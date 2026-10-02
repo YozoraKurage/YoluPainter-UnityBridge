@@ -1,0 +1,7 @@
+{
+  "name": "Dot.TexturePainter.Tests",
+  "references": ["Dot.TexturePainter.Core", "Dot.TexturePainter.Editor"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "autoReferenced": false
+}

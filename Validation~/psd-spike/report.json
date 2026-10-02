@@ -1,0 +1,224 @@
+{
+  "scope": "Independent Python format/interoperability spike, plus explicit C#-generated inputs when provided",
+  "csharp_execution": "PASS: actual C# source compiled as C#6, independently generated raw/RLE imported, guarded rewritten outputs reimported, raster bytes retained; unknown-source editing rejected.",
+  "photoshop_csp": "NOT RUN: no licensed external application fixtures or runtime available",
+  "results": [
+    {
+      "file": "independent-raw.psd",
+      "bytes": 526,
+      "sha256": "b0aaf85bbd4cf6dcb5cddd24d4e094cdb856496a40e8a804c353f2305119d184",
+      "independent_byte_oracle": "PASS",
+      "layers": [
+        {
+          "id": 303,
+          "name": "非表示",
+          "rgba_sha256": "36bea135d00a6bef43f2196be10b96822880d24cb690a8e083c82543eebaefd8",
+          "unknown": []
+        },
+        {
+          "id": 202,
+          "name": "筆 🎨",
+          "rgba_sha256": "96b138be49b1250e19560f46fc7126b74100190c13110ba63f16e7f720c8f2aa",
+          "unknown": []
+        },
+        {
+          "id": 101,
+          "name": "下地",
+          "rgba_sha256": "7d11c9e67a2f157123cabba7c256ea4a1ef407e3ce8000732ddb696210265f34",
+          "unknown": []
+        }
+      ],
+      "pillow": {
+        "status": "PASS",
+        "version": "11.3.0",
+        "note": "Reads white-matted merged samples directly; this is not a color-managed render."
+      },
+      "psd_tools": {
+        "status": "PASS",
+        "version": "1.10.9",
+        "layer_pixels": "byte-exact",
+        "metadata": "IDs, Unicode, order, bounds, opacity, visibility",
+        "max_recomposite_byte_error": 1
+      },
+      "imagemagick": {
+        "status": "PASS",
+        "output": "validation/psd-spike/independent-raw.psd[0] PSD 4x3 4x3+0+0 8-bit sRGB 526B 0.000u 0:00.000\nvalidation/psd-spike/independent-raw.psd[1] PSD 4x3 4x3+0+0 8-bit sRGB 0.000u 0:00.000\nvalidation/psd-spike/independent-raw.psd[2] PSD 2x2 2x2+1+0 8-bit sRGB 0.000u 0:00.000\nvalidation/psd-spike/independent-raw.psd[3] PSD 2x2 2x2-1+0 8-bit sRGB 0.000u 0:00.000",
+        "note": "Recognition/decoding only; no Photoshop parity claim"
+      }
+    },
+    {
+      "file": "independent-rle.psd",
+      "bytes": 646,
+      "sha256": "6554e2e211b83b5bebed4bfdd517dcd67d58e49ccb249b1e687422b4cad81568",
+      "independent_byte_oracle": "PASS",
+      "layers": [
+        {
+          "id": 303,
+          "name": "非表示",
+          "rgba_sha256": "36bea135d00a6bef43f2196be10b96822880d24cb690a8e083c82543eebaefd8",
+          "unknown": []
+        },
+        {
+          "id": 202,
+          "name": "筆 🎨",
+          "rgba_sha256": "96b138be49b1250e19560f46fc7126b74100190c13110ba63f16e7f720c8f2aa",
+          "unknown": []
+        },
+        {
+          "id": 101,
+          "name": "下地",
+          "rgba_sha256": "7d11c9e67a2f157123cabba7c256ea4a1ef407e3ce8000732ddb696210265f34",
+          "unknown": []
+        }
+      ],
+      "pillow": {
+        "status": "PASS",
+        "version": "11.3.0",
+        "note": "Reads white-matted merged samples directly; this is not a color-managed render."
+      },
+      "psd_tools": {
+        "status": "PASS",
+        "version": "1.10.9",
+        "layer_pixels": "byte-exact",
+        "metadata": "IDs, Unicode, order, bounds, opacity, visibility",
+        "max_recomposite_byte_error": 1
+      },
+      "imagemagick": {
+        "status": "PASS",
+        "output": "validation/psd-spike/independent-rle.psd[0] PSD 4x3 4x3+0+0 8-bit sRGB 646B 0.000u 0:00.000\nvalidation/psd-spike/independent-rle.psd[1] PSD 4x3 4x3+0+0 8-bit sRGB 0.000u 0:00.000\nvalidation/psd-spike/independent-rle.psd[2] PSD 2x2 2x2+1+0 8-bit sRGB 0.000u 0:00.000\nvalidation/psd-spike/independent-rle.psd[3] PSD 2x2 2x2-1+0 8-bit sRGB 0.000u 0:00.000",
+        "note": "Recognition/decoding only; no Photoshop parity claim"
+      }
+    },
+    {
+      "file": "unknown-record.psd",
+      "bytes": 560,
+      "sha256": "94aa387ed77f2d2e573a64f67f96bcd9e87047e3842fc0e5b320de753e2bf57b",
+      "independent_byte_oracle": "PASS",
+      "layers": [
+        {
+          "id": 303,
+          "name": "非表示",
+          "rgba_sha256": "36bea135d00a6bef43f2196be10b96822880d24cb690a8e083c82543eebaefd8",
+          "unknown": []
+        },
+        {
+          "id": 202,
+          "name": "筆 🎨",
+          "rgba_sha256": "96b138be49b1250e19560f46fc7126b74100190c13110ba63f16e7f720c8f2aa",
+          "unknown": [
+            "zzzz"
+          ]
+        },
+        {
+          "id": 101,
+          "name": "下地",
+          "rgba_sha256": "7d11c9e67a2f157123cabba7c256ea4a1ef407e3ce8000732ddb696210265f34",
+          "unknown": []
+        }
+      ],
+      "pillow": {
+        "status": "PASS",
+        "version": "11.3.0",
+        "note": "Reads white-matted merged samples directly; this is not a color-managed render."
+      },
+      "psd_tools": {
+        "status": "PASS",
+        "version": "1.10.9",
+        "layer_pixels": "byte-exact",
+        "metadata": "IDs, Unicode, order, bounds, opacity, visibility",
+        "max_recomposite_byte_error": 1
+      },
+      "imagemagick": {
+        "status": "PASS",
+        "output": "validation/psd-spike/unknown-record.psd[0] PSD 4x3 4x3+0+0 8-bit sRGB 560B 0.000u 0:00.000\nvalidation/psd-spike/unknown-record.psd[1] PSD 4x3 4x3+0+0 8-bit sRGB 0.000u 0:00.000\nvalidation/psd-spike/unknown-record.psd[2] PSD 2x2 2x2+1+0 8-bit sRGB 0.000u 0:00.000\nvalidation/psd-spike/unknown-record.psd[3] PSD 2x2 2x2-1+0 8-bit sRGB 0.000u 0:00.000",
+        "note": "Recognition/decoding only; no Photoshop parity claim"
+      }
+    },
+    {
+      "file": "csharp-independent-raw.psd",
+      "bytes": 530,
+      "sha256": "fce3e8fa3fd542c818258f0d8361d945df22cd9196d1056905e8271da24d4ed1",
+      "independent_byte_oracle": "PASS",
+      "layers": [
+        {
+          "id": 303,
+          "name": "非表示",
+          "rgba_sha256": "36bea135d00a6bef43f2196be10b96822880d24cb690a8e083c82543eebaefd8",
+          "unknown": []
+        },
+        {
+          "id": 202,
+          "name": "筆 🎨",
+          "rgba_sha256": "96b138be49b1250e19560f46fc7126b74100190c13110ba63f16e7f720c8f2aa",
+          "unknown": []
+        },
+        {
+          "id": 101,
+          "name": "下地",
+          "rgba_sha256": "7d11c9e67a2f157123cabba7c256ea4a1ef407e3ce8000732ddb696210265f34",
+          "unknown": []
+        }
+      ],
+      "pillow": {
+        "status": "PASS",
+        "version": "11.3.0",
+        "note": "Reads white-matted merged samples directly; this is not a color-managed render."
+      },
+      "psd_tools": {
+        "status": "PASS",
+        "version": "1.10.9",
+        "layer_pixels": "byte-exact",
+        "metadata": "IDs, Unicode, order, bounds, opacity, visibility",
+        "max_recomposite_byte_error": 1
+      },
+      "imagemagick": {
+        "status": "PASS",
+        "output": "validation/psd-spike/csharp-independent-raw.psd[0] PSD 4x3 4x3+0+0 8-bit sRGB 530B 0.000u 0:00.000\nvalidation/psd-spike/csharp-independent-raw.psd[1] PSD 4x3 4x3+0+0 8-bit sRGB 0.000u 0:00.000\nvalidation/psd-spike/csharp-independent-raw.psd[2] PSD 2x2 2x2+1+0 8-bit sRGB 0.000u 0:00.000\nvalidation/psd-spike/csharp-independent-raw.psd[3] PSD 2x2 2x2-1+0 8-bit sRGB 0.000u 0:00.000",
+        "note": "Recognition/decoding only; no Photoshop parity claim"
+      }
+    },
+    {
+      "file": "csharp-independent-rle.psd",
+      "bytes": 530,
+      "sha256": "fce3e8fa3fd542c818258f0d8361d945df22cd9196d1056905e8271da24d4ed1",
+      "independent_byte_oracle": "PASS",
+      "layers": [
+        {
+          "id": 303,
+          "name": "非表示",
+          "rgba_sha256": "36bea135d00a6bef43f2196be10b96822880d24cb690a8e083c82543eebaefd8",
+          "unknown": []
+        },
+        {
+          "id": 202,
+          "name": "筆 🎨",
+          "rgba_sha256": "96b138be49b1250e19560f46fc7126b74100190c13110ba63f16e7f720c8f2aa",
+          "unknown": []
+        },
+        {
+          "id": 101,
+          "name": "下地",
+          "rgba_sha256": "7d11c9e67a2f157123cabba7c256ea4a1ef407e3ce8000732ddb696210265f34",
+          "unknown": []
+        }
+      ],
+      "pillow": {
+        "status": "PASS",
+        "version": "11.3.0",
+        "note": "Reads white-matted merged samples directly; this is not a color-managed render."
+      },
+      "psd_tools": {
+        "status": "PASS",
+        "version": "1.10.9",
+        "layer_pixels": "byte-exact",
+        "metadata": "IDs, Unicode, order, bounds, opacity, visibility",
+        "max_recomposite_byte_error": 1
+      },
+      "imagemagick": {
+        "status": "PASS",
+        "output": "validation/psd-spike/csharp-independent-rle.psd[0] PSD 4x3 4x3+0+0 8-bit sRGB 530B 0.000u 0:00.000\nvalidation/psd-spike/csharp-independent-rle.psd[1] PSD 4x3 4x3+0+0 8-bit sRGB 0.000u 0:00.000\nvalidation/psd-spike/csharp-independent-rle.psd[2] PSD 2x2 2x2+1+0 8-bit sRGB 0.000u 0:00.000\nvalidation/psd-spike/csharp-independent-rle.psd[3] PSD 2x2 2x2-1+0 8-bit sRGB 0.000u 0:00.000",
+        "note": "Recognition/decoding only; no Photoshop parity claim"
+      }
+    }
+  ]
+}

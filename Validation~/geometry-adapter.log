@@ -1,0 +1,20 @@
+PASS RaycastReturnsBarycentricUvAndNearestDistance 
+PASS RaycastRejectsBackfacesUnlessExplicitlyTwoSided 
+PASS BvhFindsClosestTriangleWithNonUnitInputDirection 
+PASS FootprintCrossesGeometricUvSeamIntoSeparateUvIsland 
+PASS FootprintDoesNotCrossMaterialSlotBoundary 
+PASS NearbyDisconnectedShellDoesNotReceivePaint 
+PASS ForegroundGeometryOccludesTexelsEvenWhenCoveringTriangleFacesAway False,-0.2
+PASS ForegroundGeometryOccludesTexelsEvenWhenCoveringTriangleFacesAway True,-0.2
+PASS ForegroundGeometryOccludesTexelsEvenWhenCoveringTriangleFacesAway False,-1E-06
+PASS SharedTriangleEdgeIsDeduplicatedAndCoordinatesAreBottomLeft 
+PASS SoftFalloffProducesCoverageWithinUnitRange 
+PASS PixelBudgetRejectsEntireDabInsteadOfReturningPartialPixels 
+PASS VisibilityBudgetRejectsEntireDab 
+PASS BvhWorkBudgetRejectsWholeDab 0,100
+PASS BvhWorkBudgetRejectsWholeDab 100,0
+PASS StaleSnapshotCannotPaint 
+PASS MissingUvTriangleStillOccludesButCannotBePainted 
+PASS NonFiniteMeshDataIsRejected 
+PASS SmallWorldTrianglesHaveUnitNormalsAndReceivePaint 
+Math-adapter geometry check: 19 passed, 0 failed. Not a Unity execution or rendering test.

@@ -1,0 +1,28 @@
+NUnitLite 3.14.0 (.NET Standard 2.0)
+Copyright (c) 2023 Charlie Poole, Rob Prouse
+
+Runtime Environment
+   OS Version: Debian GNU/Linux 13 (trixie)
+  CLR Version: 8.0.31
+
+Test Files
+    /workspace/shared/unity_texture_painter/tools/CoreNUnit/bin/Release/net8.0/CoreNUnit.dll
+
+Test Discovery
+  Start time: 2026-10-02 01:34:30Z
+    End time: 2026-10-02 01:34:30Z
+    Duration: 0.030 seconds
+
+Run Settings
+    Number of Test Workers: 9
+    Work Directory: /workspace/shared/unity_texture_painter
+    Internal Trace: Off
+
+Test Run Summary
+  Overall result: Passed
+  Test Count: 59, Passed: 59, Failed: 0, Warnings: 0, Inconclusive: 0, Skipped: 0
+  Start time: 2026-10-02 01:34:30Z
+    End time: 2026-10-02 01:34:30Z
+    Duration: 0.113 seconds
+
+Results (nunit3) saved as /workspace/shared/unity_texture_painter/validation/core-psd-nunit.xml

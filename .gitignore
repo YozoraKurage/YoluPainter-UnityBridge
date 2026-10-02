@@ -6,3 +6,10 @@ temp.meta
 # 置くと丸ごとコンパイル対象になってしまう。
 temp~
 .distillery/
+# Tools~ の .NET ハーネスの生成物
+**/bin/
+**/obj/
+*.csproj.user
+Tools~/**/TestResult.xml
+# GeometryHarness/run.sh が Tests/Editor/GeometryTests.cs から毎回生成する
+Tools~/GeometryHarness/GeometryTests.generated.cs

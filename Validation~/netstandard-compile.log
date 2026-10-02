@@ -1,0 +1,9 @@
+  Determining projects to restore...
+  Restored /workspace/shared/unity_texture_painter/tools/CoreCompile/CoreCompile.csproj (in 66 ms).
+  CoreCompile -> /workspace/shared/unity_texture_painter/tools/CoreCompile/bin/Release/netstandard2.1/CoreCompile.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:01.61

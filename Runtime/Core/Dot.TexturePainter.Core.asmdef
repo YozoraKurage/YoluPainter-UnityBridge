@@ -1,0 +1,8 @@
+{
+  "name": "Dot.TexturePainter.Core",
+  "rootNamespace": "Dot.TexturePainter.Core",
+  "references": [],
+  "includePlatforms": ["Editor"],
+  "noEngineReferences": true,
+  "autoReferenced": true
+}
