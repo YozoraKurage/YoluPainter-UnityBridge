@@ -3,18 +3,17 @@ using Yozolab.YoluPainter.Core;
 
 namespace Yozolab.YoluPainter.Editor
 {
-    /// <summary>.ylp を取り込んだ結果（インスペクターとテスト用）。<see cref="YlpImporter"/> がサブアセットとして持ち、Project
-    /// ウィンドウには出さない。Unity は主オブジェクトの名前をファイル名に置き換えるので、主テクスチャがどのチャンネルかは
-    /// 名前からは分からず、ここに残す。</summary>
+    /// <summary>.ylp を取り込んだ結果で、.ylp のアセットの主オブジェクト（<see cref="YlpImporter"/>）。テクスチャではないので、マテリアルの
+    /// テクスチャ欄には入らない。</summary>
     internal sealed class YlpImportInfo : ScriptableObject
     {
-        /// <summary>ドキュメント（＝テクスチャ）の大きさ。読めなかったときは 0。</summary>
+        /// <summary>ドキュメントの大きさ。読めなかったときは 0。</summary>
         public int width, height;
-        /// <summary>テクスチャにしたチャンネル（列挙の順）。読めなかったときは空。</summary>
+        /// <summary>使っているチャンネル（列挙の順）。読めなかったときは空。</summary>
         public PaintChannel[] channels = new PaintChannel[0];
-        /// <summary>合成済みの画像が無い・使えないため、正本（document.utpaint）から合成したか。</summary>
+        /// <summary>合成済みの画像が無いため、正本（document.utpaint）から読んだか。</summary>
         public bool fromNativeDocument;
-        /// <summary>取り込みのエラーの理由（成功したときは空）。警告はコンソールにだけ出す。</summary>
+        /// <summary>取り込みのエラーの理由（成功したときは空）。</summary>
         public string error = "";
     }
 }

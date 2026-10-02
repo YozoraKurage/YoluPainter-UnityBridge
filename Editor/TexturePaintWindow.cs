@@ -973,7 +973,7 @@ namespace Yozolab.YoluPainter.Editor
             catch(InvalidDataException ex){notes.Add("The saved selection was not restored ("+ex.Message+"); nothing is selected, and saving will leave it out.");}
         }
         /// <summary>.ylp に保存する。上書きは開いた/保存した時点から外で変わっていないときだけで、直前の版は
-        /// &lt;名前&gt;.ylp-backups~ に退避する（保持数は設定）。Assets の中のファイルなら保存後に取り込み直してテクスチャを更新する。</summary>
+        /// &lt;名前&gt;.ylp-backups~ に退避する（保持数は設定）。Assets の中のファイルなら保存後に取り込み直して、Project ウィンドウの情報とサムネイルを更新する。</summary>
         internal void SaveProject(bool saveAs)
         {
             if(stroke!=null)return;
