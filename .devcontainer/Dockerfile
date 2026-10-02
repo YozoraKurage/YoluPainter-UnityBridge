@@ -91,6 +91,10 @@ ARG USERNAME=node
 RUN groupadd --gid 1000 "$USERNAME" \
   && useradd --uid 1000 --gid 1000 --shell /bin/zsh --create-home "$USERNAME"
 
+# 開発用コンテナなので node にパスワードなしの sudo を許す（apt で道具を足す、ドライバを試す等）。
+RUN echo "$USERNAME ALL=(root) NOPASSWD:ALL" > "/etc/sudoers.d/$USERNAME" \
+  && chmod 0440 "/etc/sudoers.d/$USERNAME"
+
 # bash 履歴の永続化
 RUN mkdir /commandhistory \
   && touch /commandhistory/.bash_history \
