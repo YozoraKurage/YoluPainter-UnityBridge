@@ -124,7 +124,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void FileMenu(GenericMenu m)
         {
-            Item(m, "New Project…", () => { if (ConfirmDiscard()) { CreateDocument(resolution); BindDocument(); } }, keys: "Ctrl+N");
+            Item(m, "New Project…", NewProjectDialog, keys: "Ctrl+N");
             Item(m, "Open…", OpenProject, keys: "Ctrl+O");
             m.AddSeparator("");
             Item(m, "Save", () => SaveProject(false), keys: "Ctrl+S");
@@ -136,6 +136,7 @@ namespace Yozolab.YoluPainter.Editor
             m.AddItem(new GUIContent(L.Tr("Export") + "/" + L.Tr("Channel as PSD…")), false, () => TryAction(ExportPsd));
             Item(m, "Assign to lilToon Material…", AssignToLilToon);
             m.AddSeparator("");
+            Item(m, "Project Configuration…", ProjectConfigurationDialog);
             Item(m, "Project Settings…", OpenSettings);
         }
 

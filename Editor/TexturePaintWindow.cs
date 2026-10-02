@@ -648,6 +648,7 @@ namespace Yozolab.YoluPainter.Editor
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.Z){if(e.shift)document.Redo();else document.Undo();e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.S){SaveProject(e.shift);e.Use();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.O){OpenProject();e.Use();}
+            else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.N){NewProjectDialog();e.Use();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.Alpha0){canvasZoom=1;canvasPan=Vector2.zero;e.Use();Repaint();}
         }
         static Vector2Int ArrowDelta(KeyCode key)=>key==KeyCode.LeftArrow?Vector2Int.left:key==KeyCode.RightArrow?Vector2Int.right:key==KeyCode.UpArrow?Vector2Int.up:key==KeyCode.DownArrow?Vector2Int.down:Vector2Int.zero;
@@ -681,8 +682,7 @@ namespace Yozolab.YoluPainter.Editor
             string target=projectPath;
             if(saveAs||String.IsNullOrEmpty(target))
             {
-                string suggestFolder=projectPath!=null?Path.GetDirectoryName(projectPath):importedPsdPath!=null?Path.GetDirectoryName(importedPsdPath):Application.dataPath;
-                string suggestName=projectPath!=null?Path.GetFileNameWithoutExtension(projectPath):importedPsdPath!=null?Path.GetFileNameWithoutExtension(importedPsdPath):"Texture";
+                var (suggestFolder,suggestName)=SaveSuggestion();
                 target=Dialogs.SaveFile("Save YoluPainter file",suggestFolder,suggestName,"ylp");
                 if(String.IsNullOrEmpty(target))return;
                 if(!target.EndsWith(YlpArchive.Extension,StringComparison.OrdinalIgnoreCase))target+=YlpArchive.Extension;
