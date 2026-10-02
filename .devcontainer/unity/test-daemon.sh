@@ -148,6 +148,19 @@ wait_ready() {
   return 1
 }
 
+# GUI モードで取り込まれたシェーダーは、インクルード失敗のエラーごと Library に残ることがある
+# （2026-10-02 実測）。batch-gl ではインクルードが正しく解決されるので、エラーを抱えたプロジェクト内の
+# シェーダーだけ取り込み直す。本当にソースが壊れているシェーダーは取り込み直してもエラーのまま残る。
+reimport_broken_shaders() {
+  local out
+  out="$("$SCRIPT_DIR/unity-do.sh" run -e 'var fixedOnes=new List<string>();
+foreach(var guid in AssetDatabase.FindAssets("t:Shader",new[]{"Assets","Packages"})){var path=AssetDatabase.GUIDToAssetPath(guid);var sh=AssetDatabase.LoadAssetAtPath<Shader>(path);
+if(sh!=null&&ShaderUtil.ShaderHasError(sh)){AssetDatabase.ImportAsset(path,ImportAssetOptions.ForceUpdate|ImportAssetOptions.ForceSynchronousImport);fixedOnes.Add(path+(ShaderUtil.ShaderHasError(AssetDatabase.LoadAssetAtPath<Shader>(path))?" (still broken)":""));}}
+return fixedOnes.Count==0?"none":string.Join(", ",fixedOnes);' 2>&1 | sed -n 's/^=> //p')" || true
+  [[ -n "$out" && "$out" != none ]] && info "エラーを抱えていたシェーダーを取り込み直した: $out"
+  return 0
+}
+
 start() {
   if pid_alive; then
     info "既に起動している (PID $(cat "$PID_FILE"))"
@@ -168,6 +181,7 @@ start() {
   wait_ready || rc=$?
   if [[ $rc -eq 0 ]]; then
     info "デーモン準備完了 (PID $(cat "$PID_FILE"))"
+    [[ "$MODE" == batch-gl ]] && reimport_broken_shaders
     return 0
   fi
   if [[ $rc -eq 2 ]]; then
