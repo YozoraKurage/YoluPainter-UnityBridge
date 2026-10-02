@@ -8,11 +8,16 @@ using Yozolab.YoluPainter.Core.Brushes;
 
 namespace Yozolab.YoluPainter.Editor
 {
-    /// <summary>取り込んだブラシの置き場。Unity プロジェクトの UserSettings/YoluPainter/Brushes に、ブラシごとに
-    /// &lt;key&gt;.json（設定）と &lt;key&gt;.tip.png / &lt;key&gt;.texture.png（筆先と紙の質感、白黒）を書く。
-    /// UserSettings はユーザーごとの置き場で、パッケージにも Assets にも入らない（取り込んだ他者のブラシを
-    /// 配布物に混ぜない）。</summary>
-    internal static class BrushLibrary
+    /// <summary>取り込んだブラシの置き場。ブラシごとに &lt;key&gt;.json（設定）と &lt;key&gt;.tip.png / &lt;key&gt;.texture.png
+    /// （筆先と紙の質感、白黒）を書く。置き場は 2 つ:
+    /// <list type="bullet">
+    /// <item>個人（<see cref="Personal"/>、ID は "library:"）: 既定は Unity プロジェクトの UserSettings/YoluPainter/Brushes。
+    /// UserSettings はユーザーごとの置き場で、パッケージにも Assets にもバージョン管理にも入らない。</item>
+    /// <item>プロジェクト共有（<see cref="Project"/>、ID は "project:"）: 共有設定でプロジェクト内のフォルダを指定したときだけ。
+    /// バージョン管理で同じプロジェクトの全員に渡る。</item>
+    /// </list>
+    /// どちらの場所も <see cref="PainterSettings"/> で変えられ、変わったら次に使うときに読み直す。</summary>
+    internal sealed class BrushLibrary
     {
         [Serializable] sealed class Entry
         {
@@ -27,34 +32,49 @@ namespace Yozolab.YoluPainter.Editor
             public bool pressureSize = true, pressureOpacity = true, pressureFlow, erase, followDirection;
         }
 
-        const string Prefix = "library:";
-        static string folder;
-        static Dictionary<string, BrushTips.TipRef> tips;
-        static List<Core.BrushPreset> presets;
+        public static readonly BrushLibrary Personal = new BrushLibrary("library:", "Imported", () => PainterSettings.BrushFolder);
+        public static readonly BrushLibrary Project = new BrushLibrary("project:", "Project", () => PainterSettings.ProjectBrushFolder);
+        public static IEnumerable<BrushLibrary> All { get { yield return Personal; yield return Project; } }
 
-        /// <summary>保存先。テストは一時フォルダに差し替える（差し替えると読み直す）。</summary>
-        public static string Folder
+        readonly string prefix;
+        readonly Func<string> configuredFolder;
+        string folderOverride, loadedFolder;
+        Dictionary<string, BrushTips.TipRef> tips;
+        List<Core.BrushPreset> presets;
+
+        BrushLibrary(string prefix, string menuName, Func<string> configuredFolder) { this.prefix = prefix; MenuName = menuName; this.configuredFolder = configuredFolder; }
+
+        /// <summary>ブラシ一覧での見出し。</summary>
+        public string MenuName { get; }
+        /// <summary>置き場の絶対パス。共有の置き場を使わない設定なら null。テストは差し替える（null で設定に戻す）。</summary>
+        public string Folder
         {
-            get => folder ?? (folder = Path.Combine(Directory.GetCurrentDirectory(), "UserSettings", "YoluPainter", "Brushes"));
-            set { folder = value; tips = null; presets = null; }
+            get => folderOverride ?? configuredFolder();
+            set { folderOverride = value; presets = null; tips = null; }
         }
+        public bool Enabled => Folder != null;
 
-        public static IReadOnlyList<Core.BrushPreset> Presets { get { Load(); return presets; } }
+        public IReadOnlyList<Core.BrushPreset> Presets { get { Load(); return presets; } }
 
-        public static bool IsLibraryPreset(string presetId) => presetId != null && presetId.StartsWith(Prefix, StringComparison.Ordinal);
+        public bool Owns(string id) => id != null && id.StartsWith(prefix, StringComparison.Ordinal);
+        /// <summary>取り込んだブラシ（どちらかの置き場）のプリセット ID か。</summary>
+        public static bool IsLibraryPreset(string presetId) => All.Any(l => l.Owns(presetId));
+        public static BrushLibrary Owning(string id) => All.FirstOrDefault(l => l.Owns(id));
 
-        public static BrushTips.TipRef ResolveRef(string id)
+        public BrushTips.TipRef ResolveRef(string id)
         {
-            if (id == null || !id.StartsWith(Prefix, StringComparison.Ordinal)) return null;
+            if (!Owns(id)) return null;
             Load(); return tips.TryGetValue(id, out var tip) ? tip : null;
         }
-        public static string IdOf(BrushSettings s)
+        public string IdOf(BrushSettings s)
         { Load(); foreach (var entry in tips) if (entry.Value.Matches(s)) return entry.Key; return null; }
 
         /// <summary>取り込んだブラシを保存し、プリセットとして返す。同じ名前でも上書きしない（別のキーになる）。</summary>
-        public static IReadOnlyList<Core.BrushPreset> Add(IEnumerable<ImportedBrush> brushes, string category)
+        public IReadOnlyList<Core.BrushPreset> Add(IEnumerable<ImportedBrush> brushes, string category)
         {
-            Directory.CreateDirectory(Folder);
+            if (!Enabled) throw new InvalidOperationException("The shared brush folder is not set in Project Settings > YoluPainter.");
+            string folder = Folder;
+            Directory.CreateDirectory(folder);
             var keys = new List<string>();
             foreach (var brush in brushes)
             {
@@ -71,32 +91,50 @@ namespace Yozolab.YoluPainter.Editor
                 if (s.Tips != null && s.Tips.Length > 0)
                 {
                     entry.tipFiles = new string[s.Tips.Length]; entry.tipSelection = (int)s.TipSelection;
-                    for (int i = 0; i < s.Tips.Length; i++) { entry.tipFiles[i] = key + ".tip" + i + ".png"; WritePng(Path.Combine(Folder, entry.tipFiles[i]), s.Tips[i]); }
+                    for (int i = 0; i < s.Tips.Length; i++) { entry.tipFiles[i] = key + ".tip" + i + ".png"; WritePng(Path.Combine(folder, entry.tipFiles[i]), s.Tips[i]); }
                 }
-                else if (s.Tip != null) { entry.tipFile = key + ".tip.png"; WritePng(Path.Combine(Folder, entry.tipFile), s.Tip); }
-                if (s.Texture != null) { entry.textureFile = key + ".texture.png"; WritePng(Path.Combine(Folder, entry.textureFile), s.Texture); }
-                File.WriteAllText(Path.Combine(Folder, key + ".json"), JsonUtility.ToJson(entry, true));
+                else if (s.Tip != null) { entry.tipFile = key + ".tip.png"; WritePng(Path.Combine(folder, entry.tipFile), s.Tip); }
+                if (s.Texture != null) { entry.textureFile = key + ".texture.png"; WritePng(Path.Combine(folder, entry.textureFile), s.Texture); }
+                File.WriteAllText(Path.Combine(folder, key + ".json"), JsonUtility.ToJson(entry, true));
                 keys.Add(key);
             }
             tips = null; presets = null; Load();
-            return presets.Where(p => keys.Contains(p.Id.Substring(Prefix.Length))).ToList();
+            return presets.Where(p => keys.Contains(p.Id.Substring(prefix.Length))).ToList();
         }
 
         /// <summary>取り込んだブラシを消す（その json と png）。</summary>
-        public static void Remove(string presetId)
+        public void Remove(string presetId)
         {
-            if (presetId == null || !presetId.StartsWith(Prefix, StringComparison.Ordinal)) return;
-            string key = presetId.Substring(Prefix.Length);
+            if (!Owns(presetId) || !Enabled || !Directory.Exists(Folder)) return;
+            string key = presetId.Substring(prefix.Length);
             foreach (var path in Directory.GetFiles(Folder, key + ".*")) File.Delete(path);
             tips = null; presets = null;
         }
 
-        static void Load()
+        /// <summary>この置き場のブラシを別のフォルダへ複写する（置き場を変えるとき用。元は消さない。同じキーは上書きしない）。</summary>
+        public int CopyTo(string destination)
         {
-            if (presets != null) return;
+            if (!Enabled || !Directory.Exists(Folder)) return 0;
+            Directory.CreateDirectory(destination);
+            int copied = 0;
+            foreach (var json in Directory.GetFiles(Folder, "*.json"))
+            {
+                string key = Path.GetFileNameWithoutExtension(json);
+                if (File.Exists(Path.Combine(destination, key + ".json"))) continue;
+                foreach (var path in Directory.GetFiles(Folder, key + ".*")) File.Copy(path, Path.Combine(destination, Path.GetFileName(path)), false);
+                copied++;
+            }
+            return copied;
+        }
+
+        void Load()
+        {
+            string folder = Folder;
+            if (presets != null && folder == loadedFolder) return;
+            loadedFolder = folder;
             tips = new Dictionary<string, BrushTips.TipRef>(); presets = new List<Core.BrushPreset>();
-            if (!Directory.Exists(Folder)) return;
-            foreach (var path in Directory.GetFiles(Folder, "*.json").OrderBy(p => p, StringComparer.Ordinal))
+            if (folder == null || !Directory.Exists(folder)) return;
+            foreach (var path in Directory.GetFiles(folder, "*.json").OrderBy(p => p, StringComparer.Ordinal))
             {
                 try
                 {
@@ -112,12 +150,12 @@ namespace Yozolab.YoluPainter.Editor
                     };
                     if (e.tipFiles != null && e.tipFiles.Length > 0)
                     {
-                        settings.Tips = e.tipFiles.Select(f => ReadPng(Path.Combine(Folder, f), e.name)).ToArray(); settings.TipSelection = (TipSelection)e.tipSelection;
-                        tips[Prefix + key] = new BrushTips.TipRef(null, settings.Tips, settings.TipSelection);
+                        settings.Tips = e.tipFiles.Select(f => ReadPng(Path.Combine(folder, f), e.name)).ToArray(); settings.TipSelection = (TipSelection)e.tipSelection;
+                        tips[prefix + key] = new BrushTips.TipRef(null, settings.Tips, settings.TipSelection);
                     }
-                    else if (!string.IsNullOrEmpty(e.tipFile)) { settings.Tip = ReadPng(Path.Combine(Folder, e.tipFile), e.name); tips[Prefix + key] = new BrushTips.TipRef(settings.Tip, null, TipSelection.Random); }
-                    if (!string.IsNullOrEmpty(e.textureFile)) { settings.Texture = ReadPng(Path.Combine(Folder, e.textureFile), e.name + " texture"); tips[Prefix + key + ":texture"] = new BrushTips.TipRef(settings.Texture, null, TipSelection.Random); }
-                    presets.Add(new Core.BrushPreset(Prefix + key, e.name, e.category, settings));
+                    else if (!string.IsNullOrEmpty(e.tipFile)) { settings.Tip = ReadPng(Path.Combine(folder, e.tipFile), e.name); tips[prefix + key] = new BrushTips.TipRef(settings.Tip, null, TipSelection.Random); }
+                    if (!string.IsNullOrEmpty(e.textureFile)) { settings.Texture = ReadPng(Path.Combine(folder, e.textureFile), e.name + " texture"); tips[prefix + key + ":texture"] = new BrushTips.TipRef(settings.Texture, null, TipSelection.Random); }
+                    presets.Add(new Core.BrushPreset(prefix + key, e.name, e.category, settings));
                 }
                 catch (Exception ex) { Debug.LogWarning("YoluPainter: skipped imported brush " + Path.GetFileName(path) + ": " + ex.Message); }
             }

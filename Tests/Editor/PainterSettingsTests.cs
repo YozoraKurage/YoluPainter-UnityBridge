@@ -1,0 +1,213 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using NUnit.Framework;
+using UnityEditor;
+using Yozolab.YoluPainter.Core;
+using Yozolab.YoluPainter.Core.Brushes;
+using Yozolab.YoluPainter.Editor;
+
+namespace Yozolab.YoluPainter.Tests
+{
+    /// <summary>プロジェクトごとの設定（共有 / 個人の 2 ファイル）、検査、壊れた・新しい版のファイル、ブラシ置き場の切り替え。</summary>
+    public sealed class PainterSettingsTests
+    {
+        string project;
+
+        sealed class Answers : IPainterDialogs
+        {
+            public bool ConfirmAnswer; public string Folder = "";
+            public readonly List<string> Asked = new List<string>();
+            public string SaveFolder(string title, string folder, string defaultName) => Folder;
+            public string OpenFolder(string title, string folder) { Asked.Add("OpenFolder"); return Folder; }
+            public string OpenFile(string title, string folder, string extension) => "";
+            public string SaveFile(string title, string folder, string defaultName, string extension) => "";
+            public bool Confirm(string title, string message, string ok, string cancel) { Asked.Add("Confirm: " + title); return ConfirmAnswer; }
+            public void Inform(string title, string message) { Asked.Add("Inform: " + title); }
+            public void Progress(string title, string info, float progress) { }
+            public void ClearProgress() { }
+        }
+
+        [SetUp] public void UseTemporaryProject()
+        {
+            project = Path.Combine(Path.GetTempPath(), "yolupainter-settings-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(project);
+            PainterSettings.ProjectRoot = project;
+        }
+
+        [TearDown] public void RestoreProject()
+        {
+            PainterSettings.ProjectRoot = null; BrushLibrary.Personal.Folder = null; BrushLibrary.Project.Folder = null;
+            if (Directory.Exists(project)) Directory.Delete(project, true);
+        }
+
+        static string P(params string[] parts) => Path.Combine(parts);
+        static ImportedBrush Brush(string name) => new ImportedBrush(name, "test", new BrushSettings { Tip = new BrushTip(name, 2, 2, new byte[] { 255, 0, 0, 255 }) });
+
+        [Test] public void WithoutFilesTheDefaultsApplyAndNothingIsWritten()
+        {
+            Assert.That(PainterSettings.DefaultResolution, Is.EqualTo(1024));
+            Assert.That(PainterSettings.RecoveryIntervalSeconds, Is.EqualTo(15));
+            Assert.That(PainterSettings.UndoBudgetBytes, Is.EqualTo(64L << 20)); Assert.That(PainterSettings.SourceBudgetBytes, Is.EqualTo(256L << 20)); Assert.That(PainterSettings.StrokeBudgetBytes, Is.EqualTo(64L << 20));
+            Assert.That(PainterSettings.BrushFolder, Is.EqualTo(P(project, "UserSettings", "YoluPainter", "Brushes")));
+            Assert.That(PainterSettings.ProjectBrushFolder, Is.Null); Assert.That(BrushLibrary.Project.Enabled, Is.False);
+            Assert.That(PainterSettings.ShowBundledBrushes, Is.True);
+            Assert.That(PainterSettings.Warnings, Is.Empty);
+            Assert.That(Directory.GetFileSystemEntries(project), Is.Empty, "reading settings creates no files");
+        }
+
+        [Test] public void SharedAndPersonalSettingsAreSavedToTheirOwnFiles()
+        {
+            int changed = 0; Action count = () => changed++;
+            PainterSettings.Changed += count;
+            try
+            {
+                var shared = PainterSettings.SharedSettings; shared.defaultResolution = 2048; shared.projectBrushFolder = "Art/Brushes";
+                var personal = PainterSettings.PersonalSettings; personal.recoveryIntervalSeconds = 40; personal.undoBudgetMiB = 128; personal.showBundledBrushes = false;
+                PainterSettings.Save(shared, personal);
+                Assert.That(changed, Is.EqualTo(1));
+            }
+            finally { PainterSettings.Changed -= count; }
+            Assert.That(PainterSettings.SharedPath, Is.EqualTo(P(project, "ProjectSettings", "Packages", "net.yozolab.yolupainter", "Settings.json")));
+            Assert.That(PainterSettings.PersonalPath, Is.EqualTo(P(project, "UserSettings", "YoluPainter", "Settings.json")));
+            Assert.That(File.ReadAllText(PainterSettings.SharedPath), Does.Contain("\"defaultResolution\": 2048").And.Not.Contain("undoBudget"), "personal values stay out of the shared file");
+            Assert.That(File.ReadAllText(PainterSettings.PersonalPath), Does.Contain("\"undoBudgetMiB\": 128").And.Not.Contain("projectBrushFolder"));
+            Assert.That(Directory.GetFiles(Path.GetDirectoryName(PainterSettings.SharedPath)).Select(Path.GetFileName), Is.EqualTo(new[] { "Settings.json" }), "no temporary file is left");
+
+            PainterSettings.ProjectRoot = project; // 読み直す
+            Assert.That(PainterSettings.DefaultResolution, Is.EqualTo(2048)); Assert.That(PainterSettings.RecoveryIntervalSeconds, Is.EqualTo(40));
+            Assert.That(PainterSettings.UndoBudgetBytes, Is.EqualTo(128L << 20)); Assert.That(PainterSettings.ShowBundledBrushes, Is.False);
+            Assert.That(PainterSettings.ProjectBrushFolder, Is.EqualTo(P(project, "Art", "Brushes")));
+            // 写しを変えても保存しなければ反映されない
+            PainterSettings.PersonalSettings.recoveryIntervalSeconds = 99;
+            Assert.That(PainterSettings.RecoveryIntervalSeconds, Is.EqualTo(40));
+        }
+
+        [Test] public void InvalidValuesAreRefusedOnSaveAndRepairedOnLoad()
+        {
+            var personal = PainterSettings.PersonalSettings; personal.recoveryIntervalSeconds = 1;
+            Assert.That(() => PainterSettings.Save(null, personal), Throws.ArgumentException.With.Message.Contains("Recovery interval"));
+            var shared = PainterSettings.SharedSettings; shared.defaultResolution = 1000;
+            Assert.That(() => PainterSettings.Save(shared, null), Throws.ArgumentException.With.Message.Contains("Default resolution"));
+            Assert.That(File.Exists(PainterSettings.PersonalPath) || File.Exists(PainterSettings.SharedPath), Is.False, "nothing is written");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(PainterSettings.PersonalPath));
+            File.WriteAllText(PainterSettings.PersonalPath, "{\"schema\":1,\"recoveryIntervalSeconds\":100000,\"sourceBudgetMiB\":1,\"undoBudgetMiB\":32}");
+            PainterSettings.ProjectRoot = project;
+            Assert.That(PainterSettings.RecoveryIntervalSeconds, Is.EqualTo(15)); Assert.That(PainterSettings.SourceBudgetBytes, Is.EqualTo(256L << 20));
+            Assert.That(PainterSettings.UndoBudgetBytes, Is.EqualTo(32L << 20), "valid values in the same file are kept");
+            Assert.That(PainterSettings.Warnings.Count, Is.EqualTo(2)); Assert.That(PainterSettings.Warnings, Has.All.Contains("The default is used"));
+        }
+
+        [Test] public void ABrokenFileIsKeptAsideWhenSettingsAreSaved()
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(PainterSettings.SharedPath));
+            File.WriteAllText(PainterSettings.SharedPath, "{ not json");
+            PainterSettings.ProjectRoot = project;
+            Assert.That(PainterSettings.DefaultResolution, Is.EqualTo(1024));
+            Assert.That(PainterSettings.Warnings.Single(), Does.Contain("could not be read").And.Contain(".broken"));
+            var shared = PainterSettings.SharedSettings; shared.defaultResolution = 512;
+            PainterSettings.Save(shared, null);
+            Assert.That(File.ReadAllText(PainterSettings.SharedPath + ".broken"), Is.EqualTo("{ not json"), "the unreadable file is not lost");
+            Assert.That(PainterSettings.DefaultResolution, Is.EqualTo(512)); Assert.That(PainterSettings.Warnings, Is.Empty);
+        }
+
+        [Test] public void AFileFromANewerVersionIsNeverOverwritten()
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(PainterSettings.PersonalPath));
+            const string future = "{\"schema\":2,\"recoveryIntervalSeconds\":30,\"somethingNew\":true}";
+            File.WriteAllText(PainterSettings.PersonalPath, future);
+            PainterSettings.ProjectRoot = project;
+            Assert.That(PainterSettings.PersonalIsReadOnly, Is.True); Assert.That(PainterSettings.RecoveryIntervalSeconds, Is.EqualTo(15));
+            Assert.That(PainterSettings.Warnings.Single(), Does.Contain("newer YoluPainter"));
+            Assert.That(() => PainterSettings.Save(null, PainterSettings.PersonalSettings), Throws.InvalidOperationException);
+            PainterSettings.UpdatePersonal(p => p.brushImportFolder = "/somewhere");
+            Assert.That(File.ReadAllText(PainterSettings.PersonalPath), Is.EqualTo(future));
+            var shared = PainterSettings.SharedSettings; shared.defaultResolution = 256;
+            PainterSettings.Save(shared, null);
+            Assert.That(PainterSettings.DefaultResolution, Is.EqualTo(256), "the other file can still be saved");
+        }
+
+        [Test] public void BrushFoldersMustNotBeImportedByUnityAndSharedOnesStayInsideTheProject()
+        {
+            string outside = Path.Combine(Path.GetTempPath(), "elsewhere-brushes");
+            Assert.That(PainterSettings.CheckProjectBrushFolder(""), Is.Null);
+            Assert.That(PainterSettings.CheckProjectBrushFolder("YoluPainter/Brushes"), Is.Null);
+            Assert.That(PainterSettings.CheckProjectBrushFolder("Assets/Art/Brushes~"), Is.Null, "a folder ending in ~ is not imported");
+            Assert.That(PainterSettings.CheckProjectBrushFolder(outside), Does.Contain("relative"));
+            Assert.That(PainterSettings.CheckProjectBrushFolder("../other/Brushes"), Does.Contain("inside the project"));
+            Assert.That(PainterSettings.CheckProjectBrushFolder("Assets/Brushes"), Does.Contain("imported by Unity"));
+            Assert.That(PainterSettings.CheckProjectBrushFolder("Packages/Mine/Brushes"), Does.Contain("imported by Unity"));
+            Assert.That(PainterSettings.CheckProjectBrushFolder("."), Does.Contain("project folder itself"));
+            Assert.That(PainterSettings.CheckPersonalBrushFolder(outside), Is.Null, "your own folder may be outside the project");
+            Assert.That(PainterSettings.CheckPersonalBrushFolder("Assets/Brushes"), Does.Contain("imported by Unity"));
+            Assert.That(PainterSettings.CheckPersonalBrushFolder(project), Does.Contain("project folder itself"));
+            var shared = PainterSettings.SharedSettings; shared.projectBrushFolder = outside;
+            Assert.That(() => PainterSettings.Save(shared, null), Throws.ArgumentException);
+        }
+
+        [Test] public void BrushLibrariesFollowTheSettings()
+        {
+            BrushLibrary.Personal.Add(new[] { Brush("Mine") }, "");
+            Assert.That(File.Exists(Directory.GetFiles(P(project, "UserSettings", "YoluPainter", "Brushes"), "Mine-*.json").Single()));
+
+            var shared = PainterSettings.SharedSettings; shared.projectBrushFolder = "TeamBrushes";
+            PainterSettings.Save(shared, null);
+            Assert.That(BrushLibrary.Project.Enabled, Is.True);
+            var team = BrushLibrary.Project.Add(new[] { Brush("Team") }, "Set").Single();
+            Assert.That(team.Id, Does.StartWith("project:"));
+            Assert.That(Directory.GetFiles(P(project, "TeamBrushes"), "Team-*.json"), Has.Length.EqualTo(1));
+            Assert.That(BrushLibrary.IsLibraryPreset(team.Id), Is.True); Assert.That(BrushLibrary.Owning(team.Id), Is.SameAs(BrushLibrary.Project));
+            Assert.That(BrushTips.IdOf(team.CreateSettings()), Is.EqualTo(team.Id));
+            Assert.That(BrushTips.Resolve(team.Id), Is.Not.Null);
+
+            shared.projectBrushFolder = ""; PainterSettings.Save(shared, null);
+            Assert.That(BrushLibrary.Project.Enabled, Is.False); Assert.That(BrushLibrary.Project.Presets, Is.Empty);
+            Assert.That(BrushTips.Resolve(team.Id), Is.Null, "turning the shared folder off hides its brushes");
+            Assert.That(() => BrushLibrary.Project.Add(new[] { Brush("x") }, ""), Throws.InvalidOperationException);
+            Assert.That(Directory.Exists(P(project, "TeamBrushes")), Is.True, "turning it off deletes nothing");
+        }
+
+        [Test] public void MovingYourBrushFolderOffersToCopyAndKeepsTheOldOne()
+        {
+            var mine = BrushLibrary.Personal.Add(new[] { Brush("Keep") }, "").Single();
+            string oldFolder = PainterSettings.BrushFolder, newFolder = Path.Combine(project + "-outside", "Brushes");
+            try
+            {
+                var answers = new Answers { ConfirmAnswer = true };
+                string notice = PainterSettingsProvider.ChangePersonalBrushFolder(newFolder, answers, out var error);
+                Assert.That(error, Is.Null); Assert.That(notice, Does.Contain("copied 1"));
+                Assert.That(answers.Asked, Is.EqualTo(new[] { "Confirm: Brush folder" }));
+                Assert.That(PainterSettings.BrushFolder, Is.EqualTo(newFolder));
+                Assert.That(Directory.GetFiles(oldFolder), Is.Not.Empty, "the old folder is left as it is");
+                Assert.That(BrushTips.Resolve(mine.Id), Is.Not.Null, "the brush keeps its id in the new folder");
+
+                answers = new Answers { ConfirmAnswer = false };
+                notice = PainterSettingsProvider.ChangePersonalBrushFolder("", answers, out error);
+                Assert.That(PainterSettings.BrushFolder, Is.EqualTo(oldFolder)); Assert.That(notice, Does.Not.Contain("copied"));
+                Assert.That(PainterSettingsProvider.ChangePersonalBrushFolder("Assets/Brushes", answers, out error), Is.Null);
+                Assert.That(error, Does.Contain("imported by Unity")); Assert.That(PainterSettings.BrushFolder, Is.EqualTo(oldFolder));
+                Assert.That(PainterSettingsProvider.ChangePersonalBrushFolder("", answers, out error), Is.Null, "no change, no question");
+            }
+            finally { if (Directory.Exists(project + "-outside")) Directory.Delete(project + "-outside", true); }
+        }
+
+        [Test] public void PathsInsideTheProjectBecomeRelative()
+        {
+            Assert.That(PainterSettingsProvider.ToProjectRelativeIfInside(P(project, "A", "B")), Is.EqualTo("A/B"));
+            Assert.That(PainterSettingsProvider.ToProjectRelativeIfInside(project), Is.EqualTo("."));
+            string outside = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "x-other"));
+            Assert.That(PainterSettingsProvider.ToProjectRelativeIfInside(outside), Is.EqualTo(outside));
+            Assert.That(PainterSettingsProvider.ToProjectRelativeIfInside(project + "-sibling"), Is.EqualTo(Path.GetFullPath(project + "-sibling")), "a sibling with the same prefix is outside");
+        }
+
+        [Test] public void TheSettingsPageIsRegisteredUnderProjectSettings()
+        {
+            var provider = PainterSettingsProvider.Create();
+            Assert.That(provider.settingsPath, Is.EqualTo("Project/YoluPainter"));
+            Assert.That(provider.scope, Is.EqualTo(SettingsScope.Project));
+            Assert.That(provider.keywords, Does.Contain("brush"));
+        }
+    }
+}

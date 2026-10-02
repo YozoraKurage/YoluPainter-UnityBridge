@@ -10,11 +10,8 @@ namespace Yozolab.YoluPainter.Tests
     /// <summary>描画ウィンドウのブラシ選択・取り込み・削除と、brush.json での保存復元。</summary>
     public sealed partial class WindowTests
     {
-        string UseTemporaryBrushLibrary()
-        {
-            string folder = NewTempPath(); BrushLibrary.Folder = folder; return folder;
-        }
-        [TearDown] public void RestoreBrushLibrary() { BrushLibrary.Folder = null; }
+        /// <summary>個人のブラシ置き場（一時プロジェクトの UserSettings の下。ウィンドウのテストは毎回一時プロジェクトで動く）。</summary>
+        static string UseTemporaryBrushLibrary() => PainterSettings.BrushFolder;
 
         [Test] public void ImportingABrushFileStoresItAndSelectsTheFirstBrush()
         {
@@ -25,8 +22,8 @@ namespace Yozolab.YoluPainter.Tests
             window.ImportBrushes();
             Assert.That(window.StatusMessage, Does.Contain("Imported 1 brush from"));
             Assert.That(fake.Asked, Does.Contain("Inform: Brush import notes"), "the colour → coverage reduction is reported");
-            Assert.That(BrushLibrary.Presets.Single().Name, Is.EqualTo("Colour tip"));
-            Assert.That(window.Brush.presetId, Is.EqualTo(BrushLibrary.Presets[0].Id));
+            Assert.That(BrushLibrary.Personal.Presets.Single().Name, Is.EqualTo("Colour tip"));
+            Assert.That(window.Brush.presetId, Is.EqualTo(BrushLibrary.Personal.Presets[0].Id));
             Assert.That(window.Brush.color, Is.EqualTo(color), "applying a preset keeps the chosen value");
             var tip = window.GetBrush().Tip;
             Assert.That(tip, Is.Not.Null); Assert.That(tip[0, 1], Is.EqualTo(255));
@@ -41,7 +38,7 @@ namespace Yozolab.YoluPainter.Tests
             window.ImportBrushes();
             Assert.That(fake.Asked, Does.Contain("Inform: Brush import failed"));
             Assert.That(window.StatusMessage, Does.Contain("Clip Studio"));
-            Assert.That(BrushLibrary.Presets, Is.Empty);
+            Assert.That(BrushLibrary.Personal.Presets, Is.Empty);
             Assert.That(JsonUtility.ToJson(window.Brush), Is.EqualTo(before));
             fake.File = ""; fake.Asked.Clear();
             window.ImportBrushes();
@@ -51,14 +48,14 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void DeletingAnImportedBrushAsksFirst()
         {
             string folder = UseTemporaryBrushLibrary();
-            var preset = BrushLibrary.Add(new[] { new Core.Brushes.ImportedBrush("Mine", "test", new BrushSettings { Tip = new BrushTip("t", 2, 2, new byte[] { 255, 255, 255, 255 }) }) }, "")[0];
+            var preset = BrushLibrary.Personal.Add(new[] { new Core.Brushes.ImportedBrush("Mine", "test", new BrushSettings { Tip = new BrushTip("t", 2, 2, new byte[] { 255, 255, 255, 255 }) }) }, "")[0];
             window.ApplyPreset(preset);
             var fake = UseFakeDialogs(window); fake.ConfirmAnswer = false;
             window.DeleteImportedBrush();
-            Assert.That(BrushLibrary.Presets.Count, Is.EqualTo(1), "declined");
+            Assert.That(BrushLibrary.Personal.Presets.Count, Is.EqualTo(1), "declined");
             fake.ConfirmAnswer = true;
             window.DeleteImportedBrush();
-            Assert.That(BrushLibrary.Presets, Is.Empty);
+            Assert.That(BrushLibrary.Personal.Presets, Is.Empty);
             Assert.That(Directory.GetFiles(folder), Is.Empty);
             Assert.That(window.Brush.presetId, Is.EqualTo(BuiltInBrushes.Presets[0].Id), "the window moves to a brush that still exists");
             fake.Asked.Clear(); window.DeleteImportedBrush();

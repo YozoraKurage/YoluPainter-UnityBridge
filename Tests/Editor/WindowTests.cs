@@ -21,10 +21,12 @@ namespace Yozolab.YoluPainter.Tests
         {
             if (Application.isBatchMode) Assert.Ignore("EditorWindow input needs a non-batch Editor (test-daemon.sh start in GUI mode).");
             EditorShaderCompiler.TolerateErrorLogsIfBroken();
+            // 設定と取り込んだブラシは一時プロジェクトに置き、テストプロジェクトの UserSettings / ProjectSettings に書かない
+            string project = NewTempPath(); Directory.CreateDirectory(project); PainterSettings.ProjectRoot = project;
             window = Open();
         }
 
-        [TearDown] public void CloseWindow() { Close(window); window = null; }
+        [TearDown] public void CloseWindow() { Close(window); window = null; PainterSettings.ProjectRoot = null; }
 
         static TexturePaintWindow Open()
         {

@@ -44,7 +44,6 @@ namespace Yozolab.YoluPainter.Editor
         long renderedRevision = -1, savedRevision = -1, recoveredRevision = -1;
         bool repaintPixels = true, surfaceStroke, externalConflict, editMask;
         Vector2 previousPointer, layerScroll, brushScroll, canvasPan;
-        string brushImportFolder = "";
         float canvasZoom = 1, previousPressure = 1;
         int materialSlot, resolution = 1024;
         bool showDynamics;
@@ -92,22 +91,39 @@ namespace Yozolab.YoluPainter.Editor
                 }
             }
             catch (Exception ex) { message="Recovery was not loaded: "+ex.Message; }
+            resolution=PainterSettings.DefaultResolution;
             if (document==null) CreateDocument(resolution);
             selectedLayer=document.Layers.Count>0?document.Layers[document.Layers.Count-1].Id:Guid.Empty;
             BindDocument();
             if (model!=null) TryAction(()=>preview.Load(model));
-            EditorApplication.update+=Tick;
+            EditorApplication.update+=Tick; PainterSettings.Changed+=SettingsChanged;
             AssemblyReloadEvents.beforeAssemblyReload+=BeforeReload;
             EditorApplication.playModeStateChanged+=PlayModeChanged;
         }
+        /// <summary>設定のメモリ予算をドキュメントに入れる。今の画素がすでに予算を超えているときは画素を捨てず、予算を今の量まで
+        /// 広げてそう知らせる。</summary>
+        /// <returns>予算を広げたときの知らせ。問題なければ null。</returns>
+        internal string ApplyBudgets()
+        {
+            if(document==null||stroke!=null)return null;
+            document.UndoBudgetBytes=PainterSettings.UndoBudgetBytes; document.ActiveStrokeBudgetBytes=PainterSettings.StrokeBudgetBytes;
+            long source=PainterSettings.SourceBudgetBytes;
+            if(source>=document.AllocatedBytes){document.SourceBudgetBytes=source;return null;}
+            document.SourceBudgetBytes=document.AllocatedBytes;
+            return "This document already holds "+(document.AllocatedBytes>>20)+" MiB of layer pixels, above the "+(source>>20)+" MiB budget in Project Settings > YoluPainter; nothing more can be added until the budget is raised.";
+        }
+        void SettingsChanged(){var note=ApplyBudgets();if(note!=null)message=note;Repaint();}
+        internal static void OpenSettings()=>SettingsService.OpenProjectSettings(PainterSettingsProvider.Path);
         void BindDocument()
         {
+            var budgetNote=ApplyBudgets(); if(budgetNote!=null)message=budgetNote;
             document.HistoryTrimming += bytes => message="Undo budget reached; dropping "+(bytes/1024)+" KiB of oldest history. Current source remains intact.";
             repaintPixels=true; renderedRevision=-1; recoveredRevision=-1;
         }
         void CreateDocument(int size)
         {
-            document=new PaintDocument(size,size,128,64L*1024*1024);
+            document=new PaintDocument(size,size,128,PainterSettings.UndoBudgetBytes);
+            ApplyBudgets();
             selectedLayer=document.AddLayer("Paint 1").Id; document.ClearHistory();
             projectRoot=null; projectToken=null; savedRevision=-1; importedOriginal=null; externalConflict=false; canvasZoom=1; canvasPan=Vector2.zero;
         }
@@ -117,13 +133,13 @@ namespace Yozolab.YoluPainter.Editor
         void OnDisable()
         {
             FinishStroke(false); preview?.CancelNavigation(); SaveRecovery();
-            EditorApplication.update-=Tick; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
+            EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
             compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
         }
         void Tick()
         {
             if(document==null) return;
-            if(stroke==null && document.Revision!=recoveredRevision && EditorApplication.timeSinceStartup-lastRecovery>15) SaveRecovery();
+            if(stroke==null && document.Revision!=recoveredRevision && EditorApplication.timeSinceStartup-lastRecovery>PainterSettings.RecoveryIntervalSeconds) SaveRecovery();
             if(!String.IsNullOrEmpty(projectRoot) && EditorApplication.timeSinceStartup-lastExternalCheck>3) CheckExternalChange();
         }
         internal void CheckExternalChange()
@@ -175,6 +191,7 @@ namespace Yozolab.YoluPainter.Editor
             using(new EditorGUI.DisabledScope(!document.CanRedo)) if(GUILayout.Button("Redo",EditorStyles.toolbarButton,GUILayout.Width(45))) document.Redo();
             if(GUILayout.Button("Demo cube",EditorStyles.toolbarButton,GUILayout.Width(75)))TryAction(()=>{model=null;preview.LoadDemoMesh();materialSlot=0;repaintPixels=true;message="Loaded tool-owned seam-test cube. No scene or source assets changed.";});
             GUILayout.FlexibleSpace(); GUILayout.Label(document.Revision==savedRevision?"Saved":"Unsaved",EditorStyles.miniLabel);
+            if(GUILayout.Button(new GUIContent("Settings","Project Settings > YoluPainter (shared with the project / only for you)"),EditorStyles.toolbarButton,GUILayout.Width(60))) OpenSettings();
             GUILayout.EndHorizontal();
             GUILayout.BeginHorizontal();
             var next=(GameObject)EditorGUILayout.ObjectField("Preview model",model,typeof(GameObject),true,GUILayout.MinWidth(260));
@@ -198,9 +215,15 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     var menu=new GenericMenu();
                     foreach(var preset in BuiltInBrushes.Presets){var p=preset;menu.AddItem(new GUIContent(p.Category+"/"+p.Name),brush.presetId==p.Id,()=>ApplyPreset(p));}
-                    foreach(var preset in BrushTips.BundledPresets){var p=preset;menu.AddItem(new GUIContent(p.Category+"/"+p.Name),brush.presetId==p.Id,()=>ApplyPreset(p));}
-                    foreach(var preset in BrushTips.ImportedPresets){var p=preset;menu.AddItem(new GUIContent("Imported/"+p.Category+"/"+p.Name),brush.presetId==p.Id,()=>ApplyPreset(p));}
-                    if(BundledBrushSets.LoadWarnings.Count>0)menu.AddDisabledItem(new GUIContent("Some bundled brushes could not be loaded (see Console)"));
+                    if(PainterSettings.ShowBundledBrushes)
+                    {
+                        foreach(var preset in BundledBrushSets.Presets){var p=preset;menu.AddItem(new GUIContent(p.Category+"/"+p.Name),brush.presetId==p.Id,()=>ApplyPreset(p));}
+                        if(BundledBrushSets.LoadWarnings.Count>0)menu.AddDisabledItem(new GUIContent("Some bundled brushes could not be loaded (see Console)"));
+                    }
+                    foreach(var library in BrushLibrary.All)
+                        foreach(var preset in library.Presets){var p=preset;menu.AddItem(new GUIContent(library.MenuName+"/"+(String.IsNullOrEmpty(p.Category)?"":p.Category+"/")+p.Name),brush.presetId==p.Id,()=>ApplyPreset(p));}
+                    menu.AddSeparator("");
+                    menu.AddItem(new GUIContent("Brush settings…"),false,OpenSettings);
                     menu.ShowAsContext();
                 }
                 GUILayout.EndHorizontal();
@@ -534,6 +557,7 @@ namespace Yozolab.YoluPainter.Editor
                 projectRoot=path;projectToken=snapshot.Token;savedRevision=document.Revision;externalConflict=false;
                 importedOriginal=snapshot.Files.TryGetValue("imported-original.psd",out var original)?original:null;
                 var notes=new List<string>();
+                var budgetNote=ApplyBudgets(); if(budgetNote!=null)notes.Add(budgetNote);
                 if(snapshot.Files.TryGetValue("brush.json",out var preset)){brush=ReadBrushState(System.Text.Encoding.UTF8.GetString(preset));var missing=MissingTipNote();if(missing!=null)notes.Add(missing);}
                 if(snapshot.Files.TryGetValue("view.json",out var view))
                 {
@@ -572,14 +596,16 @@ namespace Yozolab.YoluPainter.Editor
         /// 取り込み後に一覧で知らせる（黙って捨てない）。</summary>
         internal void ImportBrushes()
         {
-            string path=Dialogs.OpenFile("Import brushes",brushImportFolder,BrushImport.Extensions);if(String.IsNullOrEmpty(path))return;
-            brushImportFolder=Path.GetDirectoryName(path);
+            string path=Dialogs.OpenFile("Import brushes",PainterSettings.BrushImportFolder,BrushImport.Extensions);if(String.IsNullOrEmpty(path))return;
+            TryAction(()=>PainterSettings.UpdatePersonal(p=>p.brushImportFolder=Path.GetDirectoryName(path)));
             TryAction(()=>
             {
                 IReadOnlyList<Core.Brushes.ImportedBrush> brushes;
                 try{brushes=BrushImport.ReadFile(path);}
                 catch(Core.Brushes.BrushImportException ex){message="Brush import failed: "+ex.Message;Dialogs.Inform("Brush import failed",Path.GetFileName(path)+"\n\n"+ex.Message);return;}
-                var added=BrushLibrary.Add(brushes,BrushImport.PrettyName(Path.GetFileName(path)));
+                // 共有の置き場があるときは、どちらに入れるかを尋ねる（共有に入れたものはバージョン管理で全員に渡る）。
+                var library=BrushLibrary.Project.Enabled&&Dialogs.Confirm("Import brushes","Store the imported brushes in the project's shared brush folder (shared through version control) or only for you?\n\nShared: "+BrushLibrary.Project.Folder+"\nOnly you: "+BrushLibrary.Personal.Folder,"Shared with the project","Only for me")?BrushLibrary.Project:BrushLibrary.Personal;
+                var added=library.Add(brushes,BrushImport.PrettyName(Path.GetFileName(path)));
                 if(added.Count>0)ApplyPreset(added[0]);
                 var notes=brushes.SelectMany(b=>b.Warnings.Select(w=>(b.Name,w))).GroupBy(x=>x.w).Select(g=>g.Key+(g.Count()>1?" ("+g.Count()+" brushes)":" ("+g.First().Name+")")).ToList();
                 message="Imported "+added.Count+" brush"+(added.Count==1?"":"es")+" from "+Path.GetFileName(path)+(notes.Count>0?"; "+notes.Count+" unsupported setting(s) left out.":".");
@@ -589,8 +615,9 @@ namespace Yozolab.YoluPainter.Editor
         internal void DeleteImportedBrush()
         {
             if(!BrushLibrary.IsLibraryPreset(brush.presetId))return;
-            if(!Dialogs.Confirm("Delete imported brush","Delete \""+brush.presetName+"\" from this project's brush library? The original file is not touched.","Delete","Cancel"))return;
-            TryAction(()=>{BrushLibrary.Remove(brush.presetId);ApplyPreset(BuiltInBrushes.Presets[0]);message="Deleted the imported brush.";});
+            string where=BrushLibrary.Owning(brush.presetId)==BrushLibrary.Project?"the project's shared brush folder (this affects everyone after you commit)":"your brush folder";
+            if(!Dialogs.Confirm("Delete imported brush","Delete \""+brush.presetName+"\" from "+where+"? The original file is not touched.","Delete","Cancel"))return;
+            TryAction(()=>{BrushLibrary.Owning(brush.presetId).Remove(brush.presetId);ApplyPreset(BuiltInBrushes.Presets[0]);message="Deleted the imported brush.";});
         }
         void LoadPreset(){string p=Dialogs.OpenFile("Load brush",Application.dataPath,"json");if(!String.IsNullOrEmpty(p))TryAction(()=>{if(new FileInfo(p).Length>65536)throw new InvalidDataException("Preset too large");var b=ReadBrushState(File.ReadAllText(p));var previous=brush;brush=b;try{GetBrush().Validate();}catch{brush=previous;throw;}message=MissingTipNote()??"Brush preset loaded.";});}
         /// <summary>保存されたブラシの筆先・紙の質感がこの Unity プロジェクトに無いときの知らせ（取り込んだブラシはプロジェクトの

@@ -15,18 +15,20 @@ namespace Yozolab.YoluPainter.Tests
     /// <summary>同梱のブラシセット、取り込んだブラシの置き場、拡張子での読み分け、筆先 ID の対応。</summary>
     public sealed class BrushLibraryTests
     {
-        string folder;
+        string project, folder;
 
-        [SetUp] public void UseTemporaryLibrary()
+        [SetUp] public void UseTemporaryProject()
         {
-            folder = Path.Combine(Path.GetTempPath(), "yolupainter-brushes-" + Guid.NewGuid().ToString("N"));
-            BrushLibrary.Folder = folder;
+            project = Path.Combine(Path.GetTempPath(), "yolupainter-project-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(project);
+            PainterSettings.ProjectRoot = project; // 設定もブラシも一時プロジェクトに置く
+            folder = PainterSettings.BrushFolder;
         }
 
-        [TearDown] public void RestoreLibrary()
+        [TearDown] public void RestoreProject()
         {
-            BrushLibrary.Folder = null;
-            if (Directory.Exists(folder)) Directory.Delete(folder, true);
+            PainterSettings.ProjectRoot = null; BrushLibrary.Personal.Folder = null; BrushLibrary.Project.Folder = null;
+            if (Directory.Exists(project)) Directory.Delete(project, true);
         }
 
         static BrushTip Tip(string name, int width, int height, int seed)
@@ -123,12 +125,12 @@ namespace Yozolab.YoluPainter.Tests
         {
             var hose = new BrushSettings { Tips = new[] { Tip("a", 5, 3, 1), Tip("b", 4, 4, 2) }, TipSelection = TipSelection.Sequential, Radius = 12, Spacing = .4, SizeJitter = .3, Scatter = 2, Count = 3, PressureFlow = true };
             var textured = new BrushSettings { Tip = Tip("t", 7, 2, 3), Texture = Tip("paper", 16, 16, 4), TextureDepth = .6, TextureScale = 2, Angle = 30, Roundness = .5, FollowDirection = true, Opacity = .7 };
-            var added = BrushLibrary.Add(new[] { new ImportedBrush("Hose 葉", "test", hose, new[] { "note" }), new ImportedBrush("Paper", "test", textured) }, "Set");
+            var added = BrushLibrary.Personal.Add(new[] { new ImportedBrush("Hose 葉", "test", hose, new[] { "note" }), new ImportedBrush("Paper", "test", textured) }, "Set");
             Assert.That(added.Select(p => p.Name), Is.EqualTo(new[] { "Hose 葉", "Paper" }));
             Assert.That(added.All(p => p.Category == "Set"));
 
-            BrushLibrary.Folder = folder; // 読み直させる
-            var presets = BrushLibrary.Presets;
+            BrushLibrary.Personal.Folder = null; // 読み直させる
+            var presets = BrushLibrary.Personal.Presets;
             Assert.That(presets.Count, Is.EqualTo(2));
             var h = presets.Single(p => p.Name == "Hose 葉").CreateSettings();
             Assert.That(h.Tip, Is.Null); Assert.That(h.Tips.Length, Is.EqualTo(2)); Assert.That(h.TipSelection, Is.EqualTo(TipSelection.Sequential));
@@ -147,8 +149,8 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(applied.Tips, Is.EqualTo(h.Tips)); Assert.That(applied.TipSelection, Is.EqualTo(TipSelection.Sequential));
             Assert.That(Painted(PaintWith(h)), Is.GreaterThan(0));
 
-            BrushLibrary.Remove(presets.Single(p => p.Name == "Hose 葉").Id);
-            Assert.That(BrushLibrary.Presets.Select(p => p.Name), Is.EqualTo(new[] { "Paper" }));
+            BrushLibrary.Personal.Remove(presets.Single(p => p.Name == "Hose 葉").Id);
+            Assert.That(BrushLibrary.Personal.Presets.Select(p => p.Name), Is.EqualTo(new[] { "Paper" }));
             Assert.That(Directory.GetFiles(folder).Any(f => Path.GetFileName(f).StartsWith("Hose", StringComparison.Ordinal)), Is.False, "the settings and tip images are removed");
             var unknown = new BrushSettings(); BrushTips.Apply(unknown, hoseId);
             Assert.That(unknown.Tip, Is.Null, "a removed brush falls back to the round tip"); Assert.That(unknown.Tips, Is.Null);
@@ -156,12 +158,12 @@ namespace Yozolab.YoluPainter.Tests
 
         [Test] public void ABrokenLibraryEntryIsSkippedWithAWarning()
         {
-            BrushLibrary.Add(new[] { new ImportedBrush("Good", "test", new BrushSettings { Tip = Tip("g", 3, 3, 5) }) }, "");
+            BrushLibrary.Personal.Add(new[] { new ImportedBrush("Good", "test", new BrushSettings { Tip = Tip("g", 3, 3, 5) }) }, "");
             File.WriteAllText(Path.Combine(folder, "broken.json"), "{\"schema\":1,\"name\":\"Broken\",\"tipFile\":\"missing.png\"}");
             File.WriteAllText(Path.Combine(folder, "future.json"), "{\"schema\":99,\"name\":\"Future\"}");
-            BrushLibrary.Folder = folder;
+            BrushLibrary.Personal.Folder = null;
             UnityEngine.TestTools.LogAssert.Expect(LogType.Warning, new System.Text.RegularExpressions.Regex("skipped imported brush broken.json"));
-            Assert.That(BrushLibrary.Presets.Select(p => p.Name), Is.EqualTo(new[] { "Good" }), "unreadable and newer entries are not loaded as round brushes");
+            Assert.That(BrushLibrary.Personal.Presets.Select(p => p.Name), Is.EqualTo(new[] { "Good" }), "unreadable and newer entries are not loaded as round brushes");
         }
 
         [Test] public void BuiltInTipIdsRoundTrip()

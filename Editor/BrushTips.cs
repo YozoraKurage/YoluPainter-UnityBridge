@@ -6,7 +6,8 @@ using Yozolab.YoluPainter.Core;
 namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>筆先の ID と実体の対応。ID は "builtin:&lt;id&gt;"（BuiltInBrushes が生成）、"bundled:&lt;set&gt;/&lt;file&gt;"
-    /// （BundledBrushSets）、"library:&lt;key&gt;"（取り込んだブラシ、BrushLibrary）。空文字列は丸い筆先。
+    /// （BundledBrushSets）、"library:&lt;key&gt;" / "project:&lt;key&gt;"（取り込んだブラシ、BrushLibrary の個人 / 共有の置き場）。
+    /// 空文字列は丸い筆先。
     /// 1 つの ID が複数の筆先（GIMP のホースなど）を指すこともある。</summary>
     internal static class BrushTips
     {
@@ -30,7 +31,7 @@ namespace Yozolab.YoluPainter.Editor
             if (string.IsNullOrEmpty(id)) return null;
             if (id.StartsWith(BuiltInPrefix, StringComparison.Ordinal)) { var t = BuiltInBrushes.Tip(id.Substring(BuiltInPrefix.Length)); return t == null ? null : new TipRef(t, null, TipSelection.Random); }
             if (id.StartsWith(BundledBrushSets.Prefix, StringComparison.Ordinal)) return BundledBrushSets.Resolve(id);
-            return BrushLibrary.ResolveRef(id);
+            return BrushLibrary.Owning(id)?.ResolveRef(id);
         }
         /// <summary>1 枚目の筆先（紙の質感とサムネイル用）。</summary>
         public static BrushTip Resolve(string id) => ResolveRef(id)?.First;
@@ -48,7 +49,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (s.Tip == null && (s.Tips == null || s.Tips.Length == 0)) return "";
             if (s.Tips == null) foreach (var id in BuiltInBrushes.TipIds) if (ReferenceEquals(BuiltInBrushes.Tip(id), s.Tip)) return BuiltInPrefix + id;
-            return BundledBrushSets.IdOf(s) ?? BrushLibrary.IdOf(s) ?? "";
+            return BundledBrushSets.IdOf(s) ?? BrushLibrary.Personal.IdOf(s) ?? BrushLibrary.Project.IdOf(s) ?? "";
         }
         /// <summary>紙の質感など 1 枚の筆先の ID。</summary>
         public static string IdOf(BrushTip tip)
@@ -57,8 +58,6 @@ namespace Yozolab.YoluPainter.Editor
             return IdOf(new BrushSettings { Tip = tip });
         }
 
-        public static IEnumerable<Core.BrushPreset> ImportedPresets => BrushLibrary.Presets;
-        public static IEnumerable<Core.BrushPreset> BundledPresets => BundledBrushSets.Presets;
 
         /// <summary>筆先の白黒サムネイル（48px、上下はキャンバスと同じ左下原点）。丸い筆先と未知の ID は null。</summary>
         public static Texture2D Thumbnail(string id)
