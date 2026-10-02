@@ -18,8 +18,9 @@ namespace Yozolab.YoluPainter.Editor.Preview
     }
 
     /// <summary>
-    /// Static-mesh G1 prototype. Never instantiates a source GameObject/Prefab or copies scripts.
-    /// Reconstructs only MeshFilter/MeshRenderer objects, owned mesh snapshots and material clones.
+    /// G1 prototype. Never instantiates a source GameObject/Prefab or copies scripts.
+    /// Reconstructs only MeshFilter/MeshRenderer objects, owned mesh snapshots and material clones. Skinned meshes are posed on
+    /// a transform-only copy of the model's hierarchy and drawn from their CPU-baked shape.
     /// Render, pick and paint share one immutable, transformed snapshot. Call Dispose on disable/reload.
     /// </summary>
     public sealed class IsolatedModelPreview : IDisposable
@@ -66,137 +67,48 @@ namespace Yozolab.YoluPainter.Editor.Preview
             EnsurePreview();
             var shader = Shader.Find("Hidden/YoluPainter/PreviewSurface");
             if (shader == null) { report.Diagnostics.Add("The package's neutral preview shader could not be loaded."); return report; }
-            var triangles = new List<SurfaceTriangle>();
             bool incomplete = false;
             Vector3 origin = source.transform.position;
-            foreach (var skin in source.GetComponentsInChildren<SkinnedMeshRenderer>(true))
-            {
-                if (!IsActiveRenderer(skin, source.transform)) continue;
-                incomplete = true;
-                report.Diagnostics.Add(skin.name + ": skinned meshes are not included in this G1 static-mesh snapshot. Pose/BlendShape editing remains planned.");
-            }
+            loadOrigin = origin;
             foreach (var unsupportedRenderer in source.GetComponentsInChildren<Renderer>(true))
             {
                 if (unsupportedRenderer is MeshRenderer || unsupportedRenderer is SkinnedMeshRenderer || !IsActiveRenderer(unsupportedRenderer, source.transform)) continue;
                 incomplete = true;
                 report.Diagnostics.Add(unsupportedRenderer.name + ": unsupported renderer type " + unsupportedRenderer.GetType().Name + " was not copied. Surface painting is disabled because it may occlude the target.");
             }
+            long triangleTotal = 0;
+            foreach (var skin in source.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+            {
+                if (!IsActiveRenderer(skin, source.transform)) continue;
+                var input = skin.sharedMesh;
+                if (input == null) continue;
+                if (!CheckInput(skin, input, ref incomplete, ref triangleTotal)) continue;
+                SkinnedSnapshot snapshot = null;
+                try
+                {
+                    // 骨は Transform だけを複製した階層で動かす（元のモデルは Instantiate しない）。描画は焼いたメッシュで行う
+                    if (skeleton == null) { skeleton = new TransformCopy(source.transform); preview.AddSingleGO(skeleton.Root); }
+                    snapshot = SkinnedSnapshot.Create(skeleton, skin);
+                    var baked = snapshot.Bake();
+                    var t = snapshot.Renderer.transform; var scale = t.lossyScale;
+                    if (!AddEntry(skin, baked, Matrix4x4.TRS(t.position, t.rotation, Vector3.one), scale.x * scale.y * scale.z < 0, origin, shader, ref incomplete, snapshot)) snapshot.Dispose();
+                }
+                catch (Exception exception)
+                {
+                    incomplete = true; snapshot?.Dispose();
+                    report.Diagnostics.Add(skin.name + ": could not build a skinned snapshot: " + exception.Message);
+                }
+            }
             foreach (var renderer in source.GetComponentsInChildren<MeshRenderer>(true))
             {
                 if (!IsActiveRenderer(renderer, source.transform)) continue;
                 var filter = renderer.GetComponent<MeshFilter>(); var input = filter != null ? filter.sharedMesh : null;
                 if (input == null) continue;
-                if (!input.isReadable)
-                { incomplete = true; report.Diagnostics.Add(renderer.name + ": mesh is not CPU-readable. Import settings were not changed."); continue; }
-                if (input.vertexCount > MaximumVerticesPerMesh)
-                { incomplete = true; report.Diagnostics.Add(renderer.name + ": exceeds the prototype vertex budget (250,000 per mesh)."); continue; }
-                long inputTriangles = 0; bool unsupported = false;
-                for (int sub = 0; sub < input.subMeshCount; sub++)
-                {
-                    if (input.GetTopology(sub) != MeshTopology.Triangles) { unsupported = true; break; }
-                    inputTriangles += (long)input.GetIndexCount(sub) / 3;
-                }
-                if (unsupported || triangles.Count + inputTriangles > MaximumTriangles)
-                { incomplete = true; report.Diagnostics.Add(renderer.name + ": unsupported topology or prototype total triangle budget (150,000)."); continue; }
-                int firstTriangle = triangles.Count, firstSlot = materials.Count;
-                int firstMesh = meshes.Count, firstObject = objects.Count;
-                try
-                {
-                    Mesh mesh = Object.Instantiate(input); // Mesh only: no source GameObject or behaviour is instantiated.
-                    mesh.name = input.name + " (paint snapshot)"; mesh.hideFlags = HideFlags.HideAndDontSave; meshes.Add(mesh);
-                    var vertices = mesh.vertices;
-                    var matrix = renderer.localToWorldMatrix; var normalMatrix = matrix.inverse.transpose;
-                    bool mirrored = matrix.determinant < 0;
-                    for (int v = 0; v < vertices.Length; v++) vertices[v] = matrix.MultiplyPoint3x4(vertices[v]) - origin;
-                    mesh.vertices = vertices;
-                    var normals = mesh.normals;
-                    if (normals.Length == vertices.Length)
-                    {
-                        for (int n = 0; n < normals.Length; n++) normals[n] = NormalizeNonzero(normalMatrix.MultiplyVector(normals[n]));
-                        mesh.normals = normals;
-                    }
-                    var tangents = mesh.tangents;
-                    if (tangents.Length == vertices.Length)
-                    {
-                        for (int n = 0; n < tangents.Length; n++)
-                        {
-                            Vector3 tangent = NormalizeNonzero(matrix.MultiplyVector(new Vector3(tangents[n].x, tangents[n].y, tangents[n].z)));
-                            tangents[n] = new Vector4(tangent.x, tangent.y, tangent.z, tangents[n].w * (mirrored ? -1 : 1));
-                        }
-                        mesh.tangents = tangents;
-                    }
-                    var uv = mesh.uv; bool hasUv = uv.Length == vertices.Length;
-                    if (!hasUv) report.Diagnostics.Add(renderer.name + ": missing UV0. It remains an occluder, but cannot receive paint.");
-                    if (hasUv)
-                    {
-                        foreach (var coordinate in uv)
-                        {
-                            if (coordinate.x < 0 || coordinate.x > 1 || coordinate.y < 0 || coordinate.y > 1)
-                            {
-                                incomplete = true;
-                                report.Diagnostics.Add(renderer.name + ": UV0 lies outside 0–1. Repeating/UDIM mapping is unsupported; surface painting is disabled rather than silently clipping or wrapping strokes.");
-                                break;
-                            }
-                        }
-                    }
-                    var originalMaterials = renderer.sharedMaterials;
-                    var clonedMaterials = new Material[mesh.subMeshCount];
-                    for (int sub = 0; sub < mesh.subMeshCount; sub++)
-                    {
-                        var original = sub < originalMaterials.Length ? originalMaterials[sub] : null;
-                        Texture texture = null; Color color = Color.white;
-                        if (original != null)
-                        {
-                            if (original.HasProperty("_MainTex")) texture = original.GetTexture("_MainTex");
-                            else if (original.HasProperty("_BaseMap")) texture = original.GetTexture("_BaseMap");
-                            if (original.HasProperty("_Color")) color = original.GetColor("_Color");
-                            else if (original.HasProperty("_BaseColor")) color = original.GetColor("_BaseColor");
-                        }
-                        var material = original != null ? new Material(original) : new Material(shader);
-                        material.hideFlags = HideFlags.HideAndDontSave;
-                        material.name = (original != null ? original.name : "Unassigned") + " (paint preview only)";
-                        material.shader = shader; material.renderQueue = -1; material.shaderKeywords = Array.Empty<string>();
-                        material.SetOverrideTag("RenderType", "Opaque"); material.SetShaderPassEnabled("Always", true);
-                        material.SetTexture("_MainTex", texture != null ? texture : Texture2D.whiteTexture);
-                        material.SetTextureScale("_MainTex", Vector2.one); material.SetTextureOffset("_MainTex", Vector2.zero);
-                        material.SetColor("_Color", color); material.SetFloat("_PreviewLit", LitPreview ? 1 : 0);
-                        int slot = materials.Count;
-                        materials.Add(material); sourceTextures.Add(texture); sourceColors.Add(color); sourceMaterials.Add(original);
-                        slotNames.Add(renderer.name + " / " + sub + " / " + (original != null ? original.name : "Unassigned"));
-                        clonedMaterials[sub] = material;
-                        var indices = mesh.GetTriangles(sub);
-                        if (mirrored) { for (int i = 0; i < indices.Length; i += 3) { int temp = indices[i + 1]; indices[i + 1] = indices[i + 2]; indices[i + 2] = temp; } mesh.SetTriangles(indices, sub, false); }
-                        for (int i = 0; i < indices.Length; i += 3)
-                        {
-                            int a = indices[i], b = indices[i + 1], c = indices[i + 2];
-                            if (Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).sqrMagnitude < 1e-20f) continue;
-                            triangles.Add(new SurfaceTriangle(vertices[a], vertices[b], vertices[c],
-                                hasUv ? uv[a] : Vector2.zero, hasUv ? uv[b] : Vector2.zero, hasUv ? uv[c] : Vector2.zero,
-                                report.LoadedRendererCount, slot));
-                        }
-                    }
-                    if (normals.Length != vertices.Length) mesh.RecalculateNormals();
-                    mesh.RecalculateBounds();
-                    var go = new GameObject(renderer.name + " (isolated paint preview)") { hideFlags = HideFlags.HideAndDontSave };
-                    objects.Add(go); preview.AddSingleGO(go);
-                    go.AddComponent<MeshFilter>().sharedMesh = mesh;
-                    var copy = go.AddComponent<MeshRenderer>(); copy.sharedMaterials = clonedMaterials;
-                    copy.shadowCastingMode = ShadowCastingMode.Off; copy.receiveShadows = false;
-                    copy.lightProbeUsage = LightProbeUsage.Off; copy.reflectionProbeUsage = ReflectionProbeUsage.Off;
-                    report.LoadedRendererCount++;
-                }
-                catch (Exception exception)
-                {
-                    incomplete = true;
-                    triangles.RemoveRange(firstTriangle, triangles.Count - firstTriangle);
-                    DestroyTail(objects, firstObject); DestroyTail(meshes, firstMesh); DestroyTail(materials, firstSlot);
-                    sourceTextures.RemoveRange(firstSlot, sourceTextures.Count - firstSlot);
-                    sourceMaterials.RemoveRange(firstSlot, sourceMaterials.Count - firstSlot);
-                    sourceColors.RemoveRange(firstSlot, sourceColors.Count - firstSlot);
-                    slotNames.RemoveRange(firstSlot, slotNames.Count - firstSlot);
-                    report.Diagnostics.Add(renderer.name + ": could not build safe mesh snapshot: " + exception.Message);
-                }
+                if (!CheckInput(renderer, input, ref incomplete, ref triangleTotal)) continue;
+                var matrix = renderer.localToWorldMatrix;
+                AddEntry(renderer, input, matrix, matrix.determinant < 0, origin, shader, ref incomplete, null);
             }
+            var triangles = BuildTriangles();
             try
             {
                 if (triangles.Count > 0)
@@ -210,7 +122,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             catch (Exception exception)
             { incomplete = true; geometry = null; report.Diagnostics.Add("Invalid mesh snapshot: " + exception.Message); }
             report.CanPaint = HasModel && !incomplete;
-            report.Diagnostics.Add("G1 uses UV0, 0–1 UVs, static readable meshes and an opaque neutral shader. UV tiling, alpha cutouts, shader displacement, exact lilToon/SRP appearance and skinning are not represented.");
+            report.Diagnostics.Add("G1 uses UV0, 0–1 UVs, static readable meshes and an opaque neutral shader. UV tiling, alpha cutouts, shader displacement, exact lilToon/SRP appearance and shader-driven vertex motion are not represented. Skinned meshes show their current pose and BlendShapes, baked on the CPU.");
             report.Diagnostics.Add("Overlapping UVs share pixels. Duplicate-position edges may join seams; surface filtering cannot make overlapping UVs independent.");
             if (incomplete) report.Diagnostics.Add("Surface painting is disabled for this incomplete snapshot, so omitted geometry cannot silently allow painting through clothes. Choose a supported static-mesh root.");
             return report;
@@ -260,6 +172,216 @@ namespace Yozolab.YoluPainter.Editor.Preview
             }
             return report;
         }
+        /// <summary>レンダラー 1 つぶんのスナップショット（表示するメッシュ、三角形を作るための頂点・UV・添字）。スキンメッシュは
+        /// Skin で焼き直せる。</summary>
+        sealed class SnapshotEntry
+        {
+            public string Name; public Mesh Display; public int RendererIndex;
+            public int[] Slots; public int[][] Indices; public Vector2[] Uv; public bool HasUv, Mirrored;
+            /// <summary>読み込みの原点を引いたワールド座標。</summary>
+            public Vector3[] Vertices;
+            public SkinnedSnapshot Skin;
+        }
+        readonly List<SnapshotEntry> entries = new List<SnapshotEntry>();
+        TransformCopy skeleton;
+        Vector3 loadOrigin;
+
+        bool CheckInput(Renderer renderer, Mesh input, ref bool incomplete, ref long triangleTotal)
+        {
+            if (!input.isReadable)
+            { incomplete = true; report.Diagnostics.Add(renderer.name + ": mesh is not CPU-readable. Import settings were not changed."); return false; }
+            if (input.vertexCount > MaximumVerticesPerMesh)
+            { incomplete = true; report.Diagnostics.Add(renderer.name + ": exceeds the prototype vertex budget (250,000 per mesh)."); return false; }
+            long inputTriangles = 0; bool unsupported = false;
+            for (int sub = 0; sub < input.subMeshCount; sub++)
+            {
+                if (input.GetTopology(sub) != MeshTopology.Triangles) { unsupported = true; break; }
+                inputTriangles += (long)input.GetIndexCount(sub) / 3;
+            }
+            if (unsupported || triangleTotal + inputTriangles > MaximumTriangles)
+            { incomplete = true; report.Diagnostics.Add(renderer.name + ": unsupported topology or prototype total triangle budget (150,000)."); return false; }
+            triangleTotal += inputTriangles;
+            return true;
+        }
+
+        /// <summary>メッシュ（静的メッシュはそのもの、スキンメッシュは焼いたもの）を matrix でワールドへ置いたスナップショットを作り、
+        /// 表示用の複製（MeshFilter / MeshRenderer）とマテリアルの複製を用意する。失敗したら作りかけを片付けて false。</summary>
+        bool AddEntry(Renderer renderer, Mesh input, Matrix4x4 matrix, bool mirrored, Vector3 origin, Shader shader, ref bool incomplete, SkinnedSnapshot skin)
+        {
+            int firstSlot = materials.Count, firstMesh = meshes.Count, firstObject = objects.Count;
+            try
+            {
+                Mesh mesh = Object.Instantiate(input); // Mesh only: no source GameObject or behaviour is instantiated.
+                mesh.name = input.name + " (paint snapshot)"; mesh.hideFlags = HideFlags.HideAndDontSave; meshes.Add(mesh);
+                var vertices = mesh.vertices;
+                var normalMatrix = matrix.inverse.transpose;
+                for (int v = 0; v < vertices.Length; v++) vertices[v] = matrix.MultiplyPoint3x4(vertices[v]) - origin;
+                mesh.vertices = vertices;
+                var normals = mesh.normals;
+                if (normals.Length == vertices.Length)
+                {
+                    for (int n = 0; n < normals.Length; n++) normals[n] = NormalizeNonzero(normalMatrix.MultiplyVector(normals[n]));
+                    mesh.normals = normals;
+                }
+                var tangents = mesh.tangents;
+                if (tangents.Length == vertices.Length)
+                {
+                    for (int n = 0; n < tangents.Length; n++)
+                    {
+                        Vector3 tangent = NormalizeNonzero(matrix.MultiplyVector(new Vector3(tangents[n].x, tangents[n].y, tangents[n].z)));
+                        tangents[n] = new Vector4(tangent.x, tangent.y, tangent.z, tangents[n].w * (mirrored ? -1 : 1));
+                    }
+                    mesh.tangents = tangents;
+                }
+                var uv = mesh.uv; bool hasUv = uv.Length == vertices.Length;
+                if (!hasUv) report.Diagnostics.Add(renderer.name + ": missing UV0. It remains an occluder, but cannot receive paint.");
+                if (hasUv)
+                {
+                    foreach (var coordinate in uv)
+                    {
+                        if (coordinate.x < 0 || coordinate.x > 1 || coordinate.y < 0 || coordinate.y > 1)
+                        {
+                            incomplete = true;
+                            report.Diagnostics.Add(renderer.name + ": UV0 lies outside 0–1. Repeating/UDIM mapping is unsupported; surface painting is disabled rather than silently clipping or wrapping strokes.");
+                            break;
+                        }
+                    }
+                }
+                var originalMaterials = renderer.sharedMaterials;
+                var clonedMaterials = new Material[mesh.subMeshCount];
+                var entry = new SnapshotEntry { Name = renderer.name, Display = mesh, RendererIndex = report.LoadedRendererCount, Slots = new int[mesh.subMeshCount], Indices = new int[mesh.subMeshCount][],
+                    Uv = uv, HasUv = hasUv, Mirrored = mirrored, Vertices = vertices, Skin = skin };
+                for (int sub = 0; sub < mesh.subMeshCount; sub++)
+                {
+                    var original = sub < originalMaterials.Length ? originalMaterials[sub] : null;
+                    Texture texture = null; Color color = Color.white;
+                    if (original != null)
+                    {
+                        if (original.HasProperty("_MainTex")) texture = original.GetTexture("_MainTex");
+                        else if (original.HasProperty("_BaseMap")) texture = original.GetTexture("_BaseMap");
+                        if (original.HasProperty("_Color")) color = original.GetColor("_Color");
+                        else if (original.HasProperty("_BaseColor")) color = original.GetColor("_BaseColor");
+                    }
+                    var material = original != null ? new Material(original) : new Material(shader);
+                    material.hideFlags = HideFlags.HideAndDontSave;
+                    material.name = (original != null ? original.name : "Unassigned") + " (paint preview only)";
+                    material.shader = shader; material.renderQueue = -1; material.shaderKeywords = Array.Empty<string>();
+                    material.SetOverrideTag("RenderType", "Opaque"); material.SetShaderPassEnabled("Always", true);
+                    material.SetTexture("_MainTex", texture != null ? texture : Texture2D.whiteTexture);
+                    material.SetTextureScale("_MainTex", Vector2.one); material.SetTextureOffset("_MainTex", Vector2.zero);
+                    material.SetColor("_Color", color); material.SetFloat("_PreviewLit", LitPreview ? 1 : 0);
+                    int slot = materials.Count;
+                    materials.Add(material); sourceTextures.Add(texture); sourceColors.Add(color); sourceMaterials.Add(original);
+                    slotNames.Add(renderer.name + " / " + sub + " / " + (original != null ? original.name : "Unassigned"));
+                    clonedMaterials[sub] = material;
+                    var indices = mesh.GetTriangles(sub);
+                    if (mirrored) { for (int i = 0; i < indices.Length; i += 3) { int temp = indices[i + 1]; indices[i + 1] = indices[i + 2]; indices[i + 2] = temp; } mesh.SetTriangles(indices, sub, false); }
+                    entry.Slots[sub] = slot; entry.Indices[sub] = indices;
+                }
+                if (normals.Length != vertices.Length) mesh.RecalculateNormals();
+                mesh.RecalculateBounds();
+                var go = new GameObject(renderer.name + " (isolated paint preview)") { hideFlags = HideFlags.HideAndDontSave };
+                objects.Add(go); preview.AddSingleGO(go);
+                go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                var copy = go.AddComponent<MeshRenderer>(); copy.sharedMaterials = clonedMaterials;
+                copy.shadowCastingMode = ShadowCastingMode.Off; copy.receiveShadows = false;
+                copy.lightProbeUsage = LightProbeUsage.Off; copy.reflectionProbeUsage = ReflectionProbeUsage.Off;
+                entries.Add(entry);
+                report.LoadedRendererCount++;
+                return true;
+            }
+            catch (Exception exception)
+            {
+                incomplete = true;
+                DestroyTail(objects, firstObject); DestroyTail(meshes, firstMesh); DestroyTail(materials, firstSlot);
+                sourceTextures.RemoveRange(firstSlot, sourceTextures.Count - firstSlot);
+                sourceMaterials.RemoveRange(firstSlot, sourceMaterials.Count - firstSlot);
+                sourceColors.RemoveRange(firstSlot, sourceColors.Count - firstSlot);
+                slotNames.RemoveRange(firstSlot, slotNames.Count - firstSlot);
+                report.Diagnostics.Add(renderer.name + ": could not build safe mesh snapshot: " + exception.Message);
+                return false;
+            }
+        }
+
+        // ───────────── ポーズと BlendShape（複製の骨と複製のメッシュだけを動かす） ─────────────
+
+        /// <summary>BlendShape 1 つ（スキンメッシュの番号と、その中の番号）。</summary>
+        public readonly struct PoseBlendShape { public readonly int Mesh, Index; public readonly string Label; public PoseBlendShape(int mesh, int index, string label) { Mesh = mesh; Index = index; Label = label; } }
+
+        IEnumerable<SkinnedSnapshot> Skins { get { foreach (var e in entries) if (e.Skin != null) yield return e.Skin; } }
+        public bool HasSkinnedMeshes { get { foreach (var _ in Skins) return true; return false; } }
+        public IReadOnlyList<PoseBlendShape> BlendShapes
+        {
+            get
+            {
+                var list = new List<PoseBlendShape>(); int m = 0;
+                foreach (var skin in Skins) { for (int i = 0; i < skin.BlendShapeCount; i++) list.Add(new PoseBlendShape(m, i, skin.Name + " / " + skin.BlendShapeName(i))); m++; }
+                return list;
+            }
+        }
+        SkinnedSnapshot SkinAt(int mesh) { int m = 0; foreach (var skin in Skins) if (m++ == mesh) return skin; throw new ArgumentOutOfRangeException(nameof(mesh)); }
+        public float GetBlendShapeWeight(PoseBlendShape shape) => SkinAt(shape.Mesh).GetBlendShapeWeight(shape.Index);
+        /// <summary>重みを変える。形に反映するのは <see cref="ApplyPose"/> のとき。</summary>
+        public void SetBlendShapeWeight(PoseBlendShape shape, float weight)
+        {
+            if (float.IsNaN(weight) || float.IsInfinity(weight)) throw new ArgumentOutOfRangeException(nameof(weight));
+            SkinAt(shape.Mesh).SetBlendShapeWeight(shape.Index, weight);
+        }
+        /// <summary>汎用（Generic）のアニメーションクリップの time 秒の姿勢を複製の骨に置く（Humanoid は未対応で断る）。形に反映するのは
+        /// <see cref="ApplyPose"/> のとき。</summary>
+        public void SamplePose(AnimationClip clip, float time)
+        {
+            if (clip == null) throw new ArgumentNullException(nameof(clip));
+            if (skeleton == null) throw new InvalidOperationException("The loaded model has no skinned mesh to pose.");
+            if (clip.humanMotion) throw new InvalidOperationException("Humanoid clips need an Avatar retarget, which the preview does not do yet. Use a Generic clip.");
+            clip.SampleAnimation(skeleton.Root, Mathf.Clamp(time, 0, clip.length));
+        }
+        /// <summary>骨と BlendShape を読み込んだときの状態に戻す。形に反映するのは <see cref="ApplyPose"/> のとき。</summary>
+        public void ResetPose() { skeleton?.Reset(); foreach (var skin in Skins) skin.ResetBlendShapes(); }
+        /// <summary>今の骨と BlendShape でスキンメッシュを焼き直し、表示と当たり判定の形を新しい世代（<see cref="SnapshotRevision"/>）に
+        /// 切り替える。UV と三角形の並びは変わらない。ストロークの最中に呼ばない（呼ぶ側が止める）。</summary>
+        public bool ApplyPose()
+        {
+            ThrowIfDisposed();
+            if (!HasSkinnedMeshes) return false;
+            foreach (var e in entries)
+            {
+                if (e.Skin == null) continue;
+                var baked = e.Skin.Bake(); var t = e.Skin.Renderer.transform;
+                var matrix = Matrix4x4.TRS(t.position, t.rotation, Vector3.one); var normalMatrix = matrix.inverse.transpose;
+                var vertices = baked.vertices; var normals = baked.normals;
+                if (vertices.Length != e.Vertices.Length) throw new InvalidOperationException("The baked mesh changed its vertex count.");
+                for (int v = 0; v < vertices.Length; v++) vertices[v] = matrix.MultiplyPoint3x4(vertices[v]) - loadOrigin;
+                e.Vertices = vertices; e.Display.vertices = vertices;
+                if (normals.Length == vertices.Length) { for (int n = 0; n < normals.Length; n++) normals[n] = NormalizeNonzero(normalMatrix.MultiplyVector(normals[n])); e.Display.normals = normals; }
+                else e.Display.RecalculateNormals();
+                e.Display.RecalculateBounds();
+            }
+            revision++;
+            geometry = new SurfaceGeometry(BuildTriangles(), revision);
+            return true;
+        }
+
+        /// <summary>全レンダラーの今の頂点から、当たり判定と面の描画に使う三角形を作る（面積 0 の三角形は除く）。</summary>
+        List<SurfaceTriangle> BuildTriangles()
+        {
+            var triangles = new List<SurfaceTriangle>();
+            foreach (var e in entries)
+                for (int sub = 0; sub < e.Indices.Length; sub++)
+                {
+                    var indices = e.Indices[sub]; var vertices = e.Vertices;
+                    for (int i = 0; i < indices.Length; i += 3)
+                    {
+                        int a = indices[i], b = indices[i + 1], c = indices[i + 2];
+                        if (Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).sqrMagnitude < 1e-20f) continue;
+                        triangles.Add(new SurfaceTriangle(vertices[a], vertices[b], vertices[c],
+                            e.HasUv ? e.Uv[a] : Vector2.zero, e.HasUv ? e.Uv[b] : Vector2.zero, e.HasUv ? e.Uv[c] : Vector2.zero,
+                            e.RendererIndex, e.Slots[sub]));
+                    }
+                }
+            return triangles;
+        }
+
         static void AddDemoFace(List<Vector3> vertices, List<Vector2> uvs, List<int> indices, Vector3 a, Vector3 b, Vector3 c, Vector3 d)
         {
             int start = vertices.Count, face = start / 4;
@@ -408,6 +530,9 @@ namespace Yozolab.YoluPainter.Editor.Preview
         void ClearModel()
         {
             CancelNavigation(); geometry = null;
+            foreach (var e in entries) e.Skin?.Dispose();
+            entries.Clear();
+            skeleton?.Dispose(); skeleton = null;
             DestroyTail(objects, 0); DestroyTail(meshes, 0); DestroyTail(materials, 0);
             sourceTextures.Clear(); sourceColors.Clear(); sourceMaterials.Clear(); slotNames.Clear();
         }

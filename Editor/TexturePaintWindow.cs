@@ -330,7 +330,8 @@ namespace Yozolab.YoluPainter.Editor
             GUILayout.Label("LMB: use the tool (brush also on 3D)\nAlt / RMB: orbit 3D\nMMB: pan 2D / 3D\nWheel: zoom\nEsc: cancel stroke or drag\nCtrl/Cmd Z: undo · Shift: redo\nCtrl/Cmd A: select all · D: deselect\nCtrl/Cmd Shift I: invert selection\nFocus loss: cancel active stroke",EditorStyles.wordWrappedMiniLabel);
             GUILayout.Space(12);
             EditorGUILayout.HelpBox("Prototype uses one IMGUI pressure path. Tablet response, HiDPI and latency still require Unity/device tests. No-pressure input uses Unity's fixed fallback.",MessageType.Info);
-            if(GUILayout.Button("Show implementation limits")) Dialogs.Inform("G0/G1 limits","CPU source brush; bounded GPU tile compositor. Static readable meshes. Selected channel only. Native generation save and restricted RGB8 PSD. Full adjustment layers, groups, masks, editable surface paths, pose/BlendShape, mesh-map generators and lilToon parity remain unfinished. See Documentation~/STATUS.md in the package.");
+            if(GUILayout.Button("Show implementation limits")) Dialogs.Inform("G0/G1 limits","CPU source brush; bounded GPU tile compositor. Readable static and skinned meshes (skinned ones posed on a copy; Humanoid clips not yet). Selected channel only. .ylp save, PSD with RGB8 layers, groups, masks and three adjustment types. Editable surface paths, Generators/Filters/Anchors and an exact lilToon look in the preview remain unfinished. See Documentation~/STATUS.md in the package.");
+            DrawPosePanel();
             GUILayout.EndScrollView(); GUILayout.EndArea();
         }
         void DrawLayers(Rect rect)
