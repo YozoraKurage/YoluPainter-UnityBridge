@@ -1,0 +1,127 @@
+name: "Release"
+
+# main へのプルリクがマージされたら自動実行。
+#   1. PR ラベル (major / minor / patch) から semver を判定し package.json を更新
+#   2. バージョン更新を main へコミット
+#   3. vpm-packager で .unitypackage / .zip を生成
+#   4. 生成パッケージを正式 Release として公開（タグ自動作成）
+#
+# 手動実行 (workflow_dispatch) も可能。その場合は bump 入力値で更新種別を指定する。
+#
+# このファイルはリポジトリ固有の値を含まない汎用ワークフロー。VPM パッケージ用の
+# どのリポジトリにもそのままコピーして使える（ビルド対象パッケージ名は vpm-packager が
+# ルートの package.json から自動取得する）。
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # マージされた PR か、手動実行のときだけ走らせる（クローズのみの PR は無視）
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true }}
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: "Checkout main"
+        uses: "actions/checkout@v4"
+        with:
+          # マージ済みの main を取得し、バージョン更新コミットを push できるようにする
+          ref: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: "Determine version bump"
+        id: "bump"
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_BUMP: ${{ github.event.inputs.bump }}
+          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            type="${INPUT_BUMP:-patch}"
+          elif echo "$LABELS" | grep -q '"major"'; then
+            type="major"
+          elif echo "$LABELS" | grep -q '"minor"'; then
+            type="minor"
+          else
+            type="patch"
+          fi
+          echo "Selected bump type: $type"
+          echo "type=$type" >> "$GITHUB_OUTPUT"
+
+      - name: "Bump package.json version"
+        id: "version"
+        run: |
+          new_version="$(npm version "${{ steps.bump.outputs.type }}" --no-git-tag-version | sed 's/^v//')"
+          echo "Bumped to $new_version"
+          echo "version=$new_version" >> "$GITHUB_OUTPUT"
+
+      - name: "Commit version bump to main"
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git commit -m "chore: release ${{ steps.version.outputs.version }} [skip ci]"
+          git push origin HEAD:${{ github.event.pull_request.base.ref || github.ref_name }}
+
+      - name: "Build"
+        id: "build"
+        uses: "docker://ghcr.io/rerigferl/vpm-packager:latest"
+        with:
+          args: "-z -u"
+
+      - name: "Create Release"
+        uses: "softprops/action-gh-release@v2"
+        if: ${{ steps.build.outputs.package-version != '0.0.0' }}
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          target_commitish: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          draft: false
+          generate_release_notes: true
+          files: |
+            ${{ steps.build.outputs.zip-path }}
+            ${{ steps.build.outputs.unitypackage-path }}
+            ${{ steps.build.outputs.manifest-path }}
+
+      # この Release は GITHUB_TOKEN で作成されるため `release` イベントの
+      # workflow は発火しない（GitHub の再帰防止仕様）。よって VPM リスティングの
+      # 再ビルドはここから repository_dispatch で明示的にトリガーする。
+      # event_type は全パッケージ共通の "vpm-package-release"（notify-vpm-listing.yml と揃える）。
+      - name: "Trigger VPM listing rebuild"
+        if: ${{ steps.build.outputs.package-version != '0.0.0' }}
+        env:
+          DISPATCH_TOKEN: ${{ secrets.LISTING_DISPATCH_TOKEN }}
+          LISTING_REPO: "YozoraKurage/vpmrepo-list"
+          DISPATCH_EVENT_TYPE: "vpm-package-release"
+          SOURCE_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [ -z "$DISPATCH_TOKEN" ]; then
+            echo "::warning::LISTING_DISPATCH_TOKEN secret is not set; skipping VPM listing rebuild trigger."
+            exit 0
+          fi
+          payload="$(jq -nc \
+            --arg event "$DISPATCH_EVENT_TYPE" \
+            --arg repo "$SOURCE_REPO" \
+            --arg version "$RELEASE_VERSION" \
+            '{event_type: $event, client_payload: {repository: $repo, version: $version}}')"
+          curl --fail -sS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $DISPATCH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${LISTING_REPO}/dispatches" \
+            -d "$payload"
