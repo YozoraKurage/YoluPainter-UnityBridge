@@ -12,7 +12,7 @@ using UnityEngine;
 namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>Single IMGUI input path: no duplicate pointer/mouse event subscription.</summary>
-    public sealed class TexturePaintWindow : EditorWindow
+    public sealed partial class TexturePaintWindow : EditorWindow
     {
         /// <summary>ウィンドウのブラシ設定。brush.json とブラシプリセットのファイルにそのまま JSON で書く。
         /// schema 2 で筆先・ゆらぎ・紙の質感を足した（schema 1 のファイルも読める。足した項目は既定値になる）。</summary>
