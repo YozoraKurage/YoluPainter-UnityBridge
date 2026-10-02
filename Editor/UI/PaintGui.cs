@@ -315,6 +315,17 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
 
+        /// <summary>透明を表す市松（cell の大きさ）。</summary>
+        public static void Checker(Rect r, float cell = 4)
+        {
+            if (!Repainting) return;
+            EditorGUI.DrawRect(r, new Color(.42f, .42f, .44f));
+            var dark = new Color(.30f, .30f, .32f);
+            for (float y = 0; y < r.height; y += cell)
+                for (float x = ((int)(y / cell) % 2) * cell; x < r.width; x += cell * 2)
+                    EditorGUI.DrawRect(new Rect(r.x + x, r.y + y, Mathf.Min(cell, r.width - x), Mathf.Min(cell, r.height - y)), dark);
+        }
+
         /// <summary>縦の帯の区切り。</summary>
         public static void StripSeparator(Rect r) => HLine(r.x + 6, r.xMax - 6, r.center.y, PaintTheme.Separator);
     }

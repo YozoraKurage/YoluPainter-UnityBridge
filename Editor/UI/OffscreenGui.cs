@@ -18,7 +18,7 @@ namespace Yozolab.YoluPainter.Editor
         const BindingFlags Internal = BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Public;
 
         /// <summary>draw を Layout と Repaint の 2 回呼んで width × height に描き、PNG に書く。</summary>
-        public static void RenderToPng(int width, int height, Action draw, string path, Color background)
+        public static void RenderToPng(int width, int height, Action draw, string path, Color background, Vector2? mouse = null)
         {
             var guiUtility = typeof(GUIUtility); var engine = guiUtility.Assembly;
             var beginContainer = guiUtility.GetMethod("BeginContainer", Internal, null, new[] { engine.GetType("UnityEngine.ObjectGUIState") }, null);
@@ -42,9 +42,10 @@ namespace Yozolab.YoluPainter.Editor
                 const int id = 0x59500002;
                 foreach (var type in Passes)
                 {
-                    Event.current = new Event { type = type, mousePosition = new Vector2(-1000, -1000) };
+                    Event.current = new Event { type = type, mousePosition = mouse ?? new Vector2(-1000, -1000) };
                     beginContainer.Invoke(null, new[] { state });
                     pushParent.Invoke(null, new object[] { Matrix4x4.identity, Matrix4x4.identity, new Rect(0, 0, width, height) });
+                    Event.current = new Event { type = type, mousePosition = mouse ?? new Vector2(-1000, -1000) }; // BeginContainer がイベントを差し替えるので後で入れる
                     GL.PushMatrix(); GL.LoadPixelMatrix(0, width, height, 0);
                     try
                     {
@@ -69,11 +70,11 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>ペイントのウィンドウを width × height で描く（ウィンドウは表示しない。デモのキューブと層を少し入れる）。</summary>
-        public static void RenderWindow(TexturePaintWindow window, int width, int height, string path)
+        public static void RenderWindow(TexturePaintWindow window, int width, int height, string path, Vector2? mouse = null)
         {
             window.LayoutOverride = new Rect(0, 0, width, height);
             var onGui = typeof(TexturePaintWindow).GetMethod("OnGUI", BindingFlags.NonPublic | BindingFlags.Instance);
-            RenderToPng(width, height, () => onGui.Invoke(window, null), path, PaintTheme.WindowBg);
+            RenderToPng(width, height, () => onGui.Invoke(window, null), path, PaintTheme.WindowBg, mouse);
         }
     }
 }

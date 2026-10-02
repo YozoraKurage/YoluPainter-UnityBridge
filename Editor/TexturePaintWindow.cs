@@ -155,7 +155,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             FinishStroke(false); preview?.CancelNavigation(); SaveRecovery();
             EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
-            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
+            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeThumbnails(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
             if(selectionOverlay!=null){DestroyImmediate(selectionOverlay);selectionOverlay=null;overlayFor=null;}
         }
         void Tick()
@@ -178,7 +178,7 @@ namespace Yozolab.YoluPainter.Editor
         void OnGUI()
         {
             if(document==null) return;
-            var e=Event.current;
+            var e=Event.current; var pointerAtStart=e.mousePosition; // 途中のクリップや 3D の描画の後でも同じ位置を使う
             if(e.type==EventType.MouseMove) Repaint(); // マウスの乗った部品の見た目
             // スライダーのドラッグ中の変更は 1 つの Undo にまとめる。離したところで区切る。
             if(e.rawType==EventType.MouseUp) document.EndCoalescing();
@@ -197,6 +197,7 @@ namespace Yozolab.YoluPainter.Editor
             if(canvasRect.width>0) DrawCanvas();
             if(surfaceRect.width>0 && e.type==EventType.Repaint){ PaintGui.Fill(surfaceRect,PaintTheme.CanvasBg); preview.Render(surfaceRect); DrawPathMarkers(); }
             DrawShell();
+            if(surfaceRect.width>0) DrawSurfaceBrushCursor(pointerAtStart); // 3D の描画の後に GUI の状態を戻してから重ねる
             HandleCanvasInput(e);
         }
         Rect ImageRect()
@@ -208,6 +209,7 @@ namespace Yozolab.YoluPainter.Editor
         void DrawCanvas()
         {
             EditorGUI.DrawRect(canvasRect,PaintTheme.CanvasBg);
+            var pointer=Event.current.mousePosition-canvasRect.position; // クリップの中の座標（クリップに入る前に取る）
             GUI.BeginClip(canvasRect);
             var image=ImageRect(); image.position-=canvasRect.position;
             if(DisplayTexture!=null) EditorGUI.DrawTextureTransparent(image,DisplayTexture,ScaleMode.StretchToFill);
@@ -216,6 +218,7 @@ namespace Yozolab.YoluPainter.Editor
             if(toolDragging&&Event.current.type==EventType.Repaint) DrawToolPreview(image);
             else if(tool==PaintTool.Move&&!toolDragging&&Event.current.type==EventType.Repaint) DrawTransformHandles(image);
             if(Event.current.type==EventType.Repaint) DrawCanvasPathMarkers(image);
+            DrawCanvasBrushCursor(image,pointer);
             GUI.EndClip();
         }
         /// <summary>選ばれていない所を暗く覆う表示用のテクスチャ（選択範囲が変わったときだけ作り直す）。</summary>

@@ -130,6 +130,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (Math.Abs(opacity - active.Opacity) > .00001) document.SetLayerOpacity(active.Id, opacity, coalesce: true);
             }
             // 一覧
+            if (Event.current.type == EventType.Repaint) ForgetStaleThumbnails();
             var list = new Rect(r.x, top.yMax + 6, r.width, r.height - (top.yMax + 6 - r.y) - LayerToolbarHeight);
             PaintGui.Fill(list, PaintTheme.ControlBg);
             float content = document.Layers.Count * LayerRowHeight;
@@ -177,16 +178,21 @@ namespace Yozolab.YoluPainter.Editor
             if (document.IsEffectivelyClipped(index)) { PaintGui.Icon(new Rect(x, r.y, 14, r.height), "keyboard_arrow_down", PaintTheme.TextDim, 14); x += 14; }
             // 種類（サムネイルの位置）
             var thumb = new Rect(x, r.y + 4, r.height - 8, r.height - 8);
-            PaintGui.Rounded(thumb, PaintTheme.PanelHeader, 3);
-            string kind = layer.IsGroup ? "folder" : layer.Kind == LayerKind.Fill ? "format_color_fill" : layer.Kind == LayerKind.Adjustment ? "tune" : layer.Path != null ? "conversion_path" : "brush";
-            PaintGui.Icon(thumb, kind, PaintTheme.TextDim, 15);
+            var picture = LayerThumbnail(layer);
+            if (picture != null || layer.Kind == LayerKind.Raster && !layer.IsGroup) DrawThumbnail(thumb, picture);
+            else
+            {
+                PaintGui.Rounded(thumb, PaintTheme.PanelHeader, 3);
+                PaintGui.Icon(thumb, layer.IsGroup ? "folder" : layer.Kind == LayerKind.Fill ? "format_color_fill" : "tune", PaintTheme.TextDim, 15);
+            }
+            if (layer.Path != null) PaintGui.Icon(new Rect(thumb.xMax - 11, thumb.yMax - 11, 12, 12), "conversion_path", Color.white, 11); // パスで描かれた層の印
             x = thumb.xMax + 6;
             if (layer.Mask != null)
             {
                 var maskBox = new Rect(x, r.y + 4, r.height - 8, r.height - 8);
                 bool editing = selected && editMask;
-                PaintGui.Rounded(maskBox, editing ? PaintTheme.AccentDim : PaintTheme.PanelHeader, 3);
-                PaintGui.Icon(maskBox, "vignette", editing ? Color.white : PaintTheme.TextDim, 14);
+                DrawThumbnail(maskBox, MaskThumbnail(layer));
+                if (editing) PaintGui.Outline(new Rect(maskBox.x - 2, maskBox.y - 2, maskBox.width + 4, maskBox.height + 4), PaintTheme.Accent, 2, 2);
                 PaintGui.Tooltip(maskBox, L.Tr("Layer mask (click to paint on it)"));
                 if (e.type == EventType.MouseDown && e.button == 0 && maskBox.Contains(e.mousePosition) && GUI.enabled) { selectedLayer = layer.Id; editMask = !editing; e.Use(); }
                 x = maskBox.xMax + 6;
