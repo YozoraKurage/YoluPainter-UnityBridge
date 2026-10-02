@@ -14,6 +14,11 @@ namespace Yozolab.YoluPainter.Editor
     public sealed partial class TexturePaintWindow
     {
         [Serializable] sealed class ViewState { public string modelAssetGuid; public int materialSlot; public int selectedChannel; }
+        /// <summary>開いた .ylp の中身の形式（新しく作った・取り込んだものは今の形式）と、最初に作ったアプリ（形式 1 のファイルは分からないので null）。</summary>
+        int openedFormat=YlpFormat.Current; YlpWriterInfo projectCreatedBy;
+        internal int OpenedFormat=>openedFormat;
+        /// <summary>新しく作った・取り込んだ文書: 今の形式で、作ったのはこのアプリ。</summary>
+        void NewProjectRecord(){openedFormat=YlpFormat.Current;projectCreatedBy=YlpContent.Writer;}
         /// <summary>作った直後で何も手を加えていないドキュメントの版（New / 最初に開いたとき）。捨てても失うものが無いので確かめない。</summary>
         long pristineRevision=-1;
         bool ConfirmDiscard() => document.Revision==savedRevision || document.Revision==pristineRevision || Dialogs.Confirm("Keep current work?","Current work has unsaved changes. A native recovery checkpoint will be kept before opening another document.","Continue","Cancel") && SaveRecovery();
@@ -24,6 +29,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 var files=new Dictionary<string,byte[]>{{"document.utpaint",DocumentBinary.Write(document)}};
                 if(document.Selection!=null)files.Add(SelectionBinary.EntryName,SelectionBinary.Write(document.Selection));
+                YlpFormat.Stamp(files,YlpContent.Writer,projectCreatedBy);
                 var snapshot=GenerationStore.Commit(recoveryRoot,files,recoveryToken); recoveryToken=snapshot.Token;
                 recoveredRevision=document.Revision;lastRecovery=EditorApplication.timeSinceStartup;return true;
             }
@@ -54,6 +60,8 @@ namespace Yozolab.YoluPainter.Editor
             int keep=PainterSettings.BackupsToKeep;
             // 別のファイルを上書きするとき: 退避するなら元の版は残るので尋ねない。退避しない設定なら元の版が消えるので確かめる。
             if(!sameFile&&File.Exists(target)&&keep==0&&!Dialogs.Confirm("Replace file?",Path.GetFileName(target)+" already exists and backups are turned off in Project Settings > YoluPainter. Replace it? The old file will be gone.","Replace","Cancel"))return;
+            // 古い形式で開いたファイルを、退避なしで今の形式に書き換えるときは確かめる（古い YoluPainter では開けなくなる）
+            if(sameFile&&openedFormat<YlpFormat.Current&&keep==0&&!Dialogs.Confirm("Upgrade the file format?",Path.GetFileName(target)+" uses .ylp format "+openedFormat+". Saving writes format "+YlpFormat.Current+", which older YoluPainter versions cannot open, and backups are turned off in Project Settings > YoluPainter, so the old file will be gone.","Save","Cancel"))return;
             TryAction(()=>
             {
                 Dialogs.Progress("YoluPainter","Freezing native source and writing a verified .ylp. Input is paused.",.1f);
@@ -65,13 +73,21 @@ namespace Yozolab.YoluPainter.Editor
                 if(importedOriginal!=null)files.Add(YlpContent.ImportedOriginalName,importedOriginal);
                 AddMeshMapFiles(files);
                 if(document.Selection!=null)files.Add(SelectionBinary.EntryName,SelectionBinary.Write(document.Selection));
+                YlpFormat.Stamp(files,YlpContent.Writer,projectCreatedBy);
                 var saved=YlpStore.Save(target,files,sameFile?projectToken:null,!sameFile,keep);
-                projectPath=saved.Path;projectToken=saved.Token;savedRevision=document.Revision;externalConflict=false;MeshMapsWereSaved();
+                projectPath=saved.Path;projectToken=saved.Token;savedRevision=document.Revision;externalConflict=false;MeshMapsWereSaved();openedFormat=YlpFormat.Current;
                 message="Saved "+Path.GetFileName(saved.Path)+(saved.Backup!=null?"; the previous version is kept in "+Path.GetFileName(Path.GetDirectoryName(saved.Backup))+".":".");
                 string asset=AssetPathOf(saved.Path);
                 if(asset!=null)AssetDatabase.ImportAsset(asset,ImportAssetOptions.ForceUpdate);
             });
             Dialogs.ClearProgress();
+        }
+        /// <summary>開いた .ylp の形式についての知らせ（古い形式から移した・知らないエントリがある）。</summary>
+        static IEnumerable<string> FormatNotes(YlpOpened opened)
+        {
+            if(opened.Upgraded)yield return "Saved with an older .ylp format ("+opened.Info.Format+"); saving writes format "+YlpFormat.Current+", which older YoluPainter versions cannot open.";
+            foreach(var note in opened.Notes)yield return note;
+            if(opened.UnknownEntries.Count>0)yield return "This file holds data this YoluPainter does not know ("+String.Join(", ",opened.UnknownEntries.Take(5))+(opened.UnknownEntries.Count>5?", …":"")+"), probably from a newer version; it is not kept when you save.";
         }
         /// <summary>Unity プロジェクトの Assets の中なら "Assets/..." の形、外なら null。</summary>
         static string AssetPathOf(string fullPath)
@@ -97,21 +113,24 @@ namespace Yozolab.YoluPainter.Editor
             if(!ConfirmDiscard())return;
             TryAction(()=>
             {
-                var snapshot=YlpStore.Load(path);var next=DocumentBinary.Read(snapshot.Files[YlpArchive.NativeName]);
+                var snapshot=YlpStore.Load(path);var opened=YlpFormat.Open(snapshot.Files);var files=opened.Files;
+                var next=DocumentBinary.Read(files[YlpArchive.NativeName]);
                 document=next;BindDocument();selectedLayer=document.Layers.Count>0?document.Layers[document.Layers.Count-1].Id:Guid.Empty;
                 projectPath=snapshot.Path;projectToken=snapshot.Token;savedRevision=document.Revision;externalConflict=false;
-                importedOriginal=snapshot.Files.TryGetValue(YlpContent.ImportedOriginalName,out var original)?original:null;
+                importedOriginal=files.TryGetValue(YlpContent.ImportedOriginalName,out var original)?original:null;
+                openedFormat=opened.Info.Format; projectCreatedBy=opened.Info.CreatedBy;
                 var notes=new List<string>();
                 var budgetNote=ApplyBudgets(); if(budgetNote!=null)notes.Add(budgetNote);
-                if(snapshot.Files.TryGetValue(YlpContent.BrushName,out var preset)){brush=ReadBrushState(System.Text.Encoding.UTF8.GetString(preset));var missing=MissingTipNote();if(missing!=null)notes.Add(missing);}
-                if(snapshot.Files.TryGetValue(YlpContent.ViewName,out var view))
+                if(files.TryGetValue(YlpContent.BrushName,out var preset)){brush=ReadBrushState(System.Text.Encoding.UTF8.GetString(preset));var missing=MissingTipNote();if(missing!=null)notes.Add(missing);}
+                if(files.TryGetValue(YlpContent.ViewName,out var view))
                 {
                     var state=JsonUtility.FromJson<ViewState>(System.Text.Encoding.UTF8.GetString(view));materialSlot=state.materialSlot;channel=(PaintChannel)state.selectedChannel;
                     var loaded=AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(state.modelAssetGuid));
                     if(loaded!=null){model=loaded;preview.Load(model);materialSlot=Mathf.Clamp(materialSlot,0,Mathf.Max(0,preview.MaterialSlotCount-1));}else if(!String.IsNullOrEmpty(state.modelAssetGuid))notes.Add("Model asset is unavailable; assign it explicitly.");
                 }
-                LoadMeshMapFiles(snapshot.Files,notes);
-                RestoreSavedSelection(snapshot.Files,notes);
+                LoadMeshMapFiles(files,notes);
+                RestoreSavedSelection(files,notes);
+                notes.AddRange(FormatNotes(opened));
                 message="Opened "+Path.GetFileName(path)+" (verified)"+(notes.Count>0?". "+String.Join(" ",notes):"");
             });
         }
@@ -125,7 +144,7 @@ namespace Yozolab.YoluPainter.Editor
                 if(result.Mode!=PsdCompatibilityMode.EditableRaster){Dialogs.Inform("PSD protected: "+result.Mode,String.Join("\n",result.Diagnostics.Select(d=>d.ToString()))+"\nOriginal file was not modified. Unsupported features cannot be edited here.");return;}
                 var next=PsdBridge.Import(result);if(!ConfirmDiscard())return;
                 document=next;if(document.Layers.Count==0)document.AddLayer(L.Tr("Layer")+" 1");BindDocument();selectedLayer=document.Layers.Last().Id;projectPath=null;projectToken=null;savedRevision=-1;
-                importedOriginal=result.CopyOriginalBytes();importedPsdPath=Path.GetFullPath(path);channel=PaintChannel.Color;
+                importedOriginal=result.CopyOriginalBytes();importedPsdPath=Path.GetFullPath(path);channel=PaintChannel.Color;NewProjectRecord();
                 message="Imported "+Path.GetFileName(path)+". Save keeps it as a .ylp (with the original PSD inside); Export PSD writes a PSD. The PSD itself is never rewritten.";
                 // 編集できる取り込みでも、書き出す PSD に含まれない情報や合成結果の差などの注意があれば一覧で見せる（黙って捨てない）
                 var notes=result.Diagnostics.Select(d=>d.ToString()).ToList();

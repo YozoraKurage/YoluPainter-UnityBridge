@@ -13,6 +13,9 @@ namespace Yozolab.YoluPainter.Editor
         public PaintChannel[] channels = new PaintChannel[0];
         /// <summary>合成済みの画像が無いため、正本（document.utpaint）から読んだか。</summary>
         public bool fromNativeDocument;
+        /// <summary>中身の形式（YlpFormat。ylp.json の無いものは 1）と、書いたアプリ（分からなければ空）。</summary>
+        public int format;
+        public string savedBy = "", createdBy = "";
         /// <summary>取り込みのエラーの理由（成功したときは空）。</summary>
         public string error = "";
     }

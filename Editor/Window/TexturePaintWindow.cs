@@ -73,8 +73,9 @@ namespace Yozolab.YoluPainter.Editor
             {
                 if (File.Exists(Path.Combine(recoveryRoot,"current")))
                 {
-                    var snapshot=GenerationStore.Load(recoveryRoot); document=DocumentBinary.Read(snapshot.Files["document.utpaint"]); recoveryToken=snapshot.Token;
-                    var recoveryNotes=new List<string>(); RestoreSavedSelection(snapshot.Files,recoveryNotes);
+                    var snapshot=GenerationStore.Load(recoveryRoot); var recovered=YlpFormat.Open(snapshot.Files);
+                    document=DocumentBinary.Read(recovered.Files[YlpArchive.NativeName]); recoveryToken=snapshot.Token; projectCreatedBy=recovered.Info.CreatedBy;
+                    var recoveryNotes=new List<string>(); RestoreSavedSelection(recovered.Files,recoveryNotes);
                     message="Recovered native source from the last durable checkpoint. Unsaved edits after that checkpoint may be missing."+(recoveryNotes.Count>0?" "+String.Join(" ",recoveryNotes):"");
                 }
             }
@@ -115,7 +116,7 @@ namespace Yozolab.YoluPainter.Editor
             document=new PaintDocument(size,size,128,PainterSettings.UndoBudgetBytes);
             ApplyBudgets();
             selectedLayer=document.AddLayer(L.Tr("Layer")+" 1").Id; document.ClearHistory(); pristineRevision=document.Revision;
-            projectPath=null; projectToken=null; savedRevision=-1; importedOriginal=null; importedPsdPath=null; externalConflict=false; canvasZoom=1; canvasPan=Vector2.zero;
+            projectPath=null; projectToken=null; savedRevision=-1; importedOriginal=null; importedPsdPath=null; externalConflict=false; canvasZoom=1; canvasPan=Vector2.zero; NewProjectRecord();
         }
         void OnLostFocus() { FinishStroke(false); CancelToolDrag(); preview?.CancelNavigation(); SaveRecovery(); }
         void BeforeReload() { FinishStroke(false); preview?.CancelNavigation(); SaveRecovery(); }

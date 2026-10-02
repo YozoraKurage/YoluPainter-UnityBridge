@@ -27,6 +27,9 @@ namespace Yozolab.YoluPainter.Editor
             {
                 EditorGUILayout.LabelField("Document Size", info.width + " x " + info.height);
                 EditorGUILayout.LabelField("Channels", info.channels.Length == 0 ? "(none painted)" : string.Join(", ", info.channels.Select(c => c.ToString())));
+                EditorGUILayout.LabelField("File Format", info.format <= 1 ? "1 (before the format was recorded)" : info.format.ToString());
+                if (!string.IsNullOrEmpty(info.savedBy)) EditorGUILayout.LabelField("Saved By", info.savedBy);
+                if (!string.IsNullOrEmpty(info.createdBy)) EditorGUILayout.LabelField("Created By", info.createdBy);
             }
             EditorGUILayout.HelpBox("A .ylp is a YoluPainter work file and gives no textures: where the file is shared, YoluPainter may not be installed. "
                 + "For materials, use Export Images (or lilToon… in YoluPainter), which writes PNG textures into Assets.", MessageType.Info);

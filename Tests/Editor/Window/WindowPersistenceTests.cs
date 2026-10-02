@@ -67,7 +67,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
             Assert.That(window.ProjectPath, Is.EqualTo(fake.File));
             var snapshot = YlpStore.Load(fake.File);
-            CollectionAssert.AreEquivalent(new[] { "document.utpaint", "view.json", "brush.json", "composite/Color.png", "thumbnail.png" }, snapshot.Files.Keys);
+            CollectionAssert.AreEquivalent(new[] { "ylp.json", "document.utpaint", "view.json", "brush.json", "composite/Color.png", "thumbnail.png" }, snapshot.Files.Keys);
             Assert.That(snapshot.Files["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
             var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
             try

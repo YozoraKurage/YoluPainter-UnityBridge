@@ -9,10 +9,13 @@ namespace Yozolab.YoluPainter.Editor
     internal static class PackagePaths
     {
         const string Fallback = "Packages/net.yozolab.yolupainter";
-        static string s_root;
+        static string s_root, s_version;
 
         /// <summary>パッケージの根のアセットのパス（ふつうは "Packages/net.yozolab.yolupainter"）。</summary>
         public static string Root => s_root ?? (s_root = Find());
+
+        /// <summary>パッケージの版（package.json の version。分からなければ "unknown"）。</summary>
+        public static string Version => s_version ?? (s_version = PackageInfo.FindForAssembly(typeof(PackagePaths).Assembly)?.version is string v && v.Length > 0 ? v : "unknown");
 
         /// <summary>パッケージの根からの相対パスを、アセットのパスにする。</summary>
         public static string Asset(string relative) => Root + "/" + relative;

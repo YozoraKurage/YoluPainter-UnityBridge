@@ -10,7 +10,7 @@ Unity 2022.3 向けのエディタ専用パッケージ `net.yozolab.yolupainter
 
 1. `Documentation~/STATUS.md`（仕様全範囲に対する現状）と `Documentation~/VALIDATION.md`（実行した検証）
 2. `Documentation~/spec/Unity_Texture_Paint_Spec_v0_1.md`（最終要望の仕様書。docx 版も同梱）
-3. `Documentation~/ARCHITECTURE.md`、`PSD_COMPATIBILITY.md`、`TESTING.md`
+3. `Documentation~/ARCHITECTURE.md`、`YLP_FORMAT.md`（.ylp の形式と版・移行の決まり）、`PSD_COMPATIBILITY.md`、`TESTING.md`
 4. `Runtime/Core/README.md`、`Editor/Preview/README.md`
 
 ## 不変条件

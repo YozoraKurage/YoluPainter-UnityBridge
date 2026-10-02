@@ -23,7 +23,7 @@ namespace Yozolab.YoluPainter.Editor
     /// <item>読めないファイルは理由をインポートのエラーに出し、<see cref="YlpImportInfo.error"/> に残す（アセットは消えない）。
     /// .ylp そのものには一切書かない。ダブルクリックで YoluPainter で開く。</item>
     /// </list></summary>
-    [ScriptedImporter(2, "ylp")]
+    [ScriptedImporter(3, "ylp")]
     internal sealed class YlpImporter : ScriptedImporter
     {
         /// <summary>主オブジェクトの識別子。</summary>
@@ -60,6 +60,11 @@ namespace Yozolab.YoluPainter.Editor
         /// （使えなかった理由は <paramref name="warnings"/> に足す）。</summary>
         static void Describe(byte[] data, YlpImportInfo info, List<string> warnings)
         {
+            // 形式を先に確かめる（新しすぎる形式は、中身の並びが違うかもしれないので読まずに断る）。形式 1 と 2 は並びが同じ。
+            // 合成の画像の置き場を変える移行を YlpFormat に足したら、ここで読む名前も形式に合わせること。
+            var stamp = YlpArchive.Read(data, entry => entry == YlpFormat.InfoName);
+            var opened = YlpFormat.Open(stamp);
+            info.format = opened.Info.Format; info.savedBy = opened.Info.SavedBy?.ToString() ?? ""; info.createdBy = opened.Info.CreatedBy?.ToString() ?? "";
             var composites = YlpArchive.Read(data, entry => YlpContent.TryParseComposite(entry, out _));
             if (composites.Count > 0)
             {

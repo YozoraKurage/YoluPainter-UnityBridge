@@ -20,7 +20,10 @@ namespace Yozolab.YoluPainter.Editor
     /// </list></summary>
     internal static class YlpContent
     {
-        public const string ThumbnailName = "thumbnail.png", ViewName = "view.json", BrushName = "brush.json", ImportedOriginalName = "imported-original.psd";
+        public const string ThumbnailName = YlpFormat.ThumbnailName, ViewName = YlpFormat.ViewName, BrushName = YlpFormat.BrushName, ImportedOriginalName = YlpFormat.ImportedOriginalName;
+
+        /// <summary>保存したアプリとして ylp.json に書く記録（パッケージの版と Unity の版）。</summary>
+        public static YlpWriterInfo Writer => new YlpWriterInfo("YoluPainter", PackagePaths.Version, Application.unityVersion);
         public const int ThumbnailSize = 256;
 
         public static string CompositeName(PaintChannel channel) => YlpArchive.CompositeFolder + channel + ".png";
