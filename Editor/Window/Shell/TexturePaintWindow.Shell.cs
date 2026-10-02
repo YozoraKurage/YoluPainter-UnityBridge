@@ -243,7 +243,16 @@ namespace Yozolab.YoluPainter.Editor
             string channelName = L.Tr(channel.ToString());
             string what = EditingMask ? L.Tr("Layer mask") : channelName;
             if (textureSets.Count > 1) what = currentSet.Name + " · " + what;
-            if (canvasRect.width > 0) PaintGui.Text(new Rect(Mathf.Max(x + 8, canvasRect.x + 8), bar.y, 300, bar.height), PaintGui.Fit("2D · " + what + "  " + Mathf.RoundToInt(canvasZoom * 100) + "%", 300, PaintTheme.LabelDim, false), PaintTheme.LabelDim, EditingMask ? PaintTheme.Warning : PaintTheme.TextDim);
+            if (canvasRect.width > 0)
+            {
+                // 2D の見出し: 何を描いているか・拡大率、回っていれば角度、反転していればその印（押すと戻す）
+                float left = Mathf.Max(x + 8, canvasRect.x + 8), right = canvasRect.xMax - 4;
+                float marks = (canvasAngle != 0 ? 20 + PaintGui.TextWidth(AngleLabel(canvasAngle), PaintTheme.LabelDim) + 10 : 0) + (canvasFlip ? 28 : 0);
+                float width = Mathf.Clamp(right - left - marks, 0, 300);
+                string label = PaintGui.Fit("2D · " + what + "  " + Mathf.RoundToInt(canvasZoom * 100) + "%", width, PaintTheme.LabelDim, false);
+                PaintGui.Text(new Rect(left, bar.y, width, bar.height), label, PaintTheme.LabelDim, EditingMask ? PaintTheme.Warning : PaintTheme.TextDim);
+                if (marks > 0) DrawCanvasViewMarks(left + Mathf.Min(width, PaintGui.TextWidth(label, PaintTheme.LabelDim)) + 8, bar.y, right);
+            }
             if (surfaceRect.width > 0)
             {
                 float right = DrawShadingSwitch(bar);

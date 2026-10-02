@@ -9,12 +9,13 @@ namespace Yozolab.YoluPainter.Editor
     {
         bool ShowsBrushCursor => tool == PaintTool.Brush;
 
-        /// <summary>キャンバスのクリップの中（image はクリップの中の座標）。</summary>
-        void DrawCanvasBrushCursor(Rect image, Vector2 mouse)
+        /// <summary>キャンバスのクリップの中（view はクリップの中の座標の写し）。円なので回転・反転では変わらず、拡大率だけを掛ける。
+        /// R を押して表示を回すあいだは出さない。</summary>
+        void DrawCanvasBrushCursor(CanvasView view, Vector2 mouse)
         {
-            if (Event.current.type != EventType.Repaint || !ShowsBrushCursor) return;
+            if (Event.current.type != EventType.Repaint || !ShowsBrushCursor || rotateKeyHeld || canvasRotating) return;
             if (!new Rect(0, 0, canvasRect.width, canvasRect.height).Contains(mouse)) return;
-            float radius = brush.radius * image.width / document.Width;
+            float radius = brush.radius * view.PixelSize;
             Circle(mouse, radius);
         }
 

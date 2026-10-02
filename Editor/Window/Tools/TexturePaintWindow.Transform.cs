@@ -37,12 +37,17 @@ namespace Yozolab.YoluPainter.Editor
         MoveMode moveMode; Vector2 moveAnchor, moveHandle; int moveAxes; bool toolShift;
         internal const float HandleHitPoints=6, RotateReachPoints=26, MinHandleBoxPoints=36;
         (int x0,int y0,int x1,int y1)? handleBounds; long handleRevision=-1; Guid handleLayer; SelectionMask handleSelection;
-        Vector2 CanvasToWindow(Vector2 p){var image=ImageRect();return new Vector2(image.x+p.x/document.Width*image.width,image.y+(1-p.y/document.Height)*image.height);}
-        /// <summary>ハンドルを出せる大きさか（小さい範囲では、どこを掴んでも移動にする）。</summary>
+        Vector2 CanvasToWindow(Vector2 p)=>CanvasViewNow().ToGui(p);
+        /// <summary>ハンドルを出せる大きさか（小さい範囲では、どこを掴んでも移動にする）。画面の上の辺の長さで見る（回転では変わらない）。</summary>
         bool HandlesUsable((int x0,int y0,int x1,int y1) b)
         {
-            var a=CanvasToWindow(new Vector2(b.x0,b.y0)); var c=CanvasToWindow(new Vector2(b.x1,b.y1));
-            return Mathf.Abs(c.x-a.x)>=MinHandleBoxPoints&&Mathf.Abs(c.y-a.y)>=MinHandleBoxPoints;
+            var view=CanvasViewNow();
+            if(view.AxisAligned)
+            {
+                var a=view.ToGui(new Vector2(b.x0,b.y0)); var c=view.ToGui(new Vector2(b.x1,b.y1));
+                return Mathf.Abs(c.x-a.x)>=MinHandleBoxPoints&&Mathf.Abs(c.y-a.y)>=MinHandleBoxPoints;
+            }
+            return (b.x1-b.x0)*view.PixelSize>=MinHandleBoxPoints&&(b.y1-b.y0)*view.PixelSize>=MinHandleBoxPoints;
         }
         static Vector2[] HandlePoints((int x0,int y0,int x1,int y1) b)
         {
@@ -60,11 +65,21 @@ namespace Yozolab.YoluPainter.Editor
                 handle=points[i]; anchor=new Vector2(b.x0+b.x1-handle.x,b.y0+b.y1-handle.y);
                 axes=i<4?3:(i==5||i==7)?1:2; return MoveMode.Scale;
             }
-            var lo=CanvasToWindow(new Vector2(b.x0,b.y1)); var hi=CanvasToWindow(new Vector2(b.x1,b.y0)); // ウィンドウでは y が下向き
-            var box=Rect.MinMaxRect(lo.x,lo.y,hi.x,hi.y);
-            if(box.Contains(pointer))return MoveMode.Move;
+            if(InsideTransformBox(b,pointer))return MoveMode.Move;
             for(int i=0;i<4;i++) if(Vector2.Distance(CanvasToWindow(points[i]),pointer)<=RotateReachPoints) return MoveMode.Rotate;
             return MoveMode.Move;
+        }
+        /// <summary>動かすものの範囲の内側か（表示が回っていれば画素の座標で見る）。</summary>
+        bool InsideTransformBox((int x0,int y0,int x1,int y1) b,Vector2 pointer)
+        {
+            var view=CanvasViewNow();
+            if(view.AxisAligned)
+            {
+                var lo=view.ToGui(new Vector2(b.x0,b.y1)); var hi=view.ToGui(new Vector2(b.x1,b.y0)); // ウィンドウでは y が下向き
+                return Rect.MinMaxRect(lo.x,lo.y,hi.x,hi.y).Contains(pointer);
+            }
+            var p=view.ToCanvas(pointer);
+            return p.x>=b.x0&&p.x<b.x1&&p.y>b.y0&&p.y<=b.y1;
         }
         float DragAngle()
         {
@@ -97,7 +112,7 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
         /// <summary>移動ツールで、動かすものの範囲と掴めるハンドルを見せる（範囲はドキュメントの版・層・選択範囲が変わったときだけ求め直す）。</summary>
-        void DrawTransformHandles(Rect image)
+        void DrawTransformHandles(CanvasView view)
         {
             if(handleRevision!=document.Revision||handleLayer!=selectedLayer||!ReferenceEquals(handleSelection,document.Selection))
             {
@@ -108,10 +123,9 @@ namespace Yozolab.YoluPainter.Editor
             if(handleBounds==null)return;
             var b=handleBounds.Value;
             Handles.color=new Color(1,1,1,.6f);
-            Vector2 a=ToGui(image,new Vector2(b.x0,b.y0)),c=ToGui(image,new Vector2(b.x1,b.y1));
-            Handles.DrawAAPolyLine(1f,new Vector3(a.x,a.y),new Vector3(c.x,a.y),new Vector3(c.x,c.y),new Vector3(a.x,c.y),new Vector3(a.x,a.y));
+            Handles.DrawAAPolyLine(1f,view.ToGui(b.x0,b.y0),view.ToGui(b.x1,b.y0),view.ToGui(b.x1,b.y1),view.ToGui(b.x0,b.y1),view.ToGui(b.x0,b.y0));
             if(!HandlesUsable(b))return;
-            foreach(var h in HandlePoints(b)){var g=ToGui(image,h);EditorGUI.DrawRect(new Rect(g.x-3,g.y-3,6,6),new Color(1,1,1,.9f));}
+            foreach(var h in HandlePoints(b)){var g=view.ToGui(h);EditorGUI.DrawRect(new Rect(g.x-3,g.y-3,6,6),new Color(1,1,1,.9f));}
         }
         Vector2Int MoveDelta()=>new Vector2Int(Mathf.RoundToInt(toolCurrent.x-toolStart.x),Mathf.RoundToInt(toolCurrent.y-toolStart.y));
         /// <summary>選んだ層（選択範囲があればその画素と選択範囲）を整数画素だけ動かす。全チャンネルとマスクが一緒に動く。1 回の Undo。</summary>

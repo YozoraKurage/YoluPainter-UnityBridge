@@ -25,8 +25,8 @@ namespace Yozolab.YoluPainter.Editor
         string projectPath, projectToken, recoveryToken, message = "";
         long renderedRevision = -1;
         bool repaintPixels = true, surfaceStroke, externalConflict, editMask;
-        Vector2 previousPointer, layerScroll, canvasPan;
-        float canvasZoom = 1, previousPressure = 1;
+        Vector2 previousPointer, layerScroll;
+        float previousPressure = 1;
         /// <summary>キャンバスでの左ボタンの働き。</summary>
         internal enum PaintTool { Brush, Fill, Gradient, SelectRectangle, SelectEllipse, Lasso, MagicWand, Move, Path, Eyedropper }
         PaintTool tool;
@@ -66,12 +66,8 @@ namespace Yozolab.YoluPainter.Editor
         internal Guid SelectedLayer { get => selectedLayer; set => selectedLayer = value; }
         /// <summary>モーダルダイアログの差し替え口（テスト用）。</summary>
         internal IPainterDialogs Dialogs { get; set; } = EditorPainterDialogs.Instance;
-        /// <summary>PaintAt の 2D 写像の逆。ピクセル中心 (x+0.5, y+0.5) の GUI 座標を返す。</summary>
-        internal Vector2 PixelToGui(int x, int y)
-        {
-            var image = ImageRect();
-            return new Vector2(image.x + (x + .5f) / document.Width * image.width, image.y + (1 - (y + .5f) / document.Height) * image.height);
-        }
+        /// <summary>PaintAt の 2D 写像の逆。ピクセル中心 (x+0.5, y+0.5) の GUI 座標を返す（表示の回転・反転・拡大・パン込み）。</summary>
+        internal Vector2 PixelToGui(int x, int y) => CanvasViewNow().ToGui(x + .5f, y + .5f);
 
         void OnEnable()
         {
@@ -147,10 +143,10 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>今のプロジェクトをファイルから切り離す（新規・取り込み）。</summary>
         void ForgetProjectFile()
         {
-            projectPath=null; projectToken=null; savedRevision=-1; importedPsdPath=null; externalConflict=false; canvasZoom=1; canvasPan=Vector2.zero; NewProjectRecord();
+            projectPath=null; projectToken=null; savedRevision=-1; importedPsdPath=null; externalConflict=false; ResetCanvasView(); NewProjectRecord();
             ResetSetsBaseline(false);
         }
-        void OnLostFocus() { FinishStroke(false); CancelToolDrag(); preview?.CancelNavigation(); SaveRecovery(); }
+        void OnLostFocus() { FinishStroke(false); CancelToolDrag(); ReleaseCanvasViewInput(); preview?.CancelNavigation(); SaveRecovery(); }
         void BeforeReload() { FinishStroke(false); preview?.CancelNavigation(); SaveRecovery(); }
         void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ FinishStroke(false); SaveRecovery(); } }
         void OnDisable()

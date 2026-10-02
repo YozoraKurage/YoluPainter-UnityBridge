@@ -5,42 +5,45 @@ using UnityEngine;
 
 namespace Yozolab.YoluPainter.Editor
 {
-    /// <summary>2D キャンバス: 表示（拡大・パン）と、キャンバスと 3D ビューへの入力の振り分け。</summary>
+    /// <summary>2D キャンバス: 表示（拡大・パン・回転・左右反転。写しは CanvasView、操作は TexturePaintWindow.CanvasView.cs）と、キャンバスと 3D ビューへの入力の振り分け。</summary>
     public sealed partial class TexturePaintWindow
     {
         /// <summary>OnGUI が文書を表示のために合成した回数（Repaint のときだけ合成する。テストがそれを確かめる）。</summary>
         internal int CompositeCount { get; private set; }
 
-        Rect ImageRect()
-        {
-            float fit=Mathf.Min(canvasRect.width/document.Width,canvasRect.height/document.Height)*canvasZoom;
-            float width=document.Width*fit,height=document.Height*fit;
-            return new Rect(canvasRect.center.x-width*.5f+canvasPan.x,canvasRect.center.y-height*.5f+canvasPan.y,width,height);
-        }
         void DrawCanvas()
         {
             EditorGUI.DrawRect(canvasRect,PaintTheme.CanvasBg);
             var pointer=Event.current.mousePosition-canvasRect.position; // クリップの中の座標（クリップに入る前に取る）
             GUI.BeginClip(canvasRect);
-            var image=ImageRect(); image.position-=canvasRect.position;
-            if(DisplayTexture!=null) EditorGUI.DrawTextureTransparent(image,DisplayTexture,ScaleMode.StretchToFill);
-            DrawMeshMapOverlay(image);
-            if(document.Selection!=null){EnsureSelectionOverlay(); GUI.DrawTexture(image,selectionOverlay,ScaleMode.StretchToFill,true);}
-            if(toolDragging&&Event.current.type==EventType.Repaint) DrawToolPreview(image);
-            else if(tool==PaintTool.Move&&!toolDragging&&Event.current.type==EventType.Repaint) DrawTransformHandles(image);
-            if(Event.current.type==EventType.Repaint) DrawCanvasPathMarkers(image);
-            DrawCanvasBrushCursor(image,pointer);
+            var view=CanvasViewInClip(); var image=view.Image;
+            // 回っている・反転しているときは、画像（と重ねるテクスチャ）を GL の行列で回す（CanvasView.ImageMatrix）。線と印は写した座標で描く
+            bool turned=!view.AxisAligned&&Event.current.type==EventType.Repaint;
+            if(turned){GL.PushMatrix();GL.modelview=GL.modelview*view.ImageMatrix();}
+            try
+            {
+                if(DisplayTexture!=null) EditorGUI.DrawTextureTransparent(image,DisplayTexture,ScaleMode.StretchToFill);
+                DrawMeshMapOverlay(image);
+                if(document.Selection!=null){EnsureSelectionOverlay(); GUI.DrawTexture(image,selectionOverlay,ScaleMode.StretchToFill,true);}
+            }
+            finally{if(turned)GL.PopMatrix();}
+            if(toolDragging&&Event.current.type==EventType.Repaint) DrawToolPreview(view);
+            else if(tool==PaintTool.Move&&!toolDragging&&Event.current.type==EventType.Repaint) DrawTransformHandles(view);
+            if(Event.current.type==EventType.Repaint) DrawCanvasPathMarkers(view);
+            DrawCanvasBrushCursor(view,pointer);
             GUI.EndClip();
+            if(rotateKeyHeld||canvasRotating) EditorGUIUtility.AddCursorRect(canvasRect,MouseCursor.RotateArrow);
         }
-        Vector2 ToGui(Rect image,Vector2 p)=>new Vector2(image.x+p.x/document.Width*image.width,image.y+(1-p.y/document.Height)*image.height);
-        /// <summary>GUI の座標をキャンバスの画素座標（左下原点、範囲外も返す）に。</summary>
-        Vector2 CanvasPoint(Vector2 pointer){var image=ImageRect();return new Vector2((pointer.x-image.x)/image.width*document.Width,(1-(pointer.y-image.y)/image.height)*document.Height);}
+        /// <summary>GUI の座標をキャンバスの画素座標（左下原点、範囲外も返す）に。表示の回転・反転・拡大・パンを逆にたどる。</summary>
+        Vector2 CanvasPoint(Vector2 pointer)=>CanvasViewNow().ToCanvas(pointer);
         void HandleCanvasInput(Event e)
         {
+            if((canvasRect.width>0||canvasRotating)&&HandleCanvasRotateInput(e))return; // R ＋ ドラッグ・Shift ＋ 中ボタンのドラッグで表示を回す
             if(preview.HasModel && stroke==null && preview.HandleNavigation(surfaceRect,e)){Repaint();return;}
             if(canvasRect.Contains(e.mousePosition))
             {
-                if(e.type==EventType.ScrollWheel){canvasZoom=Mathf.Clamp(canvasZoom*Mathf.Exp(-e.delta.y*.07f),.2f,16);e.Use();Repaint();return;}
+                // ホイールの拡大はポインタの下の画素を動かさない
+                if(e.type==EventType.ScrollWheel){ZoomCanvasView(canvasZoom*Mathf.Exp(-e.delta.y*.07f),e.mousePosition);e.Use();return;}
                 if(e.type==EventType.MouseDrag && e.button==2){canvasPan+=e.delta;e.Use();Repaint();return;}
             }
             if(stroke==null&&HandleToolInput(e))return;

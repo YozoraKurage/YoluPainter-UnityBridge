@@ -21,13 +21,14 @@ namespace Yozolab.YoluPainter.Editor
 
         void HandleKeys(Event e)
         {
+            NoteViewKeyUp(e);
             if(e.type!=EventType.KeyDown)return;
             // キーが届いた時点で文字の欄にフォーカスがあったか（Enter で確定して外れる前の状態を見る）
             editingText=GUIUtility.keyboardControl!=0; tookKey=KeyCode.None;
             if(e.keyCode==KeyCode.Escape && toolDragging){CancelToolDrag();GUIUtility.hotControl=0;e.Use();Repaint();}
             else if(e.keyCode==KeyCode.Escape && stroke!=null){FinishStroke(false);e.Use();}
             else if(stroke==null && !toolDragging && tool==PaintTool.Move && GUIUtility.keyboardControl==0 && !(e.control||e.command) && ArrowDelta(e.keyCode)!=Vector2Int.zero)
-            {var d=ArrowDelta(e.keyCode)*(e.shift?10:1);TryAction(()=>MoveBy(d.x,d.y));e.Use();Repaint();}
+            {var d=ScreenArrowToCanvas(ArrowDelta(e.keyCode))*(e.shift?10:1);TryAction(()=>MoveBy(d.x,d.y));e.Use();Repaint();}
             else if(stroke==null && tool==PaintTool.Path && GUIUtility.keyboardControl==0 && (e.keyCode==KeyCode.Delete||e.keyCode==KeyCode.Backspace)){TryAction(RemoveLastPathPoint);e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.A){document.SetSelection(SelectionMask.All(document));e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.D){document.ClearSelection();e.Use();Repaint();}
@@ -37,14 +38,23 @@ namespace Yozolab.YoluPainter.Editor
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.S){SaveProject(e.shift);e.Use();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.O){OpenProject();e.Use();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.N){NewProjectDialog();e.Use();}
-            else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.Alpha0){canvasZoom=1;canvasPan=Vector2.zero;e.Use();Repaint();}
+            else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.Alpha0){FitCanvasView();e.Use();Repaint();}
             if(e.type==EventType.Used)NoteTookKey(e);
         }
         static Vector2Int ArrowDelta(KeyCode key)=>key==KeyCode.LeftArrow?Vector2Int.left:key==KeyCode.RightArrow?Vector2Int.right:key==KeyCode.UpArrow?Vector2Int.up:key==KeyCode.DownArrow?Vector2Int.down:Vector2Int.zero;
+        /// <summary>矢印キーの向き（画面の上で。上は +y）を、表示の回転・反転を戻して、いちばん近いキャンバスの軸の 1 画素に（画面で右を押せば
+        /// 画面で右に動く。45° ちょうどのような斜めではどちらかの軸）。</summary>
+        Vector2Int ScreenArrowToCanvas(Vector2Int arrow)
+        {
+            var view=CanvasViewNow(); if(view.AxisAligned)return arrow;
+            var d=view.ScreenToCanvasDirection(new Vector2(arrow.x,-arrow.y));
+            return Mathf.Abs(d.x)>=Mathf.Abs(d.y)?new Vector2Int(d.x>0?1:-1,0):new Vector2Int(0,d.y>0?1:-1);
+        }
 
         /// <summary>修飾キー無しの 1 文字のショートカット（ツール・色・ブラシの大きさ・表示）。文字の入力中は使わない。</summary>
         bool HandleToolKeys(Event e)
         {
+            if (HandleViewKeys(e)) return true; // 表示の回転・反転（ストロークの最中は断る）
             if (e.type != EventType.KeyDown || stroke != null || toolDragging || GUIUtility.keyboardControl != 0 || e.control || e.command || e.alt) return false;
             switch (e.keyCode)
             {

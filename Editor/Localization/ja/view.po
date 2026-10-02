@@ -1,0 +1,38 @@
+# Japanese translation for YoluPainter: the 2D canvas view (rotating and flipping the view: the View menu, the marks in the
+# 2D view's header, the shortcut help and the refusal during a stroke).
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# ── 表示メニュー ──
+
+msgid "Rotate View Left"
+msgstr "表示を左に回転"
+
+msgid "Rotate View Right"
+msgstr "表示を右に回転"
+
+msgid "Reset Rotation"
+msgstr "回転を戻す"
+
+msgid "Flip View Horizontally"
+msgstr "表示を左右反転"
+
+# ── 2D ビューの見出しの印 ──
+
+msgid "The view is rotated. Click to reset the rotation (Shift+R)."
+msgstr "表示を回転しています。押すと回転を戻します（Shift+R）。"
+
+msgid "The view is flipped horizontally. Click to flip it back (H)."
+msgstr "表示を左右反転しています。押すと元に戻します（H）。"
+
+# ── 断るとき ──
+
+msgid "The view does not rotate or flip during a stroke or a drag."
+msgstr "ストロークやドラッグの最中は、表示を回転・反転できません。"
+
+# ── ショートカットの一覧 ──
+
+msgid "2D view: - / ^ (or =) rotate 15° · R + drag rotates (with Shift in 15° steps) · Shift + middle drag rotates · Shift+R resets the rotation · H flips horizontally · Ctrl+0 also resets the rotation"
+msgstr "2D ビュー: - / ^（か =）で 15° 回転 · R を押したままドラッグで回転（Shift で 15° 刻み）· Shift + 中ボタンのドラッグで回転 · Shift+R で回転を戻す · H で左右反転 · Ctrl+0 でも回転を戻す"

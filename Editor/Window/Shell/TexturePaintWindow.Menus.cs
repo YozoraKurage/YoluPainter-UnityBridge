@@ -154,9 +154,11 @@ namespace Yozolab.YoluPainter.Editor
             Item(m, "3D View", () => View = ViewMode.Model, true, viewMode == ViewMode.Model, "F2");
             Item(m, "2D + 3D", () => View = ViewMode.Split, true, viewMode == ViewMode.Split, "F3");
             m.AddSeparator("");
-            Item(m, "Zoom In", () => canvasZoom = Mathf.Clamp(canvasZoom * 1.25f, .2f, 16), keys: "Ctrl++");
-            Item(m, "Zoom Out", () => canvasZoom = Mathf.Clamp(canvasZoom / 1.25f, .2f, 16), keys: "Ctrl+-");
-            Item(m, "Fit on Screen", () => { canvasZoom = 1; canvasPan = Vector2.zero; }, keys: "Ctrl+0");
+            Item(m, "Zoom In", () => ZoomCanvasView(canvasZoom * 1.25f), keys: "Ctrl++");
+            Item(m, "Zoom Out", () => ZoomCanvasView(canvasZoom / 1.25f), keys: "Ctrl+-");
+            Item(m, "Fit on Screen", () => FitCanvasView(), stroke == null, keys: "Ctrl+0");
+            m.AddSeparator("");
+            CanvasViewMenuItems(m);
         }
 
         void WindowMenu(GenericMenu m)
@@ -174,7 +176,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void HelpMenu(GenericMenu m)
         {
-            Item(m, "Keyboard Shortcuts", () => Dialogs.Inform(L.Tr("Keyboard Shortcuts"), L.Tr(ShortcutHelp)));
+            Item(m, "Keyboard Shortcuts", () => Dialogs.Inform(L.Tr("Keyboard Shortcuts"), L.Tr(ShortcutHelp) + "\n" + L.Tr("2D view: - / ^ (or =) rotate 15° · R + drag rotates (with Shift in 15° steps) · Shift + middle drag rotates · Shift+R resets the rotation · H flips horizontally · Ctrl+0 also resets the rotation")));
             Item(m, "Implementation Limits", () => Dialogs.Inform(L.Tr("Implementation Limits"), L.Tr(LimitsHelp)));
             Item(m, "Plugins…", ShowPluginList);
         }

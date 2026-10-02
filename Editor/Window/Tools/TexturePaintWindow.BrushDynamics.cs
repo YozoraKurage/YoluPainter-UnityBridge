@@ -59,12 +59,24 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
         /// <summary>2D キャンバスの入力点。傾きは Unity の Event.tilt（直立からのラジアン、X・Y 軸ごと）で、画面の Y は下向きなので
-        /// キャンバス（上向き）へ符号を返す。マウスは 0（直立）。</summary>
-        BrushSample PenSample(double x, double y, float pressure)
+        /// キャンバス（上向き）へ符号を返す。表示が回っている・反転しているときは、ペンの倒れた向きを画面からキャンバスの向きに直す
+        /// （<see cref="TiltToCanvas"/>）。マウスは 0（直立）。</summary>
+        BrushSample PenSample(CanvasView view, double x, double y, float pressure)
         {
             var tilt = Event.current != null ? Event.current.tilt : Vector2.zero;
             if (float.IsNaN(tilt.x) || float.IsNaN(tilt.y) || float.IsInfinity(tilt.x) || float.IsInfinity(tilt.y)) tilt = Vector2.zero;
-            return new BrushSample(x, y, pressure, EditorApplication.timeSinceStartup, tilt.x, -tilt.y);
+            if (view.AxisAligned || tilt == Vector2.zero) return new BrushSample(x, y, pressure, EditorApplication.timeSinceStartup, tilt.x, -tilt.y);
+            var (tx, ty) = TiltToCanvas(view, tilt);
+            return new BrushSample(x, y, pressure, EditorApplication.timeSinceStartup, tx, ty);
+        }
+        /// <summary>画面の傾き（X・Y 軸ごとの直立からの角度、画面の y は下向き）を、表示の回転・反転を戻したキャンバスの軸ごとの角度に。
+        /// 傾きの向き (tan θx, tan θy) を向きとして回し、軸ごとの角度に戻す（Core の PenTilt と同じ考え方なので、倒れた量は変わらず、向きだけ回る）。</summary>
+        internal static (double x, double y) TiltToCanvas(CanvasView view, Vector2 tilt)
+        {
+            const double max = Math.PI / 2 - 1e-6;
+            double tx = Math.Tan(Math.Max(-max, Math.Min(max, tilt.x))), ty = Math.Tan(Math.Max(-max, Math.Min(max, tilt.y)));
+            var d = view.ScreenToCanvasDirection(new Vector2((float)tx, (float)ty));
+            return (Math.Atan(d.x), Math.Atan(d.y));
         }
 
         // ───────── プロパティの欄（テクスチャ・デュアルブラシ・色の変化・フェードとペンの傾き） ─────────

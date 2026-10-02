@@ -106,7 +106,7 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>2D のパスの点の GUI 座標（ウィンドウの座標）。</summary>
-        Vector2 CanvasPathGui(CanvasPoint p){var image=ImageRect();return new Vector2(image.x+(float)p.X/document.Width*image.width,image.y+(1-(float)p.Y/document.Height)*image.height);}
+        Vector2 CanvasPathGui(CanvasPoint p)=>CanvasViewNow().ToGui((float)p.X,(float)p.Y);
 
         void ApplyCanvasPath(Guid layerId,CanvasPath path,string done)
         {
@@ -185,14 +185,14 @@ namespace Yozolab.YoluPainter.Editor
             foreach(var g in gui)EditorGUI.DrawRect(new Rect(g.x-3,g.y-3,6,6),new Color(1,.8f,.2f,1));
         }
 
-        /// <summary>選んだ層の 2D のパスの制御点と線をキャンバスに重ねる（Repaint のとき。image はクリップの中の座標）。</summary>
-        void DrawCanvasPathMarkers(Rect image)
+        /// <summary>選んだ層の 2D のパスの制御点と線をキャンバスに重ねる（Repaint のとき。view はクリップの中の座標の写し）。</summary>
+        void DrawCanvasPathMarkers(CanvasView view)
         {
             if(tool!=PaintTool.Path)return;
             var layer=document.Layers.FirstOrDefault(l=>l.Id==selectedLayer);
             if(!(layer?.Path is CanvasPath path)||path.Points.Count==0)return;
             var gui=new Vector3[path.Points.Count];
-            for(int i=0;i<gui.Length;i++)gui[i]=ToGui(image,new Vector2((float)path.Points[i].X,(float)path.Points[i].Y));
+            for(int i=0;i<gui.Length;i++)gui[i]=view.ToGui((float)path.Points[i].X,(float)path.Points[i].Y);
             if(pathDrag>=0&&pathDragOnCanvas&&pathDrag<gui.Length)gui[pathDrag]=pathDragGui-canvasRect.position;
             Handles.color=new Color(1,.8f,.2f,.9f);
             if(gui.Length>1)Handles.DrawAAPolyLine(2,gui);

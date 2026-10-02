@@ -133,8 +133,9 @@ namespace Yozolab.YoluPainter.Editor
             }
             else
             {
-                var image=ImageRect();
-                stroke.Add(PenSample((pointer.x-image.x)/image.width*document.Width,(1-(pointer.y-image.y)/image.height)*document.Height,pressure));
+                // 表示の回転・反転・拡大・パンを逆にたどって画素の座標にする（正本と手ぶれ補正・入り抜き・曲線は画素の座標で働く）
+                var view=CanvasViewNow(); view.ToCanvas(pointer,out double x,out double y);
+                stroke.Add(PenSample(view,x,y,pressure));
             }
             repaintPixels=true;
         }

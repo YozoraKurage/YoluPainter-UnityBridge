@@ -18,26 +18,29 @@ namespace Yozolab.YoluPainter.Editor
         internal bool WandContiguous { get => wandContiguous; set => wandContiguous = value; }
         internal bool WandSampleAll { get => wandSampleAll; set => wandSampleAll = value; }
         internal Color GradientTo { get => gradientTo; set => gradientTo = value; }
-        void DrawToolPreview(Rect image)
+        /// <summary>ドラッグの途中の形（view はクリップの中の座標の写し）。形は画素の座標で決まり、表示が回っていれば回って見える
+        /// （矩形・楕円の選択はキャンバスの軸に沿う。Photoshop・CLIP STUDIO と同じ）。</summary>
+        void DrawToolPreview(CanvasView view)
         {
             Handles.color=new Color(1,1,1,.9f);
-            Vector2 a=ToGui(image,toolStart),b=ToGui(image,toolCurrent);
+            Vector2 a=toolStart,b=toolCurrent;
+            Vector3 G(float x,float y)=>view.ToGui(x,y);
             switch(tool)
             {
-                case PaintTool.Gradient: Handles.DrawAAPolyLine(2,a,b); break;
-                case PaintTool.SelectRectangle: Handles.DrawAAPolyLine(1.5f,new Vector3(a.x,a.y),new Vector3(b.x,a.y),new Vector3(b.x,b.y),new Vector3(a.x,b.y),new Vector3(a.x,a.y)); break;
+                case PaintTool.Gradient: Handles.DrawAAPolyLine(2,G(a.x,a.y),G(b.x,b.y)); break;
+                case PaintTool.SelectRectangle: Handles.DrawAAPolyLine(1.5f,G(a.x,a.y),G(b.x,a.y),G(b.x,b.y),G(a.x,b.y),G(a.x,a.y)); break;
                 case PaintTool.SelectEllipse:
                 {
                     var c=(a+b)/2; var r=new Vector2(Mathf.Abs(b.x-a.x)/2,Mathf.Abs(b.y-a.y)/2); var points=new Vector3[49];
-                    for(int i=0;i<points.Length;i++){float t=i/48f*Mathf.PI*2;points[i]=new Vector3(c.x+Mathf.Cos(t)*r.x,c.y+Mathf.Sin(t)*r.y);}
+                    for(int i=0;i<points.Length;i++){float t=i/48f*Mathf.PI*2;points[i]=G(c.x+Mathf.Cos(t)*r.x,c.y+Mathf.Sin(t)*r.y);}
                     Handles.DrawAAPolyLine(1.5f,points); break;
                 }
-                case PaintTool.Lasso: if(lassoPoints.Count>1)Handles.DrawAAPolyLine(1.5f,lassoPoints.Select(p=>(Vector3)ToGui(image,p)).ToArray()); break;
+                case PaintTool.Lasso: if(lassoPoints.Count>1)Handles.DrawAAPolyLine(1.5f,lassoPoints.Select(p=>G(p.x,p.y)).ToArray()); break;
                 case PaintTool.Move:
                 {
                     if(moveBounds==null)break;
                     var m=moveBounds.Value; var t=DragTransform();
-                    var quad=new[]{(m.x0,m.y0),(m.x1,m.y0),(m.x1,m.y1),(m.x0,m.y1),(m.x0,m.y0)}.Select(c=>{var q=t.Apply(c.Item1,c.Item2);return (Vector3)ToGui(image,new Vector2((float)q.x,(float)q.y));}).ToArray();
+                    var quad=new[]{(m.x0,m.y0),(m.x1,m.y0),(m.x1,m.y1),(m.x0,m.y1),(m.x0,m.y0)}.Select(c=>{var q=t.Apply(c.Item1,c.Item2);return (Vector3)view.ToGui(q.x,q.y);}).ToArray();
                     Handles.DrawAAPolyLine(1.5f,quad);
                     break;
                 }

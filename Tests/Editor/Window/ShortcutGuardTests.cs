@@ -144,9 +144,12 @@ namespace Yozolab.YoluPainter.Tests
                 Press(w, KeyCode.W);
                 Assert.That(w.Tool, Is.EqualTo(TexturePaintWindow.PaintTool.MagicWand));
                 Assert.That(Tools.current, Is.EqualTo(Tool.View));
-                // 使わないキー（R）は Unity に届く。Ctrl+Y はやり直しとして使う（Unity のやり直しにはならない）
-                Press(w, KeyCode.R);
-                Assert.That(Tools.current, Is.EqualTo(Tool.Scale));
+                // 使わないキー（T）は Unity に届く。R は表示を回すのに使うので止まる（Unity の拡大縮小のツールにはならない）。
+                // Ctrl+Y はやり直しとして使う（Unity のやり直しにはならない）
+                Press(w, KeyCode.T);
+                Assert.That(Tools.current, Is.EqualTo(Tool.Rect));
+                Tools.current = Tool.View; Press(w, KeyCode.R);
+                Assert.That(Tools.current, Is.EqualTo(Tool.View), "R (hold to rotate the view) is the painter's key now");
                 w.Document.AddLayer("extra"); w.Document.Undo(); int layers = w.Document.Layers.Count;
                 Press(w, KeyCode.Y, control: true);
                 Assert.That(w.Document.Layers.Count, Is.EqualTo(layers + 1), "Ctrl+Y redoes in the painter");
