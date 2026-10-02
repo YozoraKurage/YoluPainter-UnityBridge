@@ -93,6 +93,41 @@ namespace Yozolab.YoluPainter.Tests
             }
         }
 
+        /// <summary>すべての合成モードを、通常の重ね・クリッピング・調整レイヤーの 3 つの経路で CPU と突き合わせる。
+        /// 0 と 255 を含む色で、割り算の端（覆い焼き・焼き込み・除算）も通す。各経路は正確な 8 bit の入力に合成を 1 回だけ
+        /// かける（合成を重ねると、傾きが 1 を超えるモードでは前段の丸めの 1 の差が広がるため、許容 1 の比較にならない）。</summary>
+        [Test] public void EveryBlendModeMatchesTheCpuReferenceOnTheGpu()
+        {
+            RequireWorkingShader("Hidden/YoluPainter/TileComposite");
+            byte V(int i) => (byte)(i <= 0 ? 0 : i >= 15 ? 255 : i * 17);
+            Rgba32 Below(int x, int y) => new Rgba32(V(x / 2), V(y / 2), V((x + y) / 4), (byte)(x < 4 ? 120 : 255));
+            Rgba32 Over(int x, int y) => new Rgba32(V(y / 2), V(15 - x / 2), V((x * 3 + y) % 16), (byte)(y < 4 ? 90 : y < 8 ? 0 : 255));
+            foreach (LayerBlendMode mode in Enum.GetValues(typeof(LayerBlendMode)))
+                foreach (var path in new[] { "stack", "clip", "adjustment" })
+                {
+                    var doc = new PaintDocument(32, 32, 16);
+                    var below = doc.AddLayer("Below");
+                    for (int y = 0; y < 32; y++) for (int x = 0; x < 32; x++) below.GetChannel(PaintChannel.Color).SetPixel(x, y, Below(x, y));
+                    if (path == "adjustment")
+                    {
+                        var adjust = doc.AddAdjustmentLayer("Adjust", AdjustmentSettings.Invert());
+                        doc.SetLayerBlendMode(adjust.Id, mode); doc.SetLayerOpacity(adjust.Id, .5);
+                    }
+                    else
+                    {
+                        var over = doc.AddLayer("Over");
+                        for (int y = 0; y < 32; y++) for (int x = 0; x < 32; x++) over.GetChannel(PaintChannel.Color).SetPixel(x, y, Over(x, y));
+                        doc.SetLayerBlendMode(over.Id, mode); doc.SetLayerOpacity(over.Id, .85);
+                        if (path == "clip") doc.SetLayerClipping(over.Id, true);
+                    }
+                    using (var compositor = new TileGpuCompositor())
+                    {
+                        compositor.Update(doc, PaintChannel.Color);
+                        AssertMatches(doc.Composite(PaintChannel.Color), Read(compositor.Texture), mode + " / " + path);
+                    }
+                }
+        }
+
         [Test] public void TileCompositorIncrementalUpdatesMatchCpuReference()
         {
             RequireWorkingShader("Hidden/YoluPainter/TileComposite");

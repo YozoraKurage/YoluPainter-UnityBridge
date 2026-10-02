@@ -3,7 +3,13 @@ using System;
 namespace Yozolab.YoluPainter.Core
 {
     public enum PaintChannel { Color, Roughness, Metallic, Height, Normal, Emission }
-    public enum LayerBlendMode { Normal, Multiply, Screen }
+    /// <summary>レイヤーの合成モード（Photoshop の分類と並び）。値は保存形式に入るので、並べ替えず末尾に足す。</summary>
+    public enum LayerBlendMode
+    {
+        Normal, Multiply, Screen, Overlay, Darken, Lighten, ColorDodge, ColorBurn, LinearDodge, LinearBurn,
+        HardLight, SoftLight, VividLight, LinearLight, PinLight, HardMix, Difference, Exclusion, Subtract, Divide,
+        Hue, Saturation, Color, Luminosity, DarkerColor, LighterColor,
+    }
 
     /// <summary>Unassociated (straight) RGBA8. Alpha is linear coverage; RGB is stored without color conversion.</summary>
     public readonly struct Rgba32 : IEquatable<Rgba32>

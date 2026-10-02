@@ -5,6 +5,63 @@ Shader "Hidden/YoluPainter/TileComposite"
     {
         Tags { "RenderType"="Opaque" }
         Cull Off ZWrite Off ZTest Always
+        CGINCLUDE
+        // 合成モードの色の式。CpuCompositor.BlendRgb と同じ式・同じ番号（LayerBlendMode の値）。
+        float Dodge(float d, float s) { return d <= 0 ? 0 : (s >= 1 ? 1 : min(1, d / (1 - s))); }
+        float Burn(float d, float s) { return d >= 1 ? 1 : (s <= 0 ? 0 : 1 - min(1, (1 - d) / s)); }
+        float Separable(int mode, float d, float s)
+        {
+            float v = s;
+            if (mode == 1) v = d * s;
+            else if (mode == 2) v = d + s - d * s;
+            else if (mode == 3) v = d <= 0.5 ? 2 * d * s : 1 - 2 * (1 - d) * (1 - s);
+            else if (mode == 4) v = min(d, s);
+            else if (mode == 5) v = max(d, s);
+            else if (mode == 6) v = Dodge(d, s);
+            else if (mode == 7) v = Burn(d, s);
+            else if (mode == 8) v = d + s;
+            else if (mode == 9) v = d + s - 1;
+            else if (mode == 10) v = s <= 0.5 ? 2 * d * s : 1 - 2 * (1 - d) * (1 - s);
+            else if (mode == 11) v = s <= 0.5 ? d - (1 - 2 * s) * d * (1 - d) : d + (2 * s - 1) * (sqrt(d) - d);
+            else if (mode == 12) v = s <= 0.5 ? Burn(d, 2 * s) : Dodge(d, 2 * s - 1);
+            else if (mode == 13) v = d + 2 * s - 1;
+            else if (mode == 14) v = s <= 0.5 ? min(d, 2 * s) : max(d, 2 * s - 1);
+            else if (mode == 15) v = d + s >= 1 - 0.5 / 255 ? 1 : 0;
+            else if (mode == 16) v = abs(d - s);
+            else if (mode == 17) v = d + s - 2 * d * s;
+            else if (mode == 18) v = d - s;
+            else if (mode == 19) v = s <= 0 ? (d <= 0 ? 0 : 1) : d / s;
+            return saturate(v);
+        }
+        float Lum(float3 c) { return dot(c, float3(0.3, 0.59, 0.11)); }
+        float Sat(float3 c) { return max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b)); }
+        float3 SetLum(float3 c, float l)
+        {
+            c += l - Lum(c);
+            float lum = Lum(c), n = min(c.r, min(c.g, c.b)), x = max(c.r, max(c.g, c.b));
+            if (n < 0 && lum - n > 1e-6) c = lum + (c - lum) * lum / (lum - n);
+            if (x > 1 && x - lum > 1e-6) c = lum + (c - lum) * (1 - lum) / (x - lum);
+            return saturate(c);
+        }
+        float3 SetSat(float3 c, float s)
+        {
+            float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
+            if (mx - mn <= 1e-6) return float3(0, 0, 0);
+            float3 r = (c - mn) * s / (mx - mn);
+            return float3(c.r == mx ? s : (c.r == mn ? 0 : r.r), c.g == mx ? s : (c.g == mn ? 0 : r.g), c.b == mx ? s : (c.b == mn ? 0 : r.b));
+        }
+        float3 BlendRgb(int mode, float3 d, float3 s)
+        {
+            if (mode == 0) return s;
+            if (mode == 20) return SetLum(SetSat(s, Sat(d)), Lum(d));
+            if (mode == 21) return SetLum(SetSat(d, Sat(s)), Lum(d));
+            if (mode == 22) return SetLum(s, Lum(d));
+            if (mode == 23) return SetLum(d, Lum(s));
+            if (mode == 24) return s.r + s.g + s.b < d.r + d.g + d.b - 0.5 / 255 ? s : d;
+            if (mode == 25) return s.r + s.g + s.b > d.r + d.g + d.b + 0.5 / 255 ? s : d;
+            return float3(Separable(mode, d.r, s.r), Separable(mode, d.g, s.g), Separable(mode, d.b, s.b));
+        }
+        ENDCG
         Pass
         {
             CGPROGRAM
@@ -26,9 +83,7 @@ Shader "Hidden/YoluPainter/TileComposite"
                     factor = _Mask.y > 0.5 ? 1 - _Mask.z * (1 - h) : 1 - _Mask.z * h;
                 }
                 float sa = saturate(s.a * _Opacity * factor), a = sa + b.a * (1-sa);
-                float3 blend = s.rgb;
-                if (_BlendMode == 1) blend = s.rgb * b.rgb;
-                else if (_BlendMode == 2) blend = 1 - (1-s.rgb) * (1-b.rgb);
+                float3 blend = BlendRgb(_BlendMode, b.rgb, s.rgb);
                 float3 premult = (1-sa)*b.a*b.rgb + (1-b.a)*sa*s.rgb + b.a*sa*blend;
                 return a > 0 ? float4(premult/a, a) : float4(b.rgb, 0);
             }
@@ -108,9 +163,7 @@ Shader "Hidden/YoluPainter/TileComposite"
                 if (amount <= 0 || b.a <= 0) return b;
                 // CPU と同じく、調整結果をいったん 8 bit に丸めてから合成モードと混ぜ戻しにかける。
                 float3 a = round(saturate(Adjust(b.rgb)) * 255) / 255;
-                float3 m = a;
-                if (_BlendMode == 1) m = b.rgb * a;
-                else if (_BlendMode == 2) m = 1 - (1 - b.rgb) * (1 - a);
+                float3 m = BlendRgb(_BlendMode, b.rgb, a);
                 return float4(b.rgb + (m - b.rgb) * amount, b.a);
             }
             ENDCG
@@ -140,9 +193,7 @@ Shader "Hidden/YoluPainter/TileComposite"
                 }
                 float t = s.a * _Opacity * factor;
                 if (t <= 0 || g.a <= 0) return g;
-                float3 m = s.rgb;
-                if (_BlendMode == 1) m = g.rgb * s.rgb;
-                else if (_BlendMode == 2) m = 1 - (1 - g.rgb) * (1 - s.rgb);
+                float3 m = BlendRgb(_BlendMode, g.rgb, s.rgb);
                 return float4(g.rgb + (m - g.rgb) * t, g.a);
             }
             ENDCG

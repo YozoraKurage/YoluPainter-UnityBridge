@@ -107,9 +107,7 @@ namespace Yozolab.YoluPainter.Core
         {
             // 完全に透明な画素は見えないので変えない（何も無いタイルを飛ばす最適化とも一致する）。
             if (amount <= 0 || below.A == 0) return below;
-            Rgba32 adjusted = Apply(below);
-            return new Rgba32(CpuCompositor.Mix(below.R, adjusted.R, amount, mode), CpuCompositor.Mix(below.G, adjusted.G, amount, mode),
-                CpuCompositor.Mix(below.B, adjusted.B, amount, mode), below.A);
+            return CpuCompositor.MixRgb(below, Apply(below), amount, mode);
         }
 
         public bool Equals(AdjustmentSettings other)
