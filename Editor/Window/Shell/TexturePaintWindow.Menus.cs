@@ -13,7 +13,9 @@ namespace Yozolab.YoluPainter.Editor
 
         void DrawMenuBar()
         {
-            PaintGui.MenuBar(menuRect, MenuTitles.Select(L.Tr).ToArray(), (index, at) =>
+            // プラグインが「Plugins」に入れるコマンドがあれば、その名前のメニューを最後に足す
+            var titles = PainterPluginRegistry.HasPluginsMenu ? MenuTitles.Append(PainterPluginRegistry.PluginsMenu).ToArray() : MenuTitles;
+            PaintGui.MenuBar(menuRect, titles.Select(L.Tr).ToArray(), (index, at) =>
             {
                 var menu = new GenericMenu();
                 switch (index)
@@ -26,8 +28,9 @@ namespace Yozolab.YoluPainter.Editor
                     case 5: ModelMenu(menu); break;
                     case 6: ViewMenu(menu); break;
                     case 7: WindowMenu(menu); break;
-                    default: HelpMenu(menu); break;
+                    case 8: HelpMenu(menu); break;
                 }
+                AddPluginCommands(menu, index < MenuTitles.Length ? MenuTitles[index] : PainterPluginRegistry.PluginsMenu);
                 menu.DropDown(at);
             });
             // 右端: プロジェクトの名前と保存の状態
@@ -168,6 +171,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             Item(m, "Keyboard Shortcuts", () => Dialogs.Inform(L.Tr("Keyboard Shortcuts"), L.Tr(ShortcutHelp)));
             Item(m, "Implementation Limits", () => Dialogs.Inform(L.Tr("Implementation Limits"), L.Tr(LimitsHelp)));
+            Item(m, "Plugins…", ShowPluginList);
         }
 
         const string ShortcutHelp = "Tools: B brush · E eraser · G fill · Shift+G gradient · M rectangle select · Shift+M ellipse select · L lasso · W magic wand · V move · P path · I eyedropper\n[ / ] brush size · X swap colors · D default colors\nCtrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo · Ctrl+S save · Ctrl+Shift+S save as · Ctrl+O open · Ctrl+N new\nCtrl+A select all · Ctrl+D deselect · Ctrl+Shift+I inverse\nF1 2D · F2 3D · F3 2D + 3D · Ctrl+0 fit · wheel zoom · middle drag pan\n3D: Alt or right drag orbits, middle drag pans, wheel zooms\nEsc cancels a stroke or a drag\nBy default, Unity's own shortcuts do nothing while this window has focus (Project Settings ▸ YoluPainter ▸ Unity shortcuts while painting)";

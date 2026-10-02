@@ -603,7 +603,7 @@ namespace Yozolab.YoluPainter.Core
         /// (the mask stores only a hide amount); opacity, flow, hardness and pressure apply as usual.</summary>
         public BrushStroke BeginMaskStroke(Guid layerId, BrushSettings settings)
         {
-            EnsureNoStroke(); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
+            EnsureNoStroke(); RefuseInBatch("A stroke"); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
             var mask = RequireMask(layerId, out _);
             var maskSettings = settings.ForChannel(null); maskSettings.Color = new Rgba32(0, 0, 0, 255);
             activeStroke = new BrushStroke(this, mask.Surface, maskSettings); return activeStroke;
@@ -616,7 +616,7 @@ namespace Yozolab.YoluPainter.Core
         }
         public BrushStroke BeginStroke(Guid layerId, PaintChannel channel, BrushSettings settings)
         {
-            EnsureNoStroke(); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
+            EnsureNoStroke(); RefuseInBatch("A stroke"); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
             var layer = GetLayer(layerId);
             if (layer.Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers are generated from their values and cannot be painted. Paint on the layer's mask, or add a paint layer.");
             RefusePathLayer(layer);
@@ -628,17 +628,17 @@ namespace Yozolab.YoluPainter.Core
         public Rgba32 CompositePixel(PaintChannel channel, int x, int y) { return CpuCompositor.CompositePixel(this, channel, x, y); }
         public bool Undo()
         {
-            EnsureNoStroke(); if (undo.Count == 0) return false;
+            EnsureNoStroke(); RefuseInBatch("Undo"); if (undo.Count == 0) return false;
             EndCoalescing();
             var command = undo[undo.Count - 1]; command.Revert(); undo.RemoveAt(undo.Count - 1); redo.Add(command); Revision++; return true;
         }
         public bool Redo()
         {
-            EnsureNoStroke(); if (redo.Count == 0) return false;
+            EnsureNoStroke(); RefuseInBatch("Redo"); if (redo.Count == 0) return false;
             EndCoalescing();
             var command = redo[redo.Count - 1]; command.Apply(); redo.RemoveAt(redo.Count - 1); undo.Add(command); Revision++; return true;
         }
-        public void ClearHistory() { EnsureNoStroke(); undo.Clear(); redo.Clear(); historyBytes = 0; }
+        public void ClearHistory() { EnsureNoStroke(); RefuseInBatch("Clearing the history"); undo.Clear(); redo.Clear(); historyBytes = 0; }
         internal void EnsureNoStroke()
         {
             if (notifyingHistory) throw new InvalidOperationException("Do not mutate document state inside a history notification.");
@@ -747,11 +747,44 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>Ends the current run of coalesced edits (the UI calls this when a slider drag ends), so the next edit
         /// becomes its own undo step.</summary>
         public void EndCoalescing() { coalesceKey = null; lastCoalesced = null; }
+
+        private bool batching;
+        /// <summary>True while <see cref="Batch"/> runs its edits.</summary>
+        public bool IsBatching { get { return batching; } }
+        /// <summary>Runs edits as one undo step: every history entry they add is merged into one, so one Undo reverts them all
+        /// and one Redo applies them again. If the edits throw, the entries they added are reverted in reverse order and the
+        /// history (undo, redo and its byte count) is as before. History is trimmed to the budget once, after the batch. Strokes,
+        /// Undo, Redo and clearing the history are refused inside a batch, and batches do not nest.</summary>
+        public void Batch(Action edits)
+        {
+            if (edits == null) throw new ArgumentNullException(nameof(edits));
+            EnsureNoStroke(); RefuseInBatch("A batch");
+            EndCoalescing(); // 前の連続した変更（スライダー）に、まとめの中の変更を混ぜない
+            var savedRedo = new List<IHistoryCommand>(redo); long savedBytes = historyBytes; int start = undo.Count;
+            batching = true;
+            try { edits(); }
+            catch
+            {
+                for (int i = undo.Count - 1; i >= start; i--) { undo[i].Revert(); undo.RemoveAt(i); Revision++; }
+                redo.Clear(); redo.AddRange(savedRedo); historyBytes = savedBytes; EndCoalescing();
+                throw;
+            }
+            finally { batching = false; }
+            int added = undo.Count - start;
+            if (added > 1)
+            {
+                var steps = undo.GetRange(start, added); undo.RemoveRange(start, added);
+                undo.Add(new CompoundCommand(steps)); // 合計の大きさは同じなので historyBytes はそのまま
+            }
+            EndCoalescing(); TrimHistory();
+        }
+        private void RefuseInBatch(string what) { if (batching) throw new InvalidOperationException(what + " cannot run inside a batch of edits."); }
         private void Push(IHistoryCommand command)
         {
             coalesceKey = null; lastCoalesced = null; // any new history entry ends a coalescing run
             foreach (var old in redo) historyBytes -= old.ByteCost;
-            redo.Clear(); undo.Add(command); historyBytes += command.ByteCost; TrimHistory();
+            redo.Clear(); undo.Add(command); historyBytes += command.ByteCost;
+            if (!batching) TrimHistory(); // まとめの途中で古い履歴を落とすと、失敗したときに元へ戻せない
         }
         private void TrimHistory()
         {
@@ -783,6 +816,15 @@ namespace Yozolab.YoluPainter.Core
     }
 
     internal interface IHistoryCommand { long ByteCost { get; } void Apply(); void Revert(); }
+    /// <summary>Several history entries undone and redone as one (<see cref="PaintDocument.Batch"/>).</summary>
+    internal sealed class CompoundCommand : IHistoryCommand
+    {
+        private readonly List<IHistoryCommand> steps;
+        public long ByteCost { get; private set; }
+        internal CompoundCommand(List<IHistoryCommand> steps) { this.steps = steps; foreach (var s in steps) ByteCost += s.ByteCost; }
+        public void Apply() { foreach (var s in steps) s.Apply(); }
+        public void Revert() { for (int i = steps.Count - 1; i >= 0; i--) steps[i].Revert(); }
+    }
     internal sealed class DelegateCommand : IHistoryCommand
     {
         private readonly Action apply, revert;

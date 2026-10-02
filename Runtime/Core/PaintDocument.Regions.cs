@@ -100,6 +100,31 @@ namespace Yozolab.YoluPainter.Core
             return EditRegion(surface, region, (x, y, start, amount) => CpuCompositor.Blend(start, g.ColorAt(x + .5, y + .5), g.Opacity * amount));
         }
 
+        /// <summary>Replaces a layer's channel with an image (straight RGBA8, bottom-left origin, the document's size) inside the
+        /// selection (or everywhere without one, or when withinSelection is false), as one undo step. Where the selection is fully on, the image's pixels are copied
+        /// exactly (the RGB of transparent pixels included); a partial selection amount interpolates between the old and the new
+        /// pixel in premultiplied space. Returns false when no pixel changed.</summary>
+        public bool ReplacePixels(Guid layerId, PaintChannel channel, byte[] rgba, bool withinSelection = true)
+        {
+            if (rgba == null) throw new ArgumentNullException(nameof(rgba));
+            if (rgba.LongLength != (long)Width * Height * 4) throw new ArgumentException("The image must be " + Width + " × " + Height + " RGBA8 (" + ((long)Width * Height * 4) + " bytes).", nameof(rgba));
+            var surface = PaintableSurface(layerId, channel);
+            return EditRegion(surface, null, withinSelection, (x, y, start, amount) =>
+            {
+                int o = (y * Width + x) * 4; var image = new Rgba32(rgba[o], rgba[o + 1], rgba[o + 2], rgba[o + 3]);
+                return amount >= 1 ? image : Interpolate(start, image, amount);
+            });
+        }
+
+        /// <summary>Premultiplied interpolation from a to b by t (0..1), returned straight (transparent results are transparent black).</summary>
+        static Rgba32 Interpolate(Rgba32 a, Rgba32 b, double t)
+        {
+            double aa = a.A / 255.0, ba = b.A / 255.0, alpha = aa + (ba - aa) * t;
+            if (alpha <= 0) return Rgba32.Transparent;
+            double Channel(byte ac, byte bc) => (ac / 255.0 * aa + (bc / 255.0 * ba - ac / 255.0 * aa) * t) / alpha;
+            return new Rgba32(MathUtil.ToByte(Channel(a.R, b.R)), MathUtil.ToByte(Channel(a.G, b.G)), MathUtil.ToByte(Channel(a.B, b.B)), MathUtil.ToByte(alpha));
+        }
+
         SparseTileSurface PaintableSurface(Guid layerId, PaintChannel channel)
         {
             EnsureNoStroke(); PaintLayer.ValidateChannel(channel);
@@ -120,9 +145,10 @@ namespace Yozolab.YoluPainter.Core
 
         /// <summary>Applies pixel(x, y, start, amount) to every pixel the effective region covers, as one undo step. Budgets are
         /// checked before each tile; on failure every tile already changed is restored and nothing is recorded.</summary>
-        bool EditRegion(SparseTileSurface surface, SelectionMask region, Func<int, int, Rgba32, double, Rgba32> pixel)
+        bool EditRegion(SparseTileSurface surface, SelectionMask region, Func<int, int, Rgba32, double, Rgba32> pixel) => EditRegion(surface, region, true, pixel);
+        bool EditRegion(SparseTileSurface surface, SelectionMask region, bool withinSelection, Func<int, int, Rgba32, double, Rgba32> pixel)
         {
-            var effective = EffectiveRegion(region);
+            var effective = withinSelection ? EffectiveRegion(region) : region;
             int tile = TileSize, n = tile * tile;
             var coords = new List<TileCoord>(effective != null ? effective.Tiles : EnumerateCanvasTiles());
             var changes = new List<TileChange>(); var bytes = new byte[n * 4]; var amounts = new byte[n]; long rollback = 0;
