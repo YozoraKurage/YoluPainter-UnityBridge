@@ -153,7 +153,11 @@ namespace Yozolab.YoluPainter.Editor
 
         void WindowMenu(GenericMenu m)
         {
-            foreach (var panel in Panels) { var id = panel.Id; Item(m, panel.Title, () => TogglePanel(id), true, !Layout.IsCollapsed(id)); }
+            // パネルの表示（畳む・開く・タブを見せる）、別のウィンドウにする・戻す、配置を元に戻す
+            foreach (var panel in Panels) { var id = panel.Id; Item(m, panel.Title, () => ShowOrHidePanel(id), true, PanelShown(id)); }
+            m.AddSeparator("");
+            foreach (var panel in Panels) { var id = panel.Id; m.AddItem(new GUIContent(L.Tr("Open in Separate Window") + "/" + L.Tr(panel.Title)), Layout.IsFloating(id), () => { TryAction(() => ToggleFloating(id)); Repaint(); }); }
+            Item(m, "Return All Panels to the Dock", DockAllPanels, Layout.Column(DockPlace.Floating).Count > 0);
             Item(m, "Reset Panel Layout", ResetDockLayout);
             m.AddSeparator("");
             foreach (var (language, label) in new[] { (PainterLanguage.Auto, L.Tr("Automatic (Unity's language)")), (PainterLanguage.Japanese, "日本語"), (PainterLanguage.English, "English") })

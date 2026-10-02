@@ -19,6 +19,11 @@ run_args=()
 if [[ "${1:-}" == "--" ]]; then shift; run_args=("$@"); fi
 
 mkdir -p "$DAEMON_DIR"
+# 切り替えどうしは 1 本ずつ通す（2 本が同時に止めて起動すると、2 つ目の Unity が「同じプロジェクトを別の Unity が開いている」で
+# 落ち、生きている 1 つ目は pid の記録が無いまま残った。2026-10-03）。後から来た切り替えは、前の切り替え（とその試験・戻し）が
+# 終わってから自分のモードにする。このロックは起動する Unity に引き継がせない（下の 9>&-）。
+exec 9>"$DAEMON_DIR/switch.lock"
+flock 9
 touch "$DAEMON_DIR/switching"
 trap 'rm -f "$DAEMON_DIR/switching"' EXIT
 export YOLUPAINTER_DAEMON_SWITCHING=1
@@ -26,13 +31,13 @@ export YOLUPAINTER_DAEMON_SWITCHING=1
 flock "$DAEMON_DIR/client.lock" true
 
 start_mode() {
-  "$SCRIPT_DIR/test-daemon.sh" stop >/dev/null 2>&1 || true
-  if [[ "$1" == gui ]]; then "$SCRIPT_DIR/test-daemon.sh" start; else "$SCRIPT_DIR/test-daemon.sh" start --batch-gl; fi
+  "$SCRIPT_DIR/test-daemon.sh" stop >/dev/null 2>&1 9>&- || true
+  if [[ "$1" == gui ]]; then "$SCRIPT_DIR/test-daemon.sh" start 9>&-; else "$SCRIPT_DIR/test-daemon.sh" start --batch-gl 9>&-; fi
 }
 start_mode "$mode" 2>&1 | tail -2
 code=0
 if [[ ${#run_args[@]} -gt 0 ]]; then
-  "$SCRIPT_DIR/run-tests.sh" "${run_args[@]}"; code=$?
+  "$SCRIPT_DIR/run-tests.sh" "${run_args[@]}" 9>&-; code=$?
   # GUI での試験が済んだら、ほかの依頼が普段使う batch-gl に戻す
   [[ "$mode" == gui ]] && start_mode batch-gl 2>&1 | tail -2
 fi

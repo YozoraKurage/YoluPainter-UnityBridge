@@ -659,9 +659,6 @@ msgstr "{0} の中に移しました。"
 msgid "Reset Panel Layout"
 msgstr "パネルの配置を初期状態に戻す"
 
-msgid "Click to fold; drag to move the panel"
-msgstr "クリックで畳む・開く、ドラッグでパネルを移動"
-
 # ---- blend modes (msgctxt "blend mode") ----
 
 msgctxt "blend mode"

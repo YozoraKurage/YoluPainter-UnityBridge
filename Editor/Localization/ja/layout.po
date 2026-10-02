@@ -1,0 +1,85 @@
+# Japanese translation for YoluPainter: the dock panels (tabs, separate panel windows, Window menu).
+# (Editor/Window/Shell: TexturePaintWindow.DockLayout.cs, TexturePaintWindow.PanelWindows.cs, PainterPanelWindow.cs, TexturePaintWindow.Menus.cs)
+# 語はほかの表に合わせる（パネル・ドック・畳む・別のウィンドウ）。短い一般的な語は msgctxt "panel" で場面を分ける。
+msgid ""
+msgstr ""
+"Project-Id-Version: YoluPainter\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+# ── 見出しとタブ ──
+
+msgid "Click to fold; drag to move, onto another header to make tabs, or out of the window to open it in a separate window. Right-click for more."
+msgstr "クリックで畳む・開く。ドラッグで移動、別の見出しに重ねるとタブにまとめ、ウィンドウの外へ出すと別のウィンドウになります。右クリックでほかの操作。"
+
+msgid "Drag a tab onto the painter window's dock to put it back, or onto another header to make tabs. Right-click for more."
+msgstr "タブをペイントのウィンドウのドックへドラッグすると戻り、別の見出しに重ねるとタブにまとまります。右クリックでほかの操作。"
+
+msgid "New window"
+msgstr "新しいウィンドウ"
+
+msgid "Tab in the separate window"
+msgstr "別のウィンドウのタブに"
+
+# ── 見出しの右クリック・ウィンドウ メニュー ──
+
+msgid "Open in Separate Window"
+msgstr "別のウィンドウで開く"
+
+msgid "Open This Panel in a Separate Window"
+msgstr "このパネルを別のウィンドウで開く"
+
+msgid "Open Tab Group in Separate Window"
+msgstr "タブのまとまりを別のウィンドウで開く"
+
+msgid "Separate from Tab Group"
+msgstr "タブのまとまりから外す"
+
+msgid "Move to Left Column"
+msgstr "左の列へ移動"
+
+msgid "Move to Right Column"
+msgstr "右の列へ移動"
+
+msgctxt "panel"
+msgid "Fold"
+msgstr "畳む"
+
+msgctxt "panel"
+msgid "Unfold"
+msgstr "開く"
+
+msgid "Return to the Dock"
+msgstr "ドックに戻す"
+
+msgid "Return This Panel to the Dock"
+msgstr "このパネルをドックに戻す"
+
+msgid "Separate into Its Own Window"
+msgstr "このパネルだけ別のウィンドウにする"
+
+msgid "Return All Panels to the Dock"
+msgstr "すべてのパネルをドックに戻す"
+
+# ── 持ち主の見つからない別のウィンドウ ──
+
+msgid "The YoluPainter window this panel belongs to is not open."
+msgstr "このパネルの持ち主の YoluPainter のウィンドウが開いていません。"
+
+msgid "Open YoluPainter"
+msgstr "YoluPainter を開く"
+
+msgid "Several YoluPainter windows are open. Choose the one this panel belongs to."
+msgstr "YoluPainter のウィンドウが複数開いています。このパネルをつなぐウィンドウを選んでください。"
+
+msgid "Attach to {0}"
+msgstr "{0} につなぐ"
+
+msgctxt "panel"
+msgid "Close"
+msgstr "閉じる"
+
+msgid "The panel goes back to the dock."
+msgstr "パネルはドックに戻ります。"
