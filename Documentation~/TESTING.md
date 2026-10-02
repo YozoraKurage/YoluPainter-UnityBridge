@@ -23,6 +23,8 @@
 
 `--batch-gl` は起動時に、GUI モードで壊れた状態で取り込まれたシェーダーを自動で取り込み直す。
 
+GPU はホストの実 GPU を、WSL2 の `/dev/dxg` と devcontainer に同梱した Mesa 24.2.8 の d3d12 ドライバで使う（OpenGL 4.6）。`gpu-check.sh --unity` で Unity が使っているデバイスを確認できる。GPU テストの CopyTexture 経路と描き込み経路は両方回る。llvmpipe で確かめたいときは `YOLUPAINTER_GPU=0`、システムの Mesa 23.2（OpenGL 4.2。Unity は CopyTexture と compute を無効にする）で確かめたいときは `YOLUPAINTER_MESA=system` を付けてデーモンを起動し直す。
+
 ## テストの分類
 
 | フィクスチャ | 中身 | 必要なもの |

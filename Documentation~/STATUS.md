@@ -2,7 +2,7 @@
 
 基準: Unity_Texture_Paint_Spec_v0_1（22ページ、2026-10-02）。順序は実装順であり、未実装項目を最終スコープから除外するものではありません。
 
-**重要:** 「実装」はコードがあるという意味です。2026-10-02 に Unity 2022.3.22f1（devcontainer、llvmpipe の OpenGL）で初めてコンパイル・EditMode テスト・GPU 整合・ウィンドウ操作を実行しました（VALIDATION.md）。実 GPU / D3D11、実ペンタブ、Photoshop/CSP 実機は未実施で、G0/G1 の合格条件はまだ満たしていません。Unity 実行、llvmpipe での GPU、実 GPU、Photoshop/CSP 実機を区別します。
+**重要:** 「実装」はコードがあるという意味です。2026-10-02 に Unity 2022.3.22f1（devcontainer）で初めてコンパイル・EditMode テスト・GPU 整合・ウィンドウ操作を実行しました（VALIDATION.md）。GPU はホストの RTX 3070 を OpenGL 4.6（Mesa d3d12 経由）で使っています。Windows の D3D11、実ペンタブ、Photoshop/CSP 実機は未実施で、G0/G1 の合格条件はまだ満たしていません。Unity 実行、コンテナの GPU（OpenGL）、Windows の D3D11、Photoshop/CSP 実機を区別します。
 
 | 仕様 | 今回の現物 | 検証 | 残り / ゲート |
 |---|---|---|---|
@@ -16,11 +16,11 @@
 | 8 PSD保持と再現 | 未知ブロック等の編集拒否、ガード付き書戻し、merged整合検査、RGBA/Unicode/IDs | 純C#/外部decoder、最大合成差1byteのfixture | 未編集ブロック単位パススルー・部分編集、高bit、色管理、検証済ネイティブ調整、Photoshop/CSP6工程 |
 | 9 データモデル | UUID、schema、channel、layer、tile archive。view/brush補助JSON。チャンネル別PSD | 独自保存往復byte一致 | path/model binding指紋、procedural graph/資産保存、複数Texture Set、複雑な正本選択 |
 | 10 保存・外部変更 | 完全世代/manifest SHA256/current最後、再読検査、旧世代維持、checkpoint、hash外部改変拒否 | 中断4点/改変/破損/再読込を実行 | OS電源断fsync、低ディスク/lock/全中断点、非同期UI保存、debounceウォッチ、PSD差分再読込と競合解決Undo。現在はSave As/Open |
-| 11 Unity責務 | CPU純C#ソース + GPUタイル合成（変わったタイルだけ再合成）、PreviewRenderUtility、リロード/閉じる処理、壊れたシェーダーでの CPU フォールバック | Unity で全アセンブリのコンパイル警告 0、GPU ブラシ誤差 0・GPU 合成誤差 1 以内（llvmpipe） | 実 GPU / D3D11 での整合、Jobs/Burst、AsyncGPUReadbackによるGPU正本、正確な色表示/各API |
+| 11 Unity責務 | CPU純C#ソース + GPUタイル合成（変わったタイルだけ再合成）、PreviewRenderUtility、リロード/閉じる処理、壊れたシェーダーでの CPU フォールバック | Unity で全アセンブリのコンパイル警告 0、GPU ブラシ誤差 0・GPU 合成誤差 1 以内（RTX 3070 / OpenGL 4.6 と llvmpipe）、CopyTexture の無い GPU 向けの描き込み経路 | D3D11 での整合、Jobs/Burst、AsyncGPUReadbackによるGPU正本、正確な色表示/各API |
 | 12 表面・UV | CPU triangle ray、隣接seam、material、連結、表向き/可視性、重複pixel合併、過予算全拒否 | 同じ実装を数学アダプターで実行、細小三角形/近接衣服回帰 | 実画面、BVH/JOB高速化、padding、dilation、3D対称、重複UV制作UI、複雑な非多様体実物 |
 | 13 ポーズ/3Dパス | 静的不変snapshot世代の判定。skinnedを除外した不完全モデルは塗れない | 幾何の世代・所有権試験 | ポーズ、BlendShape、BakeMesh、BVH refit、編集可能surface path、再結合、Filled/Ribbon |
 | 14 色と精度 | straight RGBA8/隠れRGB保持、データ分離、CPU/GPU ping-pong、encoded-space明記 | 純C#byteテスト、PSDレイヤー一致 | ICC、線形/ガンマ実機表示、16/32bit、HDR、CMYK/Lab、専用法線合成/packing、PSD完全合成 |
-| 15 4K/メモリ | 疎/一様タイル、source/rollback/history予算、layer全面GPU非常駐、PSD/staging上限 | core予算atomic拒否/undo、4K sparseケース、4K 4 レイヤー全面でドラッグ中の表示更新 中央値 6.5ms（llvmpipe） | 実RSS/VRAM、disk spill、LRU、低精度preview明示、codec streaming、4K dense大量レイヤー性能 |
+| 15 4K/メモリ | 疎/一様タイル、source/rollback/history予算、layer全面GPU非常駐、PSD/staging上限 | core予算atomic拒否/undo、4K sparseケース、4K 4 レイヤー全面でドラッグ中の表示更新 中央値 1.2ms（RTX 3070） | 実RSS/VRAM、disk spill、LRU、低精度preview明示、codec streaming、4K dense大量レイヤー性能 |
 | 16 scheduler/履歴 | 確定stroke単位のexact tile Undo/Redo、構造history、取消、予算通知、表示用のタイル変更追跡（ChangeSerial / TryGetChangedTiles） | core回帰・結合試験、変更追跡と差分合成の参照一致 | 構造変更時の部分再合成（今は全タイル。4K で約 2.9 秒）、effect 用の依存 scheduler、halo、global filters、disk history、checkpoint pruning、永続操作ジャーナル |
 | 17 実測計画・性能 | 実行環境とテスト結果を分離して記録 | 取得可能なcore実行のみ | 仕様の応答/メモリ/保存workloadの実Unity計測。推測値を合格値にしない |
 | 18 受入・故障 | 破損入力/未知PSD/予算超過/中断/改変拒否、元asset保護 | Unity の EditMode で全件、元アセット非変更をウィンドウ経由で確認 | 実device、driver、Play/Reload/複数Window/source scene、ディスク/permission/lock/電源断 |

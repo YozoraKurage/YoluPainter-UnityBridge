@@ -29,7 +29,8 @@ Unity 2022.3 向けのエディタ専用パッケージ `net.yozolab.yolupainter
   上書きし合ったりしない
 - `current` を最後に置換する保存契約を守る。旧世代を無断で削除しない
 - 新機能には回帰テスト・保存復元・Undo/取消・型/予算拒否のテストも付ける
-- Unity の EditMode、llvmpipe での GPU、実 GPU、Photoshop/CSP 実機の結果を混同しない
+- Unity の EditMode、llvmpipe での GPU、コンテナの実 GPU（OpenGL 経由）、Windows の D3D11、
+  Photoshop/CSP 実機の結果を混同しない
 - Generator/Filter/Anchor/Mask、編集可能 3D パス、マルチチャンネル、PSD 調整は中核要望。
   未実装だからといってスコープから削除しない
 
@@ -110,8 +111,14 @@ Editor イメージ）。テストはすべて EditMode テスト（`Tests/Edito
 - `--batch-gl` の起動時に、GUI モードで壊れた状態で取り込まれたシェーダーを自動で
   取り込み直す。それでもシェーダーがおかしいときはテストプロジェクトの `Library` を
   消して作り直す（`rm -rf /home/node/unity-testproject/Library`、数分かかる）。
-- グラフィックスは llvmpipe（ソフトウェアレンダラ）。GPU の結果は「llvmpipe で一致」で
-  あって、実 GPU / D3D11 での確認ではない。
+- グラフィックスはホストの実 GPU（RTX 3070）。WSL2 の `/dev/dxg` を、devcontainer に同梱した
+  Mesa 24.2.8 の d3d12 ドライバで使う（OpenGL 4.6、Unity から CopyTexture・compute・
+  AsyncGPUReadback が使える）。設定は `common.sh` が `/dev/dxg` を見て自動で行う。
+  `gpu-check.sh [--unity]` で確認、`YOLUPAINTER_GPU=0` で llvmpipe、`YOLUPAINTER_MESA=system`
+  でシステムの Mesa 23.2（OpenGL 4.2、CopyTexture・compute 無し）に戻せる。
+  Linux 版 Unity なので API は OpenGL のまま。GPU の結果は「コンテナの実 GPU で一致」で
+  あって、Windows の D3D11 での確認ではない。
+- コンテナでは `sudo` がパスワードなしで使える（apt で道具を足すなど）。
 - **テストデーモン**: 常駐 Unity を立てると run-tests.sh は自動でそちらへ依頼される
   （死んでいればコールドへ自動フォールバック。コールドは `-nographics` なので GPU と
   ウィンドウのテストはスキップ）。パッケージを出し入れしたら `restart`。
