@@ -95,6 +95,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         readonly float visibilityEpsilon;
         public int SnapshotRevision { get; }
         public int TriangleCount => triangles.Length;
+        /// <summary>スナップショットの三角形（読むだけ。並びは TriangleIndex と同じ）。</summary>
+        public IReadOnlyList<SurfaceTriangle> Triangles => triangles;
         public int NonManifoldEdgeCount { get; private set; }
         public Bounds Bounds { get; }
 

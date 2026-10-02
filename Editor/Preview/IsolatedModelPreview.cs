@@ -43,6 +43,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         Vector3 target;
         Rect lastRect;
         public bool HasModel => geometry != null && geometry.TriangleCount > 0;
+        /// <summary>今のスナップショットの幾何（読むだけ）。モデルが無ければ null。</summary>
+        public SurfaceGeometry Geometry => geometry;
         public bool CanPaint => HasModel && report.CanPaint;
         public Bounds Bounds => geometry != null ? geometry.Bounds : new Bounds(Vector3.zero, Vector3.one);
         public float ModelRadius => Mathf.Max(0.0001f, Bounds.extents.magnitude);
