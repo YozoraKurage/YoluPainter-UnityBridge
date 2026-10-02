@@ -7,7 +7,8 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
 {
     /// <summary>
     /// mesh map 1 枚の保存形式（.ylp の中の meshmap-&lt;種類&gt;.bin）。リトルエンディアン:
-    /// "YLPMMAP\0"、形式の版、種類、エンジンの版、モデルの指紋、形の指紋（UV・三角形）、UV チャンネル、幅、高さ、スロット、余白、チャンネル数、
+    /// "YLPMMAP\0"、形式の版、種類、エンジンの版、モデルの指紋、形の指紋（UV・三角形）、UV チャンネル、幅、高さ、スロット、余白、
+    /// アンチエイリアスの段数（版 2 から）、チャンネル数、
     /// 種類の設定・空間・姿勢・焼く元の文字列（長さ付き UTF-8）、境界箱（double × 6）、圧縮した中身の長さと中身。
     /// 中身は由来の面（1 バイト/テクセル）と、チャンネルごとに「行の中で左との差（16 bit）」の上位バイトの面・下位バイトの面を
     /// 並べて Deflate したもの。日時は入れない（同じ結果なら同じバイト列）。読むときは長さ・範囲・版を確かめ、宣言した大きさを
@@ -15,7 +16,8 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
     /// </summary>
     public static class MeshMapBinary
     {
-        public const int FormatVersion = 1;
+        /// <summary>版 2 でアンチエイリアスの段数を足した（版 1 も読める。段数 1）。</summary>
+        public const int FormatVersion = 2;
         public const string EntryPrefix = "meshmap-", EntrySuffix = ".bin";
         const int MaxString = 4096;
         static readonly byte[] Magic = Encoding.ASCII.GetBytes("YLPMMAP\0");
@@ -38,7 +40,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                 using (var w = new BinaryWriter(stream, new UTF8Encoding(false), true))
                 {
                     w.Write(Magic); w.Write(FormatVersion); w.Write((int)p.Kind); w.Write(p.EngineVersion); WriteString(w, p.MeshHash); WriteString(w, p.TopologyHash);
-                    w.Write(p.UvChannel); w.Write(p.Width); w.Write(p.Height); w.Write(p.TargetSlot); w.Write(p.Padding); w.Write(map.Channels);
+                    w.Write(p.UvChannel); w.Write(p.Width); w.Write(p.Height); w.Write(p.TargetSlot); w.Write(p.Padding); w.Write(p.Antialiasing); w.Write(map.Channels);
                     WriteString(w, p.SettingsKey); WriteString(w, p.Space); WriteString(w, p.Pose); WriteString(w, p.Source);
                     for (int a = 0; a < 3; a++) w.Write(p.BoundsMin(a));
                     for (int a = 0; a < 3; a++) w.Write(p.BoundsMax(a));
@@ -104,7 +106,9 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                     var kind = (MeshMapKind)r.ReadInt32();
                     if (!Enum.IsDefined(typeof(MeshMapKind), kind)) throw new InvalidDataException("Unknown mesh map kind " + (int)kind + ".");
                     int engine = r.ReadInt32(); string hash = ReadString(r), topology = ReadString(r);
-                    int uv = r.ReadInt32(), width = r.ReadInt32(), height = r.ReadInt32(), slot = r.ReadInt32(), padding = r.ReadInt32(), channels = r.ReadInt32();
+                    int uv = r.ReadInt32(), width = r.ReadInt32(), height = r.ReadInt32(), slot = r.ReadInt32(), padding = r.ReadInt32();
+                    int antialiasing = version >= 2 ? r.ReadInt32() : 1, channels = r.ReadInt32();
+                    if (antialiasing < 1 || antialiasing > MeshBakeSettings.MaxAntialiasing) throw new InvalidDataException("Mesh map antialiasing is out of range.");
                     if (width < 1 || height < 1 || width > MeshBakeSettings.MaxSize || height > MeshBakeSettings.MaxSize) throw new InvalidDataException("Mesh map size " + width + "×" + height + " is out of range.");
                     if (channels != BakedMeshMap.ChannelCount(kind)) throw new InvalidDataException("Mesh map channel count does not match its kind.");
                     if (uv < 0 || uv > 7 || slot < -1 || padding < 0 || padding > MeshBakeSettings.MaxPadding || engine < 1) throw new InvalidDataException("Mesh map metadata is out of range.");
@@ -136,7 +140,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                             }
                         }
                     }
-                    var provenance = new MeshMapProvenance(kind, engine, hash, topology, uv, width, height, slot, padding, settings, space, pose, source, min, max);
+                    var provenance = new MeshMapProvenance(kind, engine, hash, topology, uv, width, height, slot, padding, antialiasing, settings, space, pose, source, min, max);
                     return new BakedMeshMap(provenance, data, coverage);
                 }
             }

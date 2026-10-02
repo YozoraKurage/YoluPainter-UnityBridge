@@ -24,23 +24,27 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         public int Height { get; }
         public int TargetSlot { get; }
         public int Padding { get; }
+        /// <summary>テクセルあたり n×n のサブサンプル。</summary>
+        public int Antialiasing { get; }
         public string SettingsKey { get; }
         /// <summary>座標の空間。今は "SnapshotWorld"（ワールドの軸、原点はモデルのルート）だけ。</summary>
         public string Space { get; }
         /// <summary>基準の姿勢。今は "StaticSnapshot"（静的なメッシュをそのまま。表示用のポーズでは焼き直さない）だけ。</summary>
         public string Pose { get; }
-        /// <summary>焼く元。今は "Self"（低ポリをそのまま高ポリとして使う自己ベイク）だけ。</summary>
+        /// <summary>焼く元。"Self"（低ポリをそのまま高ポリとして使う自己ベイク）か、"Reference:" に高ポリの指紋と投影の設定
+        /// （<see cref="MeshBakeSettings.SourceKey"/>）。</summary>
         public string Source { get; }
         readonly double[] boundsMin, boundsMax;
         public string ConditionKey { get; }
 
         internal MeshMapProvenance(MeshMapKind kind, int engineVersion, string meshHash, string topologyHash, int uvChannel, int width, int height, int targetSlot, int padding,
-            string settingsKey, string space, string pose, string source, double[] boundsMin, double[] boundsMax)
+            int antialiasing, string settingsKey, string space, string pose, string source, double[] boundsMin, double[] boundsMax)
         {
+            Antialiasing = antialiasing;
             Kind = kind; EngineVersion = engineVersion; MeshHash = meshHash ?? ""; TopologyHash = topologyHash ?? ""; UvChannel = uvChannel; Width = width; Height = height;
             TargetSlot = targetSlot; Padding = padding; SettingsKey = settingsKey ?? ""; Space = space ?? ""; Pose = pose ?? ""; Source = source ?? "";
             this.boundsMin = (double[])boundsMin.Clone(); this.boundsMax = (double[])boundsMax.Clone();
-            ConditionKey = ComputeConditionKey(kind, engineVersion, MeshHash, uvChannel, width, height, targetSlot, padding, SettingsKey, Space, Pose, Source);
+            ConditionKey = ComputeConditionKey(kind, engineVersion, MeshHash, uvChannel, width, height, targetSlot, padding, antialiasing, SettingsKey, Space, Pose, Source);
         }
 
         /// <summary>位置のマップの正規化に使った境界箱（スナップショットの空間）。</summary>
@@ -48,10 +52,10 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         public double BoundsMax(int axis) => boundsMax[axis];
 
         internal static string ComputeConditionKey(MeshMapKind kind, int engineVersion, string meshHash, int uvChannel, int width, int height, int targetSlot,
-            int padding, string settingsKey, string space, string pose, string source)
+            int padding, int antialiasing, string settingsKey, string space, string pose, string source)
         {
             string text = "kind=" + kind + "\nengine=" + engineVersion + "\nmesh=" + meshHash + "\nuv=" + uvChannel + "\nsize=" + width + "x" + height
-                + "\nslot=" + targetSlot + "\npadding=" + padding + "\nsettings=" + settingsKey + "\nspace=" + space + "\npose=" + pose + "\nsource=" + source + "\n";
+                + "\nslot=" + targetSlot + "\npadding=" + padding + "\nantialiasing=" + antialiasing + "\nsettings=" + settingsKey + "\nspace=" + space + "\npose=" + pose + "\nsource=" + source + "\n";
             using (var sha = SHA256.Create())
             {
                 var hex = new StringBuilder(64);
@@ -66,13 +70,19 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             if (expected == null) throw new ArgumentNullException(nameof(expected));
             var reasons = new List<string>();
             if (EngineVersion != MeshBaker.EngineVersion) reasons.Add("baked by mesh-map engine version " + EngineVersion + ", this version is " + MeshBaker.EngineVersion + ".");
-            if (Space != MeshBaker.Space || Pose != MeshBaker.Pose || Source != MeshBaker.Source) reasons.Add("baked in space '" + Space + "' / pose '" + Pose + "' from '" + Source + "', which this version does not produce.");
+            if (Space != MeshBaker.Space || Pose != MeshBaker.Pose) reasons.Add("baked in space '" + Space + "' / pose '" + Pose + "', which this version does not produce.");
+            bool sourceDiffers = expected.Settings != null ? Source != expected.Settings.SourceKey(expected.ReferenceHash)
+                : expected.ReferenceHash == null ? Source != MeshBaker.Source : !Source.Contains(expected.ReferenceHash);
+            if (sourceDiffers)
+                reasons.Add(Source == MeshBaker.Source ? "baked without a high-poly reference; one is chosen now." : expected.ReferenceHash == null ? "baked from a high-poly reference; none is chosen now."
+                    : "the high-poly reference or its projection settings changed since the bake.");
             if (Width != expected.Width || Height != expected.Height) reasons.Add("baked at " + Width + "×" + Height + ", the document is " + expected.Width + "×" + expected.Height + ".");
             if (TargetSlot != expected.TargetSlot) reasons.Add("baked for material slot " + TargetSlot + ", the document targets slot " + expected.TargetSlot + ".");
             if (UvChannel != expected.UvChannel) reasons.Add("baked from UV" + UvChannel + ", the document uses UV" + expected.UvChannel + ".");
             if (expected.Settings != null)
             {
                 if (Padding != expected.Settings.Padding) reasons.Add("baked with " + Padding + " texels of padding, the settings ask for " + expected.Settings.Padding + ".");
+                if (Antialiasing != expected.Settings.Antialiasing) reasons.Add("baked with " + Antialiasing + "×" + Antialiasing + " antialiasing, the settings ask for " + expected.Settings.Antialiasing + "×" + expected.Settings.Antialiasing + ".");
                 string wanted = expected.Settings.KindKey(Kind);
                 if (wanted != SettingsKey) reasons.Add("bake settings changed (" + SettingsKey + " → " + wanted + ").");
             }
@@ -112,7 +122,8 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             Data = data; Coverage = coverage;
         }
 
-        public static int ChannelCount(MeshMapKind kind) => kind == MeshMapKind.WorldNormal || kind == MeshMapKind.Position ? 3 : 1;
+        public static int ChannelCount(MeshMapKind kind) =>
+            kind == MeshMapKind.WorldNormal || kind == MeshMapKind.Position || kind == MeshMapKind.TangentNormal || kind == MeshMapKind.Id || kind == MeshMapKind.BentNormal ? 3 : 1;
 
         public MeshTexelCoverage CoverageAt(int x, int y)
         {

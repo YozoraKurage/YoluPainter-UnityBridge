@@ -143,11 +143,35 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             return x * y + y * z + z * x;
         }
 
+        /// <summary>GPU などへ渡す平らな並び（<see cref="MeshBakeRayScene"/> の形）。</summary>
+        public void Flatten(out float[] bounds, out int[] first, out int[] count, out float[] triangles, out int[] original)
+        {
+            bounds = new float[nodeCount * 6]; first = new int[nodeCount]; count = new int[nodeCount];
+            for (int i = 0; i < nodeCount; i++)
+            {
+                ref Node n = ref nodes[i]; int o = i * 6;
+                bounds[o] = (float)n.MinX; bounds[o + 1] = (float)n.MinY; bounds[o + 2] = (float)n.MinZ; bounds[o + 3] = (float)n.MaxX; bounds[o + 4] = (float)n.MaxY; bounds[o + 5] = (float)n.MaxZ;
+                first[i] = n.First; count[i] = n.Count;
+            }
+            triangles = new float[tris.Length * 10]; original = new int[tris.Length];
+            for (int i = 0; i < tris.Length; i++)
+            {
+                ref Tri t = ref tris[i]; int o = i * 10;
+                triangles[o] = (float)t.Ax; triangles[o + 1] = (float)t.Ay; triangles[o + 2] = (float)t.Az;
+                triangles[o + 3] = (float)t.E1x; triangles[o + 4] = (float)t.E1y; triangles[o + 5] = (float)t.E1z;
+                triangles[o + 6] = (float)t.E2x; triangles[o + 7] = (float)t.E2y; triangles[o + 8] = (float)t.E2z; triangles[o + 9] = (float)t.Epsilon;
+                original[i] = t.Original;
+            }
+        }
+
         /// <summary>レイを飛ばす。方向は単位ベクトル。距離が 0 より大きく tMax より小さい当たりだけを数え、元の番号が ignore の三角形は
         /// 無視する。anyHit なら最初に見つけた当たり（最も近いとは限らない）で返す。</summary>
-        /// <returns>当たった距離。当たらなければ float.PositiveInfinity。</returns>
-        public double Trace(double ox, double oy, double oz, double dx, double dy, double dz, double tMax, int ignore, bool anyHit, bool ignoreBackfaces, int[] stack, double[] stackT)
+        /// <returns>当たった距離。当たらなければ double.PositiveInfinity。hitTriangle は元の三角形の番号（当たらなければ -1）、
+        /// hitU / hitV はその三角形の重心座標（頂点 B と C の重み。A は 1 − u − v）。</returns>
+        public double Trace(double ox, double oy, double oz, double dx, double dy, double dz, double tMax, int ignore, bool anyHit, bool ignoreBackfaces, int[] stack, double[] stackT,
+            out int hitTriangle, out double hitU, out double hitV)
         {
+            hitTriangle = -1; hitU = hitV = 0;
             if (nodeCount == 0) return double.PositiveInfinity;
             // 0 の成分は小さな値に置き換え、逆数を有限のまま使う（0×∞ の NaN を避ける）
             if (dx == 0) dx = 1e-300; if (dy == 0) dy = 1e-300; if (dz == 0) dz = 1e-300;
@@ -184,7 +208,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                         if (v < 0 || u + v > 1) continue;
                         double hit = (e2x * qx + e2y * qy + e2z * qz) * inv;
                         if (hit <= 0 || hit >= best || tr.Original == ignore) continue;
-                        best = hit; found = true;
+                        best = hit; found = true; hitTriangle = tr.Original; hitU = u; hitV = v;
                         if (anyHit) return best;
                     }
                 }

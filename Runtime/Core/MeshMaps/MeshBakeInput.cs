@@ -9,19 +9,23 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
     /// ベイクの入力: 静的なメッシュのスナップショットを三角形の並び（頂点を共有しない）で持つ。位置はスナップショットの空間
     /// （ワールドの軸、原点はモデルのルート）、UV は 1 つのチャンネル、頂点法線は任意（0 の法線は「無い」で、面の法線を使う）、
     /// 三角形ごとにマテリアルスロット。UV の面積が 0 の三角形（UV の無いメッシュ）は遮るだけで焼き込まれない。
-    /// 作った後は変えない（配列は複写して持つ）。<see cref="Hash"/> は位置・法線・UV・スロット・UV チャンネルの SHA-256 で、
+    /// 接線（w 込み）・頂点カラー・レンダラーの番号と名前も任意で持てる。
+    /// 作った後は変えない（配列は複写して持つ）。<see cref="Hash"/> は位置・法線・接線・色・レンダラー・UV・スロット・UV チャンネルの SHA-256 で、
     /// ベイクした結果の由来と照合に使う。浮動小数はビット列のまま入れるので、値が 1 ビットでも違えば別のモデルになる。
-    /// <see cref="TopologyHash"/> は三角形の数・UV・スロットだけの SHA-256 で、形（ポーズ・BlendShape・編集）だけが変わったのか、
+    /// <see cref="TopologyHash"/> は三角形の数・UV・スロット・レンダラーの番号だけの SHA-256 で、形（ポーズ・BlendShape・編集）だけが変わったのか、
     /// UV や三角形まで変わったのかを見分けて知らせるのに使う。
     /// </summary>
     public sealed class MeshBakeInput
     {
         public const int MaxTriangles = 4000000;
-        internal readonly float[] Corners, Normals, Uvs;
-        internal readonly int[] Slots;
+        internal readonly float[] Corners, Normals, Uvs, Tangents, Colors;
+        internal readonly int[] Slots, Renderers;
+        internal readonly string[] RendererNames;
         public int TriangleCount { get; }
         public int UvChannel { get; }
         public bool HasNormals { get; }
+        public bool HasTangents => Tangents != null;
+        public bool HasColors => Colors != null;
         public string Hash { get; }
         public string TopologyHash { get; }
         /// <summary>頂点法線の出どころ（"authored"、"reconstructed-crease-60" など。知らせるだけで、照合は法線の値そのもので行う）。</summary>
@@ -34,7 +38,12 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         /// <param name="normals">corners と同じ並びの頂点法線、または null。</param>
         /// <param name="uvs">三角形ごとに 3 頂点 × uv（6 個）。</param>
         /// <param name="slots">三角形ごとのマテリアルスロット（0 以上。-1 は「どのスロットでもない」遮るだけの面）。</param>
-        public MeshBakeInput(float[] corners, float[] normals, float[] uvs, int[] slots, int uvChannel = 0, string normalSource = null)
+        /// <param name="tangents">三角形ごとに 3 頂点 × xyzw（12 個）の接線（w は従法線の向き）、または null。接線空間の法線に使う。</param>
+        /// <param name="colors">三角形ごとに 3 頂点 × RGBA（12 個）の頂点カラー、または null。</param>
+        /// <param name="renderers">三角形ごとのレンダラー（メッシュ）の番号、または null（すべて 0）。</param>
+        /// <param name="rendererNames">レンダラーの名前（名前での対応づけに使う）、または null。</param>
+        public MeshBakeInput(float[] corners, float[] normals, float[] uvs, int[] slots, int uvChannel = 0, string normalSource = null,
+            float[] tangents = null, float[] colors = null, int[] renderers = null, IReadOnlyList<string> rendererNames = null)
         {
             if (corners == null) throw new ArgumentNullException(nameof(corners));
             if (uvs == null) throw new ArgumentNullException(nameof(uvs));
@@ -46,6 +55,12 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             if (uvs.Length != count * 6) throw new ArgumentException("UVs must hold 6 floats per triangle.", nameof(uvs));
             if (slots.Length != count) throw new ArgumentException("Slots must hold one value per triangle.", nameof(slots));
             if (normals != null && normals.Length != corners.Length) throw new ArgumentException("Normals must match the corners.", nameof(normals));
+            if (tangents != null && tangents.Length != count * 12) throw new ArgumentException("Tangents must hold 12 floats per triangle.", nameof(tangents));
+            if (colors != null && colors.Length != count * 12) throw new ArgumentException("Colors must hold 12 floats per triangle.", nameof(colors));
+            if (renderers != null && renderers.Length != count) throw new ArgumentException("Renderers must hold one value per triangle.", nameof(renderers));
+            if (tangents != null) foreach (float v in tangents) if (float.IsNaN(v) || float.IsInfinity(v)) throw new ArgumentException("The mesh contains non-finite tangents.", nameof(tangents));
+            if (colors != null) foreach (float v in colors) if (float.IsNaN(v) || float.IsInfinity(v)) throw new ArgumentException("The mesh contains non-finite colors.", nameof(colors));
+            if (renderers != null) foreach (int r in renderers) if (r < 0 || (rendererNames != null && r >= rendererNames.Count)) throw new ArgumentOutOfRangeException(nameof(renderers), "Renderer indices must be 0 or more and name a renderer.");
             if (uvChannel < 0 || uvChannel > 7) throw new ArgumentOutOfRangeException(nameof(uvChannel));
             foreach (float v in corners) if (float.IsNaN(v) || float.IsInfinity(v)) throw new ArgumentException("The mesh contains non-finite positions.", nameof(corners));
             foreach (float v in uvs) if (float.IsNaN(v) || float.IsInfinity(v)) throw new ArgumentException("The mesh contains non-finite UVs.", nameof(uvs));
@@ -53,6 +68,9 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             foreach (int s in slots) if (s < -1) throw new ArgumentOutOfRangeException(nameof(slots), "Material slots must be -1 or more.");
             Corners = (float[])corners.Clone(); Uvs = (float[])uvs.Clone(); Slots = (int[])slots.Clone();
             Normals = normals == null ? null : (float[])normals.Clone();
+            Tangents = tangents == null ? null : (float[])tangents.Clone(); Colors = colors == null ? null : (float[])colors.Clone();
+            Renderers = renderers == null ? new int[count] : (int[])renderers.Clone();
+            RendererNames = rendererNames == null ? null : new List<string>(rendererNames).ToArray();
             TriangleCount = count; UvChannel = uvChannel; HasNormals = normals != null;
             NormalSource = normals == null ? "face" : string.IsNullOrEmpty(normalSource) ? "authored" : normalSource;
             MinX = MinY = MinZ = double.MaxValue; MaxX = MaxY = MaxZ = double.MinValue;
@@ -149,12 +167,18 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             using (var sha = SHA256.Create())
             {
                 void Block(byte[] bytes) => sha.TransformBlock(bytes, 0, bytes.Length, null, 0);
-                Block(Encoding.ASCII.GetBytes(geometry ? "YOLUPAINTER-MESHBAKE-INPUT-1\n" : "YOLUPAINTER-MESHBAKE-TOPOLOGY-1\n"));
+                Block(Encoding.ASCII.GetBytes(geometry ? "YOLUPAINTER-MESHBAKE-INPUT-2\n" : "YOLUPAINTER-MESHBAKE-TOPOLOGY-2\n"));
                 Block(BitConverter.GetBytes(TriangleCount)); Block(BitConverter.GetBytes(UvChannel));
                 // 浮動小数のビット列（リトルエンディアンの機械で書く。ビッグエンディアンでは別の値になるが、照合は同じ機械の間）
-                if (geometry) { Block(BitConverter.GetBytes(HasNormals ? 1 : 0)); Floats(sha, Corners); if (Normals != null) Floats(sha, Normals); }
+                if (geometry)
+                {
+                    Block(BitConverter.GetBytes((HasNormals ? 1 : 0) | (HasTangents ? 2 : 0) | (HasColors ? 4 : 0)));
+                    Floats(sha, Corners); if (Normals != null) Floats(sha, Normals); if (Tangents != null) Floats(sha, Tangents); if (Colors != null) Floats(sha, Colors);
+                    if (RendererNames != null) foreach (var name in RendererNames) { var bytes = Encoding.UTF8.GetBytes(name ?? ""); Block(BitConverter.GetBytes(bytes.Length)); Block(bytes); }
+                }
                 Floats(sha, Uvs);
                 var slotBytes = new byte[Slots.Length * 4]; Buffer.BlockCopy(Slots, 0, slotBytes, 0, slotBytes.Length); Block(slotBytes);
+                var rendererBytes = new byte[Renderers.Length * 4]; Buffer.BlockCopy(Renderers, 0, rendererBytes, 0, rendererBytes.Length); Block(rendererBytes);
                 sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
                 var hex = new StringBuilder(64);
                 foreach (byte b in sha.Hash) hex.Append(b.ToString("x2"));

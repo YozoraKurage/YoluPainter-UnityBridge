@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using NUnit.Framework;
 using UnityEngine;
@@ -73,6 +74,49 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.MeshMaps.Count, Is.Zero);
         }
 
+        [Test] public void AHighPolyChosenInThePanelIsProjectedAndReplacingItMakesMapsStale()
+        {
+            window.Preview.LoadDemoMesh(); QuickBake(window);
+            var cube = Resources.GetBuiltinResource<Mesh>("Cube.fbx");
+            var material = new Material(Shader.Find("Hidden/YoluPainter/PreviewSurface"));
+            GameObject Make(string name, float scale)
+            {
+                var go = new GameObject(name); go.transform.localScale = Vector3.one * scale;
+                go.AddComponent<MeshFilter>().sharedMesh = cube; go.AddComponent<MeshRenderer>().sharedMaterial = material; return go;
+            }
+            var high = Make("High cube", 1.02f); var other = Make("Other high cube", 1.04f);
+            int dirty = UnityEditor.EditorUtility.GetDirtyCount(high), meshDirty = UnityEditor.EditorUtility.GetDirtyCount(cube);
+            try
+            {
+                var s = window.MeshBakeSettings;
+                s.Maps = new[] { MeshMapKind.TangentNormal, MeshMapKind.Height, MeshMapKind.Opacity }; s.ReferenceFrontal = 0.05; s.ReferenceRear = 0.05;
+                s.ReferenceAverageNormals = false; // 立方体の頂点はどれも角なので、平均の法線は面の上で斜めになる。面の法線で投影して式と比べる
+                window.HighPolyModel = high;
+                Assert.That(window.BakeMeshMaps(), Is.EqualTo(MeshBakeStatus.Completed), window.StatusMessage);
+                Assert.That(window.LastMeshBakeReport.MissedSamples, Is.Zero, "every low point finds the slightly larger cube");
+                window.MeshMaps.TryGet(MeshMapKind.Height, out var height); window.MeshMaps.TryGet(MeshMapKind.Opacity, out var opacity);
+                Assert.That(height.Provenance.Source, Does.StartWith("Reference:"));
+                double range = 0.05 * Mathf.Sqrt(3), expected = 0.5 + 0.5 * 0.01 / range; int total = 0, flat = 0;
+                for (int y = 0; y < height.Height; y += 7) for (int x = 0; x < height.Width; x += 7)
+                {
+                    if (height.CoverageAt(x, y) != MeshTexelCoverage.Covered) continue;
+                    Assert.That(opacity.RawValue(x, y), Is.EqualTo(65535)); total++;
+                    if (Math.Abs(height.Value(x, y) - expected) < 2e-3) flat++;
+                }
+                Assert.That(total, Is.GreaterThan(100)); Assert.That(flat, Is.EqualTo(total), "the high cube is 0.01 outside every face");
+                Assert.That(window.MeshMaps.Check(MeshMapKind.Height, window.CurrentMeshMapExpectation()).State, Is.EqualTo(MeshMapState.Current));
+                window.HighPolyModel = other;
+                var check = window.MeshMaps.Check(MeshMapKind.Opacity, window.CurrentMeshMapExpectation());
+                Assert.That(check.State, Is.EqualTo(MeshMapState.Stale)); Assert.That(string.Join(" ", check.Reasons), Does.Contain("high-poly reference"));
+                window.HighPolyModel = null;
+                Assert.That(string.Join(" ", window.MeshMaps.Check(MeshMapKind.Opacity, window.CurrentMeshMapExpectation()).Reasons), Does.Contain("none is chosen"));
+                window.ShowMeshMapPanel = true; Repaint(window);
+                Assert.That(UnityEditor.EditorUtility.GetDirtyCount(high), Is.EqualTo(dirty)); Assert.That(UnityEditor.EditorUtility.GetDirtyCount(cube), Is.EqualTo(meshDirty));
+                Assert.That(high.transform.localScale, Is.EqualTo(Vector3.one * 1.02f));
+            }
+            finally { Object.DestroyImmediate(high); Object.DestroyImmediate(other); Object.DestroyImmediate(material); }
+        }
+
         [Test] public void SavedMeshMapsComeBackAndAreCheckedAgainstTheModel()
         {
             var fake = UseFakeDialogs(window); fake.File = NewYlpPath("Baked.ylp");
@@ -81,7 +125,7 @@ namespace Yozolab.YoluPainter.Tests
             window.SaveProject(true);
             Assert.That(window.MeshMapsSaved, Is.True, window.StatusMessage); Assert.That(window.MeshMapNote, Is.Null);
             var files = YlpStore.Load(fake.File).Files;
-            foreach (var kind in MeshBakeSettings.AllKinds) Assert.That(files.ContainsKey(MeshMapBinary.EntryName(kind)), Is.True, kind.ToString());
+            foreach (var kind in MeshBakeSettings.DefaultKinds) Assert.That(files.ContainsKey(MeshMapBinary.EntryName(kind)), Is.True, kind.ToString());
             var keys = window.MeshMaps.Maps.ToDictionary(m => m.Kind, m => m.Provenance.ConditionKey);
             var other = Open();
             try

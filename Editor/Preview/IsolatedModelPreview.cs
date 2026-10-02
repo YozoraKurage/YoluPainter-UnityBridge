@@ -25,8 +25,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
     /// </summary>
     public sealed class IsolatedModelPreview : IDisposable
     {
-        const int MaximumVerticesPerMesh = 250000;
-        const int MaximumTriangles = 150000;
+        PreviewLoadOptions loadOptions = new PreviewLoadOptions();
+        SurfaceAttributes attributes;
         readonly List<GameObject> objects = new List<GameObject>();
         readonly List<Mesh> meshes = new List<Mesh>();
         readonly List<Material> materials = new List<Material>();
@@ -46,6 +46,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public bool HasModel => geometry != null && geometry.TriangleCount > 0;
         /// <summary>今のスナップショットの幾何（読むだけ）。モデルが無ければ null。</summary>
         public SurfaceGeometry Geometry => geometry;
+        /// <summary>今のスナップショットの三角形ごとの頂点の属性（法線・接線・頂点カラー・レンダラー名。<see cref="Geometry"/> と同じ並び）。</summary>
+        public SurfaceAttributes Attributes => attributes;
         public bool CanPaint => HasModel && report.CanPaint;
         public Bounds Bounds => geometry != null ? geometry.Bounds : new Bounds(Vector3.zero, Vector3.one);
         public float ModelRadius => Mathf.Max(0.0001f, Bounds.extents.magnitude);
@@ -59,16 +61,16 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public SurfaceBrushBudget BrushBudget { get; } = new SurfaceBrushBudget();
         public bool LitPreview { get; set; } = true;
 
-        public PreviewLoadReport Load(GameObject source)
+        public PreviewLoadReport Load(GameObject source, PreviewLoadOptions options = null)
         {
             ThrowIfDisposed();
-            ClearModel(); revision++; report = new PreviewLoadReport();
+            ClearModel(); revision++; report = new PreviewLoadReport(); loadOptions = options ?? new PreviewLoadOptions();
             if (source == null) { report.Diagnostics.Add("Choose a model GameObject or Prefab to load."); return report; }
             EnsurePreview();
             var shader = Shader.Find("Hidden/YoluPainter/PreviewSurface");
             if (shader == null) { report.Diagnostics.Add("The package's neutral preview shader could not be loaded."); return report; }
             bool incomplete = false;
-            Vector3 origin = source.transform.position;
+            Vector3 origin = loadOptions.Origin ?? source.transform.position;
             loadOrigin = origin;
             foreach (var unsupportedRenderer in source.GetComponentsInChildren<Renderer>(true))
             {
@@ -157,12 +159,15 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 var renderer = go.AddComponent<MeshRenderer>(); renderer.sharedMaterial = material;
                 renderer.shadowCastingMode = ShadowCastingMode.Off; renderer.receiveShadows = false;
                 renderer.lightProbeUsage = LightProbeUsage.Off; renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
-                var triangles = new List<SurfaceTriangle>();
+                var triangles = new List<SurfaceTriangle>(); var attribute = new SurfaceAttributes.Builder();
+                var demoNormals = mesh.normals; var demoTangents = mesh.tangents;
                 for (int i = 0; i < indices.Count; i += 3)
                 {
                     int a = indices[i], b = indices[i + 1], c = indices[i + 2];
                     triangles.Add(new SurfaceTriangle(vertices[a], vertices[b], vertices[c], uvs[a], uvs[b], uvs[c]));
+                    attribute.Add(demoNormals, demoTangents, null, a, b, c);
                 }
+                attributes = attribute.Build(new[] { "Seam cube" });
                 geometry = new SurfaceGeometry(triangles, revision);
                 report.LoadedRendererCount = 1; report.TriangleCount = geometry.TriangleCount; report.CanPaint = true;
                 report.Diagnostics.Add("Demo: a tool-owned cube with six separate UV islands. Paint across a visible cube edge to check seam propagation, then orbit to check that hidden faces stayed unchanged. No source object or asset is created.");
@@ -183,6 +188,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
             public int[] Slots; public int[][] Indices; public Vector2[] Uv; public bool HasUv, Mirrored;
             /// <summary>読み込みの原点を引いたワールド座標。</summary>
             public Vector3[] Vertices;
+            /// <summary>表示のメッシュの法線・接線（w 込み）・頂点カラー（無ければ長さ 0）。</summary>
+            public Vector3[] Normals; public Vector4[] Tangents; public Color[] Colors;
             public SkinnedSnapshot Skin;
         }
         readonly List<SnapshotEntry> entries = new List<SnapshotEntry>();
@@ -195,16 +202,16 @@ namespace Yozolab.YoluPainter.Editor.Preview
         {
             if (!input.isReadable)
             { incomplete = true; report.Diagnostics.Add(renderer.name + ": mesh is not CPU-readable. Import settings were not changed."); return false; }
-            if (input.vertexCount > MaximumVerticesPerMesh)
-            { incomplete = true; report.Diagnostics.Add(renderer.name + ": exceeds the prototype vertex budget (250,000 per mesh)."); return false; }
+            if (input.vertexCount > loadOptions.MaxVerticesPerMesh)
+            { incomplete = true; report.Diagnostics.Add(renderer.name + ": exceeds the vertex budget (" + loadOptions.MaxVerticesPerMesh.ToString("N0") + " per mesh)."); return false; }
             long inputTriangles = 0; bool unsupported = false;
             for (int sub = 0; sub < input.subMeshCount; sub++)
             {
                 if (input.GetTopology(sub) != MeshTopology.Triangles) { unsupported = true; break; }
                 inputTriangles += (long)input.GetIndexCount(sub) / 3;
             }
-            if (unsupported || triangleTotal + inputTriangles > MaximumTriangles)
-            { incomplete = true; report.Diagnostics.Add(renderer.name + ": unsupported topology or prototype total triangle budget (150,000)."); return false; }
+            if (unsupported || triangleTotal + inputTriangles > loadOptions.MaxTriangles)
+            { incomplete = true; report.Diagnostics.Add(renderer.name + ": unsupported topology or total triangle budget (" + loadOptions.MaxTriangles.ToString("N0") + ")."); return false; }
             triangleTotal += inputTriangles;
             return true;
         }
@@ -286,6 +293,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 if (normals.Length != vertices.Length) mesh.RecalculateNormals();
                 if (hasUv && tangents.Length != vertices.Length) mesh.RecalculateTangents(); // ノーマルマップの表示に要る
                 mesh.RecalculateBounds();
+                entry.Normals = mesh.normals; entry.Tangents = mesh.tangents; entry.Colors = mesh.colors;
                 var go = new GameObject(renderer.name + " (isolated paint preview)") { hideFlags = HideFlags.HideAndDontSave };
                 objects.Add(go); preview.AddSingleGO(go);
                 go.AddComponent<MeshFilter>().sharedMesh = mesh;
@@ -402,6 +410,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 else e.Display.RecalculateNormals();
                 if (e.HasUv) e.Display.RecalculateTangents();
                 e.Display.RecalculateBounds();
+                e.Normals = e.Display.normals; e.Tangents = e.Display.tangents;
             }
             revision++;
             geometry = new SurfaceGeometry(BuildTriangles(), revision);
@@ -411,7 +420,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>全レンダラーの今の頂点から、当たり判定と面の描画に使う三角形を作る（面積 0 の三角形は除く）。</summary>
         List<SurfaceTriangle> BuildTriangles()
         {
-            var triangles = new List<SurfaceTriangle>();
+            var triangles = new List<SurfaceTriangle>(); var attribute = new SurfaceAttributes.Builder(); var names = new List<string>();
+            foreach (var e in entries) names.Add(e.Name);
             foreach (var e in entries)
                 for (int sub = 0; sub < e.Indices.Length; sub++)
                 {
@@ -423,8 +433,10 @@ namespace Yozolab.YoluPainter.Editor.Preview
                         triangles.Add(new SurfaceTriangle(vertices[a], vertices[b], vertices[c],
                             e.HasUv ? e.Uv[a] : Vector2.zero, e.HasUv ? e.Uv[b] : Vector2.zero, e.HasUv ? e.Uv[c] : Vector2.zero,
                             e.RendererIndex, e.Slots[sub]));
+                        attribute.Add(e.Normals, e.HasUv ? e.Tangents : null, e.Colors, a, b, c);
                     }
                 }
+            attributes = attribute.Build(names);
             return triangles;
         }
 
@@ -608,7 +620,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         }
         void ClearModel()
         {
-            CancelNavigation(); geometry = null;
+            CancelNavigation(); geometry = null; attributes = null;
             foreach (var e in entries) e.Skin?.Dispose();
             entries.Clear();
             skeleton?.Dispose(); skeleton = null; humanAvatar = null; humanRoot = null;

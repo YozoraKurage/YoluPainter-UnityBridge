@@ -350,7 +350,7 @@ namespace Yozolab.YoluPainter.Tests
             Rejects(good.Take(good.Length / 2).ToArray());
             Rejects(good.Concat(new byte[] { 0 }).ToArray(), "trailing");
             Rejects(Damaged(b => BitConverter.GetBytes(MeshMapBinary.FormatVersion + 1).CopyTo(b, 8)), "newer");
-            const int widthAt = 8 + 4 + 4 + 4 + (4 + 64) + (4 + 64) + 4, heightAt = widthAt + 4, channelsAt = heightAt + 12;
+            const int widthAt = 8 + 4 + 4 + 4 + (4 + 64) + (4 + 64) + 4, heightAt = widthAt + 4, channelsAt = heightAt + 16; // スロット・余白・アンチエイリアス（版 2）
             Assert.That(BitConverter.ToInt32(good, widthAt), Is.EqualTo(64)); Assert.That(BitConverter.ToInt32(good, heightAt), Is.EqualTo(48));
             Rejects(Damaged(b => BitConverter.GetBytes(100000).CopyTo(b, widthAt)), "out of range");
             Rejects(Damaged(b => BitConverter.GetBytes(47).CopyTo(b, heightAt)), "expands beyond");
@@ -500,34 +500,48 @@ namespace Yozolab.YoluPainter.Tests
         internal static (float[] corners, float[] uvs, int[] slots) TestSphere(int rings, int segments, float radius) => Sphere(rings, segments, radius);
     }
 
-    /// <summary>計測（明示して走らせる: --filter 'Yozolab.YoluPainter.Tests.MeshMapTimings'）: デモのキューブと約 2 万三角形の球を、
-    /// 全マップ・既定の設定で 1024² と 2048² に 3 回ずつ焼き、中央値をログに出す。</summary>
-    [Explicit("Timing measurement; run explicitly")]
+    /// <summary>計測（明示して走らせる。1 件ずつ: --filter 'Yozolab.YoluPainter.Tests.MeshMapTimings.MeasureBakeTimes\("sphere",1024\)' など）:
+    /// デモのキューブと約 2 万三角形の球を、全マップでない既定の 5 種類・既定の設定で焼き、CPU は 3 回の中央値、GPU は 1 回の慣らしの後の
+    /// 3 回の中央値と、いちばん長かった 1 回の Dispatch の時間をログに出す。</summary>
+    [Explicit("Timing measurement; run one case at a time")]
     public sealed class MeshMapTimings
     {
         [SetUp] public void TolerateBrokenShaderCompiler() { EditorShaderCompiler.TolerateErrorLogsIfBroken(); }
 
-        [Test] public void MeasureBakeTimes()
+        [TestCase("cube", 1024)]
+        [TestCase("cube", 2048)]
+        [TestCase("sphere", 1024)]
+        [TestCase("sphere", 2048)]
+        public void MeasureBakeTimes(string mesh, int size)
         {
-            MeshBakeInput cube;
-            using (var preview = new IsolatedModelPreview()) { preview.LoadDemoMesh(); cube = TexturePaintWindow.BuildMeshBakeInput(preview.Geometry); }
-            var s = MeshMapTests.TestSphere(100, 100, 0.5f);
-            var sphere = new MeshBakeInput(s.corners, MeshBakeInput.ReconstructNormals(s.corners), s.uvs, s.slots, 0, "reconstructed-crease-60");
-            var lines = new List<string> { "CPU threads " + Environment.ProcessorCount + ", sphere triangles " + sphere.TriangleCount };
-            foreach (var (name, input) in new[] { ("demo cube", cube), ("sphere", sphere) })
-                foreach (int size in new[] { 1024, 2048 })
+            MeshBakeInput input;
+            if (mesh == "cube") { using (var preview = new IsolatedModelPreview()) { preview.LoadDemoMesh(); input = TexturePaintWindow.BuildMeshBakeInput(preview.Geometry, preview.Attributes); } }
+            else { var s = MeshMapTests.TestSphere(100, 100, 0.5f); input = new MeshBakeInput(s.corners, MeshBakeInput.ReconstructNormals(s.corners), s.uvs, s.slots, 0, "reconstructed-crease-60"); }
+            var settings = new MeshBakeSettings { Width = size, Height = size };
+            var budget = new MeshBakeBudget { MaxBytes = 1024L << 20 };
+            var lines = new List<string> { "CPU threads " + Environment.ProcessorCount + ", " + mesh + " (" + input.TriangleCount + " triangles) " + size + "², maps " + string.Join(",", settings.Maps) };
+            string Median(List<double> times) { times.Sort(); return times[times.Count / 2].ToString("F2") + " s (runs " + string.Join(", ", times.Select(t => t.ToString("F2"))) + ")"; }
+            var cpu = new List<double>(); MeshBakeReport report = null;
+            for (int run = 0; run < 3; run++)
+            {
+                var result = MeshBaker.Bake(input, settings, budget);
+                Assert.That(result.Status, Is.EqualTo(MeshBakeStatus.Completed)); cpu.Add(result.Report.TotalSeconds); report = result.Report;
+            }
+            lines.Add("CPU: median " + Median(cpu) + ", prepare " + report.PrepareSeconds.ToString("F2") + " s, rays " + report.Rays + " (" + (report.Rays / report.RasterSeconds / 1e6).ToString("F1") + " M/s), estimate " + (report.EstimatedBytes >> 20) + " MiB");
+            string why = SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null ? "no graphics device" : GpuMeshBakeRayTracer.Unavailable();
+            if (why == null)
+            {
+                var gpu = new List<double>(); double longest = 0; int dispatches = 0;
+                for (int run = 0; run < 4; run++)
                 {
-                    var times = new List<double>(); MeshBakeReport report = null;
-                    for (int run = 0; run < 3; run++)
-                    {
-                        var result = MeshBaker.Bake(input, new MeshBakeSettings { Width = size, Height = size }, new MeshBakeBudget { MaxBytes = 2048L << 20 });
-                        Assert.That(result.Status, Is.EqualTo(MeshBakeStatus.Completed));
-                        times.Add(result.Report.TotalSeconds); report = result.Report;
-                    }
-                    times.Sort();
-                    lines.Add(name + " " + size + "²: median " + times[1].ToString("F2") + " s (runs " + string.Join(", ", times.Select(t => t.ToString("F2"))) + "), prepare " + report.PrepareSeconds.ToString("F2")
-                        + " s, rays " + report.Rays + " (" + (report.Rays / report.RasterSeconds / 1e6).ToString("F1") + " M/s), padding " + report.PaddingSeconds.ToString("F2") + " s, estimate " + (report.EstimatedBytes >> 20) + " MiB");
+                    var tracer = new GpuMeshBakeRayTracer(512L << 20);
+                    var result = MeshBaker.Bake(input, settings, budget, null, default, null, tracer);
+                    Assert.That(result.Status, Is.EqualTo(MeshBakeStatus.Completed)); Assert.That(result.Report.RayBackend, Does.StartWith("GPU"));
+                    if (run > 0) { gpu.Add(result.Report.TotalSeconds); longest = Math.Max(longest, tracer.MaxDispatchMilliseconds); dispatches = tracer.Dispatches; report = result.Report; }
                 }
+                lines.Add("GPU: median " + Median(gpu) + " (after one warm-up run), " + dispatches + " dispatches per bake, longest dispatch+readback " + longest.ToString("F1") + " ms, estimate " + (report.EstimatedBytes >> 20) + " MiB, " + report.RayBackend);
+            }
+            else lines.Add("GPU: unavailable (" + why + ")");
             Debug.Log("Mesh-map bake timings:\n" + string.Join("\n", lines));
             TestContext.WriteLine(string.Join("\n", lines));
         }

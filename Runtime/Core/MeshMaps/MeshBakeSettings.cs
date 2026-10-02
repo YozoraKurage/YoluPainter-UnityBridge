@@ -19,7 +19,22 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         Curvature = 3,
         /// <summary>厚み。内向きのレイが反対側に届くまでの平均距離 ÷ 最大距離。0 = 薄い、1 = 最大距離以上（または抜けた）。</summary>
         Thickness = 4,
+        /// <summary>接空間の法線（OpenGL の向き、Y+）。高ポリの法線を低ポリの接線・従法線・法線（Unity がノーマルマップを読むのと同じ
+        /// 頂点の接線と w）で表したもの。高ポリが無い・当たらない所は平ら (0.5, 0.5, 1)。</summary>
+        TangentNormal = 5,
+        /// <summary>高さ。低ポリの面から高ポリの面までの、投影の向きに沿った符号付き距離（外が +）を、前後のレイの長さの大きい方で
+        /// 割って 0.5 ± 0.5 にしたもの。高ポリが無い・当たらない所は 0.5。</summary>
+        Height = 6,
+        /// <summary>ID。マテリアルスロット・メッシュ（レンダラー）・頂点カラー・UV アイランドごとの決まった色。</summary>
+        Id = 7,
+        /// <summary>ベントノーマル。AO のレイのうち遮られなかった向きの平均（ワールド）。全部遮られたら面の法線。</summary>
+        BentNormal = 8,
+        /// <summary>不透明度。高ポリに当たった所が 1、当たらない所が 0。高ポリが無ければ覆う所は 1。</summary>
+        Opacity = 9,
     }
+
+    /// <summary>ID の色の元。値は保存形式（設定の文字列）に入るので、並べ替えない。</summary>
+    public enum MeshIdSource { MaterialSlot = 0, Mesh = 1, VertexColor = 2, UvIsland = 3 }
 
     /// <summary>テクセルの由来。Empty は三角形も余白も届かない所で、値は 0（データを作らない）。Overlap は UV が
     /// 別の三角形とも重なっていた所（添字の小さい三角形の値を持つ）。Padding は島の外の余白で、いちばん近い島のテクセルの写し。</summary>
@@ -37,14 +52,23 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
     {
         public const int MaxSize = 8192, MaxPadding = 64, MaxSamples = 1024;
         public const double MinCurvatureRadius = 0.001, MaxCurvatureRadius = 0.5, MaxDistance = 4;
-        public static readonly IReadOnlyList<MeshMapKind> AllKinds = new[] { MeshMapKind.WorldNormal, MeshMapKind.Position, MeshMapKind.AmbientOcclusion, MeshMapKind.Curvature, MeshMapKind.Thickness };
+        public const int MaxAntialiasing = 4;
+        public static readonly IReadOnlyList<MeshMapKind> AllKinds = new[]
+        {
+            MeshMapKind.WorldNormal, MeshMapKind.Position, MeshMapKind.AmbientOcclusion, MeshMapKind.Curvature, MeshMapKind.Thickness,
+            MeshMapKind.TangentNormal, MeshMapKind.Height, MeshMapKind.Id, MeshMapKind.BentNormal, MeshMapKind.Opacity,
+        };
+        /// <summary>既定で焼く種類（高ポリが無くても意味のあるもの）。</summary>
+        public static readonly IReadOnlyList<MeshMapKind> DefaultKinds = new[] { MeshMapKind.WorldNormal, MeshMapKind.Position, MeshMapKind.AmbientOcclusion, MeshMapKind.Curvature, MeshMapKind.Thickness };
 
         public int Width = 1024, Height = 1024;
         /// <summary>焼き込む三角形のマテリアルスロット（全体を平らにした番号）。-1 ならすべてのスロット。</summary>
         public int TargetSlot;
         /// <summary>島の外へ値を延ばす幅（テクセル）。隣の島の本体には書かない。</summary>
         public int Padding = 16;
-        public MeshMapKind[] Maps = AllKinds.ToArray();
+        public MeshMapKind[] Maps = DefaultKinds.ToArray();
+        /// <summary>テクセルあたり n×n のサブサンプル（1〜4）。値は覆うサブサンプルの平均（法線は正規化し直す、ID は多数決）。</summary>
+        public int Antialiasing = 1;
         public MeshOccluders Occluders = MeshOccluders.WholeModel;
         public int AoSamples = 64;
         public double AoMaxDistance = 0.1, AoSpreadDegrees = 180;
@@ -55,6 +79,13 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         public double ThicknessMaxDistance = 0.1, ThicknessSpreadDegrees = 90;
         /// <summary>曲率を集める球の半径。</summary>
         public double CurvatureRadius = 0.02;
+        public MeshIdSource IdSource = MeshIdSource.MaterialSlot;
+        /// <summary>高ポリへの投影: 低ポリの点から外へ ReferenceFrontal だけ出た所から、内へ Frontal + Rear の範囲で最初に当たる高ポリの面。</summary>
+        public double ReferenceFrontal = 0.01, ReferenceRear = 0.01;
+        /// <summary>投影の向きに、位置で溶接した全部の面の平均の法線（ハードエッジでも割れない「ケージ」）を使う。false なら頂点法線。</summary>
+        public bool ReferenceAverageNormals = true;
+        /// <summary>名前で対応づける: 低ポリの "x_low" は高ポリの "x_high"（と "x"）にだけ投影する。</summary>
+        public bool ReferenceMatchByName;
 
         public MeshBakeSettings Clone()
         {
@@ -80,6 +111,9 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             CheckDistance(AoMaxDistance, nameof(AoMaxDistance)); CheckDistance(ThicknessMaxDistance, nameof(ThicknessMaxDistance));
             CheckSpread(AoSpreadDegrees, nameof(AoSpreadDegrees)); CheckSpread(ThicknessSpreadDegrees, nameof(ThicknessSpreadDegrees));
             if (!(CurvatureRadius >= MinCurvatureRadius && CurvatureRadius <= MaxCurvatureRadius)) throw new ArgumentOutOfRangeException(nameof(CurvatureRadius), "Curvature radius must be " + MinCurvatureRadius + "–" + MaxCurvatureRadius + " of the model's bounding-box diagonal.");
+            if (Antialiasing < 1 || Antialiasing > MaxAntialiasing) throw new ArgumentOutOfRangeException(nameof(Antialiasing), "Antialiasing must be 1–" + MaxAntialiasing + " subsamples per side.");
+            if (!Enum.IsDefined(typeof(MeshIdSource), IdSource)) throw new ArgumentOutOfRangeException(nameof(IdSource));
+            CheckDistance(ReferenceFrontal, nameof(ReferenceFrontal)); CheckDistance(ReferenceRear, nameof(ReferenceRear));
         }
         static void CheckSamples(int value, string name) { if (value < 1 || value > MaxSamples) throw new ArgumentOutOfRangeException(name, "Samples must be 1–" + MaxSamples + "."); }
         static void CheckDistance(double value, string name) { if (!(value > 0 && value <= MaxDistance)) throw new ArgumentOutOfRangeException(name, "Distances are relative to the bounding-box diagonal and must be in (0, " + MaxDistance + "]."); }
@@ -101,7 +135,38 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                 case MeshMapKind.Curvature: return "radius=" + R(CurvatureRadius);
                 case MeshMapKind.Thickness:
                     return "samples=" + ThicknessSamples + ";max=" + R(ThicknessMaxDistance) + ";spread=" + R(ThicknessSpreadDegrees) + ";occluders=" + Occluders;
+                case MeshMapKind.TangentNormal: return "frame=unity-vertex-tangents;y=up";
+                case MeshMapKind.Height: return "normalize=max-ray-distance";
+                case MeshMapKind.Id: return "source=" + IdSource;
+                case MeshMapKind.BentNormal:
+                    return "samples=" + AoSamples + ";max=" + R(AoMaxDistance) + ";spread=" + R(AoSpreadDegrees) + ";backfaces=" + (AoIgnoreBackfaces ? "ignore" : "occlude") + ";occluders=" + Occluders;
+                case MeshMapKind.Opacity: return "hit=reference";
                 default: throw new ArgumentOutOfRangeException(nameof(kind));
+            }
+        }
+
+        /// <summary>焼く元の文字列（由来に記録する）。高ポリが無ければ "Self"。有れば高ポリの指紋と投影の設定。高ポリかその設定が
+        /// 変われば、全部の種類のマップが古くなる。</summary>
+        public string SourceKey(string referenceHash)
+        {
+            if (string.IsNullOrEmpty(referenceHash)) return MeshBaker.Source;
+            return "Reference:" + referenceHash + ";frontal=" + R(ReferenceFrontal) + ";rear=" + R(ReferenceRear) + ";cage=" + (ReferenceAverageNormals ? "average" : "vertex") + ";match=" + (ReferenceMatchByName ? "name" : "all");
+        }
+        /// <summary>保存したマップの焼く元の文字列から投影の設定を戻す（UI 用）。</summary>
+        public void ApplySourceKey(string source)
+        {
+            if (string.IsNullOrEmpty(source) || !source.StartsWith("Reference:", StringComparison.Ordinal)) return;
+            foreach (var part in source.Split(';'))
+            {
+                int eq = part.IndexOf('='); if (eq <= 0) continue;
+                string name = part.Substring(0, eq), value = part.Substring(eq + 1);
+                switch (name)
+                {
+                    case "frontal": if (TryDouble(value, out double f) && f > 0 && f <= MaxDistance) ReferenceFrontal = f; break;
+                    case "rear": if (TryDouble(value, out double r) && r > 0 && r <= MaxDistance) ReferenceRear = r; break;
+                    case "cage": if (value == "average" || value == "vertex") ReferenceAverageNormals = value == "average"; break;
+                    case "match": if (value == "name" || value == "all") ReferenceMatchByName = value == "name"; break;
+                }
             }
         }
 
@@ -114,7 +179,8 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             {
                 int eq = part.IndexOf('='); if (eq <= 0) continue;
                 string name = part.Substring(0, eq), value = part.Substring(eq + 1);
-                bool ao = kind == MeshMapKind.AmbientOcclusion, thick = kind == MeshMapKind.Thickness;
+                if (kind == MeshMapKind.Id && name == "source") { if (Enum.TryParse(value, false, out MeshIdSource id) && Enum.IsDefined(typeof(MeshIdSource), id)) IdSource = id; continue; }
+                bool ao = kind == MeshMapKind.AmbientOcclusion || kind == MeshMapKind.BentNormal, thick = kind == MeshMapKind.Thickness;
                 if (!ao && !thick && !(kind == MeshMapKind.Curvature && name == "radius")) continue;
                 switch (name)
                 {
@@ -154,6 +220,11 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
     public sealed class MeshBakeReport
     {
         public long CoveredTexels, OverlapTexels, PaddedTexels, EmptyTexels, Rays, EstimatedBytes;
+        /// <summary>高ポリへの投影を試したサブサンプルの数と、高ポリに当たらず低ポリで焼いた数。</summary>
+        public long ProjectedSamples, MissedSamples;
+        public int ReferenceTriangles;
+        /// <summary>AO・ベントノーマル・厚みのレイを処理したもの（"CPU" か GPU の名前）。</summary>
+        public string RayBackend = "CPU";
         public int ReceivingTriangles, ZeroUvAreaTriangles, DegenerateTriangles, OccluderTriangles;
         public int BoundaryEdges, NonManifoldEdges, InconsistentWindingEdges, CurvatureSegments;
         public double PrepareSeconds, RasterSeconds, PaddingSeconds, TotalSeconds;
@@ -185,6 +256,8 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
     public sealed class MeshMapExpectation
     {
         public string MeshHash, TopologyHash;
+        /// <summary>高ポリの指紋。高ポリを使わないなら null。</summary>
+        public string ReferenceHash;
         public int Width, Height, TargetSlot, UvChannel;
         public MeshBakeSettings Settings;
     }
