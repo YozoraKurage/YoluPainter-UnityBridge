@@ -22,15 +22,17 @@
 |---|---|---|
 | パッケージの取り込みと C# コンパイル（Core / Editor / Tests の 3 アセンブリ） | **成功、警告 0** | 引き継ぎ時のコードは無修正でコンパイルが通った |
 | シェーダーのコンパイル（PreviewSurface / TileComposite / OrderedBrush） | **成功**（batch-gl） | GUI モードの devcontainer では環境の問題で失敗する（下の「環境の既知の問題」） |
-| EditMode テスト全 114 件 | **全件実行・失敗 0** | RTX 3070 / OpenGL 4.6 で batch-gl 102 成功 / 12 スキップ（ウィンドウ）、GUI 109 成功 / 5 スキップ（GPU）。どの 1 件もどちらかのモードで実行されて通っている。llvmpipe でも同じく失敗 0 |
+| EditMode テスト全 147 件 | **全件実行・失敗 0** | RTX 3070 / OpenGL 4.6 で batch-gl 123 成功 / 24 スキップ（ウィンドウ）、GUI 142 成功 / 5 スキップ（GPU）。どの 1 件もどちらかのモードで実行されて通っている。114 件の時点では llvmpipe でも失敗 0 |
 | 　CoreTests | 31/31 | 引き継ぎ時のテスト |
 | 　PsdTests | 28/28 | 引き継ぎ時のテスト（500 件の変異入力を含む） |
 | 　IntegrationTests | 8/8 | 引き継ぎ時の .NET ハーネス（CoreHarness）から移植。保存の 4 つの中断点、current 置換後の応答喪失、古いトークンの拒否、改変検出、PSD 往復。実ファイルシステムに書く |
 | 　GeometryTests | 22/22 | 純幾何 19 件 + Unity 専用のプレビュー 3 件（引き継ぎ時は未実行だった） |
-| 　ChangeTrackingTests | 7/7 | 新規。変更追跡、CopyTile、タイル単位 CPU 合成と 1 画素ずつの参照実装のバイト一致 |
-| 　CompositorTests | 1/1 | 新規。CPU 経路の差分更新が各段階で参照と一致 |
-| 　GpuTests | 5/5（batch-gl） | 新規。下の GPU 整合。CopyTexture 経路と、CopyTexture の無い環境向けの描き込み経路の両方 |
-| 　WindowTests | 12/12（GUI） | 新規。下のウィンドウ操作 |
+| 　ChangeTrackingTests | 7/7 | 新規。変更追跡（構造変更はそのレイヤーのタイルだけ）、CopyTile、タイル単位 CPU 合成と 1 画素ずつの参照実装のバイト一致 |
+| 　MaskTests | 11/11 | 新規。隠す・濃度・反転・無効、Undo、予算、変更追跡、参照一致、版 2 往復・版 1 読み込み、PSD 投影の拒否 |
+| 　FillTests | 10/10 | 新規。全面・無確保、端の余白、反転マスク、描画拒否、Undo と変更追跡、参照一致、版 3 往復・版 2 読み込み、PSD 投影の拒否 |
+| 　CompositorTests | 1/1 | 新規。CPU 経路の差分更新が各段階（マスク・Fill を含む）で参照と一致 |
+| 　GpuTests | 5/5（batch-gl） | 新規。下の GPU 整合。CopyTexture 経路と、CopyTexture の無い環境向けの描き込み経路の両方。マスク・Fill を含むシナリオ |
+| 　WindowTests | 24/24（GUI） | 新規。下のウィンドウ操作、保存まわり 10 件（ダイアログを差し替えて Save As・Ctrl+S・Open・外部改変時の拒否・確認付きネイティブ保存・PSD 取り込みと保護・PNG 書き出し・復旧 checkpoint）、マスク描画、Fill はマスク経由でだけ塗れる |
 | GPU ブラシ整合（OrderedBrush のダブ vs CPU ブラシ、32px） | **最大誤差 0、平均 0** | RTX 3070（d3d12）と llvmpipe の両方。メニューの整合プローブと同じ計測をテスト化 |
 | GPU タイル合成 vs CPU 参照合成 | **最大誤差 1 以内**（RGBA8 の丸め 1 段） | Normal / Multiply / Screen、不透明度、非表示、無効チャンネル、透明画素の RGB、部分タイル、差分更新の各段階。RTX 3070 で CopyTexture 経路・描き込み経路とも、llvmpipe で CopyTexture 経路 |
 | ウィンドウ操作（SendEvent で実際の IMGUI 経路に入力） | 12/12 | 点の位置（左下原点）、Ctrl+Z / Ctrl+Shift+Z のバイト一致、Escape・フォーカス喪失・リロード前・Play 移行での取消、ウィンドウ外で離しても確定、筆圧 0 で塗らない、デモキューブの 3D 描画、2 ウィンドウの独立、閉じたあと RenderTexture / Mesh / Material が元の数に戻る |
@@ -74,7 +76,7 @@ RTX 3070 の 1024px・CopyTexture は計測の最初に走り、シェーダー�
 - **D3D11 / Vulkan / Metal**。実 GPU（RTX 3070）は通ったが、Linux 版 Unity なので API は OpenGL（Mesa d3d12 で D3D12 に変換）。D3D11 固有の差（シェーダー変換経路・RT の上下・精度）はユーザーの Windows の Unity での確認が必要
 - 実ペンタブ（筆圧の値の質、ペンとマウスの重複、ボタン）、HiDPI、複数モニタ、入力から表示までの遅延
 - 実際のドメインリロードと Play モード切替の最中の挙動（テストは通知メソッドを直接呼んで代用）
-- ウィンドウの Save / Save As / Open / Import PSD / Export PNG（ファイル選択ダイアログがあるため未自動化。保存処理そのものは IntegrationTests で実ファイルシステムに対して検証済み）
+- 実際の OS のファイル選択ダイアログ（ウィンドウの保存まわりはダイアログを差し替えて自動テスト済み）
 - Photoshop / CLIP STUDIO PAINT での往復、16/32bit・ICC、ネイティブ調整・スマートオブジェクト・テキスト
 - 4K の実メモリ（RSS・VRAM）、ディスク退避、低メモリ時の挙動
 - 電源断・fsync、Windows のファイルロック、ディスク満杯、権限エラー
