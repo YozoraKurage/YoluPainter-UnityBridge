@@ -1,4 +1,5 @@
 # Japanese translation for YoluPainter: Properties ▸ layer and channel sections (layer, layer mask, filters, Normal, mesh maps, pose).
+# メッシュマップの設定の語はベイクの窓（bake.po）でも使う。窓だけの語は bake.po に置く。
 # 一般的な語（半径・強さなど）は msgctxt で場面を分ける（ほかの画面の表と同じキーにしないため）。
 msgid ""
 msgstr ""
@@ -348,10 +349,6 @@ msgstr "ID"
 msgctxt "mesh map"
 msgid "Bent normal"
 msgstr "ベントノーマル"
-
-msgctxt "mesh map"
-msgid "Common"
-msgstr "共通"
 
 msgctxt "mesh map"
 msgid "Padding"

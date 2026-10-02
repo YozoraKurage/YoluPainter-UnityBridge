@@ -26,7 +26,7 @@ namespace Yozolab.YoluPainter.Tests
         static readonly string[] Files =
         {
             "Window/Layers/TexturePaintWindow.LayerPanels.cs", "Window/Layers/TexturePaintWindow.Filters.cs", "Window/Layers/TexturePaintWindow.Normal.cs",
-            "Window/Model/TexturePaintWindow.MeshMaps.cs", "Window/Model/TexturePaintWindow.Pose.cs", "UI/PaintGui.Layers.cs",
+            "Window/Model/TexturePaintWindow.MeshMaps.cs", "Window/Model/TexturePaintWindow.MeshBake.cs", "Window/Model/MeshBakeWindow.cs", "Window/Model/TexturePaintWindow.Pose.cs", "UI/PaintGui.Layers.cs",
         };
         static readonly Regex Standard = new Regex(@"\bLegacySection\s*\(|\bEditorGUILayout\.|\bGUILayout\.|\bEditorGUI\.|\bEditorStyles\.", RegexOptions.Compiled);
         static readonly string[] Sections = { "layer", "mask", "filters", "normal", "mesh-maps", "pose" };
@@ -167,7 +167,7 @@ namespace Yozolab.YoluPainter.Tests
             var w = ScriptableObject.CreateInstance<TexturePaintWindow>();
             try
             {
-                Assert.That(w.ShowMeshMapPanel, Is.False, "the mesh-map panel is long and starts closed (as before)");
+                Assert.That(w.ShowMeshMapPanel, Is.False, "the mesh-map panel starts closed (as before)");
                 w.ShowMeshMapPanel = true;
                 var open = (Dictionary<string, bool>)typeof(TexturePaintWindow).GetField("sectionOpen", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(w);
                 Assert.That(open["mesh-maps"], Is.True);
@@ -180,7 +180,7 @@ namespace Yozolab.YoluPainter.Tests
         // ───────── 状態 ─────────
 
         /// <summary>描く状態: 画素のレイヤー（マスク・フィルターの各種の設定を開く）、塗りつぶし（色・スカラー・値なし）、調整の 3 種類（効かない
-        /// チャンネルも）、グループ（通過・分離）、ノーマルとハイトのチャンネル、メッシュマップ（ベイク前・全種類・高ポリ・ベイク済み・古い）、ポーズ。</summary>
+        /// チャンネルも）、グループ（通過・分離）、ノーマルとハイトのチャンネル、メッシュマップ（ベイク前・ベイク中・ベイク済み・古い）、ポーズ。</summary>
         static IEnumerable<(string, Action)> States(TexturePaintWindow w, List<Object> made)
         {
             var d = w.Document; PaintLayer raster = null, plain = null; FilterEffect blur = null, sharpen = null, noise = null, maskLevels = null;
@@ -214,18 +214,17 @@ namespace Yozolab.YoluPainter.Tests
             yield return ("normal", () => { w.SelectedLayer = raster.Id; w.Channel = PaintChannel.Normal; d.SetLayerBlendMode(raster.Id, LayerBlendMode.Multiply); });
             yield return ("normal-adjustment", () => w.SelectedLayer = d.Layers.First(l => l.Kind == LayerKind.Adjustment).Id);
             yield return ("height", () => { w.SelectedLayer = raster.Id; w.Channel = PaintChannel.Height; d.SetNormalSettings(d.NormalSettings.WithDerive(true)); });
+            // メッシュマップの区画: ベイクの窓を開く口と、焼いたマップの一覧だけ（焼くマップと設定は窓。MeshBakeWindowTests）
             yield return ("mesh-maps", () => { w.Channel = PaintChannel.Color; w.SelectedLayer = plain.Id; });
-            yield return ("mesh-maps-all-kinds", () => w.MeshBakeSettings.Maps = MeshBakeSettings.AllKinds.ToArray());
-            yield return ("mesh-maps-high-poly", () =>
+            yield return ("mesh-maps-baking", () =>
             {
-                var material = new Material(Shader.Find("Hidden/YoluPainter/PreviewSurface")); made.Add(material);
-                var high = new GameObject("High cube"); made.Add(high); high.transform.localScale = Vector3.one * 1.02f;
-                high.AddComponent<MeshFilter>().sharedMesh = Resources.GetBuiltinResource<Mesh>("Cube.fbx"); high.AddComponent<MeshRenderer>().sharedMaterial = material;
-                w.HighPolyModel = high;
+                w.MeshBakeSettings.Maps = MeshBakeSettings.AllKinds.ToArray(); w.MeshBakeSettings.AoSamples = 512; w.MeshBakeUseGpu = false;
+                Assert.That(w.StartMeshBake(), Is.Null, w.StatusMessage);
+                w.PumpMeshBake(1); // 進み具合と取消の行
             });
             yield return ("mesh-maps-baked", () =>
             {
-                w.HighPolyModel = null;
+                w.CancelMeshBake(); while (w.PumpMeshBake(20)) System.Threading.Thread.Sleep(2);
                 w.MeshBakeSettings.Maps = new[] { MeshMapKind.WorldNormal, MeshMapKind.Position }; // レイを使わない種類（速い）
                 w.MeshBakeProgress = (title, info, progress) => false;
                 Assert.That(w.BakeMeshMaps(), Is.EqualTo(MeshBakeStatus.Completed), w.StatusMessage);

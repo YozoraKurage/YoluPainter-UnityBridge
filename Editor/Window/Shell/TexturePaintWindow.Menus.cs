@@ -139,6 +139,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             Item(m, "Choose Model…", () => EditorGUIUtility.ShowObjectPicker<GameObject>(model, false, "t:Model t:Prefab", ModelPickerId));
             Item(m, "Demo Cube", LoadDemoCube);
+            Item(m, "Bake Mesh Maps…", () => OpenMeshBakeWindow());
             m.AddSeparator("");
             Item(m, "Light with Normal Output", () => PreviewNormals = !previewNormals, true, previewNormals);
         }

@@ -14,7 +14,7 @@ namespace Yozolab.YoluPainter.Tests
 {
     /// <summary>描画ウィンドウのプロパティの欄（レイヤー・レイヤーマスク・フィルター・ノーマル・メッシュマップ・ポーズ）を、本物のマウスの入力
     /// （SendEvent）で操作する: マスクに描く・濃度のドラッグが 1 回の Undo・反転・削除、フィルターの無効・選択・強さのドラッグ・並べ替え・削除、
-    /// Height → Normal と強さのドラッグ、平らな値、ベイクするマップの選択と、モデルが無いときのベイクのボタン、BlendShape のスライダーを離した
+    /// Height → Normal と強さのドラッグ、平らな値、メッシュマップの「ベイク…」がベイクの窓を開くこと、BlendShape のスライダーを離した
     /// ときに 1 回だけ焼き直すこと。欄は部品が見える所までスクロールして押す。どの欄も LegacySection（Unity の標準の部品）を通らない。</summary>
     public sealed partial class WindowTests
     {
@@ -129,15 +129,18 @@ namespace Yozolab.YoluPainter.Tests
             window.SetBrushNormal(1, 0);
             ClickLayerControl("normal.flat");
             Assert.That(window.GetBrush().Color, Is.EqualTo(new Rgba32(128, 128, 255)));
-            // メッシュマップ: 種類のチェック、モデルが無ければベイクのボタンは押せない
+            // メッシュマップ: 欄の「ベイク…」はモデルが無くても押せて、ベイクの窓を開く（窓は焼けない理由を出す）。焼くマップのチェックと
+            // 設定は窓の側（WindowMeshMapTests・MeshBakeWindowTests）
             window.Channel = PaintChannel.Color; Repaint(window);
-            Assert.That(window.MeshBakeSettings.Includes(MeshMapKind.Opacity), Is.False);
-            ClickLayerControl("meshmap.kind." + MeshMapKind.Opacity, .1f);
-            ClickLayerControl("meshmap.kind." + MeshMapKind.WorldNormal, .1f);
-            Assert.That(window.MeshBakeSettings.Includes(MeshMapKind.Opacity), Is.True); Assert.That(window.MeshBakeSettings.Includes(MeshMapKind.WorldNormal), Is.False);
-            string message = window.StatusMessage;
             ClickLayerControl("meshmap.bake");
-            Assert.That(window.MeshMaps.Count, Is.Zero); Assert.That(window.StatusMessage, Is.EqualTo(message), "the bake button is disabled without a model");
+            var bake = MeshBakeWindow.For(window);
+            try
+            {
+                Assert.That(bake, Is.Not.Null, "Bake… opens the bake window");
+                Assert.That(window.MeshBakeRefusal(), Does.Contain("Load a model"));
+                Assert.That(window.MeshMaps.Count, Is.Zero); Assert.That(window.IsBakingMeshMaps, Is.False);
+            }
+            finally { if (bake != null) bake.Close(); }
         }
 
         [Test] public void ABlendShapeSliderReappliesThePoseOnceWhenReleased()

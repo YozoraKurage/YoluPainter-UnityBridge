@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 using Yozolab.YoluPainter.Core.MeshMaps;
 using Yozolab.YoluPainter.Core.Persistence;
@@ -11,7 +12,9 @@ namespace Yozolab.YoluPainter.Tests
 {
     /// <summary>描画ウィンドウの mesh map: デモのキューブで焼いてもドキュメント・Undo・保存の印は変わらない、キャンバスの重ね表示と欄の描画、
     /// 取消で前のマップが残る、モデルが無い・予算を超えると焼かない、.ylp に保存して別のウィンドウで開くと同じバイト列で戻り、
-    /// モデル・設定が違えば古いと判定して使わせない。進捗バーは差し替える（モーダルを出さない）。</summary>
+    /// モデル・設定が違えば古いと判定して使わせない。進捗バーは差し替える（モーダルを出さない）。ベイクの窓: プロパティの欄の「ベイク…」で
+    /// 開き、一覧・チェック・スライダー・ボタンを本物のマウスの入力で押すと持ち主の設定が変わってその設定で焼ける、ストロークの最中は断って
+    /// 理由を出す、持ち主を閉じると窓も閉じて走っているベイクが止まる（描画と CPU・GPU の一致は batch-gl の MeshBakeWindowTests）。</summary>
     public sealed partial class WindowTests
     {
         /// <summary>レイを減らして速く焼く（ドキュメントは既定の 1024²）。進捗は取消を押さない。</summary>
@@ -166,6 +169,116 @@ namespace Yozolab.YoluPainter.Tests
                 Assert.That(other.MeshMaps.Count, Is.Zero); Assert.That(other.MeshMapsSaved, Is.True);
             }
             finally { Close(other); }
+        }
+
+        // ───────── ベイクの窓 ─────────
+
+        /// <summary>ベイクの窓の部品 id の中の点（SendEvent の座標）。fx は左から何割の所か。</summary>
+        static Vector2 BakeControlPoint(MeshBakeWindow w, string id, float fx = .5f)
+        {
+            Repaint(w); Repaint(w);
+            Assert.That(w.ControlScreenRects.TryGetValue(id, out var screen), Is.True, id + " was not drawn");
+            var host = new Rect(screen.position - HostScreenPosition(w), screen.size);
+            return new Vector2(host.x + host.width * fx, host.center.y);
+        }
+        static void BakeMouse(MeshBakeWindow w, EventType type, Vector2 at)
+        { EditorShaderCompiler.TolerateErrorLogsIfBroken(); w.SendEvent(new Event { type = type, mousePosition = at, button = 0 }); }
+        static void BakeClick(MeshBakeWindow w, string id, float fx = .5f)
+        { var p = BakeControlPoint(w, id, fx); BakeMouse(w, EventType.MouseDown, p); BakeMouse(w, EventType.MouseUp, p); Repaint(w); }
+        /// <summary>スライダーを from から to（左から何割）へドラッグして離す。</summary>
+        static void BakeDrag(MeshBakeWindow w, string id, float from, float to)
+        {
+            var a = BakeControlPoint(w, id, from); var b = new Vector2(a.x + (to - from) * w.ControlScreenRects[id].width, a.y);
+            BakeMouse(w, EventType.MouseDown, a); BakeMouse(w, EventType.MouseDrag, Vector2.Lerp(a, b, .5f)); BakeMouse(w, EventType.MouseDrag, b); BakeMouse(w, EventType.MouseUp, b);
+            Repaint(w);
+        }
+        /// <summary>EditorApplication.update の代わりに窓からのベイクを進め、終わるまで待つ。</summary>
+        static void PumpBake(TexturePaintWindow w)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            while (w.PumpMeshBake(20)) { Assert.That(clock.Elapsed.TotalSeconds, Is.LessThan(300), "the bake did not finish"); System.Threading.Thread.Sleep(2); }
+        }
+
+        [Test] public void TheBakeWindowOpensFromThePanelAndItsWidgetsChangeTheOwnersSettings()
+        {
+            Invoke(window, "CreateDocument", 256); Invoke(window, "BindDocument");
+            Assert.That(window.Preview.LoadDemoMesh().CanPaint, Is.True); QuickBake(window);
+            OpenLayerPanels();
+            ClickLayerControl("meshmap.bake");
+            var bake = MeshBakeWindow.For(window);
+            Assert.That(bake, Is.Not.Null, "Bake… in the panel opens the bake window");
+            try
+            {
+                Assert.That(window.OpenMeshBakeWindow(), Is.SameAs(bake), "one bake window per painter (3D ▸ Bake Mesh Maps… brings it to the front)");
+                bake.position = new Rect(80, 80, MeshBakeWindow.DefaultWidth, MeshBakeWindow.DefaultHeight);
+                // 一覧の項目を押すと右にその設定、スライダーは持ち主の設定を変える
+                BakeClick(bake, "bake.page." + MeshMapKind.AmbientOcclusion, .6f);
+                Assert.That(bake.Page, Is.EqualTo((int)MeshMapKind.AmbientOcclusion));
+                BakeDrag(bake, "bake.ao.rays", .5f, .1f);
+                Assert.That(window.MeshBakeSettings.AoSamples, Is.InRange(35, 75), "the rays slider sets the owner's AO samples");
+                // チェックで焼くものを選ぶ（一覧のチェックと、右の「このマップをベイク」）
+                BakeClick(bake, "bake.kind." + MeshMapKind.Opacity);
+                Assert.That(window.MeshBakeSettings.Includes(MeshMapKind.Opacity), Is.True);
+                BakeClick(bake, "bake.include");
+                Assert.That(window.MeshBakeSettings.Includes(MeshMapKind.AmbientOcclusion), Is.False);
+                // 共通の設定
+                BakeClick(bake, "bake.page.common");
+                Assert.That(bake.Page, Is.EqualTo(MeshBakeWindow.CommonPage));
+                BakeDrag(bake, "bake.padding", .25f, .5f);
+                Assert.That(window.MeshBakeSettings.Padding, Is.InRange(28, 36));
+                // 焼く: 窓の中で進み、チェックしたものが焼ける
+                long revision = window.Document.Revision;
+                BakeClick(bake, "bake.start");
+                Assert.That(window.IsBakingMeshMaps, Is.True, window.StatusMessage);
+                Repaint(bake); Assert.That(bake.ControlScreenRects.ContainsKey("bake.cancel"), Is.True, "the bake button turns into Cancel while baking");
+                PumpBake(window);
+                Assert.That(window.MeshMaps.Maps.Select(m => m.Kind), Is.EquivalentTo(window.MeshBakeSettings.Maps), window.StatusMessage);
+                Assert.That(window.MeshMaps.TryGet(MeshMapKind.AmbientOcclusion, out _), Is.False);
+                window.MeshMaps.TryGet(MeshMapKind.Opacity, out var opacity);
+                Assert.That(opacity.Provenance.Padding, Is.EqualTo(window.MeshBakeSettings.Padding));
+                Assert.That(window.Document.Revision, Is.EqualTo(revision));
+                Repaint(bake); Repaint(window);
+                // Esc で閉じる（次の更新で）
+                Key(bake, KeyCode.Escape);
+                Assert.That(bake.Closing, Is.True);
+                Assert.That(MeshBakeWindow.For(window), Is.Null);
+            }
+            finally { if (bake != null) bake.Close(); }
+        }
+
+        [Test] public void AStrokeRefusesTheBakeAndTheBakeWindowSaysWhy()
+        {
+            window.Preview.LoadDemoMesh(); QuickBake(window);
+            var bake = window.OpenMeshBakeWindow();
+            try
+            {
+                Repaint(bake);
+                Assert.That(window.MeshBakeRefusal(), Is.Null);
+                BeginLine(400, 400);
+                Assert.That(window.MeshBakeRefusal(), Does.Contain("stroke"));
+                Repaint(bake); // 窓は下の帯に理由を出し、ベイクのボタンを押せなくする
+                Assert.That(window.StartMeshBake(), Does.Contain("stroke"));
+                Assert.That(window.BakeMeshMaps(), Is.Null);
+                Assert.That(window.IsBakingMeshMaps, Is.False); Assert.That(window.MeshMaps.Count, Is.Zero);
+                Key(window, KeyCode.Escape);
+                Assert.That(window.IsStroking, Is.False);
+                Assert.That(window.MeshBakeRefusal(), Is.Null);
+            }
+            finally { bake.Close(); }
+        }
+
+        [Test] public void ClosingThePainterClosesItsBakeWindowAndStopsTheBake()
+        {
+            window.Preview.LoadDemoMesh(); QuickBake(window);
+            var s = window.MeshBakeSettings; s.Maps = MeshBakeSettings.AllKinds.ToArray(); s.AoSamples = 512; s.Antialiasing = 4;
+            var bake = window.OpenMeshBakeWindow();
+            Repaint(bake);
+            Assert.That(window.StartMeshBake(), Is.Null, window.StatusMessage);
+            var job = window.RunningMeshBake;
+            Close(window); window = null; // OnDisable: 取り消して、別のスレッドが終わるまで待つ
+            Assert.That(job.Work.IsCompleted, Is.True, "the bake thread was stopped and awaited");
+            Assert.That(bake.EnsureOwner(false), Is.False, "OnInspectorUpdate makes the same check 10 times a second");
+            Assert.That(bake == null, Is.True, "the bake window closed with its painter");
         }
     }
 }
