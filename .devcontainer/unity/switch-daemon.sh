@@ -5,6 +5,7 @@
 #   switch-daemon.sh batch-gl            # batch-gl へ（シェーダー・GPU のテスト用）
 #   switch-daemon.sh gui -- --filter 'Yozolab.YoluPainter.Tests.WindowTests'
 #                                        # GUI で run-tests.sh を回してから、元のモード（batch-gl）に戻す
+#   switch-daemon.sh gui --              # GUI で全件を回してから batch-gl に戻す
 #
 # 切り替えの間は TestDaemon/switching を置く。run-tests.sh / unity-do.sh はそれが消えるまで待つので、
 # デーモンがいない一瞬にコールド実行へ落ちない。実行中の依頼があれば、それが終わってから切り替える。
@@ -15,8 +16,9 @@ set +e  # common.sh の -e を外す: テストが落ちても、元のモード
 readonly DAEMON_DIR="$UNITY_PROJECT/TestDaemon"
 mode="${1:-}"; shift || true
 [[ "$mode" == gui || "$mode" == batch-gl ]] || die "使い方: switch-daemon.sh gui|batch-gl [-- run-tests.sh の引数]"
-run_args=()
-if [[ "${1:-}" == "--" ]]; then shift; run_args=("$@"); fi
+run_args=(); run_tests=0
+# -- があれば試験を回す（-- の後が空なら全件。-- の後に何も渡さず「切り替えだけ」になる取り違えが続いたため）
+if [[ "${1:-}" == "--" ]]; then shift; run_args=("$@"); run_tests=1; fi
 
 mkdir -p "$DAEMON_DIR"
 # 切り替えどうしは 1 本ずつ通す（2 本が同時に止めて起動すると、2 つ目の Unity が「同じプロジェクトを別の Unity が開いている」で
@@ -36,8 +38,8 @@ start_mode() {
 }
 start_mode "$mode" 2>&1 | tail -2
 code=0
-if [[ ${#run_args[@]} -gt 0 ]]; then
-  "$SCRIPT_DIR/run-tests.sh" "${run_args[@]}" 9>&-; code=$?
+if [[ $run_tests == 1 ]]; then
+  "$SCRIPT_DIR/run-tests.sh" ${run_args[@]+"${run_args[@]}"} 9>&-; code=$?
   # GUI での試験が済んだら、ほかの依頼が普段使う batch-gl に戻す
   [[ "$mode" == gui ]] && start_mode batch-gl 2>&1 | tail -2
 fi
