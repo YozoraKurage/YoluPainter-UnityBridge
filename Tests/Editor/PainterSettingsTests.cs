@@ -34,10 +34,12 @@ namespace Yozolab.YoluPainter.Tests
             project = Path.Combine(Path.GetTempPath(), "yolupainter-settings-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(project);
             PainterSettings.ProjectRoot = project;
+            PainterSettings.SystemMemoryMiBOverride = 16384; // 自動の予算をマシンに依らず確かめる
         }
 
         [TearDown] public void RestoreProject()
         {
+            PainterSettings.SystemMemoryMiBOverride = null;
             PainterSettings.ProjectRoot = null; BrushLibrary.Personal.Folder = null; BrushLibrary.Project.Folder = null;
             if (Directory.Exists(project)) Directory.Delete(project, true);
         }
@@ -49,7 +51,8 @@ namespace Yozolab.YoluPainter.Tests
         {
             Assert.That(PainterSettings.DefaultResolution, Is.EqualTo(1024));
             Assert.That(PainterSettings.RecoveryIntervalSeconds, Is.EqualTo(15));
-            Assert.That(PainterSettings.UndoBudgetBytes, Is.EqualTo(64L << 20)); Assert.That(PainterSettings.SourceBudgetBytes, Is.EqualTo(256L << 20)); Assert.That(PainterSettings.StrokeBudgetBytes, Is.EqualTo(64L << 20));
+            Assert.That(PainterSettings.UndoBudgetBytes, Is.EqualTo(1024L << 20), "automatic on 16 GB, like GIMP's 1 GiB"); Assert.That(PainterSettings.SourceBudgetBytes, Is.EqualTo(2048L << 20)); Assert.That(PainterSettings.StrokeBudgetBytes, Is.EqualTo(512L << 20));
+            Assert.That(PainterSettings.MinUndoSteps, Is.EqualTo(5));
             Assert.That(PainterSettings.BrushFolder, Is.EqualTo(P(project, "UserSettings", "YoluPainter", "Brushes")));
             Assert.That(PainterSettings.ProjectBrushFolder, Is.Null); Assert.That(BrushLibrary.Project.Enabled, Is.False);
             Assert.That(PainterSettings.ShowBundledBrushes, Is.True);
@@ -95,9 +98,33 @@ namespace Yozolab.YoluPainter.Tests
             Directory.CreateDirectory(Path.GetDirectoryName(PainterSettings.PersonalPath));
             File.WriteAllText(PainterSettings.PersonalPath, "{\"schema\":1,\"recoveryIntervalSeconds\":100000,\"sourceBudgetMiB\":1,\"undoBudgetMiB\":32}");
             PainterSettings.ProjectRoot = project;
-            Assert.That(PainterSettings.RecoveryIntervalSeconds, Is.EqualTo(15)); Assert.That(PainterSettings.SourceBudgetBytes, Is.EqualTo(256L << 20));
+            Assert.That(PainterSettings.RecoveryIntervalSeconds, Is.EqualTo(15)); Assert.That(PainterSettings.SourceBudgetBytes, Is.EqualTo(2048L << 20), "repaired to automatic");
             Assert.That(PainterSettings.UndoBudgetBytes, Is.EqualTo(32L << 20), "valid values in the same file are kept");
             Assert.That(PainterSettings.Warnings.Count, Is.EqualTo(2)); Assert.That(PainterSettings.Warnings, Has.All.Contains("The default is used"));
+        }
+
+        [Test] public void AutomaticBudgetsFollowTheMachineAndExplicitValuesStay()
+        {
+            foreach (var (ram, undo, source, stroke) in new[] { (4096, 256, 512, 128), (8192, 512, 1024, 256), (32768, 2048, 4096, 1024), (131072, 2048, 8192, 1024), (1024, 256, 256, 64) })
+            {
+                PainterSettings.SystemMemoryMiBOverride = ram;
+                Assert.That((PainterSettings.UndoBudgetBytes >> 20, PainterSettings.SourceBudgetBytes >> 20, PainterSettings.StrokeBudgetBytes >> 20), Is.EqualTo(((long)undo, (long)source, (long)stroke)), ram + " MiB");
+            }
+            PainterSettings.SystemMemoryMiBOverride = 16384;
+            // 以前の版が書いた明示の値（自動が無かったころの既定 64 / 256 / 64）はそのまま使う
+            Directory.CreateDirectory(Path.GetDirectoryName(PainterSettings.PersonalPath));
+            File.WriteAllText(PainterSettings.PersonalPath, "{\"schema\":1,\"undoBudgetMiB\":64,\"sourceBudgetMiB\":256,\"strokeBudgetMiB\":64}");
+            PainterSettings.ProjectRoot = project;
+            Assert.That((PainterSettings.UndoBudgetBytes, PainterSettings.SourceBudgetBytes, PainterSettings.StrokeBudgetBytes), Is.EqualTo((64L << 20, 256L << 20, 64L << 20)));
+            Assert.That(PainterSettings.MinUndoSteps, Is.EqualTo(5), "a file without the field gets the default");
+            Assert.That(PainterSettings.Warnings, Is.Empty);
+            var personal = PainterSettings.PersonalSettings; personal.strokeBudgetMiB = PainterSettings.Automatic; personal.minUndoSteps = 0;
+            PainterSettings.Save(null, personal);
+            Assert.That(PainterSettings.StrokeBudgetBytes, Is.EqualTo(512L << 20)); Assert.That(PainterSettings.MinUndoSteps, Is.EqualTo(0));
+            personal.minUndoSteps = 101;
+            Assert.That(() => PainterSettings.Save(null, personal), Throws.ArgumentException.With.Message.Contains("Minimum undo steps"));
+            personal.minUndoSteps = 3; personal.undoBudgetMiB = -2;
+            Assert.That(() => PainterSettings.Save(null, personal), Throws.ArgumentException.With.Message.Contains("automatic"));
         }
 
         [Test] public void BackupsToKeepDefaultsToAllAndIsRangeChecked()

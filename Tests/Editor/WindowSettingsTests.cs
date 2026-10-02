@@ -53,7 +53,7 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void ANewWindowUsesTheProjectDefaultsAndFollowsBudgetChanges()
         {
             var shared = PainterSettings.SharedSettings; shared.defaultResolution = 512;
-            var personal = PainterSettings.PersonalSettings; personal.undoBudgetMiB = 8; personal.sourceBudgetMiB = 64; personal.strokeBudgetMiB = 16;
+            var personal = PainterSettings.PersonalSettings; personal.undoBudgetMiB = 8; personal.sourceBudgetMiB = 64; personal.strokeBudgetMiB = 16; personal.minUndoSteps = 3;
             PainterSettings.Save(shared, personal);
             var other = Open();
             try
@@ -61,6 +61,7 @@ namespace Yozolab.YoluPainter.Tests
                 var d = other.Document;
                 Assert.That(d.Width, Is.EqualTo(512));
                 Assert.That((d.UndoBudgetBytes, d.SourceBudgetBytes, d.ActiveStrokeBudgetBytes), Is.EqualTo((8L << 20, 64L << 20, 16L << 20)));
+                Assert.That(d.MinimumUndoSteps, Is.EqualTo(3));
                 personal.sourceBudgetMiB = 128; PainterSettings.Save(null, personal);
                 Assert.That(other.Document.SourceBudgetBytes, Is.EqualTo(128L << 20), "an open window applies changed budgets");
                 Assert.That(window.Document.SourceBudgetBytes, Is.EqualTo(128L << 20), "to every open window");

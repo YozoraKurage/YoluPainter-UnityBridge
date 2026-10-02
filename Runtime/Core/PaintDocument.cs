@@ -185,6 +185,7 @@ namespace Yozolab.YoluPainter.Core
         private long undoBudgetBytes;
         private long sourceBudgetBytes = 256L * 1024 * 1024;
         private long activeStrokeBudgetBytes = 64L * 1024 * 1024;
+        private int minimumUndoSteps;
         private BrushStroke activeStroke;
         private bool notifyingHistory;
         // Composite invalidation journal. Not part of undo history or persistence.
@@ -209,6 +210,13 @@ namespace Yozolab.YoluPainter.Core
         {
             get { return undoBudgetBytes; }
             set { if (value < 0) throw new ArgumentOutOfRangeException(nameof(value)); EnsureNoStroke(); undoBudgetBytes = value; TrimHistory(); }
+        }
+        /// <summary>The newest undo steps kept even when they exceed UndoBudgetBytes (like GIMP's minimal undo levels), so a
+        /// large edit — a fill or transform of a whole 4K layer — can still be undone. 0 makes the budget strict.</summary>
+        public int MinimumUndoSteps
+        {
+            get { return minimumUndoSteps; }
+            set { if (value < 0) throw new ArgumentOutOfRangeException(nameof(value)); EnsureNoStroke(); minimumUndoSteps = value; TrimHistory(); }
         }
         /// <summary>Configurable source tile payload limit; refusal happens before tile expansion. Managed overhead is additional.</summary>
         public long SourceBudgetBytes
@@ -744,12 +752,14 @@ namespace Yozolab.YoluPainter.Core
         {
             long overage = historyBytes - undoBudgetBytes;
             if (overage <= 0) return;
-            long projected = historyBytes, discarded = 0;
-            foreach (var command in undo) { if (projected <= undoBudgetBytes) break; projected -= command.ByteCost; discarded += command.ByteCost; }
+            long projected = historyBytes, discarded = 0; int droppable = Math.Max(0, undo.Count - minimumUndoSteps);
+            for (int i = 0; i < droppable; i++) { if (projected <= undoBudgetBytes) break; projected -= undo[i].ByteCost; discarded += undo[i].ByteCost; }
             foreach (var command in redo) { if (projected <= undoBudgetBytes) break; projected -= command.ByteCost; discarded += command.ByteCost; }
+            if (discarded == 0) return; // only protected steps are over budget
             NotifyHistoryTrimming(discarded);
             // Preserve contiguous reachable history. Oldest undo is farthest away; furthest redo is index zero.
-            while (historyBytes > undoBudgetBytes && undo.Count > 0)
+            // The newest MinimumUndoSteps undo steps stay even over budget.
+            while (historyBytes > undoBudgetBytes && undo.Count > minimumUndoSteps)
             { historyBytes -= undo[0].ByteCost; undo.RemoveAt(0); }
             while (historyBytes > undoBudgetBytes && redo.Count > 0)
             { historyBytes -= redo[0].ByteCost; redo.RemoveAt(0); }

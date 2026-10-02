@@ -73,12 +73,29 @@ namespace Yozolab.YoluPainter.Editor
                 personal.showBundledBrushes = EditorGUILayout.Toggle(new GUIContent("Show bundled brushes", "The Krita 4 default tips shipped with the package. Hiding them does not break brushes that already use them."), personal.showBundledBrushes);
                 personal.backupsToKeep = BackupsPopup(personal.backupsToKeep);
                 personal.recoveryIntervalSeconds = EditorGUILayout.IntSlider(new GUIContent("Recovery checkpoint every (s)", "How often unsaved work is written to Library/YoluPainter for crash recovery. It is also written on focus loss, reload and Play."), personal.recoveryIntervalSeconds, PainterSettings.MinRecoverySeconds, PainterSettings.MaxRecoverySeconds);
-                EditorGUILayout.LabelField("Memory budgets (MiB)", EditorStyles.miniBoldLabel);
-                personal.undoBudgetMiB = EditorGUILayout.DelayedIntField(new GUIContent("Undo history", "Oldest undo steps are dropped beyond this. 0 keeps no history."), personal.undoBudgetMiB);
-                personal.sourceBudgetMiB = EditorGUILayout.DelayedIntField(new GUIContent("Layer pixels", "Total pixel data of all layers. Edits that would exceed it are refused without changing anything. A full 4096² layer takes 64 MiB."), personal.sourceBudgetMiB);
-                personal.strokeBudgetMiB = EditorGUILayout.DelayedIntField(new GUIContent("One stroke", "Undo data kept while a stroke is drawn. A longer stroke is cancelled safely."), personal.strokeBudgetMiB);
+                EditorGUILayout.LabelField("Memory budgets (MiB) — automatic values follow this machine's " + (PainterSettings.SystemMemoryMiB / 1024.0).ToString("0.#") + " GB of memory", EditorStyles.miniBoldLabel);
+                personal.undoBudgetMiB = BudgetField(new GUIContent("Undo history", "Oldest undo steps are dropped beyond this (the minimum steps below are always kept). 0 keeps only those."), personal.undoBudgetMiB, PainterSettings.Budget.Undo);
+                personal.minUndoSteps = EditorGUILayout.IntSlider(new GUIContent("Minimum undo steps", "The newest steps kept even beyond the undo budget, so a large fill or transform can still be undone (GIMP keeps 5 the same way). 0 makes the budget strict."), personal.minUndoSteps, 0, PainterSettings.MaxMinUndoSteps);
+                personal.sourceBudgetMiB = BudgetField(new GUIContent("Layer pixels", "Total pixel data of all layers. Edits that would exceed it are refused without changing anything. A full 4096² layer takes 64 MiB."), personal.sourceBudgetMiB, PainterSettings.Budget.Source);
+                personal.strokeBudgetMiB = BudgetField(new GUIContent("One operation", "Undo data one stroke, fill, gradient or transform may keep. A bigger one is refused or cancelled safely without changing anything."), personal.strokeBudgetMiB, PainterSettings.Budget.Stroke);
                 if (EditorGUI.EndChangeCheck()) SavePersonal();
             }
+        }
+
+        /// <summary>予算の欄: 「Auto」のときは自動の値を灰色で見せ、外すと今の自動の値から数値を入れられる。</summary>
+        static int BudgetField(GUIContent label, int value, PainterSettings.Budget budget)
+        {
+            EditorGUILayout.BeginHorizontal();
+            bool auto = value == PainterSettings.Automatic;
+            int automatic = PainterSettings.AutomaticBudgetMiB(budget);
+            using (new EditorGUI.DisabledScope(auto))
+            {
+                int shown = EditorGUILayout.DelayedIntField(label, auto ? automatic : value);
+                if (!auto) value = shown;
+            }
+            bool nextAuto = GUILayout.Toggle(auto, new GUIContent("Auto", "Follow this machine's memory (" + automatic + " MiB now)"), EditorStyles.miniButton, GUILayout.Width(44));
+            EditorGUILayout.EndHorizontal();
+            return nextAuto == auto ? value : nextAuto ? PainterSettings.Automatic : automatic;
         }
 
         static readonly int[] BackupChoices = { -1, 0, 1, 3, 5, 10, 20 };

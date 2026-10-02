@@ -120,7 +120,7 @@ namespace Yozolab.YoluPainter.Editor
         internal string ApplyBudgets()
         {
             if(document==null||stroke!=null)return null;
-            document.UndoBudgetBytes=PainterSettings.UndoBudgetBytes; document.ActiveStrokeBudgetBytes=PainterSettings.StrokeBudgetBytes;
+            document.MinimumUndoSteps=PainterSettings.MinUndoSteps; document.UndoBudgetBytes=PainterSettings.UndoBudgetBytes; document.ActiveStrokeBudgetBytes=PainterSettings.StrokeBudgetBytes;
             long source=PainterSettings.SourceBudgetBytes;
             if(source>=document.AllocatedBytes){document.SourceBudgetBytes=source;return null;}
             document.SourceBudgetBytes=document.AllocatedBytes;
@@ -131,7 +131,7 @@ namespace Yozolab.YoluPainter.Editor
         void BindDocument()
         {
             var budgetNote=ApplyBudgets(); if(budgetNote!=null)message=budgetNote;
-            document.HistoryTrimming += bytes => message="Undo budget reached; dropping "+(bytes/1024)+" KiB of oldest history. Current source remains intact.";
+            document.HistoryTrimming += bytes => message="Undo budget reached; dropping "+(bytes/1024)+" KiB of the oldest history (the newest "+document.MinimumUndoSteps+" steps are always kept). Current source remains intact.";
             repaintPixels=true; renderedRevision=-1; recoveredRevision=-1;
         }
         void CreateDocument(int size)

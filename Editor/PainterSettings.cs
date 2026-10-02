@@ -36,8 +36,11 @@ namespace Yozolab.YoluPainter.Editor
             public bool showBundledBrushes = true;
             /// <summary>未保存の作業の復旧 checkpoint を書く間隔。</summary>
             public int recoveryIntervalSeconds = 15;
-            /// <summary>ドキュメントのメモリ予算（MiB）: Undo 履歴、レイヤーの画素の合計、描いている 1 ストロークの巻き戻し用。</summary>
-            public int undoBudgetMiB = 64, sourceBudgetMiB = 256, strokeBudgetMiB = 64;
+            /// <summary>ドキュメントのメモリ予算（MiB）: Undo 履歴、レイヤーの画素の合計、1 回の操作（ストローク・塗りつぶし・変形）の
+            /// 巻き戻し用。-1 は自動（このマシンのメモリから決める。<see cref="AutomaticBudgetMiB"/>）。</summary>
+            public int undoBudgetMiB = Automatic, sourceBudgetMiB = Automatic, strokeBudgetMiB = Automatic;
+            /// <summary>Undo の予算を超えても残す直近の段数（GIMP の「最小のアンドゥ段数」と同じ考え方。既定も GIMP と同じ 5）。</summary>
+            public int minUndoSteps = 5;
             public string brushImportFolder = "";
             /// <summary>.ylp を上書き保存するとき退避した直前の版をいくつ残すか。-1 ですべて、0 で退避しない。</summary>
             public int backupsToKeep = -1;
@@ -47,7 +50,29 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>パスの比較（Windows と macOS の既定は大文字小文字を区別しないので、区切りが \ の環境では区別しない）。</summary>
         public static StringComparison PathComparison => Path.DirectorySeparatorChar == '\\' ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         public const int MinRecoverySeconds = 5, MaxRecoverySeconds = 600;
-        public const int MaxUndoMiB = 16384, MinSourceMiB = 16, MaxSourceMiB = 32768, MinStrokeMiB = 8, MaxStrokeMiB = 8192;
+        public const int MaxUndoMiB = 16384, MinSourceMiB = 16, MaxSourceMiB = 32768, MinStrokeMiB = 8, MaxStrokeMiB = 8192, MaxMinUndoSteps = 100;
+        /// <summary>予算の値で「自動」を表す。</summary>
+        public const int Automatic = -1;
+        internal enum Budget { Undo, Source, Stroke }
+
+        /// <summary>このマシンの物理メモリ（MiB）。テストは差し替える。</summary>
+        internal static int? SystemMemoryMiBOverride;
+        public static int SystemMemoryMiB => SystemMemoryMiBOverride ?? Math.Max(1024, SystemInfo.systemMemorySize);
+        /// <summary>自動のときの予算（MiB）。物理メモリの一定の割合を、小さいマシンでも作業できる下限と、Unity Editor・モデル・
+        /// 他のアセットの分を残す上限で挟む（仕様 15「予算を機器に適応させる」）。16 GB で Undo 1024（GIMP 3 の既定 1 GiB と同じ）・
+        /// 画素 2048（4K の全面 RGBA8 で 32 枚）・1 回の操作 512。</summary>
+        public static int AutomaticBudgetMiB(Budget budget)
+        {
+            int ram = SystemMemoryMiB;
+            switch (budget)
+            {
+                case Budget.Undo: return Mathf.Clamp(ram / 16, 256, 2048);
+                case Budget.Source: return Mathf.Clamp(ram / 8, 256, 8192);
+                case Budget.Stroke: return Mathf.Clamp(ram / 32, 64, 1024);
+                default: throw new ArgumentOutOfRangeException(nameof(budget));
+            }
+        }
+        static long Bytes(int mib, Budget budget) => (mib == Automatic ? AutomaticBudgetMiB(budget) : mib) * 1024L * 1024;
 
         static string projectRoot;
         static Shared shared;
@@ -89,9 +114,10 @@ namespace Yozolab.YoluPainter.Editor
         public static bool ShowBundledBrushes { get { Load(); return personal.showBundledBrushes; } }
         public static int DefaultResolution { get { Load(); return shared.defaultResolution; } }
         public static int RecoveryIntervalSeconds { get { Load(); return personal.recoveryIntervalSeconds; } }
-        public static long UndoBudgetBytes { get { Load(); return personal.undoBudgetMiB * 1024L * 1024; } }
-        public static long SourceBudgetBytes { get { Load(); return personal.sourceBudgetMiB * 1024L * 1024; } }
-        public static long StrokeBudgetBytes { get { Load(); return personal.strokeBudgetMiB * 1024L * 1024; } }
+        public static long UndoBudgetBytes { get { Load(); return Bytes(personal.undoBudgetMiB, Budget.Undo); } }
+        public static long SourceBudgetBytes { get { Load(); return Bytes(personal.sourceBudgetMiB, Budget.Source); } }
+        public static long StrokeBudgetBytes { get { Load(); return Bytes(personal.strokeBudgetMiB, Budget.Stroke); } }
+        public static int MinUndoSteps { get { Load(); return personal.minUndoSteps; } }
         public static string BrushImportFolder { get { Load(); return personal.brushImportFolder; } }
         public static int BackupsToKeep { get { Load(); return personal.backupsToKeep; } }
         public const int MaxBackups = 1000;
@@ -151,9 +177,11 @@ namespace Yozolab.YoluPainter.Editor
                 if (fix) value = fallback;
             }
             Range(ref p.recoveryIntervalSeconds, MinRecoverySeconds, MaxRecoverySeconds, defaultsPersonal.recoveryIntervalSeconds, "Recovery interval (s)");
-            Range(ref p.undoBudgetMiB, 0, MaxUndoMiB, defaultsPersonal.undoBudgetMiB, "Undo budget (MiB)");
-            Range(ref p.sourceBudgetMiB, MinSourceMiB, MaxSourceMiB, defaultsPersonal.sourceBudgetMiB, "Layer pixel budget (MiB)");
-            Range(ref p.strokeBudgetMiB, MinStrokeMiB, MaxStrokeMiB, defaultsPersonal.strokeBudgetMiB, "Stroke budget (MiB)");
+            void Budget(ref int value, int min, int max, string what) { if (value != Automatic) Range(ref value, min, max, Automatic, what + " (-1 = automatic)"); }
+            Budget(ref p.undoBudgetMiB, 0, MaxUndoMiB, "Undo budget (MiB)");
+            Budget(ref p.sourceBudgetMiB, MinSourceMiB, MaxSourceMiB, "Layer pixel budget (MiB)");
+            Budget(ref p.strokeBudgetMiB, MinStrokeMiB, MaxStrokeMiB, "One operation budget (MiB)");
+            Range(ref p.minUndoSteps, 0, MaxMinUndoSteps, defaultsPersonal.minUndoSteps, "Minimum undo steps");
             Range(ref p.backupsToKeep, -1, MaxBackups, defaultsPersonal.backupsToKeep, "Backups to keep");
             if (p.brushImportFolder == null && fix) p.brushImportFolder = "";
             if (s.projectBrushFolder == null && fix) s.projectBrushFolder = "";

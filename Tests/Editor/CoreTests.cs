@@ -172,6 +172,24 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(doc.CompositePixel(PaintChannel.Color, 0, 0).A, Is.EqualTo(255));
             Assert.That(doc.CompositePixel(PaintChannel.Color, 8, 8).A, Is.Zero);
         }
+        [Test] public void TheNewestUndoStepsAreKeptOverBudgetLikeGimp()
+        {
+            var doc = Empty(); doc.UndoBudgetBytes = 1; doc.MinimumUndoSteps = 2; long dropped = 0; int notifications = 0;
+            doc.HistoryTrimming += bytes => { dropped += bytes; notifications++; };
+            Pixel(doc, 0, 0, new Rgba32(255, 0, 0));
+            Pixel(doc, 8, 8, new Rgba32(0, 255, 0));
+            Assert.That(doc.UndoCount, Is.EqualTo(2)); Assert.That(notifications, Is.Zero, "nothing droppable: no notification");
+            Pixel(doc, 4, 4, new Rgba32(0, 0, 255));
+            Assert.That(doc.UndoCount, Is.EqualTo(2), "the oldest step is dropped"); Assert.That(notifications, Is.EqualTo(1)); Assert.That(dropped, Is.GreaterThan(0));
+            doc.Undo(); doc.Undo();
+            Assert.That(doc.CompositePixel(PaintChannel.Color, 4, 4).A, Is.Zero); Assert.That(doc.CompositePixel(PaintChannel.Color, 8, 8).A, Is.Zero);
+            Assert.That(doc.CompositePixel(PaintChannel.Color, 0, 0).A, Is.EqualTo(255), "the dropped step stays applied");
+            Assert.That(doc.Undo(), Is.False);
+            doc.Redo(); doc.Redo();
+            doc.MinimumUndoSteps = 0;
+            Assert.That(doc.UndoCount, Is.Zero, "a strict budget drops the rest"); Assert.That(doc.HistoryBytes, Is.Zero);
+            Assert.That(() => doc.MinimumUndoSteps = -1, Throws.InstanceOf<ArgumentOutOfRangeException>());
+        }
         [Test] public void OverBudgetSingleStrokeStillCommitsAndWarns()
         {
             var doc = Empty(); doc.UndoBudgetBytes = 1; bool warning = false; doc.HistoryTrimming += n => warning = true;
