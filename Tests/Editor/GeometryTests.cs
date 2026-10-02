@@ -9,6 +9,9 @@ namespace Yozolab.YoluPainter.Tests.Editor
 {
     public sealed class GeometryTests
     {
+        // プレビューを作るテストはシェーダーをコンパイルさせる。壊れたエディタではそのエラーログで落とさない。
+        [SetUp] public void TolerateBrokenShaderCompiler() { EditorShaderCompiler.TolerateErrorLogsIfBroken(); }
+
         static readonly Vector3 Camera = new Vector3(0.5f, 0.5f, -3);
         static SurfaceTriangle FrontTriangle(int renderer = 0, int slot = 0)
         {

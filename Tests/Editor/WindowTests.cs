@@ -4,9 +4,9 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.TestTools;
 using Yozolab.YoluPainter.Core;
 using Yozolab.YoluPainter.Editor;
+using Object = UnityEngine.Object;
 
 namespace Yozolab.YoluPainter.Tests
 {
@@ -20,9 +20,7 @@ namespace Yozolab.YoluPainter.Tests
         [SetUp] public void OpenWindow()
         {
             if (Application.isBatchMode) Assert.Ignore("EditorWindow input needs a non-batch Editor (test-daemon.sh start in GUI mode).");
-            // devcontainer の GUI モードは組み込みシェーダーすらコンパイルできず、描画のたびにエラーを
-            // ログする。エディタ側の問題なので、その状態のときだけログで落とさない。
-            if (ShaderUtil.ShaderHasError(Shader.Find("Hidden/BlitCopy"))) LogAssert.ignoreFailingMessages = true;
+            EditorShaderCompiler.TolerateErrorLogsIfBroken();
             window = Open();
         }
 
@@ -30,9 +28,11 @@ namespace Yozolab.YoluPainter.Tests
 
         static TexturePaintWindow Open()
         {
+            // ウィンドウの生成・破棄をまたぐと LogAssert.ignoreFailingMessages が戻ることがある（実測）ので毎回入れ直す。
+            EditorShaderCompiler.TolerateErrorLogsIfBroken();
             var w = EditorWindow.CreateWindow<TexturePaintWindow>();
             w.position = new Rect(40, 40, 1200, 800);
-            w.SendEvent(new Event { type = EventType.Repaint }); // OnGUI でキャンバスと 3D の矩形を決めさせる
+            Repaint(w); // OnGUI でキャンバスと 3D の矩形を決めさせる
             return w;
         }
 
@@ -41,18 +41,22 @@ namespace Yozolab.YoluPainter.Tests
             if (w == null) return;
             string recovery = w.RecoveryRoot;
             w.Close();
+            EditorShaderCompiler.TolerateErrorLogsIfBroken();
             if (!string.IsNullOrEmpty(recovery) && Directory.Exists(recovery)) Directory.Delete(recovery, true);
         }
 
         /// <summary>ピクセルの GUI 座標。直前に Repaint してレイアウトを最新にしておく（ウィンドウマネージャが
         /// 大きさを変えることがある）。</summary>
         static Vector2 At(TexturePaintWindow w, int x, int y)
-        { w.SendEvent(new Event { type = EventType.Repaint }); return w.PixelToGui(x, y); }
+        { Repaint(w); return w.PixelToGui(x, y); }
+
+        static void Repaint(EditorWindow w)
+        { EditorShaderCompiler.TolerateErrorLogsIfBroken(); w.SendEvent(new Event { type = EventType.Repaint }); }
 
         /// <summary>SendEvent の座標はタブを含むホスト側の座標として扱われ、ウィンドウに届く前にタブの
         /// 高さぶん引かれる。実際のマウス入力と同じ位置に届くよう、その分を足して送る。</summary>
         static void Mouse(EditorWindow w, EventType type, Vector2 position, float pressure = 1)
-        { w.SendEvent(new Event { type = type, mousePosition = position + w.rootVisualElement.worldBound.position, button = 0, pressure = pressure }); }
+        { EditorShaderCompiler.TolerateErrorLogsIfBroken(); w.SendEvent(new Event { type = type, mousePosition = position + w.rootVisualElement.worldBound.position, button = 0, pressure = pressure }); }
 
         static void Key(EditorWindow w, KeyCode key, EventModifiers modifiers = EventModifiers.None)
         { w.SendEvent(new Event { type = EventType.KeyDown, keyCode = key, modifiers = modifiers }); }
@@ -143,7 +147,7 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void DemoCubeSurfaceStrokePaintsTheDocument()
         {
             Assert.That(window.Preview.LoadDemoMesh().CanPaint, Is.True);
-            window.SendEvent(new Event { type = EventType.Repaint });
+            Repaint(window);
             var center = window.SurfaceRect.center;
             Assert.That(window.Preview.TryPick(window.SurfaceRect, center, out _), Is.True, "the default camera must see the demo cube at the 3D view center");
             Mouse(window, EventType.MouseDown, center);
@@ -152,6 +156,43 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.IsStroking, Is.False, window.StatusMessage);
             Assert.That(window.Document.CanUndo, Is.True, window.StatusMessage);
             Assert.That(Snapshot().Where((b, i) => i % 4 == 3).Any(a => a > 0), Is.True, window.StatusMessage);
+        }
+
+        [Test] public void PaintingASceneModelLeavesTheSourceUntouched()
+        {
+            // Standard シェーダーは使わない（GUI モードの devcontainer ではシーンビューの描画でコンパイルエラーを
+            // ログし、このテストの主題と無関係に落ちる）。組み込みのキューブメッシュ＋独自マテリアルで足りる。
+            var source = new GameObject("Painter source model");
+            source.transform.position = new Vector3(3, 4, 5);
+            var mesh = Resources.GetBuiltinResource<Mesh>("Cube.fbx");
+            source.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var material = new Material(Shader.Find("Hidden/YoluPainter/PreviewSurface")) { mainTexture = Texture2D.grayTexture, color = new Color(.3f, .6f, .9f) };
+            var renderer = source.AddComponent<MeshRenderer>(); renderer.sharedMaterial = material;
+            var vertices = mesh.vertices; var uvs = mesh.uv; var mainTexture = material.mainTexture; var color = material.color;
+            int materialDirty = EditorUtility.GetDirtyCount(material), meshDirty = EditorUtility.GetDirtyCount(mesh), objectDirty = EditorUtility.GetDirtyCount(source);
+            int components = source.GetComponents<Component>().Length;
+            try
+            {
+                var report = window.Preview.Load(source);
+                Assert.That(report.CanPaint, Is.True, string.Join("; ", report.Diagnostics));
+                Repaint(window);
+                var center = window.SurfaceRect.center;
+                Mouse(window, EventType.MouseDown, center); Mouse(window, EventType.MouseDrag, center + new Vector2(8, 4)); Mouse(window, EventType.MouseUp, center + new Vector2(8, 4));
+                Repaint(window);
+                Assert.That(window.Document.CanUndo, Is.True, "the surface stroke must have painted: " + window.StatusMessage);
+
+                Assert.That(renderer.sharedMaterial, Is.SameAs(material));
+                Assert.That(material.mainTexture, Is.SameAs(mainTexture));
+                Assert.That(material.color, Is.EqualTo(color));
+                Assert.That(source.GetComponent<MeshFilter>().sharedMesh, Is.SameAs(mesh));
+                Assert.That(mesh.vertices, Is.EqualTo(vertices)); Assert.That(mesh.uv, Is.EqualTo(uvs));
+                Assert.That(source.transform.position, Is.EqualTo(new Vector3(3, 4, 5)));
+                Assert.That(source.GetComponents<Component>().Length, Is.EqualTo(components));
+                Assert.That(EditorUtility.GetDirtyCount(material), Is.EqualTo(materialDirty), "material dirty count");
+                Assert.That(EditorUtility.GetDirtyCount(mesh), Is.EqualTo(meshDirty), "mesh dirty count");
+                Assert.That(EditorUtility.GetDirtyCount(source), Is.EqualTo(objectDirty), "GameObject dirty count");
+            }
+            finally { Object.DestroyImmediate(source); Object.DestroyImmediate(material); }
         }
 
         [Test] public void WindowsKeepIndependentDocuments()
@@ -177,9 +218,9 @@ namespace Yozolab.YoluPainter.Tests
             var w = Open();
             try
             {
-                w.Preview.LoadDemoMesh(); w.SendEvent(new Event { type = EventType.Repaint });
+                w.Preview.LoadDemoMesh(); Repaint(w);
                 Mouse(w, EventType.MouseDown, At(w, 10, 10)); Mouse(w, EventType.MouseUp, At(w, 10, 10));
-                w.SendEvent(new Event { type = EventType.Repaint });
+                Repaint(w);
             }
             finally { Close(w); }
             Assert.That(Resources.FindObjectsOfTypeAll<RenderTexture>().Length, Is.EqualTo(textures), "RenderTextures");

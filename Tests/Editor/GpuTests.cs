@@ -21,8 +21,8 @@ namespace Yozolab.YoluPainter.Tests
         {
             if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
                 Assert.Ignore("No graphics device (-nographics). Run with a GPU, e.g. test-daemon.sh start --batch-gl.");
-            // 組み込みシェーダーまで壊れているのはエディタ側の問題で、パッケージの不具合ではない。
-            if (ShaderUtil.ShaderHasError(Shader.Find("Hidden/BlitCopy")))
+            // シェーダーコンパイラが組み込みのインクルードすら解決できないのはエディタ側の問題で、パッケージの不具合ではない。
+            if (EditorShaderCompiler.IsBroken)
                 Assert.Ignore("Built-in shaders fail to compile in this Editor (devcontainer GUI mode). Use test-daemon.sh start --batch-gl.");
             var shader = Shader.Find(name);
             Assert.That(shader, Is.Not.Null, name);
