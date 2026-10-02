@@ -64,10 +64,36 @@ namespace Yozolab.YoluPainter.Core
         public bool PressureFlow;
         public bool Erase;
 
+        // --- Tip shape. A null Tip is the procedural round tip shaped by Hardness. ---
+        /// <summary>Sampled tip image, or null for the round tip. Its larger side spans the brush diameter.</summary>
+        public BrushTip Tip;
+        /// <summary>Tip rotation in degrees (counter-clockwise, canvas Y up).</summary>
+        public double Angle;
+        /// <summary>Squash of the tip across its rotated vertical axis (1 = no squash).</summary>
+        public double Roundness = 1;
+        /// <summary>Adds the stroke direction to Angle (for bristle and calligraphy tips).</summary>
+        public bool FollowDirection;
+        // --- Per-dab randomness (0 = none). Deterministic for a given Seed. ---
+        public double SizeJitter, AngleJitter, RoundnessJitter, OpacityJitter, FlowJitter;
+        /// <summary>Random offset of each dab, in brush diameters along both axes.</summary>
+        public double Scatter;
+        /// <summary>Dabs placed at each spacing step (useful with Scatter).</summary>
+        public int Count = 1;
+        public int Seed;
+        // --- Paper texture: multiplies coverage by a tiled grain in canvas pixels. ---
+        public BrushTip Texture;
+        /// <summary>0 = texture has no effect, 1 = coverage fully follows the texture.</summary>
+        public double TextureDepth;
+        /// <summary>Canvas pixels per texture pixel (2 = the texture is drawn twice as large).</summary>
+        public double TextureScale = 1;
+
         public BrushSettings Clone()
         {
             return new BrushSettings { Radius = Radius, Hardness = Hardness, Spacing = Spacing, Opacity = Opacity,
-                Flow = Flow, Color = Color, PressureSize = PressureSize, PressureOpacity = PressureOpacity, PressureFlow = PressureFlow, Erase = Erase };
+                Flow = Flow, Color = Color, PressureSize = PressureSize, PressureOpacity = PressureOpacity, PressureFlow = PressureFlow, Erase = Erase,
+                Tip = Tip, Angle = Angle, Roundness = Roundness, FollowDirection = FollowDirection,
+                SizeJitter = SizeJitter, AngleJitter = AngleJitter, RoundnessJitter = RoundnessJitter, OpacityJitter = OpacityJitter, FlowJitter = FlowJitter,
+                Scatter = Scatter, Count = Count, Seed = Seed, Texture = Texture, TextureDepth = TextureDepth, TextureScale = TextureScale };
         }
         public void Validate()
         {
@@ -78,6 +104,14 @@ namespace Yozolab.YoluPainter.Core
             if (Spacing < 0.01 || Spacing > 4) throw new ArgumentOutOfRangeException(nameof(Spacing));
             if (Opacity < 0 || Opacity > 1) throw new ArgumentOutOfRangeException(nameof(Opacity));
             if (Flow < 0 || Flow > 1) throw new ArgumentOutOfRangeException(nameof(Flow));
+            foreach (double v in new[] { Angle, Roundness, SizeJitter, AngleJitter, RoundnessJitter, OpacityJitter, FlowJitter, Scatter, TextureDepth, TextureScale })
+                MathUtil.RequireFinite(v, "brush dynamics");
+            if (Roundness < 0.01 || Roundness > 1) throw new ArgumentOutOfRangeException(nameof(Roundness));
+            foreach (double v in new[] { SizeJitter, AngleJitter, RoundnessJitter, OpacityJitter, FlowJitter, TextureDepth })
+                if (v < 0 || v > 1) throw new ArgumentOutOfRangeException("jitter/texture depth", "Must be 0..1.");
+            if (Scatter < 0 || Scatter > 10) throw new ArgumentOutOfRangeException(nameof(Scatter));
+            if (Count < 1 || Count > 16) throw new ArgumentOutOfRangeException(nameof(Count));
+            if (TextureScale < 0.05 || TextureScale > 64) throw new ArgumentOutOfRangeException(nameof(TextureScale));
         }
     }
 

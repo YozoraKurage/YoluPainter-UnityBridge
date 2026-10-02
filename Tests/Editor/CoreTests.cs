@@ -219,7 +219,8 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void RollbackBudgetRefusalCancelsAndRestoresExistingTiles()
         {
             var doc = Empty(); Pixel(doc, 1, 1, new Rgba32(5, 6, 7)); doc.ClearHistory();
-            byte[] before = doc.Composite(PaintChannel.Color); doc.ActiveStrokeBudgetBytes = 128;
+            // 1 タイル分だけ入る予算: 記録 64 + 元のタイル 64 + ストローク中の濃さのバッファ 4x4x4 = 64。
+            byte[] before = doc.Composite(PaintChannel.Color); doc.ActiveStrokeBudgetBytes = 192;
             using (var stroke = doc.BeginStroke(doc.Layers[0].Id, PaintChannel.Color, Opaque(new Rgba32(255, 0, 0))))
             {
                 stroke.ApplyPixel(1, 1, 1);
