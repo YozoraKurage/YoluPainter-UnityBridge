@@ -263,7 +263,122 @@ namespace Yozolab.YoluPainter.Editor.Preview
             barycentric = new Vector3(1 - u - v, u, v); return true;
         }
 
+        /// <summary>
+        /// The texture pixels a spherical surface dab covers, with coverage. Triangles are visited breadth-first from the hit (the same
+        /// order as always) and their candidate texels collected in that order; the visibility rays from the camera, which dominate the
+        /// cost, then run in parallel (the BVH is read-only); finally the texels are accepted and merged in the collected order, and the
+        /// budgets are checked in that order too, so the pixels, the counts and the reason for a refusal are the same as the sequential
+        /// <see cref="BuildSurfaceDabsReference"/> at any degree of parallelism (Core's CoreParallelism).
+        /// </summary>
         public SurfaceDabResult BuildSurfaceDabs(SurfaceHit hit, float radiusWorld, int width, int height, Vector3 cameraPosition,
+            float hardness = 0.8f, SurfaceBrushBudget budget = null)
+        {
+            var result = new SurfaceDabResult();
+            if (hit.SnapshotRevision != SnapshotRevision || hit.TriangleIndex < 0 || hit.TriangleIndex >= triangles.Length)
+            { result.Diagnostic = "The model snapshot changed. Start a new stroke."; return result; }
+            if (width <= 0 || height <= 0 || width > 32768 || height > 32768 || !Finite(radiusWorld) || radiusWorld <= 0 || !Finite(cameraPosition) || !Finite(hit.Position))
+            { result.Diagnostic = "Invalid surface brush size, resolution or camera."; return result; }
+            var seed = triangles[hit.TriangleIndex];
+            if (seed.RendererIndex != hit.RendererIndex || seed.MaterialSlot != hit.MaterialSlot)
+            { result.Diagnostic = "Surface binding does not match the current snapshot."; return result; }
+            budget = budget ?? new SurfaceBrushBudget(); hardness = Mathf.Clamp01(hardness);
+
+            // 1. 三角形を幅優先で辿り、半径の中の候補のテクセルを並びのまま集める（三角形の数と候補の画素の予算はここで、元と同じ所で断る）
+            var queue = new Queue<int>(); var visited = new HashSet<int>(); var candidates = new List<DabCandidate>();
+            queue.Enqueue(hit.TriangleIndex); visited.Add(hit.TriangleIndex);
+            float radiusSquared = radiusWorld * radiusWorld; int processed = 0; string stop = null;
+            while (queue.Count > 0 && stop == null)
+            {
+                int triangleIndex = queue.Dequeue(); var t = triangles[triangleIndex];
+                if (++processed > budget.MaxTriangles) { stop = "Surface dab exceeded the triangle budget. No pixels were changed; reduce the brush radius."; break; }
+                if (t.RendererIndex != hit.RendererIndex || t.MaterialSlot != hit.MaterialSlot || t.Bounds.SqrDistance(hit.Position) > radiusSquared) continue;
+                if ((ClosestPoint(hit.Position, t) - hit.Position).sqrMagnitude > radiusSquared) continue;
+                if (Vector3.Dot(t.Normal, cameraPosition - (t.A + t.B + t.C) / 3) <= 0) continue;
+                foreach (int neighbor in adjacency[triangleIndex]) if (visited.Add(neighbor)) queue.Enqueue(neighbor);
+                if (!UvFootprintBounds(t, hit.Position, radiusWorld, out var uvMin, out var uvMax)) continue;
+                int minX = Mathf.Max(0, Mathf.CeilToInt(uvMin.x * width - 0.5f));
+                int maxX = Mathf.Min(width - 1, Mathf.FloorToInt(uvMax.x * width - 0.5f));
+                int minY = Mathf.Max(0, Mathf.CeilToInt(uvMin.y * height - 0.5f));
+                int maxY = Mathf.Min(height - 1, Mathf.FloorToInt(uvMax.y * height - 0.5f));
+                if (maxX < minX || maxY < minY) continue;
+                long candidateCount = (long)(maxX - minX + 1) * (maxY - minY + 1);
+                if ((long)result.CandidatePixels + candidateCount > budget.MaxCandidatePixels)
+                { stop = "Surface dab exceeded the pixel budget. No pixels were changed; reduce brush radius or use a smaller document."; break; }
+                result.CandidatePixels += (int)candidateCount;
+                for (int y = minY; y <= maxY; y++) for (int x = minX; x <= maxX; x++)
+                {
+                    var uv = new Vector2((x + 0.5f) / width, (y + 0.5f) / height);
+                    if (!TryUvBarycentric(uv, t, out var bary)) continue;
+                    var position = t.A * bary.x + t.B * bary.y + t.C * bary.z;
+                    float normalizedDistance = (position - hit.Position).magnitude / radiusWorld;
+                    if (normalizedDistance >= 1) continue;
+                    candidates.Add(new DabCandidate { Triangle = triangleIndex, X = x, Y = y, Bary = bary, Position = position, Distance = normalizedDistance, CandidatesSoFar = result.CandidatePixels });
+                }
+            }
+
+            // 2・3. 可視のレイを組ごとに並列に撃ち、組ごとに並びのとおりに予算を数えて受け入れる。予算を超える所が見つかればすぐ断る
+            // （元の逐次の処理と同じく、超えた後のレイは撃たない。無駄に撃つのは多くても 1 組）。レイの数の予算を超える候補は撃たない。
+            int rays = Math.Min(candidates.Count, budget.MaxVisibilityRays);
+            const int Chunk = 4096;
+            var outcomes = new RayOutcome[Math.Min(rays, Chunk)];
+            var options = new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Yozolab.YoluPainter.Core.CoreParallelism.Degree };
+            int chunkStart = 0, chunkEnd = 0;
+            void Shoot(int k)
+            {
+                var c = candidates[chunkStart + k]; var direction = c.Position - cameraPosition; float distance = direction.magnitude;
+                if (distance <= visibilityEpsilon) { outcomes[k] = new RayOutcome { Skipped = true }; return; }
+                var work = new RayQueryBudget { RemainingTriangleTests = budget.MaxRayTriangleTests, RemainingNodeVisits = budget.MaxRayNodeVisits };
+                bool hasHit = TryRaycastInternal(new Ray(cameraPosition, direction / distance), out var visible, false, distance + visibilityEpsilon * 2, work);
+                outcomes[k] = new RayOutcome { HasHit = hasHit, Hit = visible, CameraDistance = distance,
+                    Tests = budget.MaxRayTriangleTests - work.RemainingTriangleTests, Visits = budget.MaxRayNodeVisits - work.RemainingNodeVisits, Exceeded = work.Exceeded };
+            }
+            long tests = 0, visits = 0; var pixels = new Dictionary<int, float>(); int collected = result.CandidatePixels;
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                // 元の逐次の処理がこの候補を見ていた時点の、候補の画素の数（断るときに同じ数を返す）
+                result.CandidatePixels = candidates[i].CandidatesSoFar;
+                if (++result.VisibilityRays > budget.MaxVisibilityRays)
+                    return result.Reject("Surface dab exceeded the visibility budget. No pixels were changed; reduce the brush radius.");
+                if (i >= chunkEnd)
+                {
+                    chunkStart = i; int count = Math.Min(Chunk, rays - i); chunkEnd = i + count;
+                    if (count < 64 || options.MaxDegreeOfParallelism == 1) for (int k = 0; k < count; k++) Shoot(k);
+                    else System.Threading.Tasks.Parallel.For(0, count, options, Shoot);
+                }
+                var o = outcomes[i - chunkStart];
+                if (o.Skipped) continue;
+                tests += o.Tests; visits += o.Visits;
+                bool exceeded = o.Exceeded || tests > budget.MaxRayTriangleTests || visits > budget.MaxRayNodeVisits;
+                result.RayTriangleTests = (int)Math.Min(tests, (long)budget.MaxRayTriangleTests + 1);
+                if (exceeded) return result.Reject("Surface visibility exceeded the BVH work budget. No pixels were changed; reduce the radius or simplify overlapping geometry.");
+                var c = candidates[i];
+                if (!o.HasHit || o.Hit.Distance < o.CameraDistance - visibilityEpsilon) continue;
+                if (o.Hit.TriangleIndex != c.Triangle)
+                {
+                    // Distance tolerance alone can leak through extremely thin, nearby clothing.
+                    // Only an actual adjacent triangle at this triangle's edge may share a visible hit.
+                    if (Mathf.Min(c.Bary.x, Mathf.Min(c.Bary.y, c.Bary.z)) > 1e-6f ||
+                        (o.Hit.Position - c.Position).sqrMagnitude > visibilityEpsilon * visibilityEpsilon ||
+                        Array.IndexOf(adjacency[c.Triangle], o.Hit.TriangleIndex) < 0) continue;
+                }
+                float coverage = c.Distance <= hardness || hardness >= 0.9999f ? 1 : 1 - Mathf.SmoothStep(0, 1, (c.Distance - hardness) / (1 - hardness));
+                int key = c.Y * width + c.X;
+                if (!pixels.TryGetValue(key, out float current) || coverage > current) pixels[key] = coverage;
+            }
+            result.CandidatePixels = collected;
+            if (stop != null) return result.Reject(stop);
+            // Deterministic bottom-left row order and max-union prevent shared-edge double paint.
+            var keys = new List<int>(pixels.Keys); keys.Sort();
+            foreach (int key in keys) result.Pixels.Add(new SurfacePixel(key % width, key / width, pixels[key]));
+            return result;
+        }
+
+        struct DabCandidate { public int Triangle, X, Y, CandidatesSoFar; public Vector3 Bary, Position; public float Distance; }
+        struct RayOutcome { public bool Skipped, HasHit, Exceeded; public SurfaceHit Hit; public float CameraDistance; public long Tests, Visits; }
+
+        /// <summary>The sequential original of <see cref="BuildSurfaceDabs"/>, kept to test that the parallel version gives the same pixels,
+        /// counts and refusals.</summary>
+        internal SurfaceDabResult BuildSurfaceDabsReference(SurfaceHit hit, float radiusWorld, int width, int height, Vector3 cameraPosition,
             float hardness = 0.8f, SurfaceBrushBudget budget = null)
         {
             var result = new SurfaceDabResult();
