@@ -21,8 +21,31 @@ namespace Yozolab.YoluPainter.Core
         private readonly SparseTileSurface surface;
         private readonly BrushSettings settings;
         private readonly Dictionary<TileCoord, TileStorage> before = new Dictionary<TileCoord, TileStorage>();
-        // Accumulated stroke coverage (0..1) per touched pixel, tile-local row-major. Freed with the stroke.
-        private readonly Dictionary<TileCoord, float[]> washes = new Dictionary<TileCoord, float[]>();
+        /// <summary>What the stroke keeps for one tile it has touched (created together with the tile's entry in before).</summary>
+        private sealed class StrokeTile
+        {
+            public TileStorage Before;
+            /// <summary>Accumulated stroke coverage (0..1) per pixel, tile-local row-major. Freed with the stroke.</summary>
+            public float[] Wash;
+            /// <summary>Per-tip colours: the stroke colour per pixel (straight RGBA 0..1), or null.</summary>
+            public float[] Paint;
+            /// <summary>The last pixel pass (<see cref="passSerial"/>) that changed a pixel of the tile.</summary>
+            public long ChangedInPass = -1;
+        }
+        private readonly Dictionary<TileCoord, StrokeTile> strokeTiles = new Dictionary<TileCoord, StrokeTile>();
+        /// <summary>The tile the pixel loop is in. Each dab (or ApplyPixel call) looks its tiles up once per tile instead of once
+        /// per pixel; the surface's tile objects only change in Commit / Cancel, after the last pass.</summary>
+        private sealed class TileCursor
+        {
+            public int X, Y; public TileCoord Coord;
+            public StrokeTile Stroke; public TileStorage Surface, Selected; public float[] Dual;
+            public void Reset() { X = int.MinValue; Y = int.MinValue; Stroke = null; Surface = null; Selected = null; Dual = null; }
+        }
+        private readonly TileCursor cursor = new TileCursor();
+        // ひと通りの画素の処理（ダブ 1 つ、ApplyPixel 1 回）で変えたタイル。面の書き換え番号と変更の記録は、画素ごとでなく
+        // その処理の終わりにタイルごとに 1 回進める（結果の画素も、どのタイルが変わったと伝わるかも同じ）。
+        private readonly List<TileCoord> passChanged = new List<TileCoord>();
+        private long passSerial;
         /// <summary>The document's selection when the stroke began (null = everything). Results are mixed back toward the
         /// pixel before the stroke by the selected amount, so a half-selected pixel never changes more than halfway.</summary>
         private readonly SelectionMask selection;
@@ -43,7 +66,6 @@ namespace Yozolab.YoluPainter.Core
         private readonly bool tipColors;
         private readonly Rgba32 strokeColor;
         private Rgba32 dabColor;
-        private readonly Dictionary<TileCoord, float[]> paints;
         // デュアルブラシ: 2 つ目の筆先のダブ（道筋の上の位置と線の長さ）と、画素ごとの最大の被覆率
         private struct DualDab { public double X, Y, Arc; }
         private readonly DualBrush dual;
@@ -76,7 +98,7 @@ namespace Yozolab.YoluPainter.Core
             {
                 // ストロークの色を最初に 1 回引く（ダブごとでないとき、また 3D の面のブラシ（ダブを持たない）はこの色で塗る）。
                 colorRandom = new Random(settings.Seed ^ ColorStream); strokeColor = ColorDynamics.Next(settings, colorRandom);
-                if (settings.ColorPerTip) { tipColors = true; paints = new Dictionary<TileCoord, float[]>(); }
+                if (settings.ColorPerTip) tipColors = true;
             }
             dabColor = strokeColor;
             if (settings.Dual != null)
@@ -245,7 +267,13 @@ namespace Yozolab.YoluPainter.Core
             {
                 MathUtil.RequireFinite(coverage, nameof(coverage)); MathUtil.RequireFinite(pressure, nameof(pressure));
                 if (coverage < 0 || coverage > 1 || pressure < 0 || pressure > 1) throw new ArgumentOutOfRangeException("coverage/pressure");
-                bool changed = ApplyPixelInternal(x, y, coverage, pressure);
+                bool changed = false;
+                if (x >= 0 && y >= 0 && x < surface.Width && y < surface.Height)
+                {
+                    int tile = surface.TileSize; BeginPass();
+                    try { changed = ApplyPixelAt(cursor, true, x / tile, y / tile, (y % tile) * tile + x % tile, coverage, pressure, 1, 1); }
+                    finally { EndPass(); }
+                }
                 if (changed) document.PixelsChanged();
                 return changed;
             }
@@ -322,40 +350,59 @@ namespace Yozolab.YoluPainter.Core
             double aspectX = 1, aspectY = 1;
             if (dual.Tip != null) { if (dual.Tip.Width >= dual.Tip.Height) aspectY = dual.Tip.Height / (double)dual.Tip.Width; else aspectX = dual.Tip.Width / (double)dual.Tip.Height; }
             int tile = surface.TileSize;
-            for (int py = minY; py <= maxY; py++) for (int px = minX; px <= maxX; px++)
+            float[] cells = null; int cellsX = int.MinValue, cellsY = int.MinValue; // 今いるタイルの溜まり（タイルが変わったときだけ引く）
+            for (int py = minY; py <= maxY; py++)
             {
-                double dx = px + 0.5 - x, dy = py + 0.5 - y;
-                double u = (cos * dx + sin * dy) / radius, v = (-sin * dx + cos * dy) / (radius * dual.Roundness);
-                double coverage;
-                if (dual.Tip == null)
+                int ty = py / tile, row = (py - ty * tile) * tile, tx = minX / tile, lx = minX - tx * tile;
+                for (int px = minX; px <= maxX; px++, lx++)
                 {
-                    double dist = Math.Sqrt(u * u + v * v);
-                    if (dist > 1) continue;
-                    coverage = 1;
-                    if (dist > dual.Hardness) { double t = (1 - dist) / (1 - dual.Hardness); coverage = t * t * (3 - 2 * t); }
+                    if (lx == tile) { lx = 0; tx++; }
+                    double dx = px + 0.5 - x, dy = py + 0.5 - y;
+                    double u = (cos * dx + sin * dy) / radius, v = (-sin * dx + cos * dy) / (radius * dual.Roundness);
+                    double coverage;
+                    if (dual.Tip == null)
+                    {
+                        double dist = Math.Sqrt(u * u + v * v);
+                        if (dist > 1) continue;
+                        coverage = 1;
+                        if (dist > dual.Hardness) { double t = (1 - dist) / (1 - dual.Hardness); coverage = t * t * (3 - 2 * t); }
+                    }
+                    else coverage = dual.Tip.Sample((u / aspectX + 1) * 0.5, (v / aspectY + 1) * 0.5);
+                    if (coverage <= 0) continue;
+                    if (tx != cellsX || ty != cellsY)
+                    {
+                        var coord = new TileCoord(tx, ty); cellsX = tx; cellsY = ty;
+                        if (!dualCoverage.TryGetValue(coord, out cells))
+                        {
+                            long nextBytes = rollbackBytes + 64 + (long)tile * tile * 4;
+                            document.EnsureStrokeBudget(nextBytes);
+                            cells = new float[tile * tile]; dualCoverage.Add(coord, cells); rollbackBytes = nextBytes;
+                        }
+                    }
+                    int local = row + lx;
+                    if (coverage > cells[local]) cells[local] = (float)coverage;
                 }
-                else coverage = dual.Tip.Sample((u / aspectX + 1) * 0.5, (v / aspectY + 1) * 0.5);
-                if (coverage <= 0) continue;
-                TileCoord coord = surface.CoordAt(px, py);
-                float[] cells;
-                if (!dualCoverage.TryGetValue(coord, out cells))
-                {
-                    long nextBytes = rollbackBytes + 64 + (long)tile * tile * 4;
-                    document.EnsureStrokeBudget(nextBytes);
-                    cells = new float[tile * tile]; dualCoverage.Add(coord, cells); rollbackBytes = nextBytes;
-                }
-                int local = (py % tile) * tile + px % tile;
-                if (coverage > cells[local]) cells[local] = (float)coverage;
             }
         }
-        private double DualAt(int x, int y)
+        /// <summary>The shape of one dab, read by the pixel loop (on worker threads too; never changed while they run).</summary>
+        private sealed class DabShape
         {
-            float[] cells;
-            if (!dualCoverage.TryGetValue(surface.CoordAt(x, y), out cells)) return 0;
-            int tile = surface.TileSize;
-            return cells[(y % tile) * tile + x % tile];
+            public double X, Y, Radius, Cos, Sin, Roundness, AspectX, AspectY, Hardness, Pressure, OpacityScale, FlowScale;
+            public BrushTip Tip; public bool Plain, Textured;
         }
-        /// <summary>One dab. With the round tip, no rotation and roundness 1 this is exactly the original circular dab.</summary>
+        private readonly DabShape shape = new DabShape();
+        /// <summary>Dabs whose bounding box has at least this many pixels may change the tiles the stroke has already taken over on
+        /// worker threads (see Dab). Below it the cost of starting workers outweighs the gain (measured with radius 32 and 128 on
+        /// tiles of 128). Not changed by the core; a harness may lower it to drive the worker path with small documents.</summary>
+        internal static int ParallelDabPixels = 128 * 128;
+        /// <summary>One dab. With the round tip, no rotation and roundness 1 this is exactly the original circular dab.
+        /// <para>Large dabs run in two steps. A tile is safe when the stroke already holds it (its rollback copy and coverage exist)
+        /// and its pixels are the surface's own writable buffer: changing its pixels can neither allocate nor be refused by a
+        /// budget, and touches nothing outside the tile. First the pixels of the other tiles go through in raster order on this
+        /// thread — every budget check, rollback copy and tile allocation happens there, in the same order as a dab done pixel by
+        /// pixel — then the safe tiles are done on worker threads in bands of rows. Each pixel is computed from its own inputs
+        /// only (its coverage, its stroke coverage and colour, its pixel before the stroke), so the bytes are the same with any
+        /// number of threads.</para></summary>
         private bool Dab(double x, double y, double radius, double angle, double roundness, double pressure, double opacityScale, double flowScale, BrushTip tip)
         {
             double extent = tip == null ? radius : radius * 1.4142135623730951; // a square tip's corners reach √2·r when rotated
@@ -363,67 +410,165 @@ namespace Yozolab.YoluPainter.Core
             int maxX = Math.Min(surface.Width - 1, (int)Math.Floor(x + extent - 0.5));
             int minY = Math.Max(0, (int)Math.Ceiling(y - extent - 0.5));
             int maxY = Math.Min(surface.Height - 1, (int)Math.Floor(y + extent - 0.5));
-            double cos = Math.Cos(angle), sin = Math.Sin(angle);
-            double aspectX = 1, aspectY = 1;
-            if (tip != null) { if (tip.Width >= tip.Height) aspectY = tip.Height / (double)tip.Width; else aspectX = tip.Width / (double)tip.Height; }
-            bool textured = settings.Texture != null && settings.TextureDepth > 0;
-            bool plain = angle == 0 && roundness == 1;
-            bool changed = false;
-            for (int py = minY; py <= maxY; py++) for (int px = minX; px <= maxX; px++)
+            var s = shape;
+            s.X = x; s.Y = y; s.Radius = radius; s.Cos = Math.Cos(angle); s.Sin = Math.Sin(angle); s.Roundness = roundness; s.Tip = tip;
+            s.AspectX = 1; s.AspectY = 1;
+            if (tip != null) { if (tip.Width >= tip.Height) s.AspectY = tip.Height / (double)tip.Width; else s.AspectX = tip.Width / (double)tip.Height; }
+            s.Textured = settings.Texture != null && settings.TextureDepth > 0;
+            s.Plain = angle == 0 && roundness == 1;
+            s.Hardness = settings.Hardness; s.Pressure = pressure; s.OpacityScale = opacityScale; s.FlowScale = flowScale;
+            if (minX > maxX || minY > maxY) return false;
+            int tile = surface.TileSize, tx0 = minX / tile, ty0 = minY / tile, columns = maxX / tile - tx0 + 1, rows = maxY / tile - ty0 + 1;
+            bool[] safe = null; int safeCount = 0, degree = CoreParallelism.Degree;
+            if (degree > 1 && (long)(maxX - minX + 1) * (maxY - minY + 1) >= ParallelDabPixels && columns * rows > 1)
             {
-                double dx = px + 0.5 - x, dy = py + 0.5 - y;
-                double u = (cos * dx + sin * dy) / radius, v = (-sin * dx + cos * dy) / (radius * roundness);
-                double coverage;
-                if (tip == null)
+                safe = new bool[columns * rows];
+                for (int j = 0; j < rows; j++) for (int i = 0; i < columns; i++)
                 {
-                    // 回転も潰しも無いときは元の式そのもので測る（丸ブラシの結果を以前とビット単位で揃える）。
-                    double d = plain ? Math.Sqrt(dx * dx + dy * dy) / radius : Math.Sqrt(u * u + v * v);
-                    if (d > 1) continue;
-                    coverage = 1;
-                    if (d > settings.Hardness)
+                    var coord = new TileCoord(tx0 + i, ty0 + j); var live = surface.PeekTile(coord);
+                    if (live != null && live.Writable && strokeTiles.ContainsKey(coord)) { safe[j * columns + i] = true; safeCount++; }
+                }
+                if (safeCount == 0) safe = null;
+            }
+            bool changed = false;
+            BeginPass();
+            try
+            {
+                changed = DabPixels(s, cursor, true, minX, maxX, minY, maxY, safe, tx0, ty0, columns);
+                if (safe != null)
+                {
+                    var jobs = new int[safeCount]; for (int k = 0, n = 0; k < safe.Length; k++) if (safe[k]) jobs[n++] = k;
+                    // タイルを行の束に分けて、スレッドが余らないようにする（同じタイルの別の行は別の画素しか触らない）
+                    int chunks = Math.Max(1, Math.Min(tile / 16, (degree + safeCount - 1) / safeCount)), rowsPerChunk = (tile + chunks - 1) / chunks;
+                    var results = new bool[safeCount * chunks];
+                    CoreParallelism.For(safeCount * chunks, degree, item =>
                     {
-                        double t = (1 - d) / (1 - settings.Hardness);
-                        coverage = t * t * (3 - 2 * t);
+                        int n = item / chunks, chunk = item - n * chunks, k = jobs[n], tx = tx0 + k % columns, ty = ty0 + k / columns;
+                        int y0 = Math.Max(minY, ty * tile + chunk * rowsPerChunk), y1 = Math.Min(maxY, Math.Min(ty * tile + tile - 1, ty * tile + (chunk + 1) * rowsPerChunk - 1));
+                        if (y0 > y1) return;
+                        var c = new TileCursor(); c.Reset();
+                        results[item] = DabPixels(s, c, false, Math.Max(minX, tx * tile), Math.Min(maxX, tx * tile + tile - 1), y0, y1, null, 0, 0, 0);
+                    });
+                    foreach (bool r in results) changed |= r;
+                    for (int n = 0; n < safeCount; n++)
+                    {
+                        int k = jobs[n]; var coord = new TileCoord(tx0 + k % columns, ty0 + k / columns);
+                        if (strokeTiles[coord].ChangedInPass == passSerial) passChanged.Add(coord);
                     }
                 }
-                else
+            }
+            finally { EndPass(); }
+            return changed;
+        }
+        /// <summary>The pixels [minX, maxX] × [minY, maxY] of the dab in raster order, leaving out the tiles marked in skip (indexed
+        /// from tile (tx0, ty0), columns wide). collect: record changed tiles in passChanged (only on the calling thread).</summary>
+        private bool DabPixels(DabShape s, TileCursor c, bool collect, int minX, int maxX, int minY, int maxY, bool[] skip, int tx0, int ty0, int columns)
+        {
+            double x = s.X, y = s.Y, radius = s.Radius, cos = s.Cos, sin = s.Sin, roundness = s.Roundness, hardness = s.Hardness;
+            double aspectX = s.AspectX, aspectY = s.AspectY, pressure = s.Pressure, opacityScale = s.OpacityScale, flowScale = s.FlowScale;
+            BrushTip tip = s.Tip; bool plain = s.Plain, textured = s.Textured;
+            int tile = surface.TileSize; bool changed = false;
+            for (int py = minY; py <= maxY; py++)
+            {
+                int ty = py / tile, row = (py - ty * tile) * tile, tx = minX / tile, lx = minX - tx * tile;
+                double dy = py + 0.5 - y;
+                for (int px = minX; px <= maxX; px++, lx++)
                 {
-                    coverage = tip.Sample((u / aspectX + 1) * 0.5, (v / aspectY + 1) * 0.5);
-                    if (coverage <= 0) continue;
+                    if (lx == tile) { lx = 0; tx++; }
+                    if (skip != null && skip[(ty - ty0) * columns + tx - tx0])
+                    {
+                        // 残りのこのタイルの列を飛ばす（ワーカーが受け持つ）
+                        int jump = tile - 1 - lx; px += jump; lx += jump; continue;
+                    }
+                    double dx = px + 0.5 - x;
+                    double coverage;
+                    if (tip == null)
+                    {
+                        // 回転も潰しも無いときは元の式そのもので測る（丸ブラシの結果を以前とビット単位で揃える）。
+                        double d;
+                        if (plain) d = Math.Sqrt(dx * dx + dy * dy) / radius;
+                        else
+                        {
+                            double u = (cos * dx + sin * dy) / radius, v = (-sin * dx + cos * dy) / (radius * roundness);
+                            d = Math.Sqrt(u * u + v * v);
+                        }
+                        if (d > 1) continue;
+                        coverage = 1;
+                        if (d > hardness)
+                        {
+                            double t = (1 - d) / (1 - hardness);
+                            coverage = t * t * (3 - 2 * t);
+                        }
+                    }
+                    else
+                    {
+                        double u = (cos * dx + sin * dy) / radius, v = (-sin * dx + cos * dy) / (radius * roundness);
+                        coverage = tip.Sample((u / aspectX + 1) * 0.5, (v / aspectY + 1) * 0.5);
+                        if (coverage <= 0) continue;
+                    }
+                    if (dual != null)
+                    {
+                        MoveTo(c, tx, ty);
+                        float[] cells = c.Dual;
+                        coverage = DualBrush.Combine(dual.Mode, coverage, cells == null ? 0 : cells[row + lx]); if (coverage <= 0) continue;
+                    }
+                    double ceilingScale = opacityScale;
+                    if (textured)
+                    {
+                        // 紙の質感は流量ではなく天井に効かせる（Photoshop の「描点ごとに適用」オフと同じ）。流量に効かせると、
+                        // 間隔の細かいブラシでは重なったダブが溜まって質感が消えてしまう。
+                        double grain = settings.Texture.SampleTiled((px + 0.5) / settings.TextureScale, (py + 0.5) / settings.TextureScale);
+                        ceilingScale *= 1 - settings.TextureDepth * (1 - grain);
+                        if (ceilingScale <= 0) continue;
+                    }
+                    changed |= ApplyPixelAt(c, collect, tx, ty, row + lx, coverage, pressure, ceilingScale, flowScale);
                 }
-                if (dual != null) { coverage = DualBrush.Combine(dual.Mode, coverage, DualAt(px, py)); if (coverage <= 0) continue; }
-                double ceilingScale = opacityScale;
-                if (textured)
-                {
-                    // 紙の質感は流量ではなく天井に効かせる（Photoshop の「描点ごとに適用」オフと同じ）。流量に効かせると、
-                    // 間隔の細かいブラシでは重なったダブが溜まって質感が消えてしまう。
-                    double grain = settings.Texture.SampleTiled((px + 0.5) / settings.TextureScale, (py + 0.5) / settings.TextureScale);
-                    ceilingScale *= 1 - settings.TextureDepth * (1 - grain);
-                    if (ceilingScale <= 0) continue;
-                }
-                changed |= ApplyPixelInternal(px, py, coverage, pressure, ceilingScale, flowScale);
             }
             return changed;
         }
-        private bool ApplyPixelInternal(int x, int y, double coverage, double pressure, double opacityScale = 1, double flowScale = 1)
+        /// <summary>Starts a pass over pixels (one dab or one ApplyPixel call): tiles are looked up afresh.</summary>
+        private void BeginPass() { passSerial++; cursor.Reset(); }
+        /// <summary>Ends a pass: the surface records each tile the pass changed once (revision and change journal), also when
+        /// the pass stopped with an exception (the cancel that follows records them again when it restores them).</summary>
+        private void EndPass()
         {
-            if (x < 0 || y < 0 || x >= surface.Width || y >= surface.Height) return false;
-            double selected = selection == null ? 1 : selection.Coverage(x, y);
+            cursor.Reset();
+            if (passChanged.Count == 0) return;
+            for (int i = 0; i < passChanged.Count; i++) surface.NotifyTileChanged(passChanged[i]);
+            passChanged.Clear();
+        }
+        private void MoveTo(TileCursor c, int tx, int ty)
+        {
+            if (c.X == tx && c.Y == ty) return;
+            c.X = tx; c.Y = ty; c.Coord = new TileCoord(tx, ty);
+            strokeTiles.TryGetValue(c.Coord, out c.Stroke);
+            c.Surface = surface.PeekTile(c.Coord);
+            c.Selected = selection == null ? null : selection.Surface.PeekTile(c.Coord);
+            c.Dual = null; if (dual != null) dualCoverage.TryGetValue(c.Coord, out c.Dual);
+        }
+        /// <summary>One pixel of a pass: (tx, ty) is its tile, local its index in the tile. The same arithmetic and the same budget
+        /// checks in the same order as a per-pixel lookup; only the dictionary lookups are made once per tile.</summary>
+        private bool ApplyPixelAt(TileCursor c, bool collect, int tx, int ty, int local, double coverage, double pressure, double opacityScale, double flowScale)
+        {
+            MoveTo(c, tx, ty);
+            double selected = selection == null ? 1 : (c.Selected == null ? 0 : c.Selected.Get(local * 4).A) / 255.0;
             if (selected <= 0) return false;
             double ceiling = settings.Opacity * opacityScale * (settings.PressureOpacity ? pressure : 1);
             double flow = coverage * settings.Flow * flowScale * (settings.PressureFlow ? pressure : 1);
             if (flow <= 0 || ceiling <= 0) return false;
-            TileCoord coord = surface.CoordAt(x, y);
-            int tile = surface.TileSize, local = (y % tile) * tile + x % tile;
-            float[] wash;
-            if (washes.TryGetValue(coord, out wash) && wash[local] >= ceiling && !tipColors) return false;
-            if (!before.ContainsKey(coord))
+            var st = c.Stroke;
+            if (st != null && st.Wash[local] >= ceiling && !tipColors) return false;
+            int tile = surface.TileSize;
+            if (st == null)
             {
-                long nextBytes = rollbackBytes + 64 + surface.TileBytesAt(coord) + (long)tile * tile * (tipColors ? 20 : 4);
+                long nextBytes = rollbackBytes + 64 + (c.Surface == null ? 0 : c.Surface.ByteSize) + (long)tile * tile * (tipColors ? 20 : 4);
                 document.EnsureStrokeBudget(nextBytes);
-                before.Add(coord, surface.Capture(coord)); rollbackBytes = nextBytes;
+                var captured = c.Surface == null ? null : c.Surface.Clone();
+                before.Add(c.Coord, captured); rollbackBytes = nextBytes;
+                st = new StrokeTile { Before = captured, Wash = new float[tile * tile], Paint = tipColors ? new float[tile * tile * 4] : null };
+                strokeTiles.Add(c.Coord, st); c.Stroke = st;
             }
-            if (wash == null) { wash = new float[tile * tile]; washes.Add(coord, wash); if (tipColors) paints.Add(coord, new float[tile * tile * 4]); }
+            float[] wash = st.Wash;
             double previousWash = wash[local];
             // 天井に届いた画素も、ダブごとの色ならその色へは寄せる（濃さは天井のまま）。
             double accumulated = previousWash >= ceiling ? previousWash : wash[local] + (ceiling - wash[local]) * Math.Min(1, flow);
@@ -431,7 +576,7 @@ namespace Yozolab.YoluPainter.Core
             Rgba32 paint = strokeColor;
             if (tipColors)
             {
-                float[] p = paints[coord]; int o = local * 4; double w = Math.Min(1, flow);
+                float[] p = st.Paint; int o = local * 4; double w = Math.Min(1, flow);
                 Rgba32 k = dabColor;
                 if (previousWash <= 0) { p[o] = k.R / 255f; p[o + 1] = k.G / 255f; p[o + 2] = k.B / 255f; p[o + 3] = k.A / 255f; }
                 else
@@ -441,17 +586,18 @@ namespace Yozolab.YoluPainter.Core
                 }
                 paint = new Rgba32(MathUtil.ToByte(p[o]), MathUtil.ToByte(p[o + 1]), MathUtil.ToByte(p[o + 2]), MathUtil.ToByte(p[o + 3]));
             }
-            TileStorage original = before[coord];
+            TileStorage original = st.Before;
             Rgba32 start = original == null ? Rgba32.Transparent : original.Get(local * 4), next;
             if (settings.Erase)
             {
                 byte alpha = MathUtil.ToByte(start.A / 255.0 * (1 - accumulated * settings.Color.A / 255.0));
                 next = alpha == 0 ? Rgba32.Transparent : new Rgba32(start.R, start.G, start.B, alpha);
             }
-            else next = CpuCompositor.Blend(start, paint, Math.Min(1, accumulated));
+            else next = CpuCompositor.BlendUnchecked(start, paint, Math.Min(1, accumulated), LayerBlendMode.Normal); // 0..1 なので Blend の検査は要らない
             if (selected < 1) next = CpuCompositor.Fade(start, next, selected);
-            if (next == surface.GetPixel(x, y)) return false;
-            return surface.SetPixelInternal(x, y, next);
+            if (!surface.WritePixelQuiet(c.Coord, ref c.Surface, local * 4, next)) return false;
+            if (st.ChangedInPass != passSerial) { st.ChangedInPass = passSerial; if (collect) passChanged.Add(c.Coord); }
+            return true;
         }
         /// <summary>Commits exact before/after tile states. Returns false when the stroke made no net pixel change.</summary>
         public bool Commit()
@@ -482,8 +628,7 @@ namespace Yozolab.YoluPainter.Core
         }
         private void ReleaseScratch()
         {
-            before.Clear(); washes.Clear(); rollbackBytes = 0; curvePieces.Clear(); curvePoints = 0;
-            if (paints != null) paints.Clear();
+            before.Clear(); strokeTiles.Clear(); passChanged.Clear(); cursor.Reset(); rollbackBytes = 0; curvePieces.Clear(); curvePoints = 0;
             if (dual != null) { dualCoverage.Clear(); dualPending.Clear(); }
         }
         public void Dispose() { Cancel(); }

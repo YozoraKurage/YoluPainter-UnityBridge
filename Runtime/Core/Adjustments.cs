@@ -58,12 +58,20 @@ namespace Yozolab.YoluPainter.Core
             switch (Type)
             {
                 case AdjustmentType.Invert: return new Rgba32((byte)(255 - c.R), (byte)(255 - c.G), (byte)(255 - c.B), c.A);
-                case AdjustmentType.Levels: return new Rgba32(Level(c.R), Level(c.G), Level(c.B), c.A);
+                case AdjustmentType.Levels:
+                {
+                    var t = System.Threading.Volatile.Read(ref levelTable);
+                    if (t == null) { t = LevelTable(); System.Threading.Volatile.Write(ref levelTable, t); }
+                    return new Rgba32(t[c.R], t[c.G], t[c.B], c.A);
+                }
                 default:
                     double r, g, b; HueSaturationLightness(c.R / 255.0, c.G / 255.0, c.B / 255.0, out r, out g, out b);
                     return new Rgba32(MathUtil.ToByte(r), MathUtil.ToByte(g), MathUtil.ToByte(b), c.A);
             }
         }
+        // Level of every byte, made on first use (the settings never change; two threads making it at once make the same table).
+        byte[] levelTable;
+        byte[] LevelTable() { var t = new byte[256]; for (int i = 0; i < 256; i++) t[i] = Level((byte)i); return t; }
         byte Level(byte component)
         {
             double v = (component / 255.0 - InputBlack) / (InputWhite - InputBlack);

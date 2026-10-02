@@ -24,7 +24,7 @@ namespace Yozolab.YoluPainter.Editor
     /// 違う項目以上で使うレイヤー・マスクのブロックは GPU に残す。署名がすべて同じブロックは合成し直さない（結果は同じ）。
     /// 写しはすべて <see cref="ResidentBudgetBytes"/> の内側で、足りなければ古いものから捨て、それでも足りなければ写さずに毎回アップロードする
     /// （結果は同じで、遅くなるだけ）。<see cref="ReleaseResidentCaches"/> で全部捨てられ、しばらく使われない写しは自動で捨てる。</para>
-    /// <para>グループは CpuCompositor.EvaluateTile と同じ順・同じ式で GPU 上で合成する。分離グループ（とクリッピングのあるグループ、
+    /// <para>グループは CpuCompositor.EvaluateSpan と同じ順・同じ式で GPU 上で合成する。分離グループ（とクリッピングのあるグループ、
     /// クリッピングされたグループ）は 1 つ深い段の作業ブロックで透明から中身を合成し、レイヤーと同じように重ねる。通過グループは下の結果を
     /// 1 つ深い段へ写して中身を重ね、不透明度×マスクでフェードする（不透明度 1 でマスクが無ければ同じ段でそのまま重ねる）。
     /// <see cref="MaxNestedLevels"/> 段と <see cref="NestedLevelBudgetBytes"/> を超える文書では、深いグループが触れるタイルだけ CPU の正本の
@@ -333,7 +333,7 @@ namespace Yozolab.YoluPainter.Editor
         long BlockRevision(SparseTileSurface surface, int bx, int by)
         { return surface.MaxTileRevision(bx * blockTiles, by * blockTiles, (bx + 1) * blockTiles, (by + 1) * blockTiles); }
 
-        // ───────────── 入れ子の合成（CpuCompositor.EvaluateTile と同じ順と式） ─────────────
+        // ───────────── 入れ子の合成（CpuCompositor.EvaluateSpan と同じ順と式） ─────────────
 
         /// <summary>不透明度 1 でマスクが効いていない通過グループは、フェードが中身そのもの（CpuCompositor.Fade の amount ≥ 1）なので
         /// 同じ段で重ねられる。</summary>

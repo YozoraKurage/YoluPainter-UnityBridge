@@ -72,7 +72,7 @@ namespace Yozolab.YoluPainter.Core
             return EditRegion(surface, region, (x, y, start, amount) =>
             {
                 double a = opacity * amount;
-                if (!erase) return CpuCompositor.Blend(start, color, a);
+                if (!erase) return CpuCompositor.BlendUnchecked(start, color, a, LayerBlendMode.Normal); // a is 0..1 (checked above)
                 byte alpha = MathUtil.ToByte(start.A / 255.0 * (1 - a * color.A / 255.0));
                 return alpha == 0 ? Rgba32.Transparent : new Rgba32(start.R, start.G, start.B, alpha);
             });
@@ -97,7 +97,7 @@ namespace Yozolab.YoluPainter.Core
             if (gradient == null) throw new ArgumentNullException(nameof(gradient)); gradient.Validate();
             var g = new GradientSettings { Shape = gradient.Shape, X0 = gradient.X0, Y0 = gradient.Y0, X1 = gradient.X1, Y1 = gradient.Y1, From = gradient.From, To = gradient.To, Opacity = gradient.Opacity };
             var surface = PaintableSurface(layerId, channel);
-            return EditRegion(surface, region, (x, y, start, amount) => CpuCompositor.Blend(start, g.ColorAt(x + .5, y + .5), g.Opacity * amount));
+            return EditRegion(surface, region, (x, y, start, amount) => CpuCompositor.BlendUnchecked(start, g.ColorAt(x + .5, y + .5), g.Opacity * amount, LayerBlendMode.Normal)); // 0..1 (Validate)
         }
 
         /// <summary>Replaces a layer's channel with an image (straight RGBA8, bottom-left origin, the document's size) inside the
@@ -151,30 +151,50 @@ namespace Yozolab.YoluPainter.Core
             var effective = withinSelection ? EffectiveRegion(region) : region;
             int tile = TileSize, n = tile * tile;
             var coords = new List<TileCoord>(effective != null ? effective.Tiles : EnumerateCanvasTiles());
-            var changes = new List<TileChange>(); var bytes = new byte[n * 4]; var amounts = new byte[n]; long rollback = 0;
+            var changes = new List<TileChange>(); long rollback = 0;
+            // 新しいタイルの計算はタイルごとに独立（pixel は純粋な関数、面とマスクは読むだけ）なので、まとめて並列に計算し、
+            // 予算の確認と書き込みはタイルの順にこのスレッドで行う（予算で止まる所も、止まったときに戻すものも逐次と同じ）。
+            int degree = CoreParallelism.Degree, batch = degree > 1 ? Math.Min(coords.Count, degree * 4) : 1;
+            var selected = new bool[batch]; var same = new bool[batch]; var uniform = new bool[batch]; var bytes = new byte[batch][]; var amounts = new byte[batch][];
+            for (int k = 0; k < batch; k++) { bytes[k] = new byte[n * 4]; amounts[k] = new byte[n]; }
             try
             {
-                foreach (var coord in coords)
+                for (int start = 0; start < coords.Count; start += batch)
                 {
-                    if (effective != null) { if (!effective.CopyTile(coord, amounts)) continue; }
-                    else for (int i = 0; i < n; i++) amounts[i] = 255;
-                    var before = surface.Capture(coord);
-                    surface.CopyTile(coord, bytes);
-                    int w = Math.Min(tile, Width - coord.X * tile), h = Math.Min(tile, Height - coord.Y * tile);
-                    for (int y = 0; y < h; y++) for (int x = 0; x < w; x++)
+                    int count = Math.Min(batch, coords.Count - start), first = start;
+                    // ワーカーでは割り当てない（エディタの GC は割り当てのたびに全スレッドを止め得る）。新しい画素を作り、元と同じかだけ見る
+                    CoreParallelism.For(count, degree, k =>
                     {
-                        int i = y * tile + x; if (amounts[i] == 0) continue;
-                        int o = i * 4; var start = new Rgba32(bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]);
-                        var next = pixel(coord.X * tile + x, coord.Y * tile + y, start, amounts[i] / 255.0);
-                        bytes[o] = next.R; bytes[o + 1] = next.G; bytes[o + 2] = next.B; bytes[o + 3] = next.A;
+                        var coord = coords[first + k];
+                        var tileBytes = bytes[k]; var tileAmounts = amounts[k];
+                        selected[k] = effective == null || effective.CopyTile(coord, tileAmounts);
+                        if (!selected[k]) return;
+                        if (effective == null) for (int i = 0; i < n; i++) tileAmounts[i] = 255;
+                        surface.CopyTile(coord, tileBytes);
+                        int w = Math.Min(tile, Width - coord.X * tile), h = Math.Min(tile, Height - coord.Y * tile);
+                        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++)
+                        {
+                            int i = y * tile + x; if (tileAmounts[i] == 0) continue;
+                            int o = i * 4; var startPixel = new Rgba32(tileBytes[o], tileBytes[o + 1], tileBytes[o + 2], tileBytes[o + 3]);
+                            var next = pixel(coord.X * tile + x, coord.Y * tile + y, startPixel, tileAmounts[i] / 255.0);
+                            tileBytes[o] = next.R; tileBytes[o + 1] = next.G; tileBytes[o + 2] = next.B; tileBytes[o + 3] = next.A;
+                        }
+                        same[k] = TileStorage.SameAs(surface.PeekTile(coord), tileBytes);
+                        uniform[k] = !same[k] && TileStorage.Uniformity(tileBytes);
+                    });
+                    for (int k = 0; k < count; k++)
+                    {
+                        if (!selected[k]) continue;
+                        var coord = coords[first + k];
+                        var before = surface.Capture(coord);
+                        if (same[k]) continue;
+                        var after = TileStorage.FromBytes(bytes[k], uniform[k]);
+                        rollback += 64 + (before == null ? 0 : before.ByteSize);
+                        EnsureStrokeBudget(rollback);
+                        surface.EnsureGrowth((after == null ? 0 : after.ByteSize) - surface.TileBytesAt(coord));
+                        surface.Restore(coord, after);
+                        changes.Add(new TileChange(coord, before, after));
                     }
-                    var after = TileStorage.FromBytes(bytes);
-                    if (TileStorage.Same(before, after)) continue;
-                    rollback += 64 + (before == null ? 0 : before.ByteSize);
-                    EnsureStrokeBudget(rollback);
-                    surface.EnsureGrowth((after == null ? 0 : after.ByteSize) - surface.TileBytesAt(coord));
-                    surface.Restore(coord, after);
-                    changes.Add(new TileChange(coord, before, after));
                 }
             }
             catch

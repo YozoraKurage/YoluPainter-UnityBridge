@@ -44,10 +44,9 @@ namespace Yozolab.YoluPainter.Core
         public int TileCount { get { return tiles.Count; } }
         /// <summary>True when the tile holds data (an absent tile is transparent).</summary>
         public bool HasTile(TileCoord coord) { return tiles.ContainsKey(coord); }
-        public long AllocatedBytes
-        {
-            get { long bytes = 0; foreach (var tile in tiles.Values) bytes += tile.ByteSize; return bytes; }
-        }
+        // タイルの ByteSize の合計。タイルを足す・外す・入れ替える・広げる所で増減する（予算の確認ごとに全タイルを数えない）
+        private long allocatedBytes;
+        public long AllocatedBytes { get { return allocatedBytes; } }
         public SparseTileSurface(int width, int height, int tileSize = 128)
         {
             if (width <= 0 || width > 32768) throw new ArgumentOutOfRangeException(nameof(width));
@@ -81,15 +80,41 @@ namespace Yozolab.YoluPainter.Core
                 if (color == Rgba32.Transparent) return false;
                 EnsureGrowth(checked(TileSize * TileSize * 4));
                 tile = TileStorage.Uniform(Rgba32.Transparent);
-                tiles.Add(coord, tile);
+                tiles.Add(coord, tile); allocatedBytes += tile.ByteSize;
             }
             int index = ((y % TileSize) * TileSize + x % TileSize) * 4;
             if (tile.Get(index) == color) return false;
-            if (tile.ByteSize == 4) EnsureGrowth(checked(TileSize * TileSize * 4) - 4);
-            tile.Set(index, color, checked(TileSize * TileSize * 4));
+            long size = tile.ByteSize;
+            if (size == 4) EnsureGrowth(checked(TileSize * TileSize * 4) - 4);
+            tile.Set(index, color, checked(TileSize * TileSize * 4)); allocatedBytes += tile.ByteSize - size;
             Touched(coord);
             return true;
         }
+        /// <summary>The stored tile itself (not a copy), or null when the tile is absent. A writer that stays in one tile for
+        /// many pixels (BrushStroke) keeps it instead of looking the tile up per pixel; the object is replaced only by
+        /// Restore, Compact and Clear, so it must not be kept across those.</summary>
+        internal TileStorage PeekTile(TileCoord coord) { TileStorage tile; return tiles.TryGetValue(coord, out tile) ? tile : null; }
+        /// <summary><see cref="SetPixelInternal"/> on a tile the caller already looked up (tile is the result of
+        /// <see cref="PeekTile"/> and is updated when the write creates it), without the change notification: the caller must
+        /// call <see cref="NotifyTileChanged"/> once for every tile this returned true for, before anything else reads the
+        /// revisions or the change journal. Same budget checks, in the same order, as SetPixelInternal.</summary>
+        internal bool WritePixelQuiet(TileCoord coord, ref TileStorage tile, int index, Rgba32 color)
+        {
+            if (tile == null)
+            {
+                if (color == Rgba32.Transparent) return false;
+                EnsureGrowth(checked(TileSize * TileSize * 4));
+                tile = TileStorage.Uniform(Rgba32.Transparent);
+                tiles.Add(coord, tile); allocatedBytes += tile.ByteSize;
+            }
+            if (tile.Get(index) == color) return false;
+            long size = tile.ByteSize;
+            if (size == 4) EnsureGrowth(checked(TileSize * TileSize * 4) - 4);
+            tile.Set(index, color, checked(TileSize * TileSize * 4)); allocatedBytes += tile.ByteSize - size;
+            return true;
+        }
+        /// <summary>The change notification of pixel writes made with <see cref="WritePixelQuiet"/> (once per tile).</summary>
+        internal void NotifyTileChanged(TileCoord coord) { Touched(coord); }
         /// <summary>Imports a complete tile. Padding outside the canvas must be zero; caller buffers are copied.</summary>
         public void ImportTile(TileCoord coord, byte[] bytes)
         {
@@ -142,7 +167,7 @@ namespace Yozolab.YoluPainter.Core
             if (tiles.Count == 0) return;
             if (BeforeExternalMutation != null) BeforeExternalMutation();
             var cleared = new List<TileCoord>(tiles.Keys);
-            tiles.Clear();
+            tiles.Clear(); allocatedBytes = 0;
             foreach (var coord in cleared) Touched(coord);
             if (AfterExternalMutation != null) AfterExternalMutation();
         }
@@ -153,8 +178,9 @@ namespace Yozolab.YoluPainter.Core
         { TileStorage tile; return tiles.TryGetValue(coord, out tile) ? tile.Clone() : null; }
         internal void Restore(TileCoord coord, TileStorage snapshot)
         {
+            allocatedBytes -= TileBytesAt(coord);
             if (snapshot == null) tiles.Remove(coord);
-            else tiles[coord] = snapshot.Clone();
+            else { var restored = snapshot.Clone(); tiles[coord] = restored; allocatedBytes += restored.ByteSize; }
             Touched(coord);
         }
         internal void Compact(TileCoord coord)
@@ -162,10 +188,12 @@ namespace Yozolab.YoluPainter.Core
             TileStorage tile;
             if (!tiles.TryGetValue(coord, out tile)) return;
             TileStorage compact = tile.Compact();
-            if (compact == null) tiles.Remove(coord); else tiles[coord] = compact;
+            allocatedBytes -= tile.ByteSize;
+            if (compact == null) tiles.Remove(coord); else { tiles[coord] = compact; allocatedBytes += compact.ByteSize; }
         }
         private void CheckPixel(int x, int y)
         { if (x < 0 || y < 0 || x >= Width || y >= Height) throw new ArgumentOutOfRangeException("pixel", "Pixel is outside the surface."); }
+        internal void RequireCoord(TileCoord coord) { CheckCoord(coord); }
         private void CheckCoord(TileCoord coord)
         { if (coord.X < 0 || coord.Y < 0 || (long)coord.X * TileSize >= Width || (long)coord.Y * TileSize >= Height) throw new ArgumentOutOfRangeException(nameof(coord)); }
     }
@@ -176,6 +204,8 @@ namespace Yozolab.YoluPainter.Core
         private bool shared;
         private Rgba32 uniform;
         internal long ByteSize { get { return data == null ? 4 : data.Length; } }
+        /// <summary>True when Set writes straight into the tile's own buffer (no allocation, no copy-on-write).</summary>
+        internal bool Writable { get { return data != null && !shared; } }
         private TileStorage() { }
         internal static TileStorage Uniform(Rgba32 color) { return new TileStorage { uniform = color }; }
         internal static long EstimateBytes(byte[] bytes)
@@ -184,7 +214,22 @@ namespace Yozolab.YoluPainter.Core
                 if (bytes[i] != bytes[0] || bytes[i + 1] != bytes[1] || bytes[i + 2] != bytes[2] || bytes[i + 3] != bytes[3]) return bytes.Length;
             return (bytes[0] | bytes[1] | bytes[2] | bytes[3]) == 0 ? 0 : 4;
         }
-        internal static TileStorage FromBytes(byte[] bytes) { return new TileStorage { data = (byte[])bytes.Clone() }.Compact(); }
+        /// <summary>A tile with these pixels: absent (null) when all are transparent zero, uniform when all are equal, otherwise a
+        /// copy (the same as copying and then <see cref="Compact"/>, without copying tiles that compact).</summary>
+        internal static TileStorage FromBytes(byte[] bytes) { return FromBytes(bytes, Uniformity(bytes)); }
+        /// <summary>FromBytes when the caller already knows <see cref="Uniformity"/> of bytes (worked out on a worker thread).</summary>
+        internal static TileStorage FromBytes(byte[] bytes, bool uniform)
+        {
+            if (uniform) return bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 0 && bytes[3] == 0 ? null : Uniform(new Rgba32(bytes[0], bytes[1], bytes[2], bytes[3]));
+            return new TileStorage { data = (byte[])bytes.Clone() };
+        }
+        /// <summary>True when every pixel equals the first.</summary>
+        internal static bool Uniformity(byte[] bytes)
+        {
+            byte r = bytes[0], g = bytes[1], b = bytes[2], a = bytes[3];
+            for (int i = 4; i < bytes.Length; i += 4) if (bytes[i] != r || bytes[i + 1] != g || bytes[i + 2] != b || bytes[i + 3] != a) return false;
+            return true;
+        }
         internal Rgba32 Get(int index) { return data == null ? uniform : new Rgba32(data[index], data[index + 1], data[index + 2], data[index + 3]); }
         internal void Set(int index, Rgba32 color, int byteLength)
         {
@@ -212,17 +257,40 @@ namespace Yozolab.YoluPainter.Core
         internal TileStorage Compact()
         {
             if (data == null) return uniform == Rgba32.Transparent ? null : this;
+            if (!Uniformity(data)) return this;
             Rgba32 first = Get(0);
-            for (int i = 4; i < data.Length; i += 4) if (Get(i) != first) return this;
             return first == Rgba32.Transparent ? null : Uniform(first);
+        }
+        /// <summary>Same(a, FromBytes(bytes)) without making the tile (bytes is a full tile).</summary>
+        internal static bool SameAs(TileStorage a, byte[] bytes)
+        {
+            if (a == null) { for (int i = 0; i < bytes.Length; i++) if (bytes[i] != 0) return false; return true; }
+            if (a.data != null) { var x = a.data; if (x.Length != bytes.Length) return false; for (int i = 0; i < x.Length; i++) if (x[i] != bytes[i]) return false; return true; }
+            var u = a.uniform;
+            for (int p = 0; p < bytes.Length; p += 4) if (bytes[p] != u.R || bytes[p + 1] != u.G || bytes[p + 2] != u.B || bytes[p + 3] != u.A) return false;
+            return true;
+        }
+        /// <summary>Writes the alpha of every pixel into amounts (TileSize² bytes).</summary>
+        internal void CopyAlpha(byte[] amounts)
+        {
+            if (data == null) { for (int i = 0; i < amounts.Length; i++) amounts[i] = uniform.A; return; }
+            for (int i = 0; i < amounts.Length; i++) amounts[i] = data[i * 4 + 3];
         }
         internal static bool Same(TileStorage a, TileStorage b)
         {
             if (a == null || b == null) return a == b;
             if (a.data == null && b.data == null) return a.uniform == b.uniform;
-            int length = a.data != null ? a.data.Length : b.data.Length;
-            if (a.data != null && b.data != null && a.data.Length != b.data.Length) return false;
-            for (int p = 0; p < length; p += 4) if (a.Get(p) != b.Get(p)) return false;
+            if (a.data != null && b.data != null)
+            {
+                if (a.data.Length != b.data.Length) return false;
+                if (ReferenceEquals(a.data, b.data)) return true;
+                var x = a.data; var y = b.data;
+                for (int i = 0; i < x.Length; i++) if (x[i] != y[i]) return false;
+                return true;
+            }
+            // 片方だけが一様: もう片方の全画素がその色か
+            var full = a.data ?? b.data; var u = a.data == null ? a.uniform : b.uniform;
+            for (int p = 0; p < full.Length; p += 4) if (full[p] != u.R || full[p + 1] != u.G || full[p + 2] != u.B || full[p + 3] != u.A) return false;
             return true;
         }
         private static void Fill(byte[] bytes, Rgba32 color)

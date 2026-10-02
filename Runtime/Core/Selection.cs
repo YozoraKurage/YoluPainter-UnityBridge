@@ -28,43 +28,52 @@ namespace Yozolab.YoluPainter.Core
         {
             int n = TileSize * TileSize;
             if (amounts == null || amounts.Length != n) throw new ArgumentException("Incorrect tile length.", nameof(amounts));
-            var rgba = new byte[n * 4];
-            if (!surface.CopyTile(coord, rgba)) { Array.Clear(amounts, 0, n); return false; }
-            for (int i = 0; i < n; i++) amounts[i] = rgba[i * 4 + 3];
+            surface.RequireCoord(coord);
+            var tile = surface.PeekTile(coord); // read only, no tile-sized copy (this runs on worker threads in fills)
+            if (tile == null) { Array.Clear(amounts, 0, n); return false; }
+            tile.CopyAlpha(amounts);
             return true;
         }
 
         /// <summary>A mask from amount(x, y) inside [x0, x1) × [y0, y1). With parallel, tiles are computed on several threads, so
         /// amount must be pure (no caches or other shared state; the magic wand's tile reader is not).</summary>
         static SelectionMask Build(int width, int height, int tileSize, Func<int, int, byte> amount, int x0 = 0, int y0 = 0, int x1 = int.MaxValue, int y1 = int.MaxValue, bool parallel = false)
+        { return Build(width, height, tileSize, (_, __) => amount, false, x0, y0, x1, y1, parallel); }
+        /// <summary>Build with the amount function made per tile: tileAmount(coord, scratch) is called once for each tile on the
+        /// thread that computes it, with a tile-sized (TileSize² × 4) scratch buffer of its own when withScratch (else null);
+        /// with parallel it must be pure too.</summary>
+        static SelectionMask Build(int width, int height, int tileSize, Func<TileCoord, byte[], Func<int, int, byte>> tileAmount, bool withScratch, int x0, int y0, int x1, int y1, bool parallel)
         {
             var mask = new SelectionMask(width, height, tileSize);
             x0 = Math.Max(0, x0); y0 = Math.Max(0, y0); x1 = Math.Min(width, x1); y1 = Math.Min(height, y1);
             if (x0 >= x1 || y0 >= y1) return mask;
-            // タイルごとに独立なので（parallel なら）並列に計算し、取り込みは順に行う（一度に持つのは Batch 枚まで）
+            // タイルごとに独立なので（parallel なら）並列に計算し、取り込みは順に行う（一度に持つのは Batch 枚まで）。
+            // 作業用の配列はまとめの枠ごとに先に用意して使い回す（ワーカーで大きな配列を割り当てると、エディタの GC が全員を止める）
             var coords = new List<TileCoord>();
             for (int ty = y0 / tileSize; ty <= (y1 - 1) / tileSize; ty++)
                 for (int tx = x0 / tileSize; tx <= (x1 - 1) / tileSize; tx++) coords.Add(new TileCoord(tx, ty));
             const int Batch = 64;
-            var results = new byte[Math.Min(Batch, coords.Count)][];
+            int slots = Math.Min(Batch, coords.Count), length = tileSize * tileSize * 4;
+            var results = new byte[slots][]; var scratch = new byte[slots][]; var any = new bool[slots];
+            for (int k = 0; k < slots; k++) { results[k] = new byte[length]; if (withScratch) scratch[k] = new byte[length]; }
             for (int start = 0; start < coords.Count; start += Batch)
             {
-                int count = Math.Min(Batch, coords.Count - start);
+                int count = Math.Min(Batch, coords.Count - start), first = start;
                 Action<int> compute = k =>
                 {
-                    var c = coords[start + k]; int tx = c.X, ty = c.Y;
-                    var bytes = new byte[tileSize * tileSize * 4]; bool any = false;
+                    var c = coords[first + k]; int tx = c.X, ty = c.Y;
+                    var bytes = results[k]; Array.Clear(bytes, 0, length); bool found = false; var amount = tileAmount(c, scratch[k]);
                     int px0 = Math.Max(x0, tx * tileSize), px1 = Math.Min(x1, (tx + 1) * tileSize);
                     int py0 = Math.Max(y0, ty * tileSize), py1 = Math.Min(y1, (ty + 1) * tileSize);
                     for (int y = py0; y < py1; y++) for (int x = px0; x < px1; x++)
                     {
                         byte a = amount(x, y); if (a == 0) continue;
-                        bytes[((y - ty * tileSize) * tileSize + (x - tx * tileSize)) * 4 + 3] = a; any = true;
+                        bytes[((y - ty * tileSize) * tileSize + (x - tx * tileSize)) * 4 + 3] = a; found = true;
                     }
-                    results[k] = any ? bytes : null;
+                    any[k] = found;
                 };
-                if (parallel) System.Threading.Tasks.Parallel.For(0, count, compute); else for (int k = 0; k < count; k++) compute(k);
-                for (int k = 0; k < count; k++) if (results[k] != null) mask.surface.ImportTile(coords[start + k], results[k]);
+                CoreParallelism.For(count, parallel ? CoreParallelism.Degree : 1, compute);
+                for (int k = 0; k < count; k++) if (any[k]) mask.surface.ImportTile(coords[first + k], results[k]);
             }
             return mask;
         }
@@ -139,27 +148,74 @@ namespace Yozolab.YoluPainter.Core
             if (seedX < 0 || seedY < 0 || seedX >= document.Width || seedY >= document.Height) throw new ArgumentOutOfRangeException("seed");
             if (tolerance < 0 || tolerance > 255) throw new ArgumentOutOfRangeException(nameof(tolerance));
             var reference = new TileReader(document, layer, channel);
-            int w = document.Width, h = document.Height;
+            int w = document.Width, h = document.Height, ts = document.TileSize;
             var seed = reference.Get(seedX, seedY);
             bool Matches(Rgba32 c) =>
                 Math.Abs(c.R - seed.R) <= tolerance && Math.Abs(c.G - seed.G) <= tolerance && Math.Abs(c.B - seed.B) <= tolerance && Math.Abs(c.A - seed.A) <= tolerance;
-            if (!contiguous) return Build(w, h, document.TileSize, (x, y) => Matches(reference.Get(x, y)) ? (byte)255 : (byte)0);
+            if (!contiguous)
+            {
+                // 層の画素が基準なら、タイルごとに読んで（読むだけなので）並列に。合成が基準なら合成器（フィルターのキャッシュを使う）を
+                // このスレッドからだけ呼ぶ（合成そのものは中で並列になる）。
+                if (layer.HasValue)
+                {
+                    var target = document.GetLayer(layer.Value);
+                    return Build(w, h, ts, (coord, bytes) =>
+                    {
+                        target.CopyTile(channel, coord, bytes); int bx = coord.X * ts, by = coord.Y * ts;
+                        return (x, y) => { int i = ((y - by) * ts + x - bx) * 4; return Matches(new Rgba32(bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3])) ? (byte)255 : (byte)0; };
+                    }, true, 0, 0, w, h, parallel: true);
+                }
+                // 合成は帯（タイル 1 行分）ずつ。合成器は中でタイルを並列に計算し、フィルターのキャッシュはこのスレッドからだけ触る
+                var mask = new SelectionMask(w, h, ts);
+                int columns = (w + ts - 1) / ts, length = ts * ts * 4;
+                var results = new byte[columns][]; var any = new bool[columns];
+                for (int i = 0; i < columns; i++) results[i] = new byte[length];
+                for (int ty = 0; ty * ts < h; ty++)
+                {
+                    int y0 = ty * ts, rows = Math.Min(ts, h - y0);
+                    var band = CpuCompositor.CompositeRegion(document, channel, 0, y0, w, rows);
+                    CoreParallelism.For(columns, CoreParallelism.Degree, tx =>
+                    {
+                        var bytes = results[tx]; Array.Clear(bytes, 0, length); bool found = false;
+                        int x0 = tx * ts, x1 = Math.Min(w, x0 + ts);
+                        for (int y = 0; y < rows; y++) for (int x = x0; x < x1; x++)
+                        {
+                            int o = (y * w + x) * 4;
+                            if (!Matches(new Rgba32(band[o], band[o + 1], band[o + 2], band[o + 3]))) continue;
+                            bytes[(y * ts + x - x0) * 4 + 3] = 255; found = true;
+                        }
+                        any[tx] = found;
+                    });
+                    for (int tx = 0; tx < columns; tx++) if (any[tx]) mask.surface.ImportTile(new TileCoord(tx, ty), results[tx]);
+                }
+                return mask;
+            }
+            // 走査線の塗りつぶし: 種から 4 近傍でつながる、条件に合う画素の集まり（どの順で辿っても同じ集まりと外接矩形になる）
             var selected = new System.Collections.BitArray(w * h);
-            var stack = new Stack<int>(); stack.Push(seedY * w + seedX); selected[seedY * w + seedX] = true;
+            var stack = new Stack<int>(); stack.Push(seedY * w + seedX);
             int minX = seedX, maxX = seedX, minY = seedY, maxY = seedY;
             while (stack.Count > 0)
             {
                 int i = stack.Pop(), x = i % w, y = i / w;
-                if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
-                void Visit(int nx, int ny)
+                if (selected[i]) continue;
+                int left = x, right = x;
+                while (left > 0 && !selected[y * w + left - 1] && Matches(reference.Get(left - 1, y))) left--;
+                while (right < w - 1 && !selected[y * w + right + 1] && Matches(reference.Get(right + 1, y))) right++;
+                for (int k = left; k <= right; k++) selected[y * w + k] = true;
+                if (left < minX) minX = left; if (right > maxX) maxX = right; if (y < minY) minY = y; if (y > maxY) maxY = y;
+                for (int ny = y - 1; ny <= y + 1; ny += 2)
                 {
-                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) return;
-                    int n = ny * w + nx; if (selected[n] || !Matches(reference.Get(nx, ny))) return;
-                    selected[n] = true; stack.Push(n);
+                    if (ny < 0 || ny >= h) continue;
+                    bool inRun = false;
+                    for (int k = left; k <= right; k++)
+                    {
+                        bool open = !selected[ny * w + k] && Matches(reference.Get(k, ny));
+                        if (open && !inRun) stack.Push(ny * w + k);
+                        inRun = open;
+                    }
                 }
-                Visit(x + 1, y); Visit(x - 1, y); Visit(x, y + 1); Visit(x, y - 1);
             }
-            return Build(w, h, document.TileSize, (x, y) => selected[y * w + x] ? (byte)255 : (byte)0, minX, minY, maxX + 1, maxY + 1, parallel: true);
+            return Build(w, h, ts, (x, y) => selected[y * w + x] ? (byte)255 : (byte)0, minX, minY, maxX + 1, maxY + 1, parallel: true);
         }
 
         /// <summary>Reads pixels tile by tile (a layer's own pixels, or the composite) with a small tile cache.</summary>
@@ -172,9 +228,12 @@ namespace Yozolab.YoluPainter.Core
                 this.document = document; this.channel = channel; tile = document.TileSize;
                 layer = layerId.HasValue ? document.GetLayer(layerId.Value) : null;
             }
+            int lastX = -1, lastY = -1; byte[] last; // 続けて同じタイルを読むことが多いので、最後のタイルは辞書を引かない
             public Rgba32 Get(int x, int y)
             {
-                var coord = new TileCoord(x / tile, y / tile);
+                int tx = x / tile, ty = y / tile;
+                if (tx == lastX && ty == lastY) { int j = ((y - ty * tile) * tile + x - tx * tile) * 4; return new Rgba32(last[j], last[j + 1], last[j + 2], last[j + 3]); }
+                var coord = new TileCoord(tx, ty);
                 if (!cache.TryGetValue(coord, out var bytes))
                 {
                     if (cache.Count > 4096) cache.Clear();
@@ -188,6 +247,7 @@ namespace Yozolab.YoluPainter.Core
                     }
                     cache.Add(coord, bytes);
                 }
+                lastX = tx; lastY = ty; last = bytes;
                 int i = ((y % tile) * tile + x % tile) * 4;
                 return new Rgba32(bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]);
             }

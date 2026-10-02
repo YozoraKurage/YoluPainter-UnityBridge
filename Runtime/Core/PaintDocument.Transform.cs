@@ -129,19 +129,37 @@ namespace Yozolab.YoluPainter.Core
         /// command can undo it). Null when no tile changed.</summary>
         TileStrokeCommand TransformSurface(SparseTileSurface surface, SurfaceSnapshot source, List<TileCoord> targets, Affine2D inverse, SurfaceSnapshot lifted, Resampling resampling, ref long rollback)
         {
-            var changes = new List<TileChange>(); var bytes = new byte[TileSize * TileSize * 4]; var scratch = new AffineResampler.Scratch(TileSize);
+            var changes = new List<TileChange>();
+            // 行き先のタイルの計算は独立（読むのは変える前の写しだけ）なので、まとめて並列に描き、予算の確認と書き込みは
+            // タイルの順にこのスレッドで行う（逐次と同じ所で止まり、同じものを戻す）。作業者ごとに写しの見方（最後のタイルの覚え）を分ける。
+            int degree = CoreParallelism.Degree, batch = degree > 1 ? Math.Min(targets.Count, degree * 4) : 1, workers = Math.Max(1, Math.Min(degree, batch));
+            var same = new bool[batch]; var uniform = new bool[batch]; var scratches = new AffineResampler.Scratch[batch];
             try
             {
-                foreach (var coord in targets)
+                for (int start = 0; start < targets.Count; start += batch)
                 {
-                    AffineResampler.Render(source, lifted, inverse, resampling, coord, bytes, scratch);
-                    var before = surface.Capture(coord); var after = TileStorage.FromBytes(bytes);
-                    if (TileStorage.Same(before, after)) continue;
-                    rollback += 64 + (before == null ? 0 : before.ByteSize);
-                    EnsureStrokeBudget(rollback);
-                    surface.EnsureGrowth((after == null ? 0 : after.ByteSize) - surface.TileBytesAt(coord));
-                    surface.Restore(coord, after);
-                    changes.Add(new TileChange(coord, before, after));
+                    int count = Math.Min(batch, targets.Count - start), first = start;
+                    for (int k = 0; k < count; k++) if (scratches[k] == null) scratches[k] = new AffineResampler.Scratch(TileSize, source, lifted);
+                    // ワーカーでは割り当てない（エディタの GC は割り当てのたびに全スレッドを止め得る）。描いて、元と同じかだけ見る
+                    CoreParallelism.For(count, degree, k =>
+                    {
+                        var scratch = scratches[k]; var coord = targets[first + k];
+                        AffineResampler.Render(scratch.Source, scratch.LiftedView, inverse, resampling, coord, scratch.Bytes, scratch);
+                        same[k] = TileStorage.SameAs(surface.PeekTile(coord), scratch.Bytes);
+                        uniform[k] = !same[k] && TileStorage.Uniformity(scratch.Bytes);
+                    });
+                    for (int k = 0; k < count; k++)
+                    {
+                        var coord = targets[first + k];
+                        var before = surface.Capture(coord);
+                        if (same[k]) continue;
+                        var after = TileStorage.FromBytes(scratches[k].Bytes, uniform[k]);
+                        rollback += 64 + (before == null ? 0 : before.ByteSize);
+                        EnsureStrokeBudget(rollback);
+                        surface.EnsureGrowth((after == null ? 0 : after.ByteSize) - surface.TileBytesAt(coord));
+                        surface.Restore(coord, after);
+                        changes.Add(new TileChange(coord, before, after));
+                    }
                 }
             }
             catch
@@ -157,14 +175,18 @@ namespace Yozolab.YoluPainter.Core
     /// pixels, and later writes to the surface do not show through.</summary>
     internal sealed class SurfaceSnapshot
     {
-        readonly Dictionary<TileCoord, TileStorage> tiles = new Dictionary<TileCoord, TileStorage>();
+        readonly Dictionary<TileCoord, TileStorage> tiles;
         internal readonly int Width, Height, TileSize;
         int lastX = -1, lastY = -1; TileStorage last;
         internal SurfaceSnapshot(SparseTileSurface surface)
         {
-            Width = surface.Width; Height = surface.Height; TileSize = surface.TileSize;
+            Width = surface.Width; Height = surface.Height; TileSize = surface.TileSize; tiles = new Dictionary<TileCoord, TileStorage>();
             foreach (var coord in surface.EnumerateTileCoordinates()) tiles.Add(coord, surface.Capture(coord));
         }
+        SurfaceSnapshot(SurfaceSnapshot shared) { tiles = shared.tiles; Width = shared.Width; Height = shared.Height; TileSize = shared.TileSize; }
+        /// <summary>The same tiles with a pixel reader of its own (<see cref="Get"/> remembers the last tile, so a reader must not be
+        /// shared between threads; the tiles themselves are only read).</summary>
+        internal SurfaceSnapshot View() { return new SurfaceSnapshot(this); }
         internal bool IsEmpty => tiles.Count == 0;
         internal ICollection<TileCoord> Coords => tiles.Keys;
         internal bool HasTile(TileCoord coord) => tiles.ContainsKey(coord);
@@ -216,8 +238,12 @@ namespace Yozolab.YoluPainter.Core
 
         internal sealed class Scratch
         {
-            internal readonly byte[] Original, Lifted;
+            internal readonly byte[] Original, Lifted, Bytes;
+            /// <summary>Readers of the source and lifted snapshots for one thread (null lifted stays null).</summary>
+            internal readonly SurfaceSnapshot Source, LiftedView;
             internal Scratch(int tileSize) { Original = new byte[tileSize * tileSize * 4]; Lifted = new byte[tileSize * tileSize * 4]; }
+            internal Scratch(int tileSize, SurfaceSnapshot source, SurfaceSnapshot lifted) : this(tileSize)
+            { Bytes = new byte[tileSize * tileSize * 4]; Source = source.View(); LiftedView = lifted == null ? null : lifted.View(); }
         }
 
         /// <summary>Writes the transformed tile into bytes (TileSize² RGBA, padding zero). lifted = how much of each source pixel

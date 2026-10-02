@@ -158,8 +158,62 @@ namespace Yozolab.YoluPainter.Core
     internal static class MathUtil
     {
         internal static double Clamp01(double value) { return Math.Max(0, Math.Min(1, value)); }
-        internal static byte ToByte(double value) { return (byte)Math.Max(0, Math.Min(255, Math.Floor(value * 255 + 0.5))); }
+        /// <summary>Round half up to 0..255: floor(value × 255 + 0.5) clamped. Written with comparisons instead of
+        /// Math.Floor / Min / Max (which the editor's Mono calls instead of inlining); the result is the same for every double,
+        /// infinities and NaN (0) included.</summary>
+        internal static byte ToByte(double value)
+        {
+            double v = value * 255 + 0.5;
+            return v >= 255 ? (byte)255 : v > 0 ? (byte)(int)v : (byte)0; // (int) of a non-negative value is its floor
+        }
+        /// <summary>b / 255.0 for every byte b (the same doubles as the division; a load instead of a divide).</summary>
+        internal static readonly double[] ByteUnit = MakeByteUnit();
+        static double[] MakeByteUnit() { var t = new double[256]; for (int i = 0; i < 256; i++) t[i] = i / 255.0; return t; }
         internal static void RequireFinite(double value, string name)
         { if (double.IsNaN(value) || double.IsInfinity(value)) throw new ArgumentOutOfRangeException(name, "Must be finite."); }
+    }
+
+    /// <summary>How many threads the CPU paths of the core may use at once: compositing (<see cref="CpuCompositor"/>), the Normal
+    /// output, fills and gradients, transforms, the magic wand, filters, selection edits and large brush dabs. Every pixel is
+    /// computed from its own inputs independently of the scheduling, so any value gives the same bytes; 1 runs everything on the
+    /// calling thread. The document stays single-threaded for its callers: an operation returns only after its workers finish,
+    /// and workers never change the document's structure, history or budgets. Read at the start of each operation (a change does
+    /// not affect one that is running). Mesh baking has its own limit (MeshBakeBudget).</summary>
+    public static class CoreParallelism
+    {
+        static int maxDegree;
+        /// <summary>0 (the default) = one per logical processor (<see cref="Environment.ProcessorCount"/>); n &gt; 0 = at most n.</summary>
+        public static int MaxDegreeOfParallelism
+        {
+            get { return maxDegree; }
+            set { if (value < 0) throw new ArgumentOutOfRangeException(nameof(value), "Use 0 for one thread per processor, or a positive count."); maxDegree = value; }
+        }
+        /// <summary>The number of threads an operation starting now may use (at least 1).</summary>
+        public static int Degree { get { int d = maxDegree; return d > 0 ? d : Math.Max(1, Environment.ProcessorCount); } }
+
+        /// <summary>Parallel.For options that keep to <see cref="Degree"/>.</summary>
+        internal static System.Threading.Tasks.ParallelOptions Options() { return new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Degree }; }
+
+        /// <summary>Runs body(i) for every i in [0, count): on the calling thread when degree (or count) is 1, otherwise on up to
+        /// degree workers that each take the next index in turn. Each body must only write what belongs to its index. An exception
+        /// stops the workers from taking more indices and is rethrown as it is (not wrapped in an AggregateException); with several,
+        /// which one is rethrown is not defined.</summary>
+        internal static void For(int count, int degree, Action<int> body)
+        {
+            if (count <= 0) return;
+            degree = Math.Min(degree, count);
+            if (degree <= 1) { for (int i = 0; i < count; i++) body(i); return; }
+            int next = -1; Exception failure = null;
+            System.Threading.Tasks.Parallel.For(0, degree, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = degree }, _ =>
+            {
+                for (int i; (i = System.Threading.Interlocked.Increment(ref next)) < count;)
+                {
+                    if (System.Threading.Volatile.Read(ref failure) != null) return;
+                    try { body(i); }
+                    catch (Exception e) { System.Threading.Interlocked.CompareExchange(ref failure, e, null); return; }
+                }
+            });
+            if (failure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+        }
     }
 }

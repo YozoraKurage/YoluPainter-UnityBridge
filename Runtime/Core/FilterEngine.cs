@@ -279,7 +279,7 @@ namespace Yozolab.YoluPainter.Core
                 return results;
             }
             long working = 1; foreach (var r in rects) working = Math.Max(working, WorkingBytes(s.Chain, count, r.W, r.H, document.Width, document.Height));
-            int degree = (int)Math.Max(1, Math.Min(Environment.ProcessorCount, document.FilterWorkingBudgetBytes / working));
+            int degree = (int)Math.Max(1, Math.Min(CoreParallelism.Degree, document.FilterWorkingBudgetBytes / working));
             // 作業者 degree 人が、次のブロックを順に取っていく（Parallel.For の分割に任せると同時に動く作業者が少なかった）
             int nextRect = -1; degree = Math.Min(degree, rects.Count);
             Parallel.For(0, degree, new ParallelOptions { MaxDegreeOfParallelism = degree }, _ =>
@@ -448,7 +448,7 @@ namespace Yozolab.YoluPainter.Core
                     rects.Add(block);
                 }
             // 前の段を文書全体で評価する（並列のまとまりごとに。全面の画素は持たない）
-            int batch = Math.Max(1, Environment.ProcessorCount * 2);
+            int batch = Math.Max(1, CoreParallelism.Degree * 2);
             for (int start = 0; start < rects.Count; start += batch)
                 foreach (var rgba in EvaluateRects(s, k, rects.GetRange(start, Math.Min(batch, rects.Count - start))))
                     for (int i = 0; i < rgba.Length; i += 4)
@@ -644,11 +644,12 @@ namespace Yozolab.YoluPainter.Core
         static void ParallelRange(int count, Action<int, int> body)
         {
             if (count <= 0) return;
-            if (count < 64 || sequentialPasses) { body(0, count); return; }
-            int chunks = Math.Min(count / 16, Environment.ProcessorCount * 4);
+            int degree = CoreParallelism.Degree;
+            if (count < 64 || sequentialPasses || degree <= 1) { body(0, count); return; }
+            int chunks = Math.Min(count / 16, degree * 4);
             if (chunks <= 1) { body(0, count); return; }
             int size = (count + chunks - 1) / chunks;
-            Parallel.For(0, (count + size - 1) / size, c => body(c * size, Math.Min(count, (c + 1) * size)));
+            Parallel.For(0, (count + size - 1) / size, new ParallelOptions { MaxDegreeOfParallelism = degree }, c => body(c * size, Math.Min(count, (c + 1) * size)));
         }
     }
 }

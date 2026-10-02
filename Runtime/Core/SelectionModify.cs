@@ -117,7 +117,7 @@ namespace Yozolab.YoluPainter.Core
         {
             var dense = Dense(w); int pw = w.width + 2 * pad, ph = w.height + 2 * pad;
             var p = new byte[pw * ph];
-            Parallel.For(0, ph, py =>
+            Parallel.For(0, ph, CoreParallelism.Options(), py =>
             {
                 int cy = w.y + py - pad; bool outY = cy < 0 || cy >= Height;
                 for (int px = 0; px < pw; px++)
@@ -154,7 +154,7 @@ namespace Yozolab.YoluPainter.Core
                 circle[i] = (int)Math.Round(Math.Sqrt(radius * (double)radius - t * t), MidpointRounding.ToEven);
             }
             var output = new byte[width * height];
-            Parallel.For(0, height, () => new byte[(radius + 1) * pw], (y, _, columns) =>
+            Parallel.For(0, height, CoreParallelism.Options(), () => new byte[(radius + 1) * pw], (y, _, columns) =>
             {
                 int centre = (y + radius) * pw;
                 Buffer.BlockCopy(padded, centre, columns, 0, pw);
@@ -194,7 +194,7 @@ namespace Yozolab.YoluPainter.Core
         static void Convolve(float[] src, float[] dst, int w, int h, double[] kernel, bool horizontal)
         {
             int reach = kernel.Length / 2;
-            Parallel.For(0, h, y =>
+            Parallel.For(0, h, CoreParallelism.Options(), y =>
             {
                 for (int x = 0; x < w; x++)
                 {
@@ -227,7 +227,7 @@ namespace Yozolab.YoluPainter.Core
         {
             int lines = horizontal ? h : w, length = horizontal ? w : h, step = horizontal ? 1 : w;
             double scale = 1.0 / (2 * r + 1);
-            Parallel.For(0, lines, line =>
+            Parallel.For(0, lines, CoreParallelism.Options(), line =>
             {
                 int start = horizontal ? line * w : line;
                 double sum = 0;

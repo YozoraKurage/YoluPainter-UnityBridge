@@ -288,8 +288,9 @@ namespace Yozolab.YoluPainter.Core
                 int rows = Math.Min(band, h - y0);
                 byte[] normal = painted ? CpuCompositor.CompositeRegion(document, PaintChannel.Normal, 0, y0, w, rows) : null;
                 if (derive) LoadHeights(document, settings.Edges, y0, rows, heights);
-                for (int r = 0; r < rows; r++)
-                    Row(normal, r * w * 4, heights, r * w, w, settings, derive, painted, output, (y0 + r) * w * 4);
+                int band0 = y0;
+                // 行は独立（読むのは帯の合成と高さ、書くのはその行だけ）
+                CoreParallelism.For(rows, (long)rows * w < 1 << 14 ? 1 : CoreParallelism.Degree, r => Row(normal, r * w * 4, heights, r * w, w, settings, derive, painted, output, (band0 + r) * w * 4));
             }
             return output;
         }
