@@ -45,6 +45,20 @@ namespace Yozolab.YoluPainter.Editor
         [MenuItem("YozoLab/YoluPainter (Prototype)")]
         public static void Open() => GetWindow<TexturePaintWindow>("Texture Painter");
 
+        // EditMode テスト用の参照口。入力は SendEvent で本物の経路を通す。
+        internal PaintDocument Document => document;
+        internal bool IsStroking => stroke != null;
+        internal IsolatedModelPreview Preview => preview;
+        internal Rect SurfaceRect => surfaceRect;
+        internal string StatusMessage => message;
+        internal string RecoveryRoot => recoveryRoot;
+        /// <summary>PaintAt の 2D 写像の逆。ピクセル中心 (x+0.5, y+0.5) の GUI 座標を返す。</summary>
+        internal Vector2 PixelToGui(int x, int y)
+        {
+            var image = ImageRect();
+            return new Vector2(image.x + (x + .5f) / document.Width * image.width, image.y + (1 - (y + .5f) / document.Height) * image.height);
+        }
+
         void OnEnable()
         {
             minSize = new Vector2(980,640);
