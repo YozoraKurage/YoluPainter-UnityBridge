@@ -45,6 +45,10 @@ daemon_alive() {
     && kill -0 "$(cat "$DAEMON_DIR/daemon.pid")" 2>/dev/null
 }
 if daemon_alive; then
+  # 依頼の受け口（request.json / done）は 1 つしか無いので、同時に走る依頼（複数のエージェントや
+  # unity-do.sh）を 1 本ずつ通す。ロックはこのスクリプトが終わると外れる。
+  exec 8>"$DAEMON_DIR/client.lock"
+  flock 8
   info "デーモンへ依頼 (PID $(cat "$DAEMON_DIR/daemon.pid"))"
   rm -f "$DAEMON_DIR/done" "$DAEMON_DIR/result.xml"
   printf '{"filter":"%s","category":"%s"}' "$FILTER" "$CATEGORY" \
