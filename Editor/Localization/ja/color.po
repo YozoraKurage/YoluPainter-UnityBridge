@@ -18,3 +18,9 @@ msgstr "ブラシの色の不透明度"
 
 msgid "Colors you paint with appear here."
 msgstr "描いた色がここに並びます。"
+
+msgid "Hue wheel"
+msgstr "色相の円"
+
+msgid "Square and hue bar"
+msgstr "四角と色相の帯"

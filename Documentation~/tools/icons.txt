@@ -35,6 +35,7 @@ rotate_90_degrees_cw fluent arrow_rotate_clockwise
 select_all fluent select_all_on
 splitscreen_right fluent split_vertical
 square fluent image
+color_square fluent square
 stylus fluent inking_tool
 swap_horiz fluent arrow_swap
 texture fluent data_area
