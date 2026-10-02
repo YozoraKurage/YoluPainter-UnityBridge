@@ -78,7 +78,7 @@ namespace Yozolab.YoluPainter.Editor
                     uploadPixels = new byte[tileSize*tileSize*4];
                     material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
                     upload = new Texture2D(tileSize, tileSize, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point };
-                    ping = MakeRt(tileSize, tileSize); pong = MakeRt(tileSize, tileSize); composite = MakeRt(width, height); Clear(composite);
+                    ping = MakeRt(tileSize, tileSize, FilterMode.Point); pong = MakeRt(tileSize, tileSize, FilterMode.Point); composite = MakeRt(width, height, FilterMode.Bilinear); Clear(composite);
                     Backend = "CPU source brush / GPU tiled compositor (encoded-space prototype)"; return;
                 }
                 catch (Exception ex) { Dispose(); Backend = "GPU allocation failed: " + ex.Message + "; CPU composite fallback"; }
@@ -87,9 +87,9 @@ namespace Yozolab.YoluPainter.Editor
             width = doc.Width; height = doc.Height; tileSize = doc.TileSize;
             cpuFallback = new Texture2D(width, height, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Bilinear };
         }
-        static RenderTexture MakeRt(int w, int h)
+        static RenderTexture MakeRt(int w, int h, FilterMode filter)
         {
-            var rt = new RenderTexture(w,h,0,RenderTextureFormat.ARGB32,RenderTextureReadWrite.Linear) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp, useMipMap = false };
+            var rt = new RenderTexture(w,h,0,RenderTextureFormat.ARGB32,RenderTextureReadWrite.Linear) { hideFlags = HideFlags.HideAndDontSave, filterMode = filter, wrapMode = TextureWrapMode.Clamp, useMipMap = false };
             if (!rt.Create()) { UnityEngine.Object.DestroyImmediate(rt); throw new InvalidOperationException("RenderTexture.Create failed"); } return rt;
         }
         static void Clear(RenderTexture rt)
