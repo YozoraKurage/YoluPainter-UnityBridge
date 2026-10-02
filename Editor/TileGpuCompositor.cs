@@ -70,7 +70,7 @@ namespace Yozolab.YoluPainter.Editor
             if (width == doc.Width && height == doc.Height && tileSize == doc.TileSize && Texture != null) return;
             Dispose(); width = doc.Width; height = doc.Height; tileSize = doc.TileSize;
             var shader = Shader.Find("Hidden/YoluPainter/TileComposite");
-            bool supported = shader != null && shader.isSupported && SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGB32) && (SystemInfo.copyTextureSupport & CopyTextureSupport.Basic) != 0;
+            bool supported = ShaderHealth.IsUsable(shader) && SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGB32) && (SystemInfo.copyTextureSupport & CopyTextureSupport.Basic) != 0;
             if (supported)
             {
                 try
@@ -83,7 +83,7 @@ namespace Yozolab.YoluPainter.Editor
                 }
                 catch (Exception ex) { Dispose(); Backend = "GPU allocation failed: " + ex.Message + "; CPU composite fallback"; }
             }
-            else Backend = "CPU composite fallback: GPU format, copy or shader unavailable";
+            else Backend = "CPU composite fallback: GPU format, copy or shader unavailable (or the shader failed to compile)";
             width = doc.Width; height = doc.Height; tileSize = doc.TileSize;
             cpuFallback = new Texture2D(width, height, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Bilinear };
         }

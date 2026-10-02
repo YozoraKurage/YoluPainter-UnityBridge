@@ -6,14 +6,32 @@ using UnityEngine;
 namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>Explicit G0 test probe, not the authoritative editor stroke path.
-    /// Synchronous readback is deliberately confined to this user-invoked validation command.</summary>
+    /// Synchronous readback is deliberately confined to this user-invoked validation command and to tests.</summary>
     public static class GpuBrushProbe
     {
+        internal readonly struct Result
+        {
+            public readonly int MaxByteError; public readonly double MeanByteError;
+            public Result(int max, double mean) { MaxByteError = max; MeanByteError = mean; }
+        }
+
         [MenuItem("YozoLab/YoluPainter GPU Brush Parity Probe")]
         public static void Run()
         {
             var shader=Shader.Find("Hidden/YoluPainter/OrderedBrush");
-            if(shader==null||!shader.isSupported){Debug.LogWarning("GPU brush probe skipped: shader unavailable.");return;}
+            if(!ShaderHealth.IsUsable(shader)){Debug.LogWarning("GPU brush probe skipped: shader unavailable or failed to compile.");return;}
+            try
+            {
+                var result=Measure(shader);
+                string message=$"GPU brush parity probe: max byte error {result.MaxByteError}, mean {result.MeanByteError:F6}; {SystemInfo.graphicsDeviceType} / {SystemInfo.graphicsDeviceName}. One RGBA8 dab only; not tablet, 3D or full compositor validation.";
+                if(result.MaxByteError<=1)Debug.Log(message);else Debug.LogWarning(message);
+            }
+            catch(Exception ex){Debug.LogError("GPU brush probe failed: "+ex);}
+        }
+
+        /// <summary>Renders one dab with OrderedBrush and compares it with the CPU source brush given the same coverage.</summary>
+        internal static Result Measure(Shader shader)
+        {
             const int size=32; Texture2D upload=null,readback=null;RenderTexture a=null,b=null;Material material=null;
             var previous=RenderTexture.active;
             try
@@ -46,10 +64,8 @@ namespace Yozolab.YoluPainter.Editor
                 readback.ReadPixels(new Rect(0,0,size,size),0,0);readback.Apply();
                 byte[] expected=doc.Composite(PaintChannel.Color);var actual=readback.GetRawTextureData<byte>();int maximum=0;long sum=0;
                 for(int i=0;i<expected.Length;i++){int error=Math.Abs(expected[i]-actual[i]);maximum=Math.Max(maximum,error);sum+=error;}
-                string message=$"GPU brush parity probe: max byte error {maximum}, mean {sum/(double)expected.Length:F6}; {SystemInfo.graphicsDeviceType} / {SystemInfo.graphicsDeviceName}. One RGBA8 dab only; not tablet, 3D or full compositor validation.";
-                if(maximum<=1)Debug.Log(message);else Debug.LogWarning(message);
+                return new Result(maximum,sum/(double)expected.Length);
             }
-            catch(Exception ex){Debug.LogError("GPU brush probe failed: "+ex);}
             finally
             {
                 RenderTexture.active=previous;
