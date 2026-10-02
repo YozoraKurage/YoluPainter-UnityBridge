@@ -8,7 +8,7 @@ readonly UNITY_EDITOR="/usr/bin/unity-editor" # xvfb-run + -batchmode を被せ�
 
 # テストプロジェクトは名前付きボリュームの中に置く。/workspace (ホストの 9p
 # バインド) に置くと Library/ の I/O で桁違いに遅くなる。
-UNITY_PROJECT="${DAERD_UNITY_PROJECT:-$HOME/unity-testproject}"
+UNITY_PROJECT="${YOLUPAINTER_UNITY_PROJECT:-$HOME/unity-testproject}"
 readonly UNITY_PROJECT
 
 # 再ビルドを跨いで .ulf を残しておく置き場（ボリューム）

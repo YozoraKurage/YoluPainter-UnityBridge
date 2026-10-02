@@ -10,8 +10,8 @@ using UnityEditor.TestTools.TestRunner.Api;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
-// DaerD のテストデーモン受け口。テストプロジェクト側（名前付きボリューム）にだけ
-// インストールされ、DaerD 本体（配布パッケージ）には決して入らない。
+// YoluPainter のテストデーモン受け口。テストプロジェクト側（名前付きボリューム）にだけ
+// インストールされ、YoluPainter 本体（配布パッケージ）には決して入らない。
 //
 // 動く仕組み: 常駐エディタ（GUI モードでも batchmode でも）の中で EditorApplication.update に乗り、
 // <project>/TestDaemon/request.json を見つけたら running.json に「主張」してから
@@ -30,10 +30,10 @@ using Debug = UnityEngine.Debug;
 // 慣性の保険が 2 つ:
 //  - コールド実行（-runTests）中は完全に沈黙する（二重実行の防止）。
 //  - TestDaemon/enabled が無ければ何もしない（受け口が入っていても無害）。
-namespace Yozolab.DaerDTestDaemon
+namespace Yozolab.YoluPainterTestDaemon
 {
     [InitializeOnLoad]
-    static class DaerDTestDaemon
+    static class YoluPainterTestDaemon
     {
         static readonly string Dir =
             Path.Combine(Path.GetDirectoryName(Application.dataPath), "TestDaemon");
@@ -71,7 +71,7 @@ namespace Yozolab.DaerDTestDaemon
 
         static string TracePath => Path.Combine(Dir, "trace.log");
 
-        static DaerDTestDaemon()
+        static YoluPainterTestDaemon()
         {
             var args = Environment.GetCommandLineArgs();
             // コールドの -runTests と共存しない。デーモンが生きている間にコールドは
@@ -188,7 +188,7 @@ namespace Yozolab.DaerDTestDaemon
             }
             catch (Exception e)
             {
-                Debug.LogError("[DaerDTestDaemon] " + e);
+                Debug.LogError("[YoluPainterTestDaemon] " + e);
                 try { Finish(3, e.Message); } catch { /* 客側のタイムアウトに任せる */ }
             }
         }
@@ -208,7 +208,7 @@ namespace Yozolab.DaerDTestDaemon
                 if (now - s_gateSince < GateStallSeconds) return;
                 s_gateEscalatedAt = now;
                 Trace("gate: stuck " + GateStallSeconds + " s; escalating");
-                Debug.LogWarning("[DaerDTestDaemon] stuck in the compile gate for " + GateStallSeconds
+                Debug.LogWarning("[YoluPainterTestDaemon] stuck in the compile gate for " + GateStallSeconds
                                  + " s; unlocking reloads, requesting compilation, refreshing synchronously");
                 if (s_locked)
                 {
@@ -263,7 +263,7 @@ namespace Yozolab.DaerDTestDaemon
                 s_stallUnlocked = true;
                 s_startedAt = now;
                 Trace("stall: no test started; releasing the reload lock");
-                Debug.LogWarning("[DaerDTestDaemon] no test started in " + StallSeconds
+                Debug.LogWarning("[YoluPainterTestDaemon] no test started in " + StallSeconds
                                  + " s; releasing the reload lock and refreshing");
                 if (s_locked)
                 {
@@ -324,7 +324,7 @@ namespace Yozolab.DaerDTestDaemon
         /// 入る前に「Scene(s) Have Been Modified」の保存確認ダイアログを出し、GUI モードでは
         /// それがネイティブのモーダルなので主スレッドごと止まる — 鼓動も番犬も一緒に止まり、
         /// 外から見ると「生きているのに何も返さない」になる（2026-09-18 実測: レイアウトに
-        /// DaerD と Animation のウィンドウが残った起動では Untitled シーンが起動直後から
+        /// DaerD 時代、エディタ拡張と Animation のウィンドウがレイアウトに残った起動では Untitled シーンが起動直後から
         /// dirty で、再起動しても同じ場所で止まった）。常駐エディタに守るべきシーンは無い。
         /// </summary>
         static void DiscardDirtyScenes()
@@ -349,7 +349,7 @@ namespace Yozolab.DaerDTestDaemon
 
         /// <summary>「Type の完全名.メソッド名」を全アセンブリから探し、
         /// static string Method(string) として呼ぶ。internal でよい — リフレクションは
-        /// 可視性を見ないので、DaerD 側の受け口を public にしないで済む。</summary>
+        /// 可視性を見ないので、YoluPainter 側の受け口を public にしないで済む。</summary>
         static void RunExec(string target, string arg)
         {
             try
@@ -617,9 +617,9 @@ namespace Yozolab.DaerDTestDaemon
                     if ((DateTime.UtcNow - File.GetLastWriteTimeUtc(old)).TotalHours > 1) File.Delete(old);
                 var src = Path.Combine(work, id + ".cs");
                 // アセンブリ名は固定（ファイル名から決まる）。バイト列からの Load は同名でも
-                // 別個体として読めるので毎回ぶつからず、DaerD 側が InternalsVisibleTo で
+                // 別個体として読めるので毎回ぶつからず、YoluPainter 側が InternalsVisibleTo で
                 // この名前を挙げれば internal も触れる。
-                var dll = Path.Combine(work, "DaerDSnippet.dll");
+                var dll = Path.Combine(work, "YoluPainterSnippet.dll");
                 var rsp = Path.Combine(work, id + ".rsp");
 
                 var sb = new StringBuilder();
@@ -628,7 +628,7 @@ namespace Yozolab.DaerDTestDaemon
                 sb.AppendLine("using UnityEngine; using UnityEditor; using UnityEngine.SceneManagement; using UnityEditor.SceneManagement;");
                 sb.AppendLine("using Object = UnityEngine.Object;");
                 foreach (var u in usings) sb.AppendLine(u);
-                sb.AppendLine("public static class __DaerDSnippet { public static object Run() {");
+                sb.AppendLine("public static class __YoluPainterSnippet { public static object Run() {");
                 sb.AppendLine("#line " + (usings.Count + 1) + " \"snippet\"");
                 foreach (var l in body) sb.AppendLine(l);
                 sb.AppendLine("#line default");
@@ -679,7 +679,7 @@ namespace Yozolab.DaerDTestDaemon
                 }
 
                 var asm = System.Reflection.Assembly.Load(File.ReadAllBytes(dll));
-                var run = asm.GetType("__DaerDSnippet").GetMethod("Run", BindingFlags.Static | BindingFlags.Public);
+                var run = asm.GetType("__YoluPainterSnippet").GetMethod("Run", BindingFlags.Static | BindingFlags.Public);
                 var logs = new StringBuilder();
                 Application.LogCallback capture = (msg, stack, type) =>
                 {
@@ -770,12 +770,12 @@ namespace Yozolab.DaerDTestDaemon
             {
                 if (!s_testSeen) Trace("first test started");
                 s_testSeen = true;
-                DaerDTestDaemon.Beat();
+                YoluPainterTestDaemon.Beat();
             }
 
             public void TestFinished(ITestResultAdaptor result)
             {
-                DaerDTestDaemon.Beat();
+                YoluPainterTestDaemon.Beat();
                 if (!result.Test.IsSuite && result.TestStatus == TestStatus.Inconclusive)
                     Trace("inconclusive case " + result.FullName + ": " + (result.Message ?? "").Split('\n')[0]);
                 if (result.TestStatus != TestStatus.Failed) return;
@@ -802,7 +802,7 @@ namespace Yozolab.DaerDTestDaemon
                 }
                 catch (Exception e)
                 {
-                    Debug.LogError("[DaerDTestDaemon] " + e);
+                    Debug.LogError("[YoluPainterTestDaemon] " + e);
                     Finish(3, e.Message);
                 }
             }

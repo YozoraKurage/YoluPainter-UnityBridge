@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# DaerD の EditMode テストを batchmode で実行する。
+# YoluPainter の EditMode テストを batchmode で実行する。
 #
 #   run-tests.sh                                   全件
-#   run-tests.sh --filter 'Yozolab.DaerD.Tests.AapGadgetsTests'
+#   run-tests.sh --filter 'Yozolab.YoluPainter.Tests.FooTests'
 #   run-tests.sh --filter '*Frame*'                部分一致（NUnit のフィルタ構文）
 #   run-tests.sh --category Slow
 #   run-tests.sh --log                             失敗時に Unity ログの末尾も出す
 #
 # 標準出力にはサマリと失敗内容だけを出す。Unity の生ログ（数万行）は
-# $DAERD_UNITY_PROJECT/Logs/tests.log に残る。
+# $YOLUPAINTER_UNITY_PROJECT/Logs/tests.log に残る。
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 

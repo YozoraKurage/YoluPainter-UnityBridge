@@ -2,7 +2,7 @@
 # テスト用 Unity プロジェクトを用意する。postCreateCommand から呼ばれるほか、
 # 手で何度実行しても同じ状態になる（冪等）。
 #
-# プロジェクト本体はボリューム側 ($DAERD_UNITY_PROJECT) に置き、このリポジトリは
+# プロジェクト本体はボリューム側 ($YOLUPAINTER_UNITY_PROJECT) に置き、このリポジトリは
 # ローカルパッケージ (file:/workspace) として参照させる。リポジトリ側には
 # Library/ も Assets/ も作らない。
 

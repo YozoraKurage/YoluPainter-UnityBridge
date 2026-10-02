@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 常駐 Unity (test-daemon.sh) に static メソッドの実行を依頼する。
 #
-#   exec-method.sh 'Yozolab.DaerD.Analyze.ClipDigestEntry.Run' /path/to/args.txt
+#   exec-method.sh 'Yozolab.YoluPainter.Foo.BarEntry.Run' /path/to/args.txt
 #
 # 対象は static string Method(string)（可視性は不問 — リフレクション経由）。
 # 第 2 引数は文字列としてそのまま渡す。慣習としてファイルパスを渡し、中身の形式は

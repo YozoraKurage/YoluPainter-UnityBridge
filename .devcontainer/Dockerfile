@@ -1,4 +1,4 @@
-# DaerD の DevContainer。
+# YoluPainter の DevContainer。
 #
 # ベースは game-ci の Unity Editor イメージ。Unity 本体 (/opt/unity/Editor/Unity)、
 # 必要な共有ライブラリ、xvfb、`unity-editor` ラッパー、そして固定 machine-id が

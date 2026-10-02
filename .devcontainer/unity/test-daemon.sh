@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# DaerD 常駐 Unity: テストと Editor 操作を、起動費を払わずに依頼できるようにする。
+# YoluPainter 常駐 Unity: テストと Editor 操作を、起動費を払わずに依頼できるようにする。
 #
 #   test-daemon.sh start [--batch]   受け口をインストールして常駐 Unity を起動
 #   test-daemon.sh stop              行儀よく終了（応答が無ければ kill）
@@ -26,11 +26,11 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 readonly DAEMON_DIR="$UNITY_PROJECT/TestDaemon"
 readonly PID_FILE="$DAEMON_DIR/daemon.pid"
-readonly RECEIVER_SRC="$SCRIPT_DIR/daemon/DaerDTestDaemon.cs"
-readonly RECEIVER_DST="$UNITY_PROJECT/Assets/DaerDTestDaemon/Editor/DaerDTestDaemon.cs"
+readonly RECEIVER_SRC="$SCRIPT_DIR/daemon/YoluPainterTestDaemon.cs"
+readonly RECEIVER_DST="$UNITY_PROJECT/Assets/YoluPainterTestDaemon/Editor/YoluPainterTestDaemon.cs"
 readonly DAEMON_LOG="$UNITY_LOG_DIR/daemon.log"
 
-MODE="${DAERD_DAEMON_MODE:-gui}"   # gui | batch
+MODE="${YOLUPAINTER_DAEMON_MODE:-gui}"   # gui | batch
 
 parse_mode() {
   for a in "$@"; do
@@ -73,7 +73,7 @@ launch() {
       >/dev/null 2>&1 &
   else
     # unity-editor ラッパーは必ず -batchmode を足すので、本体を直接 xvfb に載せる。
-    nohup xvfb-run -a -s "-screen 0 ${DAERD_XVFB_SCREEN:-1920x1080x24}" \
+    nohup xvfb-run -a -s "-screen 0 ${YOLUPAINTER_XVFB_SCREEN:-1920x1080x24}" \
       "$UNITY_BIN" -projectPath "$UNITY_PROJECT" -logFile "$DAEMON_LOG" \
       >/dev/null 2>&1 &
   fi
