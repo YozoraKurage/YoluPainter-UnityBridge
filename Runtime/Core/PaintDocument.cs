@@ -99,6 +99,10 @@ namespace Yozolab.YoluPainter.Core
             return surface;
         }
         public bool TryGetChannel(PaintChannel channel, out SparseTileSurface surface) { return channels.TryGetValue(channel, out surface); }
+        /// <summary>Removes a disabled channel's surface again when it holds no tiles (the undo of enabling it), so the layer is
+        /// exactly as before and saves no empty surface.</summary>
+        internal void DropEmptyChannel(PaintChannel channel)
+        { if (!enabled.Contains(channel) && channels.TryGetValue(channel, out var surface) && surface.TileCount == 0) channels.Remove(channel); }
         public bool IsChannelEnabled(PaintChannel channel) { return enabled.Contains(channel); }
         internal void Enable(PaintChannel channel, bool value)
         { if (value) { if (Kind == LayerKind.Raster) GetChannel(channel); enabled.Add(channel); } else enabled.Remove(channel); }
@@ -559,7 +563,9 @@ namespace Yozolab.YoluPainter.Core
             bool old = layer.IsChannelEnabled(channel); if (old == enabled) return;
             if (enabled && layer.Kind == LayerKind.Adjustment && !layer.Adjustment.AppliesTo(channel))
                 throw new InvalidOperationException(layer.Adjustment.Type + " cannot be applied to the " + channel + " channel.");
-            Execute(LayerScoped(layer, channel, () => layer.Enable(channel, enabled), () => layer.Enable(channel, old), 64));
+            // 有効にして初めて面ができたときは、取り消しで面も消す（空の面が残ると保存のバイト列が変わる）
+            bool hadSurface = layer.TryGetChannel(channel, out _);
+            Execute(LayerScoped(layer, channel, () => layer.Enable(channel, enabled), () => { layer.Enable(channel, old); if (!hadSurface) layer.DropEmptyChannel(channel); }, 64));
         }
         /// <summary>Adds an empty raster mask (reveals everything) to a layer. Undoable.</summary>
         public RasterMask AddLayerMask(Guid id)

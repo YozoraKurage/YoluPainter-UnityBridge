@@ -60,6 +60,20 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(doc.Redo(), Is.True); Assert.That(doc.GetLayer(layer.Id).Opacity, Is.EqualTo(.7));
         }
 
+        [Test] public void UndoingAnEnabledChannelLeavesTheDocumentByteForByteAsBefore()
+        {
+            var doc = NewDocument(); var layer = doc.AddLayer("Layer"); doc.ClearHistory();
+            var before = Yozolab.YoluPainter.Core.Persistence.DocumentBinary.Write(doc);
+            doc.SetChannelEnabled(layer.Id, PaintChannel.Roughness, true);
+            Assert.That(doc.Undo(), Is.True);
+            Assert.That(Yozolab.YoluPainter.Core.Persistence.DocumentBinary.Write(doc), Is.EqualTo(before), "no empty Roughness surface is left behind");
+            Assert.That(doc.Redo(), Is.True); Assert.That(doc.GetLayer(layer.Id).IsChannelEnabled(PaintChannel.Roughness), Is.True);
+            // まとめが失敗して取り消されたときも同じ
+            doc.Undo();
+            Assert.That(() => doc.Batch(() => { doc.SetChannelEnabled(layer.Id, PaintChannel.Metallic, true); throw new InvalidOperationException("x"); }), Throws.InvalidOperationException);
+            Assert.That(Yozolab.YoluPainter.Core.Persistence.DocumentBinary.Write(doc), Is.EqualTo(before));
+        }
+
         [Test] public void BatchesRefuseNestingStrokesAndUndo()
         {
             var doc = NewDocument(); var layer = doc.AddLayer("Layer"); doc.SetChannelEnabled(layer.Id, PaintChannel.Color, true);
