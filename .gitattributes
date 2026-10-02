@@ -3,3 +3,8 @@
 # - text=auto: テキストを自動判定し、バイナリは触らない。
 # - eol=lf: checkout 時の working tree 実体も LF に揃える(Windows でも LF)。
 * text=auto eol=lf
+
+# ブラシのファイル（同梱の筆先・取り込み元）は中身を一切変えない（SHA256SUMS と一致させる）
+*.gbr binary
+*.gih binary
+*.abr binary
