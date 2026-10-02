@@ -41,6 +41,26 @@ namespace Yozolab.YoluPainter.Tests
             finally { Object.DestroyImmediate(w); L.OverrideLanguage(PainterLanguage.English); }
         }
 
+        /// <summary>3D を描いた後に外枠を描くとき、マウスの位置が OnGUI の始めのまま（3D の描画が (0,0) にしていた。外枠のマウスの乗った見た目が
+        /// 並べる表示と 3D の表示で出なかった）。</summary>
+        [Test] public void TheShellSeesTheMouseWhereItIsAfterThe3DViewIsDrawn()
+        {
+            if (!Application.isBatchMode) Assert.Ignore("Offscreen drawing is checked on the batch-gl daemon.");
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null) Assert.Ignore("No graphics device (-nographics).");
+            var w = ScriptableObject.CreateInstance<TexturePaintWindow>();
+            try
+            {
+                w.Preview.LoadDemoMesh();
+                foreach (var view in new[] { TexturePaintWindow.ViewMode.Split, TexturePaintWindow.ViewMode.Model })
+                {
+                    w.View = view; var mouse = new Vector2(1000, 50);
+                    OffscreenGui.RenderWindow(w, 1200, 800, Path.Combine(Folder, "mouse-" + view + ".png"), mouse);
+                    Assert.That(w.shellMouseForTests, Is.EqualTo(mouse), view.ToString());
+                }
+            }
+            finally { Object.DestroyImmediate(w); }
+        }
+
         static void Render(TexturePaintWindow w, int width, int height, string name)
         {
             string path = Path.Combine(Folder, name + ".png");

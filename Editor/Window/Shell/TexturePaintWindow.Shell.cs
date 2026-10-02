@@ -71,8 +71,11 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>外枠を描く（キャンバスと 3D の中身は呼ぶ側が先に描く）。</summary>
+        /// <summary>テスト用: 外枠を描き始めたときのマウスの位置（3D の描画の後でも、OnGUI の始めの位置であること）。</summary>
+        internal Vector2 shellMouseForTests;
         void DrawShell()
         {
+            shellMouseForTests = Event.current.mousePosition;
             using (new EditorGUI.DisabledScope(stroke != null))
             {
                 DrawMenuBar();
