@@ -21,6 +21,17 @@
 
 シリーズの区切りでは、batch-gl と GUI の両方で全件を回し、合わせて全テストが実行されたことを確かめる。
 
+### 複数の作業者（エージェント）が同時にデーモンを使うとき
+
+デーモンへの依頼の受け口は 1 組しか無いので、`run-tests.sh` と `unity-do.sh` は `TestDaemon/client.lock` を flock で取り、依頼を 1 本ずつ通す（後から来た依頼は待つ）。モードの切り替えは `test-daemon.sh` を直接使わず、`switch-daemon.sh` を使う:
+
+```
+.devcontainer/unity/switch-daemon.sh gui -- --filter 'Yozolab.YoluPainter.Tests.WindowTests'   # GUI で回して batch-gl に戻す
+.devcontainer/unity/switch-daemon.sh batch-gl                                                  # batch-gl へ
+```
+
+切り替えの間は `TestDaemon/switching` を置き、ほかの依頼はそれが消えるまで待つ（デーモンがいない一瞬にコールド実行へ落ちて、起動中のデーモンとプロジェクトを取り合わない）。実行中の依頼があれば、それが終わってから切り替える。常駐させる Unity にはロックのファイルを引き継がせない（引き継ぐと、その Unity が生きている間ロックが外れず、誰の依頼も通らなくなる。実際に起きた）。
+
 `--batch-gl` は起動時に、GUI モードで壊れた状態で取り込まれたシェーダーを自動で取り込み直す。
 
 GPU はホストの実 GPU を、WSL2 の `/dev/dxg` と devcontainer に同梱した Mesa 24.2.8 の d3d12 ドライバで使う（OpenGL 4.6）。`gpu-check.sh --unity` で Unity が使っているデバイスを確認できる。GPU テストの CopyTexture 経路と描き込み経路は両方回る。llvmpipe で確かめたいときは `YOLUPAINTER_GPU=0`、システムの Mesa 23.2（OpenGL 4.2。Unity は CopyTexture と compute を無効にする）で確かめたいときは `YOLUPAINTER_MESA=system` を付けてデーモンを起動し直す。

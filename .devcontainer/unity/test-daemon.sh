@@ -73,6 +73,9 @@ install_receiver() {
 }
 
 launch() {
+  # 依頼のロック（client.lock）を常駐 Unity に引き継がせない（daemon-lock.sh）
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/daemon-lock.sh"
+  close_inherited_daemon_lock
   if [[ "$MODE" == batch ]]; then
     nohup "$UNITY_EDITOR" -batchmode -nographics \
       -projectPath "$UNITY_PROJECT" -logFile "$DAEMON_LOG" \

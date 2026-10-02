@@ -19,10 +19,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 readonly DAEMON_DIR="$UNITY_PROJECT/TestDaemon"
 # 依頼の受け口（snippet-in.cs / request.json / done）は 1 つしか無いので、同時に走る依頼
-# （複数のエージェントや run-tests.sh）を 1 本ずつ通す。ロックはこのスクリプトが終わると外れる。
-mkdir -p "$DAEMON_DIR"
-exec 8>"$DAEMON_DIR/client.lock"
-flock 8
+# （複数のエージェントや run-tests.sh）を 1 本ずつ通す（daemon-lock.sh）。
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/daemon-lock.sh"
+acquire_daemon_client_lock
 daemon_alive() {
   [[ -f "$DAEMON_DIR/daemon.pid" ]] \
     && kill -0 "$(cat "$DAEMON_DIR/daemon.pid")" 2>/dev/null
