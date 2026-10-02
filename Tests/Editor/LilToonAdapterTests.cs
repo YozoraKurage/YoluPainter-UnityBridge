@@ -25,6 +25,10 @@ namespace Yozolab.YoluPainter.Tests
         [SetUp] public void CreateFolder()
         {
             if (Shader.Find("lilToon") == null) Assert.Ignore("lilToon is not installed in this project (Shader.Find(\"lilToon\") is null); the adapter tests need the real package.");
+            // この devcontainer の GUI モードではシェーダーのコンパイルが壊れていて、lilToon のマテリアルやアセットを作るたびに
+            // シェーダーのエラーがログに出る（アダプターとは無関係。アセット操作をまたぐとログの無視の設定も戻る）。
+            // GPU のテストと同じく、壊れたエディタでは飛ばして batch-gl で確かめる。
+            if (EditorShaderCompiler.IsBroken) Assert.Ignore("Built-in shaders fail to compile in this Editor (devcontainer GUI mode). Run the lilToon adapter tests with test-daemon.sh start --batch-gl.");
             string name = "ZZ_LilToonAdapterTests-" + Guid.NewGuid().ToString("N");
             Assert.That(AssetDatabase.CreateFolder("Assets", name), Is.Not.Empty);
             folder = "Assets/" + name;
