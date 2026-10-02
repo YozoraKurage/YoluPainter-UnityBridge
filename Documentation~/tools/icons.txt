@@ -60,6 +60,16 @@ tools/move fluent arrow_move
 tools/path fluent pen
 tools/eyedropper fluent eyedropper
 
+# ── プロパティの欄のレイヤー・チャンネル側（レイヤーマスク・フィルター・メッシュマップ・ポーズ）で足したもの ──
+close fluent dismiss
+search fluent search
+target fluent target
+sync fluent arrow_sync
+local_fire_department fluent fire
+grid_on fluent grid
+accessibility fluent accessibility
+animation fluent video_clip
+
 # ---- プロパティの欄のツールの設定（TexturePaintWindow.ToolPanels.cs など） ----
 paint_brush fluent paint_brush
 ink_stroke fluent ink_stroke

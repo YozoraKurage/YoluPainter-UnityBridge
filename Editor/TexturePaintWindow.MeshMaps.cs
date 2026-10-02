@@ -44,7 +44,6 @@ namespace Yozolab.YoluPainter.Editor
 
         readonly MeshMapSet meshMaps = new MeshMapSet();
         MeshBakeSettings meshBakeSettings = new MeshBakeSettings();
-        bool showMeshMaps;
         MeshMapView meshMapView = MeshMapView.None; float meshMapOpacity = 1;
         Texture2D meshMapOverlay; long overlayRevision = -1; MeshMapView overlayView = MeshMapView.None;
         long savedMeshMapRevision, savingMeshMapRevision = -1;
@@ -61,7 +60,8 @@ namespace Yozolab.YoluPainter.Editor
         internal MeshBakeReport LastMeshBakeReport => lastMeshBakeReport;
         internal MeshMapView MeshMapOverlay { get => meshMapView; set { meshMapView = value; Repaint(); } }
         internal float MeshMapOverlayOpacity { get => meshMapOpacity; set => meshMapOpacity = Mathf.Clamp01(value); }
-        internal bool ShowMeshMapPanel { get => showMeshMaps; set => showMeshMaps = value; }
+        /// <summary>プロパティの欄のメッシュマップのセクションが開いているか（既定は閉。長い欄なので）。</summary>
+        internal bool ShowMeshMapPanel { get => SectionIsOpen("mesh-maps", false); set => sectionOpen["mesh-maps"] = value; }
         /// <summary>ベイクの進み具合（題、説明、0〜1）。true を返すと取消。既定は Unity の取消できる進捗バー（テストは差し替える）。</summary>
         internal Func<string, string, float, bool> MeshBakeProgress = EditorUtility.DisplayCancelableProgressBar;
 
@@ -142,12 +142,12 @@ namespace Yozolab.YoluPainter.Editor
         internal MeshBakeStatus? BakeMeshMaps()
         {
             if (stroke != null || document == null) return null;
-            if (preview == null || !preview.HasModel) { message = "Load a model (or the demo cube) before baking mesh maps."; return null; }
-            if (!preview.CanPaint) { message = "Mesh maps are baked only from a complete static snapshot that can be painted; this one is incomplete (see the load diagnostics)."; return null; }
+            if (preview == null || !preview.HasModel) { message = L.Tr("Load a model (or the demo cube) before baking mesh maps."); return null; }
+            if (!preview.CanPaint) { message = L.Tr("Mesh maps are baked only from a complete static snapshot that can be painted; this one is incomplete (see the load diagnostics)."); return null; }
             var settings = meshBakeSettings.Clone();
             settings.Width = document.Width; settings.Height = document.Height; settings.TargetSlot = materialSlot;
             var reference = CurrentHighPolyInput();
-            if (highPolyModel != null && reference == null) { message = "Mesh maps were not baked: " + (highPolyNote ?? "the high poly has no readable mesh."); return null; }
+            if (highPolyModel != null && reference == null) { message = L.Tr("Mesh maps were not baked: {0}", highPolyNote ?? L.Tr("the high poly has no readable mesh.")); return null; }
             MeshBakeResult result;
             try
             {
@@ -155,18 +155,18 @@ namespace Yozolab.YoluPainter.Editor
                 result = RunMeshBake(CurrentMeshBakeInput(), settings, new MeshBakeBudget { MaxBytes = PainterSettings.StrokeBudgetBytes }, reference);
             }
             catch (Exception ex) when (ex is MeshBakeRefusedException || ex is ArgumentException)
-            { message = "Mesh maps were not baked: " + ex.Message; return null; }
+            { message = L.Tr("Mesh maps were not baked: {0}", ex.Message); return null; }
             finally { Dialogs.ClearProgress(); }
             lastMeshBakeReport = result.Report;
             if (result.Status != MeshBakeStatus.Completed)
             {
-                message = (result.Status == MeshBakeStatus.TimedOut ? "The mesh-map bake hit its time limit" : "The mesh-map bake was canceled") + "; the previous maps are unchanged.";
+                message = result.Status == MeshBakeStatus.TimedOut ? L.Tr("The mesh-map bake hit its time limit; the previous maps are unchanged.") : L.Tr("The mesh-map bake was canceled; the previous maps are unchanged.");
                 return result.Status;
             }
             meshMaps.Put(result.Maps);
             if (meshMapView == MeshMapView.None) meshMapView = MeshMapView.Coverage;
-            message = "Baked " + string.Join(", ", result.Maps.Select(m => m.Kind)) + " at " + settings.Width + "×" + settings.Height + " for slot " + settings.TargetSlot + " (rays: " + result.Report.RayBackend + "): " + result.Report.Summary()
-                + ". Mesh maps are derived data, not layers; Save keeps them in the .ylp.";
+            message = L.Tr("Baked {0} at {1}×{2} for slot {3} (rays: {4}): {5}. Mesh maps are derived data, not layers; Save keeps them in the .ylp.",
+                string.Join(", ", result.Maps.Select(m => MeshMapLabel(m.Kind))), settings.Width, settings.Height, settings.TargetSlot, result.Report.RayBackend, result.Report.Summary());
             Repaint();
             return result.Status;
         }
@@ -174,12 +174,12 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>ベイクは別のスレッドで回し、ここ（主スレッド）で進捗バーを出して取消を受ける。始める前にも 1 回尋ねる。</summary>
         MeshBakeResult RunMeshBake(MeshBakeInput input, MeshBakeSettings settings, MeshBakeBudget budget, MeshBakeInput reference)
         {
-            const string title = "Baking mesh maps";
+            string title = L.Tr("Baking mesh maps");
             // GPU の呼び出しは主スレッドでしかできないので、別のスレッドのベイクから回ってきた仕事をこのループで行う
             var tracer = meshBakeUseGpu ? new GpuMeshBakeRayTracer(PainterSettings.GpuCacheBytes) : null;
             using (var cancel = new CancellationTokenSource())
             {
-                if (MeshBakeProgress(title, "Preparing…", 0)) cancel.Cancel();
+                if (MeshBakeProgress(title, L.Tr("Preparing…"), 0)) cancel.Cancel();
                 var gate = new object(); double fraction = 0; string phase = "Preparing";
                 var task = Task.Run(() => MeshBaker.Bake(input, settings, budget, (f, p) => { lock (gate) { fraction = f; phase = p; } return true; }, cancel.Token, reference, tracer));
                 var shown = System.Diagnostics.Stopwatch.StartNew();
@@ -198,118 +198,213 @@ namespace Yozolab.YoluPainter.Editor
         }
         static bool WaitQuietly(Task task, int milliseconds) { try { return task.Wait(milliseconds); } catch (AggregateException) { return true; } }
 
-        /// <summary>double の値のスライダー。触っていなければ元の値のまま返す（float に丸めた値や欄の範囲で切った値で、保存した条件を
-        /// 黙って変えて「設定が変わった」と古くしない）。</summary>
-        static double KeepSlider(GUIContent label, double value, float min, float max)
+        /// <summary>高ポリを選ぶオブジェクトピッカーの印（ExecuteCommand で結果を見分ける）。</summary>
+        const int HighPolyPickerId = 0x59500010;
+
+        /// <summary>セクションの見出し: 古いマップがあれば数を添える。</summary>
+        string MeshMapsTitle()
         {
-            float shown = Mathf.Clamp((float)value, min, max), picked = EditorGUILayout.Slider(label, shown, min, max);
-            return picked != shown ? picked : value;
-        }
-        static int KeepIntSlider(string label, int value, int min, int max)
-        {
-            int shown = Mathf.Clamp(value, min, max), picked = EditorGUILayout.IntSlider(label, shown, min, max);
-            return picked != shown ? picked : value;
+            int stale = 0;
+            if (meshMaps.Count > 0)
+            {
+                var expected = CurrentMeshMapExpectation();
+                stale = meshMaps.Maps.Count(m => m.Provenance.Check(expected).State == MeshMapState.Stale);
+            }
+            return L.Tr("Mesh Maps") + (stale > 0 ? " · " + L.Tr("{0} stale", stale) : "");
         }
 
-        void DrawMeshMapPanel()
+        /// <summary>
+        /// メッシュマップのベイクの欄（Substance Painter の「メッシュマップをベイク」の配置）: 出力の大きさ・スロット、ベイクするマップ、
+        /// 共通の設定、高ポリ、種類ごとの設定、ベイクのボタン、ベイク済みのマップ（状態・キャンバスへの重ね表示・消去）。欄の範囲は
+        /// 扱える範囲より狭く、保存したマップの値が範囲の外でも触らなければそのまま（「設定が変わった」と古くしない）。
+        /// </summary>
+        void DrawMeshMapPanel(UiRows rows)
         {
-            GUILayout.Space(6);
-            var expected = meshMaps.Count > 0 ? CurrentMeshMapExpectation() : null;
-            int stale = expected == null ? 0 : meshMaps.Maps.Count(m => m.Provenance.Check(expected).State == MeshMapState.Stale);
-            showMeshMaps = EditorGUILayout.Foldout(showMeshMaps, "Mesh maps (bake)" + (stale > 0 ? " — " + stale + " stale" : ""), true);
-            if (!showMeshMaps) return;
             var s = meshBakeSettings;
-            using (new EditorGUI.DisabledScope(stroke != null))
+            var expected = meshMaps.Count > 0 ? CurrentMeshMapExpectation() : null;
+            bool was = GUI.enabled; GUI.enabled = was && stroke == null;
+            try
             {
-                EditorGUILayout.LabelField("Bakes " + document.Width + "×" + document.Height + " (document) for slot " + materialSlot + " from the loaded model", EditorStyles.wordWrappedMiniLabel);
-                var kinds = new List<MeshMapKind>();
-                foreach (var kind in MeshBakeSettings.AllKinds)
-                    if (EditorGUILayout.ToggleLeft(MeshMapLabel(kind), s.Includes(kind))) kinds.Add(kind);
-                if (kinds.Count > 0 && !kinds.SequenceEqual(s.Maps)) s.Maps = kinds.ToArray();
-                s.Padding = EditorGUILayout.IntSlider(new GUIContent("Padding", "Texels the islands are extended into the empty space around them (never over another island)"), s.Padding, 0, MeshBakeSettings.MaxPadding);
-                // 欄の範囲は扱える範囲より狭い（保存したマップの値が範囲の外でも、触らなければそのまま）
+                PaintGui.ValueBox(rows.Row(), L.TrIn("mesh map", "Output"), L.Tr("{0} × {1} · slot {2}", document.Width, document.Height, materialSlot), PropertyLabelWidth, null,
+                    L.Tr("Mesh maps are baked at the document size, for the material slot this document paints"));
+                // ベイクするマップ（2 列）
+                PaintGui.GroupLabel(rows.Row(16), L.Tr("Maps to Bake"));
+                var kinds = MeshBakeSettings.AllKinds;
+                bool kindsChanged = false; var picked = new List<MeshMapKind>();
+                for (int i = 0; i < kinds.Count; i += 2)
+                {
+                    var c = UiRows.Split(rows.Row(20, 2), 2, 6);
+                    for (int k = 0; k < 2 && i + k < kinds.Count; k++)
+                    {
+                        var kind = kinds[i + k]; bool on = s.Includes(kind);
+                        bool next = PaintGui.FitToggle(Spot("meshmap.kind." + kind, c[k]), MeshMapGridLabel(kind), on, MeshMapLabel(kind));
+                        if (next != on) kindsChanged = true;
+                        if (next) picked.Add(kind);
+                    }
+                }
+                rows.Space(2);
+                if (kindsChanged && picked.Count > 0) s.Maps = picked.ToArray(); // 1 つも無しにはしない
+                // 共通
+                PaintGui.GroupLabel(rows.Row(16), L.TrIn("mesh map", "Common"));
+                s.Padding = PaintGui.KeepIntSlider(Spot("meshmap.padding", rows.Row()), L.TrIn("mesh map", "Padding"), s.Padding, 0, MeshBakeSettings.MaxPadding, " px", L.Tr("Texels the islands are extended into the empty space around them (never over another island)"));
+                ChoiceDropdown(rows.Row(), L.TrIn("mesh map", "Antialiasing"), s.Antialiasing, new[] { 1, 2, 3, 4 }, n => n == 1 ? L.Tr("None") : n + " × " + n, n => meshBakeSettings.Antialiasing = n,
+                    L.Tr("Subsamples per texel side (the bake takes n² times as long)"));
+                if (s.Includes(MeshMapKind.AmbientOcclusion) || s.Includes(MeshMapKind.Thickness) || s.Includes(MeshMapKind.BentNormal))
+                    ChoiceDropdown(rows.Row(), L.TrIn("mesh map", "Occluders"), s.Occluders, (MeshOccluders[])Enum.GetValues(typeof(MeshOccluders)), OccludersName, v => meshBakeSettings.Occluders = v,
+                        L.Tr("Which faces block AO and thickness rays"));
+                meshBakeUseGpu = PaintGui.FitToggle(rows.Row(), L.Tr("Use the GPU for rays"), meshBakeUseGpu,
+                    L.Tr("Ambient occlusion, bent normal and thickness rays run in a compute shader (same formulas, float precision). Falls back to the CPU when the GPU cannot."));
+                // 高ポリ
+                PaintGui.GroupLabel(rows.Row(16), L.Tr("High Poly (optional)"));
+                var high = highPolyModel;
+                if (PaintGui.ObjectBox(rows.Row(), ref high, HighPolyPickerId, true, L.Tr("None (drop a high poly here)"), "view_in_ar",
+                        L.Tr("A second model whose detail is projected onto this one (meshes are read only; nothing is instantiated or changed)"), L.Tr("Stop using the high poly")))
+                { highPolyModel = high; CurrentHighPolyInput(); Repaint(); }
+                if (highPolyModel != null)
+                {
+                    CurrentHighPolyInput(); // 選んであれば読む（同じものなら読み直さない）。数と知らせを出すため
+                    var c = UiRows.Split(rows.Row(), 2, 6);
+                    s.ReferenceFrontal = PaintGui.KeepSlider(c[0], L.TrIn("mesh map", "Frontal"), s.ReferenceFrontal, .0001, .2, "0.####", "", L.Tr("Max frontal distance: how far outside the low poly the high poly is searched (relative to the bounding-box diagonal)"));
+                    s.ReferenceRear = PaintGui.KeepSlider(c[1], L.TrIn("mesh map", "Rear"), s.ReferenceRear, .0001, .2, "0.####", "", L.Tr("Max rear distance: how far inside the low poly the high poly is searched"));
+                    c = UiRows.Split(rows.Row(), 2, 6);
+                    s.ReferenceAverageNormals = PaintGui.FitToggle(c[0], L.Tr("Average normals"), s.ReferenceAverageNormals, L.Tr("Project along normals averaged over hard edges (a cage without gaps)"));
+                    s.ReferenceMatchByName = PaintGui.FitToggle(c[1], L.Tr("Match by name"), s.ReferenceMatchByName, L.Tr("Project 'part_low' only onto 'part_high' (or 'part')"));
+                    var reference = highPolyPreview != null ? highPolyPreview.Geometry : null;
+                    var row = rows.Row();
+                    PaintGui.ValueBox(new Rect(row.x, row.y, row.width - 28, row.height), L.Tr("Triangles"), reference != null ? reference.TriangleCount.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) : L.Tr("Not readable"), DropdownLabelWidth,
+                        reference != null ? (Color?)null : PaintTheme.Warning, L.Tr("Triangles read from the high poly"));
+                    if (PaintGui.IconButton(new Rect(row.xMax - 24, row.y, 24, row.height), "sync", L.Tr("Read the high poly's meshes again (after editing them)"), false, GUI.enabled, 16)) { DisposeHighPoly(); CurrentHighPolyInput(); }
+                    if (highPolyNote != null) NoteRow(rows, highPolyNote, NoteKind.Warning);
+                }
+                // 種類ごとの設定
                 if (s.Includes(MeshMapKind.AmbientOcclusion) || s.Includes(MeshMapKind.BentNormal))
                 {
-                    GUILayout.Label("Ambient occlusion", EditorStyles.miniBoldLabel);
-                    s.AoSamples = KeepIntSlider("Rays", s.AoSamples, 1, 512);
-                    s.AoMaxDistance = KeepSlider(new GUIContent("Max distance", "Relative to the model's bounding-box diagonal"), s.AoMaxDistance, .001f, 1);
-                    s.AoSpreadDegrees = KeepSlider(new GUIContent("Spread °", "180 = the whole hemisphere"), s.AoSpreadDegrees, 1, 180);
-                    s.AoFalloff = (MeshOcclusionFalloff)EditorGUILayout.EnumPopup(new GUIContent("Falloff", "Linear: nearer occluders darken more"), s.AoFalloff);
-                    s.AoIgnoreBackfaces = EditorGUILayout.Toggle(new GUIContent("Ignore back faces", "Rays pass through faces seen from behind"), s.AoIgnoreBackfaces);
+                    PaintGui.GroupLabel(rows.Row(16), MeshMapLabel(MeshMapKind.AmbientOcclusion));
+                    var c = UiRows.Split(rows.Row(), 2, 6);
+                    s.AoSamples = PaintGui.KeepIntSlider(c[0], L.TrIn("mesh map", "Rays"), s.AoSamples, 1, 512, "", L.Tr("Rays per texel (more is smoother and slower)"));
+                    s.AoMaxDistance = PaintGui.KeepSlider(c[1], L.TrIn("mesh map", "Distance"), s.AoMaxDistance, .001, 1, "0.###", "", L.Tr("Max distance, relative to the model's bounding-box diagonal"));
+                    c = UiRows.Split(rows.Row(), 2, 6);
+                    s.AoSpreadDegrees = PaintGui.KeepSlider(c[0], L.TrIn("mesh map", "Spread"), s.AoSpreadDegrees, 1, 180, "0", "°", L.Tr("180° = the whole hemisphere"));
+                    s.AoIgnoreBackfaces = PaintGui.FitToggle(c[1], L.Tr("Ignore back faces"), s.AoIgnoreBackfaces, L.Tr("Rays pass through faces seen from behind"));
+                    ChoiceDropdown(rows.Row(), L.TrIn("mesh map", "Falloff"), s.AoFalloff, (MeshOcclusionFalloff[])Enum.GetValues(typeof(MeshOcclusionFalloff)), FalloffName, v => meshBakeSettings.AoFalloff = v,
+                        L.Tr("Linear: nearer occluders darken more"));
                 }
                 if (s.Includes(MeshMapKind.Curvature))
                 {
-                    GUILayout.Label("Curvature", EditorStyles.miniBoldLabel);
-                    s.CurvatureRadius = KeepSlider(new GUIContent("Radius", "Edges within this distance count (relative to the bounding-box diagonal). Larger = wider, softer edges"), s.CurvatureRadius, (float)MeshBakeSettings.MinCurvatureRadius, .2f);
+                    PaintGui.GroupLabel(rows.Row(16), MeshMapLabel(MeshMapKind.Curvature));
+                    s.CurvatureRadius = PaintGui.KeepSlider(rows.Row(), L.TrIn("mesh map", "Radius"), s.CurvatureRadius, MeshBakeSettings.MinCurvatureRadius, .2, "0.###", "",
+                        L.Tr("Edges within this distance count (relative to the bounding-box diagonal). Larger = wider, softer edges"));
                 }
                 if (s.Includes(MeshMapKind.Thickness))
                 {
-                    GUILayout.Label("Thickness", EditorStyles.miniBoldLabel);
-                    s.ThicknessSamples = KeepIntSlider("Rays", s.ThicknessSamples, 1, 512);
-                    s.ThicknessMaxDistance = KeepSlider(new GUIContent("Max distance", "Relative to the bounding-box diagonal; thicker parts read 1"), s.ThicknessMaxDistance, .001f, 1);
-                    s.ThicknessSpreadDegrees = KeepSlider(new GUIContent("Spread °"), s.ThicknessSpreadDegrees, 1, 180);
+                    PaintGui.GroupLabel(rows.Row(16), MeshMapLabel(MeshMapKind.Thickness));
+                    var c = UiRows.Split(rows.Row(), 2, 6);
+                    s.ThicknessSamples = PaintGui.KeepIntSlider(c[0], L.TrIn("mesh map", "Rays"), s.ThicknessSamples, 1, 512, "", L.Tr("Rays per texel (more is smoother and slower)"));
+                    s.ThicknessMaxDistance = PaintGui.KeepSlider(c[1], L.TrIn("mesh map", "Distance"), s.ThicknessMaxDistance, .001, 1, "0.###", "", L.Tr("Max distance, relative to the bounding-box diagonal; thicker parts read 1"));
+                    s.ThicknessSpreadDegrees = PaintGui.KeepSlider(rows.Row(), L.TrIn("mesh map", "Spread"), s.ThicknessSpreadDegrees, 1, 180, "0", "°", L.Tr("180° = the whole hemisphere"));
                 }
-                if (s.Includes(MeshMapKind.Id)) s.IdSource = (MeshIdSource)EditorGUILayout.EnumPopup(new GUIContent("ID from", "What gets its own colour in the ID map"), s.IdSource);
-                meshBakeUseGpu = EditorGUILayout.Toggle(new GUIContent("Use GPU for rays", "Ambient occlusion, bent normal and thickness rays run in a compute shader (same formulas, float precision). Falls back to the CPU when the GPU cannot."), meshBakeUseGpu);
-                s.Antialiasing = EditorGUILayout.IntPopup(new GUIContent("Antialiasing", "Subsamples per texel side (the bake takes n² times as long)"), s.Antialiasing, new[] { new GUIContent("None"), new GUIContent("2×2"), new GUIContent("3×3"), new GUIContent("4×4") }, new[] { 1, 2, 3, 4 });
-                GUILayout.Label("High poly (optional)", EditorStyles.miniBoldLabel);
-                var high = (GameObject)EditorGUILayout.ObjectField(new GUIContent("High poly", "A second model whose detail is projected onto this one (meshes are read only; nothing is instantiated or changed)"), highPolyModel, typeof(GameObject), true);
-                if (high != highPolyModel) { highPolyModel = high; CurrentHighPolyInput(); }
-                if (highPolyModel != null)
+                if (s.Includes(MeshMapKind.Id))
                 {
-                    s.ReferenceFrontal = KeepSlider(new GUIContent("Max frontal", "How far outside the low poly the high poly is searched (relative to the bounding-box diagonal)"), s.ReferenceFrontal, .0001f, .2f);
-                    s.ReferenceRear = KeepSlider(new GUIContent("Max rear", "How far inside the low poly the high poly is searched"), s.ReferenceRear, .0001f, .2f);
-                    s.ReferenceAverageNormals = EditorGUILayout.Toggle(new GUIContent("Average normals", "Project along normals averaged over hard edges (a cage without gaps)"), s.ReferenceAverageNormals);
-                    s.ReferenceMatchByName = EditorGUILayout.Toggle(new GUIContent("Match by name", "Project 'part_low' only onto 'part_high' (or 'part')"), s.ReferenceMatchByName);
-                    var reference = highPolyPreview != null ? highPolyPreview.Geometry : null;
-                    GUILayout.BeginHorizontal();
-                    EditorGUILayout.LabelField(reference != null ? reference.TriangleCount.ToString("N0") + " high-poly triangles" : "Not readable", EditorStyles.miniLabel);
-                    if (GUILayout.Button(new GUIContent("Reload", "Read the high poly's meshes again (after editing them)"), EditorStyles.miniButton, GUILayout.Width(60))) { DisposeHighPoly(); CurrentHighPolyInput(); }
-                    GUILayout.EndHorizontal();
-                    if (highPolyNote != null) EditorGUILayout.HelpBox(highPolyNote, MessageType.Warning);
+                    PaintGui.GroupLabel(rows.Row(16), MeshMapLabel(MeshMapKind.Id));
+                    ChoiceDropdown(rows.Row(), L.Tr("Colors from"), s.IdSource, (MeshIdSource[])Enum.GetValues(typeof(MeshIdSource)), IdSourceName, v => meshBakeSettings.IdSource = v,
+                        L.Tr("What gets its own colour in the ID map"));
                 }
-                if (s.Includes(MeshMapKind.AmbientOcclusion) || s.Includes(MeshMapKind.Thickness) || s.Includes(MeshMapKind.BentNormal))
-                    s.Occluders = (MeshOccluders)EditorGUILayout.EnumPopup(new GUIContent("Occluders", "Which faces block AO and thickness rays"), s.Occluders);
-                using (new EditorGUI.DisabledScope(preview == null || !preview.HasModel))
-                    if (GUILayout.Button(new GUIContent("Bake mesh maps", "Bake the checked maps from the loaded model. The model, its materials and textures are not changed."))) TryAction(() => BakeMeshMaps());
+                rows.Space(4);
+                bool hasModel = preview != null && preview.HasModel;
+                if (PaintGui.Button(Spot("meshmap.bake", rows.Row(28, 6)), L.Tr("Bake Mesh Maps"), true, GUI.enabled && hasModel, L.Tr("Bake the checked maps from the loaded model. The model, its materials and textures are not changed."), "local_fire_department"))
+                    TryAction(() => BakeMeshMaps());
+                if (!hasModel) NoteRow(rows, L.Tr("Load a model in Texture Set (or 3D ▸ Demo Cube) to bake."), NoteKind.Info);
             }
-            if (meshMaps.Count > 0)
-            {
-                foreach (var map in meshMaps.Maps)
-                {
-                    var check = map.Provenance.Check(expected);
-                    EditorGUILayout.LabelField(MeshMapLabel(map.Kind), map.Width + "×" + map.Height + " slot " + map.Provenance.TargetSlot + " — " + check.State.ToString().ToLowerInvariant(), EditorStyles.miniLabel);
-                    if (check.State == MeshMapState.Stale) EditorGUILayout.HelpBox(MeshMapLabel(map.Kind) + " is stale and is not used: " + string.Join(" ", check.Reasons) + " Bake again to update it.", MessageType.Warning);
-                }
-                if (expected.MeshHash == null) EditorGUILayout.HelpBox("No model is loaded, so the maps cannot be checked against it.", MessageType.Info);
-                var views = new List<MeshMapView> { MeshMapView.None, MeshMapView.Coverage };
-                views.AddRange(meshMaps.Maps.Select(m => (MeshMapView)m.Kind));
-                int index = Math.Max(0, views.IndexOf(meshMapView));
-                int picked = EditorGUILayout.Popup(new GUIContent("Show on canvas", "Read-only overlay; nothing is painted"), index, views.Select(v => new GUIContent(v == MeshMapView.None ? "None" : v == MeshMapView.Coverage ? "Coverage (UV islands)" : MeshMapLabel((MeshMapKind)v))).ToArray());
-                if (picked != index) { meshMapView = views[picked]; Repaint(); }
-                if (meshMapView != MeshMapView.None) meshMapOpacity = EditorGUILayout.Slider("Overlay opacity", meshMapOpacity, 0, 1);
-                if (meshMapView == MeshMapView.Coverage) EditorGUILayout.LabelField("Green: baked · Red: overlapping UVs · Blue: padding", EditorStyles.miniLabel);
-                if (!MeshMapsSaved) EditorGUILayout.HelpBox("These mesh maps are not in the saved file yet. Save keeps them in the .ylp (they are not part of Undo).", MessageType.None);
-                using (new EditorGUI.DisabledScope(stroke != null))
-                    if (GUILayout.Button("Clear mesh maps")) { meshMaps.Clear(); meshMapView = MeshMapView.None; message = "Cleared the mesh maps (derived data; nothing in the layers changed)."; }
-            }
-            if (lastMeshBakeReport != null && lastMeshBakeReport.Diagnostics.Count > 0) EditorGUILayout.HelpBox(string.Join("\n", lastMeshBakeReport.Diagnostics), MessageType.Info);
-            if (meshMapNote != null) EditorGUILayout.HelpBox(meshMapNote, MessageType.Warning);
+            finally { GUI.enabled = was; }
+            if (meshMaps.Count > 0) DrawBakedMeshMaps(rows, expected);
+            if (lastMeshBakeReport != null && lastMeshBakeReport.Diagnostics.Count > 0) NoteRow(rows, string.Join("\n", lastMeshBakeReport.Diagnostics), NoteKind.Info);
+            if (meshMapNote != null) NoteRow(rows, meshMapNote, NoteKind.Warning);
         }
+
+        /// <summary>ベイク済みのマップ: 種類ごとの状態（最新・古い・未確認）、古い理由、キャンバスへの重ね表示、消去。</summary>
+        void DrawBakedMeshMaps(UiRows rows, MeshMapExpectation expected)
+        {
+            PaintGui.GroupLabel(rows.Row(16), L.Tr("Baked Maps"));
+            foreach (var map in meshMaps.Maps)
+            {
+                var check = map.Provenance.Check(expected);
+                var row = rows.Row(20, 2);
+                var color = check.State == MeshMapState.Current ? new Color(.35f, .78f, .42f) : check.State == MeshMapState.Stale ? PaintTheme.Warning : PaintTheme.TextDim;
+                PaintGui.Dot(new Rect(row.x, row.y, 12, row.height), color);
+                string state = MeshMapStateName(check.State);
+                float right = PaintGui.TextWidth(state, PaintTheme.LabelDim) + 4;
+                PaintGui.Text(new Rect(row.x + 18, row.y, row.width - 18 - right, row.height), PaintGui.Fit(MeshMapLabel(map.Kind), row.width - 22 - right, PaintTheme.Label), PaintTheme.Label);
+                PaintGui.Text(new Rect(row.xMax - right, row.y, right, row.height), state, StateStyle, color);
+                PaintGui.Tooltip(row, L.Tr("{0} × {1} · slot {2}", map.Width, map.Height, map.Provenance.TargetSlot));
+                if (check.State == MeshMapState.Stale) NoteRow(rows, L.Tr("{0} is stale and is not used: {1} Bake again to update it.", MeshMapLabel(map.Kind), string.Join(" ", check.Reasons).Replace(";", "; ")), NoteKind.Warning, 18); // 由来の条件の文字列は ; で折り返せるようにする
+            }
+            if (expected.MeshHash == null) NoteRow(rows, L.Tr("No model is loaded, so the maps cannot be checked against it."), NoteKind.Info);
+            rows.Space(2);
+            var views = new List<MeshMapView> { MeshMapView.None, MeshMapView.Coverage };
+            views.AddRange(meshMaps.Maps.Select(m => (MeshMapView)m.Kind));
+            var current = views.Contains(meshMapView) ? meshMapView : MeshMapView.None;
+            ChoiceDropdown(rows.Row(), L.Tr("Show on canvas"), current, views.ToArray(), MeshMapViewName, v => { meshMapView = v; Repaint(); }, L.Tr("Read-only overlay; nothing is painted"));
+            if (meshMapView != MeshMapView.None)
+                meshMapOpacity = (float)PaintGui.KeepSlider(rows.Row(), L.Tr("Overlay opacity"), meshMapOpacity, 0, 1, "0", "%", null, true, 100);
+            if (meshMapView == MeshMapView.Coverage)
+            {
+                var row = rows.Row(18);
+                var legend = new[] { (L.TrIn("mesh map", "Baked"), new Color(.2f, .8f, .3f)), (L.Tr("Overlapping UVs"), new Color(.9f, .25f, .2f)), (L.TrIn("mesh map", "Padding"), new Color(.25f, .45f, .95f)) };
+                float x = row.x;
+                foreach (var (label, c) in legend)
+                {
+                    PaintGui.Dot(new Rect(x, row.y, 10, row.height), c);
+                    float w = PaintGui.TextWidth(label, PaintTheme.LabelDim);
+                    PaintGui.Text(new Rect(x + 13, row.y, Mathf.Min(w + 2, row.xMax - x - 13), row.height), label, PaintTheme.LabelDim);
+                    x += 13 + w + 12;
+                }
+            }
+            if (!MeshMapsSaved) NoteRow(rows, L.Tr("These mesh maps are not in the saved file yet. Save keeps them in the .ylp (they are not part of Undo)."));
+            if (PaintGui.Button(rows.Row(), L.Tr("Clear Mesh Maps"), false, GUI.enabled && stroke == null, L.Tr("Remove the baked maps (derived data; the layers do not change)"), "delete"))
+            { meshMaps.Clear(); meshMapView = MeshMapView.None; message = L.Tr("Cleared the mesh maps (derived data; nothing in the layers changed)."); }
+        }
+
         static string MeshMapLabel(MeshMapKind kind)
         {
             switch (kind)
             {
-                case MeshMapKind.WorldNormal: return "Normal (world)";
-                case MeshMapKind.Position: return "Position";
-                case MeshMapKind.AmbientOcclusion: return "Ambient occlusion";
-                case MeshMapKind.Curvature: return "Curvature";
-                case MeshMapKind.Thickness: return "Thickness";
-                case MeshMapKind.TangentNormal: return "Normal (tangent)";
-                case MeshMapKind.Height: return "Height";
-                case MeshMapKind.Id: return "ID";
-                case MeshMapKind.BentNormal: return "Bent normal";
-                default: return "Opacity";
+                case MeshMapKind.WorldNormal: return L.TrIn("mesh map", "Normal (world)");
+                case MeshMapKind.Position: return L.TrIn("mesh map", "Position");
+                case MeshMapKind.AmbientOcclusion: return L.TrIn("mesh map", "Ambient occlusion");
+                case MeshMapKind.Curvature: return L.TrIn("mesh map", "Curvature");
+                case MeshMapKind.Thickness: return L.TrIn("mesh map", "Thickness");
+                case MeshMapKind.TangentNormal: return L.TrIn("mesh map", "Normal (tangent)");
+                case MeshMapKind.Height: return L.Tr("Height");
+                case MeshMapKind.Id: return L.TrIn("mesh map", "ID");
+                case MeshMapKind.BentNormal: return L.TrIn("mesh map", "Bent normal");
+                default: return L.Tr("Opacity");
+            }
+        }
+        /// <summary>ベイクするマップの 2 列の欄の名前（長い名前は欄に収まる短い名前。ツールチップは <see cref="MeshMapLabel"/>）。</summary>
+        static string MeshMapGridLabel(MeshMapKind kind) => kind == MeshMapKind.AmbientOcclusion ? L.TrIn("mesh map short", "AO") : MeshMapLabel(kind);
+        static string MeshMapViewName(MeshMapView v) => v == MeshMapView.None ? L.Tr("None") : v == MeshMapView.Coverage ? L.Tr("UV coverage") : MeshMapLabel((MeshMapKind)v);
+        static GUIStyle s_stateStyle;
+        static GUIStyle StateStyle => s_stateStyle ?? (s_stateStyle = new GUIStyle(PaintTheme.LabelDim) { alignment = TextAnchor.MiddleRight });
+        static string MeshMapStateName(MeshMapState state)
+        {
+            switch (state)
+            {
+                case MeshMapState.Current: return L.TrIn("mesh map", "current");
+                case MeshMapState.Stale: return L.TrIn("mesh map", "stale");
+                case MeshMapState.Unverified: return L.TrIn("mesh map", "unverified");
+                default: return L.TrIn("mesh map", "missing");
+            }
+        }
+        static string OccludersName(MeshOccluders o) => o == MeshOccluders.TargetSlotOnly ? L.Tr("This slot only") : L.Tr("Whole model");
+        static string FalloffName(MeshOcclusionFalloff f) => f == MeshOcclusionFalloff.Linear ? L.Tr("Linear") : L.Tr("None");
+        static string IdSourceName(MeshIdSource s)
+        {
+            switch (s)
+            {
+                case MeshIdSource.Mesh: return L.Tr("Mesh");
+                case MeshIdSource.VertexColor: return L.Tr("Vertex color");
+                case MeshIdSource.UvIsland: return L.Tr("UV island");
+                default: return L.TrIn("mesh map", "Material slot");
             }
         }
 

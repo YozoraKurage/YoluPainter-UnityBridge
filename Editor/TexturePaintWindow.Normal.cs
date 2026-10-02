@@ -37,59 +37,61 @@ namespace Yozolab.YoluPainter.Editor
             document.SetNormalSettings(next, coalesce);
             repaintPixels = true;
             if (next.DeriveFromHeight != old.DeriveFromHeight)
-                message = next.DeriveFromHeight ? "Height → Normal on: the Normal output now has the normal derived from Height under the painted Normal layers (nothing is painted into a layer)." : "Height → Normal off: the Normal output is the painted Normal layers only.";
+                message = next.DeriveFromHeight ? L.Tr("Height → Normal on: the Normal output now has the normal derived from Height under the painted Normal layers (nothing is painted into a layer).") : L.Tr("Height → Normal off: the Normal output is the painted Normal layers only.");
             else if (next.FileDirection != old.FileDirection)
-                message = "Normal files (Export Images / PNG / PSD) are now written in " + DirectionName(next.FileDirection) + " order. The .ylp texture and the preview stay OpenGL (Unity).";
+                message = L.Tr("Normal files (Export Images / PNG / PSD) are now written in {0} order. The .ylp texture and the preview stay OpenGL (Unity).", DirectionName(next.FileDirection));
         }
         static string DirectionName(NormalYDirection d) => d == NormalYDirection.DirectX ? "DirectX (Y−)" : "OpenGL (Y+)";
+        static string EdgeName(HeightEdgeMode m) => m == HeightEdgeMode.Wrap ? L.Tr("Wrap (tiling)") : L.TrIn("normal output", "Clamp");
 
-        void DrawNormalPanel()
+        void DrawNormalPanel(UiRows rows)
         {
-            if (channel != PaintChannel.Normal && channel != PaintChannel.Height) return;
-            using (new EditorGUI.DisabledScope(stroke != null))
+            bool was = GUI.enabled; GUI.enabled = was && stroke == null;
+            try
             {
-                GUILayout.Space(6);
-                GUILayout.Label("Normal output", EditorStyles.boldLabel);
                 var s = document.NormalSettings;
-                bool derive = EditorGUILayout.Toggle(new GUIContent("Height → Normal", "Add the normal derived from the Height channel under the painted Normal layers in the Normal output (preview, .ylp texture, exports). It is regenerated from Height, never painted into a layer."), s.DeriveFromHeight);
-                double strength = s.Strength; var edges = s.Edges;
-                using (new EditorGUI.DisabledScope(!derive))
-                {
-                    // スライダーは float。触っていなければ文書の値（double）のままにする（読み込んだ値を勝手に丸めて Undo を作らない）
-                    float shown = (float)s.Strength, picked = EditorGUILayout.Slider(new GUIContent("Strength", "Texels of rise for the full height range (0 → 1). Negative turns bumps into dents."), shown, -(float)NormalSettings.MaxStrength, (float)NormalSettings.MaxStrength);
-                    if (picked != shown) strength = picked;
-                    edges = (HeightEdgeMode)EditorGUILayout.EnumPopup(new GUIContent("Edges", "Clamp: the slope at the canvas edge uses the edge texel. Wrap: it reads the opposite edge (tiling textures)."), s.Edges);
-                }
-                var direction = (NormalYDirection)EditorGUILayout.EnumPopup(new GUIContent("File Y", "Green direction of Normal images written by Export Images / PNG / PSD. Unity uses OpenGL (Y+); the .ylp texture and the preview always do."), s.FileDirection);
-                if (derive != s.DeriveFromHeight || strength != s.Strength || edges != s.Edges || direction != s.FileDirection)
-                {
-                    bool drag = strength != s.Strength && derive == s.DeriveFromHeight && edges == s.Edges && direction == s.FileDirection;
-                    TryAction(() => ApplyNormalSettings(new NormalSettings(derive, strength, edges, direction), coalesce: drag));
-                }
+                bool derive = PaintGui.FitToggle(Spot("normal.derive", rows.Row()), L.Tr("Height → Normal"), s.DeriveFromHeight,
+                    L.Tr("Add the normal derived from the Height channel under the painted Normal layers in the Normal output (preview, .ylp texture, exports). It is regenerated from Height, never painted into a layer."));
+                // スライダーは float。触っていなければ文書の値（double）のままにする（読み込んだ値を勝手に丸めて Undo を作らない）
+                double strength = PaintGui.KeepSlider(Spot("normal.strength", rows.Row()), L.TrIn("normal output", "Strength"), s.Strength, -NormalSettings.MaxStrength, NormalSettings.MaxStrength, "0.##", "",
+                    L.Tr("Texels of rise for the full height range (0 → 1). Negative turns bumps into dents."), derive);
+                if (derive != s.DeriveFromHeight) TryAction(() => ApplyNormalSettings(s.WithDerive(derive)));
+                else if (strength != s.Strength) TryAction(() => ApplyNormalSettings(s.WithStrength(strength), coalesce: true));
+                ChoiceDropdown(rows.Row(), L.TrIn("normal output", "Edges"), s.Edges, (HeightEdgeMode[])Enum.GetValues(typeof(HeightEdgeMode)), EdgeName,
+                    v => TryAction(() => ApplyNormalSettings(document.NormalSettings.WithEdges(v))),
+                    L.Tr("Clamp: the slope at the canvas edge uses the edge texel. Wrap: it reads the opposite edge (tiling textures)."), s.DeriveFromHeight);
+                ChoiceDropdown(rows.Row(), L.Tr("File Y"), s.FileDirection, (NormalYDirection[])Enum.GetValues(typeof(NormalYDirection)), DirectionName,
+                    v => TryAction(() => ApplyNormalSettings(document.NormalSettings.WithFileDirection(v))),
+                    L.Tr("Green direction of Normal images written by Export Images / PNG / PSD. Unity uses OpenGL (Y+); the .ylp texture and the preview always do."));
                 if (channel == PaintChannel.Height)
                 {
-                    if (derive) EditorGUILayout.HelpBox("Height also shapes the Normal output. Switch to the Normal channel to see it.", MessageType.None);
+                    if (s.DeriveFromHeight) NoteRow(rows, L.Tr("Height also shapes the Normal output. Switch to the Normal channel to see it."), NoteKind.Info);
                     return;
                 }
-                bool show = EditorGUILayout.Toggle(new GUIContent("Show output", "On: the Normal output (renormalized, flat where unpainted, Height → Normal included). Off: the painted Normal layers with transparency."), showNormalOutput);
+                bool show = PaintGui.FitToggle(rows.Row(), L.Tr("Show output"), showNormalOutput,
+                    L.Tr("On: the Normal output (renormalized, flat where unpainted, Height → Normal included). Off: the painted Normal layers with transparency."));
                 if (show != showNormalOutput) ShowNormalOutput = show;
-                DrawNormalBrushValue();
+                DrawNormalBrushValue(rows);
                 var layer = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
                 if (layer != null && !layer.IsGroup && layer.Kind != LayerKind.Adjustment && !NormalMaps.IsVectorMode(layer.BlendMode))
-                    EditorGUILayout.HelpBox(layer.BlendMode + " has no meaning for normals: in the Normal channel this layer replaces what is below, like Normal. Use Overlay to add it as detail (reoriented normal mapping).", MessageType.Info);
+                    NoteRow(rows, L.Tr("{0} has no meaning for normals: in the Normal channel this layer replaces what is below, like Normal. Use Overlay to add it as detail (reoriented normal mapping).", L.TrIn("blend mode", BlendName(layer.BlendMode))), NoteKind.Info);
                 else if (layer != null && layer.Kind == LayerKind.Adjustment)
-                    EditorGUILayout.HelpBox("Adjustments change the encoded values of the Normal channel (not the vectors); the output renormalizes them.", MessageType.None);
+                    NoteRow(rows, L.Tr("Adjustments change the encoded values of the Normal channel (not the vectors); the output renormalizes them."));
             }
+            finally { GUI.enabled = was; }
         }
 
         /// <summary>ブラシの値を法線の傾きで選ぶ（X: 右、Y: 上、Z は単位長さになるように決める）。</summary>
-        void DrawNormalBrushValue()
+        void DrawNormalBrushValue(UiRows rows)
         {
-            float x = brush.color.r * 2 - 1, y = brush.color.g * 2 - 1;
-            float nx = EditorGUILayout.Slider(new GUIContent("Brush tilt X", "The brush value as a normal: +1 leans right"), x, -1, 1);
-            float ny = EditorGUILayout.Slider(new GUIContent("Brush tilt Y", "+1 leans up (OpenGL / Unity)"), y, -1, 1);
-            if (nx != x || ny != y) SetBrushNormal(nx, ny);
-            if (GUILayout.Button(new GUIContent("Flat brush value", "(128, 128, 255): paints a flat normal"))) SetBrushNormal(0, 0);
+            PaintGui.GroupLabel(rows.Row(16), L.Tr("Brush value (normal)"));
+            var row = rows.Row();
+            var c = UiRows.Split(new Rect(row.x, row.y, row.width - 28, row.height), 2, 6);
+            double x = brush.color.r * 2 - 1, y = brush.color.g * 2 - 1;
+            double nx = PaintGui.KeepSlider(Spot("normal.tiltX", c[0]), L.TrIn("normal brush", "Tilt X"), x, -1, 1, "0.00", "", L.Tr("The brush value as a normal: +1 leans right"));
+            double ny = PaintGui.KeepSlider(c[1], L.TrIn("normal brush", "Tilt Y"), y, -1, 1, "0.00", "", L.Tr("+1 leans up (OpenGL / Unity)"));
+            if (nx != x || ny != y) SetBrushNormal((float)nx, (float)ny);
+            if (PaintGui.IconButton(Spot("normal.flat", new Rect(row.xMax - 24, row.y, 24, row.height)), "restart_alt", L.Tr("Flat brush value (128, 128, 255): paints a flat normal"), false, GUI.enabled, 16)) SetBrushNormal(0, 0);
         }
         /// <summary>ブラシの値を (x, y, √(1 − x² − y²)) の法線にする（長さが 1 を超える傾きは z = 0 の向きに縮める）。</summary>
         internal void SetBrushNormal(float x, float y)
