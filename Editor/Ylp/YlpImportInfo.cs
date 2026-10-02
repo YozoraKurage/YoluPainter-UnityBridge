@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using Yozolab.YoluPainter.Core;
 
@@ -16,7 +17,22 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>中身の形式（YlpFormat。ylp.json の無いものは 1）と、書いたアプリ（分からなければ空）。</summary>
         public int format;
         public string savedBy = "", createdBy = "";
+        /// <summary>テクスチャセットの一覧（project.json の並び。形式 2 までのファイルは 1 つ）。上の大きさ・チャンネルは今のセットのもの。</summary>
+        public TextureSetSummary[] textureSets = new TextureSetSummary[0];
         /// <summary>取り込みのエラーの理由（成功したときは空）。</summary>
         public string error = "";
+
+        /// <summary>1 つのテクスチャセットの名前・スロット・大きさ・使っているチャンネル。</summary>
+        [Serializable] internal sealed class TextureSetSummary
+        {
+            public string name = "";
+            public int materialSlot;
+            public int width, height;
+            public PaintChannel[] channels = new PaintChannel[0];
+            /// <summary>合成済みの画像が無い・使えないため、正本から読んだか。</summary>
+            public bool fromNativeDocument;
+            /// <summary>保存したときの今のセットか。</summary>
+            public bool current;
+        }
     }
 }

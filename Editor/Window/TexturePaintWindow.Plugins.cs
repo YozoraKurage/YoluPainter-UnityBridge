@@ -51,7 +51,7 @@ namespace Yozolab.YoluPainter.Editor
             Dialogs.Inform(L.Tr("Plugins"), L.Tr("Plugin API {0}", PainterApi.Version.ToString()) + "\n\n" + text);
         }
 
-        /// <summary>プラグインに渡すプロジェクト（このウィンドウの今の文書）。</summary>
+        /// <summary>プラグインに渡すプロジェクト（このウィンドウの今のテクスチャセットの文書。ほかのセットは見せない）。</summary>
         sealed class PluginSession : IPainterSession
         {
             readonly TexturePaintWindow w;

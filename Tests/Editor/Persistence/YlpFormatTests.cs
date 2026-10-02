@@ -16,7 +16,8 @@ namespace Yozolab.YoluPainter.Tests
     /// .ylp の中身の形式（YlpFormat、Documentation~/YLP_FORMAT.md）: ylp.json の読み書きと拒否、古い形式を開くと今の並びになること、
     /// 新しすぎる形式はどのエントリにも触れずに断ること、知らないエントリを知らせること。形式 1 のファイルは、形式を足す前の
     /// YoluPainter で作って固めたフィクスチャ（Fixtures~/format1.ylp。層 5 枚・マスク・グループ・塗りつぶし層・調整層・Normal の
-    /// 設定・選択範囲・全チャンネルの合成）で確かめる。
+    /// 設定・選択範囲・全チャンネルの合成）、形式 2 は同じ中身に ylp.json と取り込んだ PSD の原本を足したもの（Fixtures~/format2.ylp）で
+    /// 確かめる。どちらも形式 3（テクスチャセット）では 1 つのセットとして開き、書き戻しても正本はバイト一致。
     /// </summary>
     public sealed class YlpFormatTests
     {
@@ -70,18 +71,31 @@ namespace Yozolab.YoluPainter.Tests
 
         [Test] public void AStampedFileOpensAsTheCurrentFormatAndUnknownEntriesAreReported()
         {
-            var files = new Dictionary<string, byte[]> { { YlpArchive.NativeName, new byte[] { 1 } }, { "future/thing.bin", new byte[] { 2 } }, { "composite/Glow.png", new byte[] { 3 } } };
+            var id = Guid.NewGuid();
+            var files = new Dictionary<string, byte[]>
+            {
+                { YlpFormat.ProjectName, YlpFormat.WriteProject(new YlpProjectInfo(new[] { new YlpTextureSetInfo(id, "Body", 0) }, id)) },
+                { YlpFormat.SetEntry(id, YlpArchive.NativeName), new byte[] { 1 } }, { "future/thing.bin", new byte[] { 2 } }, { YlpFormat.SetEntry(id, "composite/Glow.png"), new byte[] { 3 } },
+                { YlpArchive.NativeName, new byte[] { 4 } },
+            };
             YlpFormat.Stamp(files, Saver, null);
             var opened = YlpFormat.Open(files);
             Assert.That(opened.Info.Format, Is.EqualTo(YlpFormat.Current)); Assert.That(opened.Upgraded, Is.False);
             Assert.That(opened.Files.ContainsKey(YlpFormat.InfoName), Is.False, "the record is read into Info, not passed on");
-            Assert.That(opened.UnknownEntries, Is.EqualTo(new[] { "composite/Glow.png", "future/thing.bin" }), "an unknown channel's composite is unknown too");
+            Assert.That(opened.UnknownEntries, Is.EqualTo(new[] { YlpArchive.NativeName, "future/thing.bin", YlpFormat.SetEntry(id, "composite/Glow.png") }),
+                "an unknown channel's composite is unknown too, and so is a document where format 3 does not keep one");
             Assert.That(files.ContainsKey("future/thing.bin"), Is.True, "Open does not change the dictionary it was given");
-            Assert.That(YlpFormat.KindOf("document.utpaint"), Is.EqualTo(YlpFormat.EntryKind.Source));
-            Assert.That(YlpFormat.KindOf("selection.bin"), Is.EqualTo(YlpFormat.EntryKind.Source));
+            string set = YlpFormat.SetFolder(id);
+            Assert.That(YlpFormat.KindOf(YlpFormat.ProjectName), Is.EqualTo(YlpFormat.EntryKind.Source), "the list of texture sets cannot be lost");
+            Assert.That(YlpFormat.KindOf(set + "document.utpaint"), Is.EqualTo(YlpFormat.EntryKind.Source));
+            Assert.That(YlpFormat.KindOf(set + "selection.bin"), Is.EqualTo(YlpFormat.EntryKind.Source));
+            Assert.That(YlpFormat.KindOf(set + "imported-original.psd"), Is.EqualTo(YlpFormat.EntryKind.Source));
             Assert.That(YlpFormat.KindOf("view.json"), Is.EqualTo(YlpFormat.EntryKind.State));
-            Assert.That(YlpFormat.KindOf("composite/Normal.png"), Is.EqualTo(YlpFormat.EntryKind.Derived));
-            Assert.That(YlpFormat.KindOf("meshmap-AmbientOcclusion.bin"), Is.EqualTo(YlpFormat.EntryKind.Derived));
+            Assert.That(YlpFormat.KindOf(set + "composite/Normal.png"), Is.EqualTo(YlpFormat.EntryKind.Derived));
+            Assert.That(YlpFormat.KindOf(set + "meshmap-AmbientOcclusion.bin"), Is.EqualTo(YlpFormat.EntryKind.Derived));
+            Assert.That(YlpFormat.KindOf("thumbnail.png"), Is.EqualTo(YlpFormat.EntryKind.Derived));
+            foreach (var formerlyAtTheRoot in new[] { "document.utpaint", "selection.bin", "composite/Normal.png", "meshmap-AmbientOcclusion.bin", set + "view.json", set + "sub/x.bin" })
+                Assert.That(YlpFormat.KindOf(formerlyAtTheRoot), Is.Null, formerlyAtTheRoot);
         }
 
         /// <summary>形式を足す前の YoluPainter で作ったファイル: 形式 1 として開き、正本はバイト一致で読み書きでき、合成の画像は正本から作り直したものと同じ。</summary>
@@ -93,20 +107,71 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(opened.Info.Format, Is.EqualTo(1)); Assert.That(opened.Upgraded, Is.True);
             Assert.That(opened.Info.SavedBy, Is.Null); Assert.That(opened.Info.CreatedBy, Is.Null);
             Assert.That(opened.UnknownEntries, Is.Empty);
-            var native = opened.Files[YlpArchive.NativeName];
+            var files = OneTextureSet(opened);
+            var native = files[YlpArchive.NativeName];
             var document = DocumentBinary.Read(native);
+            Assert.That(opened.Project.Sets.Single().Id, Is.EqualTo(document.Id), "the one texture set is named after the document");
             Assert.That(document.Layers.Select(l => l.Name), Is.EquivalentTo(new[] { "Paint", "Group", "Inner", "Fill", "Invert" }));
             Assert.That(document.GetLayer(document.Layers.Single(l => l.Name == "Inner").ParentId).Name, Is.EqualTo("Group"));
             Assert.That(document.Layers.Single(l => l.Name == "Paint").Mask, Is.Not.Null);
             Assert.That(document.NormalSettings.DeriveFromHeight, Is.True);
             Assert.That(DocumentBinary.Write(document), Is.EqualTo(native), "the native source reads and writes back byte for byte");
-            Assert.That(SelectionBinary.Read(opened.Files[SelectionBinary.EntryName], document).IsEmpty, Is.False);
+            Assert.That(SelectionBinary.Read(files[SelectionBinary.EntryName], document).IsEmpty, Is.False);
+            AssertCompositesMatch(files, document);
+            AssertWritesBackAsTheCurrentFormat(opened);
+        }
+
+        /// <summary>形式 2 のファイル（形式 1 と同じ中身に ylp.json と取り込んだ PSD の原本）: 1 つのテクスチャセットとして開き、正本・選択範囲・
+        /// PSD の原本はセットの下、view.json とサムネイルは根に残る。</summary>
+        [Test] public void AFormatTwoFileOpensAsOneTextureSet()
+        {
+            var snapshot = YlpStore.Load(Fixture("format2.ylp"));
+            var opened = YlpFormat.Open(snapshot.Files);
+            Assert.That(opened.Info.Format, Is.EqualTo(2)); Assert.That(opened.Upgraded, Is.True);
+            Assert.That(opened.Info.SavedBy.App, Is.EqualTo("YoluPainter")); Assert.That(opened.Info.CreatedBy, Is.Not.Null);
+            Assert.That(opened.UnknownEntries, Is.Empty); Assert.That(opened.Notes, Is.Empty);
+            var files = OneTextureSet(opened);
+            Assert.That(files.Keys, Is.SupersetOf(new[] { YlpArchive.NativeName, SelectionBinary.EntryName, YlpContent.ImportedOriginalName }));
+            Assert.That(files[YlpContent.ImportedOriginalName], Is.EqualTo(snapshot.Files[YlpContent.ImportedOriginalName]), "the imported PSD's original bytes move with the set");
+            Assert.That(opened.Files.ContainsKey(YlpContent.ViewName) && opened.Files.ContainsKey(YlpContent.ThumbnailName), Is.True, "view.json and the thumbnail stay at the root");
+            var native = files[YlpArchive.NativeName];
+            Assert.That(native, Is.EqualTo(snapshot.Files[YlpArchive.NativeName]));
+            var document = DocumentBinary.Read(native);
+            Assert.That(opened.Project.Sets.Single().Id, Is.EqualTo(document.Id));
+            Assert.That(DocumentBinary.Write(document), Is.EqualTo(native), "the native source reads and writes back byte for byte");
+            Assert.That(SelectionBinary.Write(SelectionBinary.Read(files[SelectionBinary.EntryName], document)), Is.EqualTo(files[SelectionBinary.EntryName]));
+            AssertCompositesMatch(files, document);
+            AssertWritesBackAsTheCurrentFormat(opened);
+        }
+
+        /// <summary>移行した 1 つのテクスチャセット（スロットは view.json の 0、名前は移行の仮の名前、今のセット）のエントリ。</summary>
+        static Dictionary<string, byte[]> OneTextureSet(YlpOpened opened)
+        {
+            var set = opened.Project.Sets.Single();
+            Assert.That(set.MaterialSlot, Is.Zero); Assert.That(set.Name, Is.EqualTo(YlpFormat.MigratedSetName)); Assert.That(opened.Project.CurrentSet, Is.EqualTo(set.Id));
+            Assert.That(opened.Files.Keys.Where(k => !k.StartsWith(YlpFormat.SetsFolder, StringComparison.Ordinal)), Is.EquivalentTo(new[] { YlpFormat.ProjectName, YlpFormat.ViewName, YlpFormat.BrushName, YlpFormat.ThumbnailName }));
+            return opened.SetFiles(set.Id);
+        }
+
+        /// <summary>移した中身を今の形式で書いて読み直すと、同じセット・同じバイト列（保存しても正本は変わらない）。</summary>
+        static void AssertWritesBackAsTheCurrentFormat(YlpOpened opened)
+        {
+            var files = new Dictionary<string, byte[]>(opened.Files);
+            YlpFormat.Stamp(files, Saver, opened.Info.CreatedBy);
+            var again = YlpFormat.Open(YlpArchive.Read(YlpArchive.Write(files)));
+            Assert.That(again.Info.Format, Is.EqualTo(YlpFormat.Current)); Assert.That(again.Upgraded, Is.False); Assert.That(again.UnknownEntries, Is.Empty);
+            Assert.That(again.Project.Sets.Select(s => (s.Id, s.Name, s.MaterialSlot)), Is.EqualTo(opened.Project.Sets.Select(s => (s.Id, s.Name, s.MaterialSlot))));
+            foreach (var entry in opened.Files) Assert.That(again.Files[entry.Key], Is.EqualTo(entry.Value), entry.Key);
+        }
+
+        static void AssertCompositesMatch(Dictionary<string, byte[]> files, PaintDocument document)
+        {
             foreach (var channel in YlpContent.UsedChannels(document))
             {
                 var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
                 try
                 {
-                    Assert.That(texture.LoadImage(opened.Files[YlpContent.CompositeName(channel)], false), Is.True);
+                    Assert.That(texture.LoadImage(files[YlpContent.CompositeName(channel)], false), Is.True);
                     // LoadImage は PNG を ARGB32 にするので、並びではなく画素の値で比べる
                     var pixels = texture.GetPixels32(); var rgba = new byte[pixels.Length * 4];
                     for (int i = 0; i < pixels.Length; i++) { rgba[i * 4] = pixels[i].r; rgba[i * 4 + 1] = pixels[i].g; rgba[i * 4 + 2] = pixels[i].b; rgba[i * 4 + 3] = pixels[i].a; }

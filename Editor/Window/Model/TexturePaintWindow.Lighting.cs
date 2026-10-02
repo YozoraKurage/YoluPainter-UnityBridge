@@ -5,7 +5,8 @@ using Yozolab.YoluPainter.Core;
 namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>3D プレビューの照明に Normal の出力（手描きの Normal と Height → Normal）を使う。どのチャンネルを描いていても効くよう、
-    /// Normal の合成と出力を別に持つ。作り直すのはストロークの外で文書が変わったときだけ（CPU の代わりの経路は 4K で数秒かかる）。</summary>
+    /// Normal の合成と出力を別に持つ。作り直すのはストロークの外で文書が変わったときだけ（CPU の代わりの経路は 4K で数秒かかる）。
+    /// ほかのテクスチャセットは CPU の Normal の出力を、それぞれのスロットの照明に使う（文書の版が変わったときだけ作り直す）。</summary>
     public sealed partial class TexturePaintWindow
     {
         bool previewNormals = true;
@@ -21,19 +22,31 @@ namespace Yozolab.YoluPainter.Editor
 
         void UpdatePreviewLighting()
         {
-            if (!previewNormals || !YlpContent.UsedChannels(document).Contains(PaintChannel.Normal)) { DisposeLighting(); SetPreviewNormal(null); return; }
-            if (ShowsNormalOutput && normalOutput?.Texture != null) { SetPreviewNormal(normalOutput.Texture); return; } // 表示用の出力をそのまま使う
-            if (stroke == null && document.Revision != lightingRevision)
+            Texture current = null;
+            if (!previewNormals || !YlpContent.UsedChannels(document).Contains(PaintChannel.Normal)) DisposeLighting();
+            else if (ShowsNormalOutput && normalOutput?.Texture != null) current = normalOutput.Texture; // 表示用の出力をそのまま使う
+            else
             {
-                if (lightingCompositor == null) lightingCompositor = new TileGpuCompositor { ResidentBudgetBytes = 0 };
-                lightingCompositor.Update(document, PaintChannel.Normal);
-                if (lightingOutput == null) lightingOutput = new NormalOutputView();
-                lightingOutput.Update(document, lightingCompositor.Texture);
-                lightingRevision = document.Revision;
+                if (stroke == null && document.Revision != lightingRevision)
+                {
+                    if (lightingCompositor == null) lightingCompositor = new TileGpuCompositor { ResidentBudgetBytes = 0 };
+                    lightingCompositor.Update(document, PaintChannel.Normal);
+                    if (lightingOutput == null) lightingOutput = new NormalOutputView();
+                    lightingOutput.Update(document, lightingCompositor.Texture);
+                    lightingRevision = document.Revision;
+                }
+                current = lightingOutput?.Texture;
             }
-            SetPreviewNormal(lightingOutput?.Texture);
+            PreviewNormalTexture = current;
+            if (preview == null) return;
+            var normals = new System.Collections.Generic.Dictionary<int, Texture>();
+            if (current != null) normals[materialSlot] = current;
+            if (previewNormals && preview.HasModel)
+                foreach (var set in textureSets)
+                    if (set != currentSet && set.MaterialSlot < preview.MaterialSlotCount && !normals.ContainsKey(set.MaterialSlot))
+                    { var n = SetLighting(set); if (n != null) normals[set.MaterialSlot] = n; }
+            preview.SetNormalTextures(normals);
         }
-        void SetPreviewNormal(Texture texture) { PreviewNormalTexture = texture; preview?.SetNormalTexture(texture, materialSlot); }
         void DisposeLighting() { lightingOutput?.Dispose(); lightingOutput = null; lightingCompositor?.Dispose(); lightingCompositor = null; lightingRevision = -1; }
     }
 }

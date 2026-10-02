@@ -19,11 +19,13 @@ namespace Yozolab.YoluPainter.Editor
     /// もの（Texture2D のサブアセット）を出さない。マテリアルには Export Images・lilToon への割り当てで書き出した PNG を使う。</item>
     /// <item>Project ウィンドウのサムネイルとプレビューは <see cref="YlpImportInfoEditor"/> が .ylp の thumbnail.png から描く
     /// （アセットには入れない）。</item>
-    /// <item>大きさとチャンネルは合成済みの画像の名前と PNG の頭（IHDR）から読む。画像が無いときだけ正本（document.utpaint）を読む。</item>
+    /// <item>大きさとチャンネルは、テクスチャセットごとに合成済みの画像の名前と PNG の頭（IHDR）から読む。画像が無いときだけそのセットの正本
+    /// （document.utpaint）を読む。セットの並びは project.json（形式 3 から。形式 2 までは根の合成の 1 つのセット）。主オブジェクトの大きさと
+    /// チャンネルは保存したときの今のセットのもの。</item>
     /// <item>読めないファイルは理由をインポートのエラーに出し、<see cref="YlpImportInfo.error"/> に残す（アセットは消えない）。
     /// .ylp そのものには一切書かない。ダブルクリックで YoluPainter で開く。</item>
     /// </list></summary>
-    [ScriptedImporter(3, "ylp")]
+    [ScriptedImporter(4, "ylp")]
     internal sealed class YlpImporter : ScriptedImporter
     {
         /// <summary>主オブジェクトの識別子。</summary>
@@ -50,34 +52,69 @@ namespace Yozolab.YoluPainter.Editor
             {
                 string reason = ex is InvalidDataException ? ex.Message : ex.GetType().Name + ": " + ex.Message;
                 ctx.LogImportError("YoluPainter could not import " + ctx.assetPath + ": " + reason);
-                info.width = info.height = 0; info.channels = new PaintChannel[0]; info.fromNativeDocument = false; info.error = reason;
+                info.width = info.height = 0; info.channels = new PaintChannel[0]; info.fromNativeDocument = false; info.textureSets = new YlpImportInfo.TextureSetSummary[0]; info.error = reason;
             }
             ctx.AddObjectToAsset(InfoIdentifier, info);
             ctx.SetMainObject(info);
         }
 
-        /// <summary>大きさとチャンネル。合成済みの画像があればその名前と IHDR から（画素は展開しない）、無い・使えないときは正本から
-        /// （使えなかった理由は <paramref name="warnings"/> に足す）。</summary>
+        /// <summary>テクスチャセットごとの大きさとチャンネル。合成済みの画像があればその名前と IHDR から（画素は展開しない）、無い・使えないときは
+        /// 正本から（使えなかった理由は <paramref name="warnings"/> に足す）。</summary>
         static void Describe(byte[] data, YlpImportInfo info, List<string> warnings)
         {
-            // 形式を先に確かめる（新しすぎる形式は、中身の並びが違うかもしれないので読まずに断る）。形式 1 と 2 は並びが同じ。
-            // 合成の画像の置き場を変える移行を YlpFormat に足したら、ここで読む名前も形式に合わせること。
-            var stamp = YlpArchive.Read(data, entry => entry == YlpFormat.InfoName);
-            var opened = YlpFormat.Open(stamp);
-            info.format = opened.Info.Format; info.savedBy = opened.Info.SavedBy?.ToString() ?? ""; info.createdBy = opened.Info.CreatedBy?.ToString() ?? "";
-            var composites = YlpArchive.Read(data, entry => YlpContent.TryParseComposite(entry, out _));
-            if (composites.Count > 0)
+            // 形式を先に確かめる（新しすぎる形式は、中身の並びが違うかもしれないので読まずに断る）。合成の画像の置き場は形式で決まる
+            // （形式 1・2 は根の composite/、形式 3 からはセットごとの sets/<ID>/composite/）。
+            var head = YlpArchive.Read(data, entry => entry == YlpFormat.InfoName || entry == YlpFormat.ProjectName || entry == YlpFormat.ViewName);
+            var format = head.TryGetValue(YlpFormat.InfoName, out var record) ? YlpFormat.ReadInfo(record) : new YlpFormatInfo(1, null, null);
+            YlpFormat.CheckReadable(format);
+            info.format = format.Format; info.savedBy = format.SavedBy?.ToString() ?? ""; info.createdBy = format.CreatedBy?.ToString() ?? "";
+            var sets = new List<YlpImportInfo.TextureSetSummary>();
+            if (format.Format >= 3)
             {
-                try { DescribeComposites(composites, info); return; }
-                catch (InvalidDataException ex) { warnings.Add("The composite images in the file could not be used (" + ex.Message + "); the size and channels were read from the native document."); }
+                if (!head.TryGetValue(YlpFormat.ProjectName, out var projectBytes)) throw new InvalidDataException("The file has no " + YlpFormat.ProjectName + " (its list of texture sets).");
+                var project = YlpFormat.ReadProject(projectBytes);
+                var composites = YlpArchive.Read(data, entry => YlpFormat.TrySplitSetEntry(entry, out _, out var leaf) && YlpContent.TryParseComposite(leaf, out _));
+                foreach (var set in project.Sets)
+                {
+                    string folder = YlpFormat.SetFolder(set.Id);
+                    var mine = composites.Where(c => c.Key.StartsWith(folder, StringComparison.Ordinal)).ToDictionary(c => c.Key.Substring(folder.Length), c => c.Value, StringComparer.Ordinal);
+                    sets.Add(DescribeSet(data, mine, YlpFormat.SetEntry(set.Id, YlpArchive.NativeName), set.Name, set.MaterialSlot, set.Id == project.CurrentSet, project.Sets.Count > 1, warnings));
+                }
             }
-            var native = YlpArchive.Read(data, entry => entry == YlpArchive.NativeName);
-            var document = DocumentBinary.Read(native[YlpArchive.NativeName]);
-            CheckSize(document.Width, document.Height, YlpArchive.NativeName);
-            info.width = document.Width; info.height = document.Height; info.channels = YlpContent.UsedChannels(document).ToArray(); info.fromNativeDocument = true; info.error = "";
+            else
+            {
+                int slot = 0;
+                if (head.TryGetValue(YlpFormat.ViewName, out var view))
+                {
+                    try { slot = YlpFormat.LegacyMaterialSlot(view); }
+                    catch (InvalidDataException ex) { warnings.Add("The material slot in view.json could not be read (" + ex.Message + "); slot 0 is shown."); }
+                }
+                var composites = YlpArchive.Read(data, entry => YlpContent.TryParseComposite(entry, out _));
+                sets.Add(DescribeSet(data, composites, YlpArchive.NativeName, YlpFormat.MigratedSetName, slot, true, false, warnings));
+            }
+            info.textureSets = sets.ToArray();
+            var current = sets.First(s => s.current);
+            info.width = current.width; info.height = current.height; info.channels = current.channels; info.fromNativeDocument = current.fromNativeDocument; info.error = "";
         }
 
-        static void DescribeComposites(Dictionary<string, byte[]> composites, YlpImportInfo info)
+        /// <summary>1 つのテクスチャセット（composites はセットの下の名前）。</summary>
+        static YlpImportInfo.TextureSetSummary DescribeSet(byte[] data, Dictionary<string, byte[]> composites, string nativeEntry, string name, int slot, bool current, bool named, List<string> warnings)
+        {
+            var summary = new YlpImportInfo.TextureSetSummary { name = name, materialSlot = slot, current = current };
+            if (composites.Count > 0)
+            {
+                try { DescribeComposites(composites, summary); return summary; }
+                catch (InvalidDataException ex) { warnings.Add((named ? "Texture set " + name + ": " : "") + "The composite images in the file could not be used (" + ex.Message + "); the size and channels were read from the native document."); }
+            }
+            var native = YlpArchive.Read(data, entry => entry == nativeEntry);
+            if (!native.TryGetValue(nativeEntry, out var bytes)) throw new InvalidDataException("The file has no " + nativeEntry + ".");
+            var document = DocumentBinary.Read(bytes);
+            CheckSize(document.Width, document.Height, nativeEntry);
+            summary.width = document.Width; summary.height = document.Height; summary.channels = YlpContent.UsedChannels(document).ToArray(); summary.fromNativeDocument = true;
+            return summary;
+        }
+
+        static void DescribeComposites(Dictionary<string, byte[]> composites, YlpImportInfo.TextureSetSummary info)
         {
             var channels = new List<PaintChannel>(); int width = 0, height = 0;
             foreach (var entry in composites)
@@ -89,7 +126,7 @@ namespace Yozolab.YoluPainter.Editor
                 width = w; height = h; channels.Add(channel);
             }
             channels.Sort();
-            info.width = width; info.height = height; info.channels = channels.ToArray(); info.fromNativeDocument = false; info.error = "";
+            info.width = width; info.height = height; info.channels = channels.ToArray(); info.fromNativeDocument = false;
         }
 
         /// <summary>PNG の大きさ（IHDR）。</summary>

@@ -127,7 +127,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.BakeMeshMaps(), Is.EqualTo(MeshBakeStatus.Completed));
             window.SaveProject(true);
             Assert.That(window.MeshMapsSaved, Is.True, window.StatusMessage); Assert.That(window.MeshMapNote, Is.Null);
-            var files = YlpStore.Load(fake.File).Files;
+            var files = SetFiles(YlpStore.Load(fake.File).Files);
             foreach (var kind in MeshBakeSettings.DefaultKinds) Assert.That(files.ContainsKey(MeshMapBinary.EntryName(kind)), Is.True, kind.ToString());
             var keys = window.MeshMaps.Maps.ToDictionary(m => m.Kind, m => m.Provenance.ConditionKey);
             var other = Open();

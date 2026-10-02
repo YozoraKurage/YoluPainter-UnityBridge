@@ -181,10 +181,12 @@ namespace Yozolab.YoluPainter.Tests
 
         /// <summary>テクスチャセットのパネルのチャンネルのボタンの中央（DrawTextureSetPanel の並び: 見出し 24、余白 8、モデル 26+4、
         /// マテリアル 26+4、間 4、3 列のボタン 26+4）。</summary>
+        /// <summary>テクスチャセットのパネルのチャンネルの欄の中心（見出し 24、上の余白 8、モデルの行 26+6、セットが 1 つの一覧 30+6、
+        /// ベイクの行 26+8 の下に 26+4 の行が並ぶ）。</summary>
         static Vector2 ChannelChip(float width, PaintChannel channel)
         {
             int index = (int)channel, row = index / 3, column = index % 3;
-            float y = 24 + 8 + 30 + 30 + 4 + row * 30, cell = (width - 16 - 8) / 3;
+            float y = 24 + 8 + 32 + 36 + 34 + row * 30, cell = (width - 16 - 8) / 3;
             return new Vector2(8 + column * (cell + 4) + cell / 2, y + 13);
         }
 

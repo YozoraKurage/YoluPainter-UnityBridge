@@ -27,6 +27,16 @@ namespace Yozolab.YoluPainter.Editor
             {
                 EditorGUILayout.LabelField("Document Size", info.width + " x " + info.height);
                 EditorGUILayout.LabelField("Channels", info.channels.Length == 0 ? "(none painted)" : string.Join(", ", info.channels.Select(c => c.ToString())));
+                var sets = info.textureSets ?? new YlpImportInfo.TextureSetSummary[0];
+                if (sets.Length > 1 || sets.Length == 1 && sets[0].name != Core.Persistence.YlpFormat.MigratedSetName)
+                {
+                    EditorGUILayout.LabelField("Texture Sets", sets.Length.ToString());
+                    EditorGUI.indentLevel++;
+                    foreach (var set in sets)
+                        EditorGUILayout.LabelField(set.name + (set.current ? " (current)" : ""), "slot " + set.materialSlot + " · " + set.width + " x " + set.height + " · "
+                            + (set.channels.Length == 0 ? "(none painted)" : string.Join(", ", set.channels.Select(c => c.ToString()))));
+                    EditorGUI.indentLevel--;
+                }
                 EditorGUILayout.LabelField("File Format", info.format <= 1 ? "1 (before the format was recorded)" : info.format.ToString());
                 if (!string.IsNullOrEmpty(info.savedBy)) EditorGUILayout.LabelField("Saved By", info.savedBy);
                 if (!string.IsNullOrEmpty(info.createdBy)) EditorGUILayout.LabelField("Created By", info.createdBy);

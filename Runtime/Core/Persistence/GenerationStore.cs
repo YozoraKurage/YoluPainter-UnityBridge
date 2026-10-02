@@ -17,6 +17,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// Immutable generation directories, verified content hashes, current pointer changed last.
     /// Flush(true) flushes files. Directory fsync/power-loss durability varies by OS and is not claimed.
     /// The lock serializes this tool; external noncooperating writers are detected by hashes, not locked.
+    /// File names are flat, or flat inside one texture-set folder <c>sets/&lt;lower-case GUID&gt;/</c> (.ylp format 3); a generation
+    /// holds a native document at the root or in at least one texture set.
     /// </summary>
     public static class GenerationStore
     {
@@ -35,7 +37,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
 
         public static GenerationSnapshot Commit(string root, IDictionary<string, byte[]> files, string expectedToken = null, Action<string> faultInjection = null)
         {
-            if (files == null || !files.ContainsKey("document.utpaint")) throw new ArgumentException("A complete native document is required.");
+            if (files == null || !HasNative(files.Keys)) throw new ArgumentException("A complete native document is required.");
             long total = 0;
             foreach (var entry in files)
             {
@@ -55,7 +57,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     var manifest = new StringBuilder("DOTPAINT-MANIFEST-1\n");
                     foreach (var entry in files.OrderBy(x => x.Key, StringComparer.Ordinal))
                     {
-                        WriteDurable(Path.Combine(staging, entry.Key), entry.Value);
+                        string path = Path.Combine(staging, entry.Key);
+                        Directory.CreateDirectory(Path.GetDirectoryName(path));
+                        WriteDurable(path, entry.Value);
                         manifest.Append(Hash(entry.Value)).Append(' ').Append(entry.Value.LongLength).Append(' ').Append(entry.Key).Append('\n');
                         faultInjection?.Invoke("file:" + entry.Key);
                     }
@@ -126,7 +130,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 if (!String.Equals(Hash(data), parts[0], StringComparison.Ordinal)) throw new InvalidDataException("Generation checksum mismatch: " + parts[2]);
                 files.Add(parts[2], keepBytes ? data : new byte[0]);
             }
-            if (!files.ContainsKey("document.utpaint")) throw new InvalidDataException("Generation missing native source.");
+            if (!HasNative(files.Keys)) throw new InvalidDataException("Generation missing native source.");
             return files;
         }
         static byte[] ReadBounded(string path, long max)
@@ -143,8 +147,13 @@ namespace Yozolab.YoluPainter.Core.Persistence
         { using (var s = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { s.Write(bytes, 0, bytes.Length); s.Flush(true); } }
         public static string Hash(byte[] data)
         { using (var hash = SHA256.Create()) return BitConverter.ToString(hash.ComputeHash(data)).Replace("-", "").ToLowerInvariant(); }
+        const string NativeName = "document.utpaint";
+        static bool HasNative(IEnumerable<string> names) => names.Any(n => n == NativeName || YlpFormat.TrySplitSetEntry(n, out _, out var leaf) && leaf == NativeName);
         static void ValidateName(string value)
-        { if (String.IsNullOrEmpty(value) || value.Length > 80 || value == "manifest.sha256" || value.Any(c => !(Char.IsLetterOrDigit(c) || c == '.' || c == '-' || c == '_')) || value.Contains("..")) throw new InvalidDataException("Unsafe generation filename."); }
+        {
+            string leaf = value != null && YlpFormat.TrySplitSetEntry(value, out _, out var inSet) ? inSet : value;
+            if (String.IsNullOrEmpty(leaf) || leaf.Length > 80 || leaf == "manifest.sha256" || leaf.Any(c => !(Char.IsLetterOrDigit(c) || c == '.' || c == '-' || c == '_')) || leaf.Contains("..")) throw new InvalidDataException("Unsafe generation filename.");
+        }
         static void ValidateGeneration(string value)
         { if (String.IsNullOrEmpty(value) || value.Length > 80 || value.Any(c => !(Char.IsLetterOrDigit(c) || c == '-'))) throw new InvalidDataException("Unsafe generation pointer."); }
     }

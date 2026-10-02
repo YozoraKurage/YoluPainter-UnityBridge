@@ -34,6 +34,8 @@ namespace Yozolab.YoluPainter.Editor
             {
                 surfaceStroke=surfaceRect.Contains(e.mousePosition);
                 if(surfaceStroke && !preview.CanPaint){message="This preview snapshot is not safe to paint. See its load diagnostics.";return;}
+                // ほかのテクスチャセットの面では描き始めない（切り替えはテクスチャセットのパネルで）
+                if(surfaceStroke && preview.TryPick(surfaceRect,e.mousePosition,out var startHit) && startHit.MaterialSlot!=materialSlot){message=OtherSlotNote(startHit.MaterialSlot);e.Use();Repaint();return;}
                 TryAction(()=>
                 {
                     RememberColor();

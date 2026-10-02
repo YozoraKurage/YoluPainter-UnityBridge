@@ -12,8 +12,9 @@ namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>
     /// mesh map のベイク（サブスタンス由来の機能の土台）: 読み込んだモデルのスナップショット（<see cref="IsolatedModelPreview.Geometry"/>）から、
-    /// 今の材質スロットとドキュメントの大きさで法線・位置・AO・曲率・厚みを焼く。結果は描くレイヤーではない派生物で、Undo に入らず、
-    /// ドキュメントの版も変えない。.ylp に meshmap-&lt;種類&gt;.bin として保存し、開いたときに戻す。由来（モデルの指紋・大きさ・スロット・設定・
+    /// テクスチャセットの材質スロットとドキュメントの大きさで法線・位置・AO・曲率・厚みを焼く。マップはテクスチャセットごとに持つ（欄に出すのは
+    /// 今のセットのもの。焼く設定はプロジェクトで 1 つ）。結果は描くレイヤーではない派生物で、Undo に入らず、ドキュメントの版も変えない。
+    /// .ylp にセットごとの sets/&lt;ID&gt;/meshmap-&lt;種類&gt;.bin として保存し、開いたときに戻す。由来（モデルの指紋・大きさ・スロット・設定・
     /// エンジンの版）が今と違うマップは「古い」と表示し、黙って使わない。キャンバスには読むだけの重ね表示で見せる。
     /// 焼くマップと設定はベイクの窓で選び、ベイクの仕事は TexturePaintWindow.MeshBake.cs。プロパティの欄の区画は焼いたマップの一覧と
     /// 窓を開く口だけ。元のモデル・マテリアル・テクスチャ・取り込み設定には触れない（プレビューの複製の三角形を読むだけ）。
@@ -40,13 +41,9 @@ namespace Yozolab.YoluPainter.Editor
         IsolatedModelPreview highPolyPreview; GameObject highPolyLoaded; Vector3 highPolyOrigin; Matrix4x4 highPolyMatrix; string highPolyNote;
         SurfaceGeometry highPolyInputFor; MeshBakeInput highPolyInput;
 
-        readonly MeshMapSet meshMaps = new MeshMapSet();
         MeshBakeSettings meshBakeSettings = new MeshBakeSettings();
         MeshMapView meshMapView = MeshMapView.None; float meshMapOpacity = 1;
         Texture2D meshMapOverlay; long overlayRevision = -1; MeshMapView overlayView = MeshMapView.None;
-        long savedMeshMapRevision, savingMeshMapRevision = -1;
-        string meshMapNote;
-        MeshBakeReport lastMeshBakeReport;
         SurfaceGeometry meshBakeInputFor; MeshBakeInput meshBakeInput;
 
         internal MeshMapSet MeshMaps => meshMaps;
@@ -124,14 +121,17 @@ namespace Yozolab.YoluPainter.Editor
         internal GameObject HighPolyModel { get => highPolyModel; set { highPolyModel = value; Repaint(); } }
         void DisposeHighPoly() { highPolyPreview?.Dispose(); highPolyPreview = null; highPolyLoaded = null; highPolyInput = null; highPolyInputFor = null; highPolyNote = null; }
 
-        /// <summary>マップを使う側の今の条件（モデル・ドキュメントの大きさ・スロット・欄の設定）。</summary>
-        internal MeshMapExpectation CurrentMeshMapExpectation()
+        /// <summary>マップを使う側の今の条件（モデル・今のテクスチャセットのドキュメントの大きさ・スロット・欄の設定）。</summary>
+        internal MeshMapExpectation CurrentMeshMapExpectation() => MeshMapExpectationOf(document, materialSlot);
+        /// <summary>テクスチャセットのマップの今の条件。</summary>
+        MeshMapExpectation MeshMapExpectationFor(TextureSet set) => set == currentSet ? CurrentMeshMapExpectation() : MeshMapExpectationOf(set.Document, set.MaterialSlot);
+        MeshMapExpectation MeshMapExpectationOf(Core.PaintDocument d, int slot)
         {
             var input = CurrentMeshBakeInput();
             return new MeshMapExpectation
             {
-                MeshHash = input?.Hash, TopologyHash = input?.TopologyHash, ReferenceHash = CurrentHighPolyInput()?.Hash, Width = document.Width, Height = document.Height,
-                TargetSlot = materialSlot, UvChannel = 0, Settings = meshBakeSettings,
+                MeshHash = input?.Hash, TopologyHash = input?.TopologyHash, ReferenceHash = CurrentHighPolyInput()?.Hash, Width = d.Width, Height = d.Height,
+                TargetSlot = slot, UvChannel = 0, Settings = meshBakeSettings,
             };
         }
 
@@ -294,19 +294,23 @@ namespace Yozolab.YoluPainter.Editor
             meshMapNote = null; lastMeshBakeReport = null; meshMapView = MeshMapView.None;
         }
 
-        /// <summary>保存する中身に mesh map を足す（SaveProject から）。入れると .ylp の予算を超えるなら入れずに知らせる
-        /// （ドキュメントそのものは保存する。マップは焼き直せる派生物）。</summary>
+        /// <summary>保存する中身に全部のテクスチャセットの mesh map を足す（SaveProject から。sets/&lt;ID&gt;/meshmap-&lt;種類&gt;.bin）。入れると .ylp の
+        /// 予算を超えるなら、どのセットのマップも入れずに知らせる（ドキュメントそのものは保存する。マップは焼き直せる派生物）。</summary>
         void AddMeshMapFiles(Dictionary<string, byte[]> files)
         {
-            meshMapNote = null; savingMeshMapRevision = meshMaps.Revision;
-            if (meshMaps.Count == 0) return;
-            var entries = meshMaps.Maps.ToDictionary(m => MeshMapBinary.EntryName(m.Kind), MeshMapBinary.Write);
+            var entries = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+            foreach (var set in textureSets)
+            {
+                set.MeshMapNote = null; set.SavingMeshMapRevision = set.MeshMaps.Revision;
+                foreach (var map in set.MeshMaps.Maps) entries[YlpFormat.SetEntry(set.Id, MeshMapBinary.EntryName(map.Kind))] = MeshMapBinary.Write(map);
+            }
+            if (entries.Count == 0) return;
             string problem = MeshMapSaveProblem(files.Values.Sum(b => b.LongLength), files.Count, entries.Values.Select(b => b.LongLength));
             if (problem != null)
             {
-                savingMeshMapRevision = -1;
-                meshMapNote = "Mesh maps were left out of the last save: " + problem + " The document itself was saved; bake the maps again after opening it.";
-                Debug.LogWarning("Texture Painter: " + meshMapNote);
+                string note = "Mesh maps were left out of the last save: " + problem + " The document itself was saved; bake the maps again after opening it.";
+                foreach (var set in textureSets) { set.SavingMeshMapRevision = -1; if (set.MeshMaps.Count > 0) set.MeshMapNote = note; }
+                Debug.LogWarning("Texture Painter: " + note);
                 return;
             }
             foreach (var entry in entries) files[entry.Key] = entry.Value;
@@ -321,17 +325,19 @@ namespace Yozolab.YoluPainter.Editor
             return null;
         }
         /// <summary>保存が済んだら呼ぶ（SaveProject から）。</summary>
-        void MeshMapsWereSaved() { if (savingMeshMapRevision >= 0) savedMeshMapRevision = savingMeshMapRevision; }
+        void MeshMapsWereSaved() { foreach (var set in textureSets) if (set.SavingMeshMapRevision >= 0) set.SavedMeshMapRevision = set.SavingMeshMapRevision; }
 
-        /// <summary>開いた .ylp の mesh map を戻す（OpenProjectAt から、BindDocument の後）。読めないもの・知らない種類は捨てたことを
-        /// 知らせる（ドキュメントは開く。マップは焼き直せる派生物）。</summary>
-        void LoadMeshMapFiles(IReadOnlyDictionary<string, byte[]> files, List<string> notes)
+        /// <summary>開いた .ylp のテクスチャセットの mesh map を戻す（OpenProjectAt から、モデルを読んだ後。files はセットの下の名前）。読めないもの・
+        /// 知らない種類は捨てたことを知らせる（ドキュメントは開く。マップは焼き直せる派生物）。焼く設定はプロジェクトで 1 つなので、保存したマップの
+        /// 条件にそろえる（セットごとに違う設定で焼いたマップは、最後に読んだもの以外が古いと出る）。</summary>
+        void LoadMeshMapFiles(TextureSet set, IReadOnlyDictionary<string, byte[]> files, List<string> notes)
         {
+            string who = SetNotePrefix(set);
             var loaded = new List<BakedMeshMap>();
             foreach (var entry in files.OrderBy(e => e.Key, StringComparer.Ordinal))
             {
                 if (!entry.Key.StartsWith(MeshMapBinary.EntryPrefix, StringComparison.Ordinal)) continue;
-                if (!MeshMapBinary.TryParseEntryName(entry.Key, out var kind)) { notes.Add("Unknown mesh map " + entry.Key + " (from a newer YoluPainter?) was not loaded."); continue; }
+                if (!MeshMapBinary.TryParseEntryName(entry.Key, out var kind)) { notes.Add(who + "Unknown mesh map " + entry.Key + " (from a newer YoluPainter?) was not loaded."); continue; }
                 try
                 {
                     var map = MeshMapBinary.Read(entry.Value);
@@ -339,23 +345,28 @@ namespace Yozolab.YoluPainter.Editor
                     loaded.Add(map);
                 }
                 catch (Exception ex) when (ex is InvalidDataException || ex is ArgumentException)
-                { notes.Add("Mesh map " + kind + " could not be read (" + ex.Message + "); bake it again."); }
+                { notes.Add(who + "Mesh map " + kind + " could not be read (" + ex.Message + "); bake it again."); }
             }
             if (loaded.Count > 0)
             {
-                meshMaps.Put(loaded);
+                set.MeshMaps.Put(loaded);
                 // 欄の設定を、保存したマップの条件にそろえる（開いただけで「設定が変わった」と古くならないように）
                 foreach (var map in loaded)
                 {
                     meshBakeSettings.ApplyKindKey(map.Kind, map.Provenance.SettingsKey, map.Provenance.Padding);
                     meshBakeSettings.Antialiasing = map.Provenance.Antialiasing; meshBakeSettings.ApplySourceKey(map.Provenance.Source);
                 }
-                meshBakeSettings.Maps = loaded.Select(m => m.Kind).ToArray();
-                var expected = CurrentMeshMapExpectation();
+                var kinds = new HashSet<MeshMapKind>(loaded.Select(m => m.Kind));
+                if (meshMapsLoadedInto.Count > 0) kinds.UnionWith(meshBakeSettings.Maps ?? Array.Empty<MeshMapKind>());
+                meshBakeSettings.Maps = MeshBakeSettings.AllKinds.Where(kinds.Contains).ToArray();
+                meshMapsLoadedInto.Add(set.Id);
+                var expected = MeshMapExpectationFor(set);
                 var stale = loaded.Where(m => m.Provenance.Check(expected).State == MeshMapState.Stale).Select(m => m.Kind.ToString()).ToList();
-                notes.Add(loaded.Count + " mesh map(s) restored" + (stale.Count > 0 ? "; " + string.Join(", ", stale) + " are stale for the loaded model (see Mesh maps)." : "."));
+                notes.Add(who + loaded.Count + " mesh map(s) restored" + (stale.Count > 0 ? "; " + string.Join(", ", stale) + " are stale for the loaded model (see Mesh maps)." : "."));
             }
-            savedMeshMapRevision = meshMaps.Revision; savingMeshMapRevision = -1;
+            set.SavedMeshMapRevision = set.MeshMaps.Revision; set.SavingMeshMapRevision = -1;
         }
+        /// <summary>今開いているファイルで、マップを読んだセット（2 つ目からは焼くマップの一覧を足し合わせる）。開くたびに空にする。</summary>
+        readonly HashSet<Guid> meshMapsLoadedInto = new HashSet<Guid>();
     }
 }

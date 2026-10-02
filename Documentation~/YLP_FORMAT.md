@@ -10,16 +10,22 @@ YoluPainter の作業ファイル `.ylp` の決まり。読み書きのコード
 
 | 層 | 版 | 受け持ち | 変えたときの扱い |
 |---|---|---|---|
-| 外側（zip・mimetype・manifest） | `YOLUPAINTER-YLP-1`（manifest の 1 行目） | `YlpArchive` | 変えたら manifest の番号を上げる。古い読み手は「新しい YoluPainter で書かれた」と断る |
-| 中身の形式（エントリの並び・ylp.json） | `ylp.json` の `format`（無ければ 1）。今は **2** | `YlpFormat` | 下の「形式を変えるとき」 |
+| 外側（zip・mimetype・manifest・名前の決まり） | manifest の 1 行目。今は **`YOLUPAINTER-YLP-2`**（`YOLUPAINTER-YLP-1` も読む） | `YlpArchive` | 変えたら manifest の番号を上げる。古い読み手は「新しい YoluPainter で書かれた」と断る |
+| 中身の形式（エントリの並び・ylp.json・project.json） | `ylp.json` の `format`（無ければ 1）。今は **3** | `YlpFormat` | 下の「形式を変えるとき」 |
 | エントリの中身 | エントリごとの版（下の表） | 各エントリの読み手 | そのエントリの版を上げ、古い版も読めるようにする |
 
 ### 外側
 
 - zip（zip64 なし、名前は ASCII）。先頭は無圧縮の `mimetype`（`application/x-yolupainter`）、次に `manifest.sha256`。
-- `manifest.sha256` は UTF-8 のテキストで、1 行目が `YOLUPAINTER-YLP-1`、続く各行が `<SHA-256 の 16 進 64 桁> <バイト数> <名前>`
+- `manifest.sha256` は UTF-8 のテキストで、1 行目が版（下）、続く各行が `<SHA-256 の 16 進 64 桁> <バイト数> <名前>`
   （名前の順）。中身の正しさは SHA-256 で決め、zip の CRC-32 も確かめる。manifest に無いエントリ・manifest にあってファイルに
   無いエントリ・長さや SHA-256 の違いは、どれも読まずに断る。
+- エントリの名前: 英数字と `. - _`、96 文字まで、フォルダは `composite/` だけ（`..`・`.` で始まる名前・空の名前は断る）。
+  - `YOLUPAINTER-YLP-1`（中身の形式 1・2）: 名前は根と `composite/` の下だけ。根に `document.utpaint` が要る。今は読むだけ。
+  - `YOLUPAINTER-YLP-2`（中身の形式 3 から。今書くもの）: 加えて、名前の前に `sets/<ID>/` を 1 つ置ける（ID は小文字のハイフン付きの
+    GUID 36 文字。大文字・ハイフン無し・空の GUID・入れ子は断る）。`document.utpaint` は根かどれかの `sets/<ID>/` にあればよい
+    （どのセットに要るかは中身の形式が決める）。名前の決まりが広がったので番号を上げた: `YLP-1` しか知らない YoluPainter は、名前で断る
+    代わりに「新しい YoluPainter で書かれた」と断る。
 - 上限: 1 エントリ 512 MiB、合計 768 MiB、1000 エントリ。宣言した長さを超えて展開しない。
 - PNG は無圧縮、ほかは Deflate で入れる。
 
@@ -38,6 +44,31 @@ YoluPainter の作業ファイル `.ylp` の決まり。読み書きのコード
 |---|---|---|
 | 1 | （ylp.json の無い、2026-10-03 より前のファイル） | — |
 | 2 | `ylp.json` を足した。エントリの並びは 1 と同じ | なにもしない（並びは同じ） |
+| 3 | テクスチャセット（1 つのプロジェクトに複数）。根に `project.json`（セットの並びと今のセット）、正本・選択範囲・取り込んだ PSD・合成・メッシュマップはセットごとに `sets/<ID>/` の下。`view.json` の `materialSlot` は使わない。manifest は `YOLUPAINTER-YLP-2` | 根の `document.utpaint`・`selection.bin`・`imported-original.psd`・`composite/*`・`meshmap-*.bin` を `sets/<文書の ID>/` へ動かし（ID は `document.utpaint` の頭にある文書の ID なので、同じファイルはいつも同じ ID）、`view.json` の `materialSlot`（無い・読めなければ 0 にして知らせる）から 1 つのセットの `project.json` を作る。名前は仮の `Texture Set 1`（ウィンドウはモデルのマテリアルの名前に付け直す）。`view.json`・`brush.json`・`thumbnail.png`・知らないエントリは根に残す |
+
+### project.json（形式 3 から）
+
+```json
+{
+  "sets": [
+    { "id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0", "name": "Body", "materialSlot": 0 },
+    { "id": "11111111-2222-3333-4444-555555555555", "name": "Hair", "materialSlot": 1 }
+  ],
+  "current": "11111111-2222-3333-4444-555555555555"
+}
+```
+
+- `sets`（必須、1〜64 個、並びの順がパネルの順）: テクスチャセット。
+  - `id`（必須）: 小文字のハイフン付きの GUID。エントリの置き場 `sets/<id>/` の名前。新しく作るセットは文書の ID と同じ値にする
+    （同じでなくても読める）。
+  - `name`（必須）: 1〜256 文字、空白だけでない、制御文字を含まない。大文字小文字を区別せずにほかのセットと重ならない（書き出す
+    ファイルの名前に使う）。
+  - `materialSlot`（必須、0〜65535 の整数）: 描くマテリアルのスロット（モデルのプレビューで平らにした番号。ほかのセットと重ならない）。
+    モデルに無いスロットのセットも開ける（3D に見えないだけ）。
+- `current`（必須）: 今のセットの `id`（並びにあること）。
+- 知らないキーは読み飛ばす。壊れた JSON・型の違い・上の決まりに合わないもの・64 KiB を超えるものは、どれも開くのを断る
+  （正本と同じく失えないものなので、既定に戻して開かない）。
+- 並びにあるセットに `sets/<id>/document.utpaint` が無ければ開くのを断る。並びに無い `sets/<id>/` は知らないエントリとして知らせる。
 
 ### ylp.json（形式 2 から）
 
@@ -56,19 +87,27 @@ YoluPainter の作業ファイル `.ylp` の決まり。読み書きのコード
 - 文字列は 1〜256 文字。知らないキーは読み飛ばす（同じ形式の中で足したキーは、古い読み手に要らない約束）。壊れた JSON、
   キーの重複、型の違い、64 KiB を超えるものは断る。
 
-### エントリ（形式 2）
+### エントリ（形式 3）
+
+根:
 
 | エントリ | 種類 | 必須 | 中身と版 | 読み手 |
 |---|---|---|---|---|
-| `ylp.json` | 記録 | 形式 2 から | 上のとおり | `YlpFormat.ReadInfo` |
-| `document.utpaint` | 正本 | ○ | ネイティブの正本（唯一の正本）。`DOTPAINT` + 版。今は **版 10**、版 1〜10 を読む（下） | `DocumentBinary` |
+| `ylp.json` | 記録 | ○ | 上のとおり | `YlpFormat.ReadInfo` |
+| `project.json` | 正本 | ○ | テクスチャセットの並びと今のセット（上のとおり） | `YlpFormat.ReadProject` |
+| `view.json` | 状態 | | モデル（GUID）・選んだチャンネル（形式 2 までの `materialSlot` は書かない・読まない） | ウィンドウ |
+| `brush.json` | 状態 | | ブラシの設定。`schema` 1〜3（2 で筆先・ゆらぎ・紙の質感、3 でダイナミクス） | ウィンドウ |
+| `thumbnail.png` | 派生 | | 今のセットの Color（無ければ最初のチャンネル。どのチャンネルも使っていなければ並びの最初の描いたセット）の合成を長辺 256 px 以下に縮めたもの | インポーター |
+
+テクスチャセットごと（`sets/<id>/` の下。形式 2 までは同じ名前で根にあった）:
+
+| エントリ | 種類 | 必須 | 中身と版 | 読み手 |
+|---|---|---|---|---|
+| `document.utpaint` | 正本 | ○ | セットのネイティブの正本（そのセットの唯一の正本）。`DOTPAINT` + 版。今は **版 10**、版 1〜10 を読む（下） | `DocumentBinary` |
 | `selection.bin` | 正本 | 選択があるとき | 選択範囲。`YLSL` + 版 1 | `SelectionBinary` |
 | `imported-original.psd` | 正本 | PSD から取り込んだとき | 取り込んだ PSD の原本のバイト列（変えない） | — |
-| `view.json` | 状態 | | モデル（GUID）・マテリアルのスロット・選んだチャンネル | ウィンドウ |
-| `brush.json` | 状態 | | ブラシの設定。`schema` 1〜3（2 で筆先・ゆらぎ・紙の質感、3 でダイナミクス） | ウィンドウ |
 | `composite/<チャンネル>.png` | 派生 | | そのチャンネルを使うレイヤーがあるときの合成（straight RGBA8、PNG なので外から見て上下は正しい）。Normal は Unity 向けの出力 | インポーター（大きさとチャンネルを見るだけ） |
-| `thumbnail.png` | 派生 | | Color（無ければ最初のチャンネル）の合成を長辺 256 px 以下に縮めたもの | インポーター |
-| `meshmap-<種類>.bin` | 派生 | | 焼いたメッシュマップと由来。`YLPMMAP\0` + 形式の版 2（2 でアンチエイリアスの段数）、エンジンの版 2 | `MeshMapBinary` |
+| `meshmap-<種類>.bin` | 派生 | | 焼いたメッシュマップと由来（スロットはそのセットのもの）。`YLPMMAP\0` + 形式の版 2（2 でアンチエイリアスの段数）、エンジンの版 2 | `MeshMapBinary` |
 
 種類の意味（`YlpFormat.EntryKind`）:
 
@@ -84,12 +123,16 @@ YoluPainter の作業ファイル `.ylp` の決まり。読み書きのコード
 
 1. `ylp.json` を読む（無ければ形式 1、書いたアプリは分からない）。
 2. 形式が今より新しければ、どのエントリにも触れずに断る。理由には形式の番号と書いたアプリを添える
-   （例: 「format 3, saved by YoluPainter 0.4.0 … reads up to format 2; update YoluPainter」）。
+   （例: 「format 4, saved by YoluPainter 0.4.0 … reads up to format 3; update YoluPainter」）。
 3. 古い形式なら、移行の段（形式 k → k+1）を順に通して今の並びにする。メモリの上だけで、ファイルは書き換えない。
-4. 今の形式で知らないエントリは一覧にして知らせる（「保存すると残らない」）。黙って捨てない。
-5. 各エントリは、それぞれの読み手が自分の版を読み替える（document.utpaint の版 1〜10 など）。
+4. `project.json` を読み、並びの全部のセットに正本があることを確かめる（無ければ断る）。
+5. 今の形式で知らないエントリ（並びに無いセットの `sets/<id>/` も）は一覧にして知らせる（「保存すると残らない」）。黙って捨てない。
+6. 各エントリは、それぞれの読み手が自分の版を読み替える（document.utpaint の版 1〜10 など）。ウィンドウは全部のセットの正本を
+   読めてから、開いているプロジェクトと入れ替える（1 つでも読めなければ何も変えない）。
 
-復旧の checkpoint（Library/YoluPainter の GenerationStore。.ylp ではない）にも同じ `ylp.json` を書き、同じ手順で読む。
+復旧の checkpoint（Library/YoluPainter の GenerationStore。.ylp ではない）にも同じ `ylp.json`・`project.json` と、セットごとの
+`sets/<id>/document.utpaint`・`selection.bin` を同じ並びで書き、同じ手順で読む（GenerationStore の名前もセットの置き場を 1 つ認める）。
+形式 1・2 の checkpoint も同じ移行で 1 つのセットとして戻る。
 
 ### 保存するとき
 
@@ -102,18 +145,26 @@ YoluPainter の作業ファイル `.ylp` の決まり。読み書きのコード
 1. **正本・状態のエントリを足す・名前や置き場を変える・意味を変える**ときは形式を上げる（`YlpFormat.Current` を 1 つ上げ、
    `Steps` に前の形式からの移行の段を足す）。上げないと、古い YoluPainter が知らないエントリを落として保存し、作業を失う。
 2. 派生のエントリだけを足すときは、上げなくてよい（古い版は知らないエントリとして知らせ、保存で落とし、次に作り直す）。
+   ただし名前の決まり（置けるフォルダ）を広げるなら、外側の manifest の版も上げる（形式 3 で `sets/<ID>/` を足したときに `YLP-2` にした）。
 3. エントリの中身の版だけを変えるときは、そのエントリの版を上げ、古い版も読めるようにする（形式は上げない。新しい版を
    古い読み手が読めないなら、その読み手が断る）。
 4. この文書の「版の歴史」「エントリ」の表を直す。
 5. 前の形式のフィクスチャ（`Tests/Editor/Persistence/Fixtures~/format<N>.ylp`。前の版の YoluPainter で作り、それ以後は変えない）
-   を足し、開ける・正本がバイト一致で読み書きできる・合成が正本と一致することを `YlpFormatTests` で確かめる。
+   を足し、開ける・正本がバイト一致で読み書きできる・合成が正本と一致することを `YlpFormatTests` で確かめる。今あるのは形式 1 と 2。
+   形式 3 のフィクスチャは、次に形式を上げる人が、上げる前の YoluPainter で（できれば複数のテクスチャセットで）作る。
 6. 1.0.0 より前は互換を壊す変更もありうるが、そのときも古いファイルは開けるようにし（移行の段）、新しい形式を古い版で開いたら
    理由を出して断る。
 
 ### 試験
 
-- `YlpFormatTests`: ylp.json の読み書きと拒否、新しすぎる形式の拒否、知らないエントリの知らせ、形式 1 のフィクスチャ
-  （層 5 枚・マスク・グループ・塗りつぶし層・調整層・Normal の設定・選択範囲・全チャンネルの合成）を開いて正本がバイト一致。
+- `YlpFormatTests`: ylp.json の読み書きと拒否、新しすぎる形式の拒否、知らないエントリの知らせと形式 3 の種類、形式 1 のフィクスチャ
+  （層 5 枚・マスク・グループ・塗りつぶし層・調整層・Normal の設定・選択範囲・全チャンネルの合成）と形式 2 のフィクスチャ（同じ中身に
+  ylp.json と取り込んだ PSD の原本）を 1 つのテクスチャセットとして開いて正本がバイト一致、今の形式で書き戻して読み直しても同じバイト列。
+- `YlpTextureSetFormatTests`: project.json の読み書きと拒否、形式 3 のファイルを開く（並びに無いセットの知らせ、project.json やセットの
+  正本が無いものの拒否）、形式 2 → 3 の移行（文書の ID・view.json のスロット・読めない view.json）、文書の ID を頭から読む、manifest
+  `YLP-2` だけがセットの置き場を認める、復旧の checkpoint のセットの置き場。
+- `TextureSetTests`（`Tests/Editor/Window/WindowTextureSetTests.cs`）: 2 つのセットを保存して開く・形式 1・2 のファイルを 1 つのセットとして
+  開いて保存する・復旧の checkpoint から戻す・インポーターのセットの一覧。
 - `WindowTests`（`WindowYlpFormatTests.cs`）: 古い形式を開いた知らせ、保存で今の形式と書いたアプリ、退避なしで古い形式を
   書き換えるときの確認、新しすぎる形式を開かないこと。
 - `YlpArchiveTests`・`YlpStoreTests`: 外側の層（zip・manifest・壊れたファイル・保存の置き換え・退避・外部の改変）。

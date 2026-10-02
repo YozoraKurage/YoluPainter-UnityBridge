@@ -7,8 +7,9 @@ using Yozolab.YoluPainter.Editor.LilToonApply;
 
 namespace Yozolab.YoluPainter.Editor
 {
-    /// <summary>lilToon への割り当て: 今のマテリアルスロットの元のマテリアルが、確かめた lilToon のバージョン・バリアントなら、
-    /// チャンネルを lilToon 用の PNG に書き出してマテリアルに入れる。変えることをすべて一覧にして確かめてから行う。</summary>
+    /// <summary>lilToon への割り当て: 今のテクスチャセットのマテリアルスロットの元のマテリアルが、確かめた lilToon のバージョン・バリアントなら、
+    /// チャンネルを lilToon 用の PNG に書き出してマテリアルに入れる。変えることをすべて一覧にして確かめてから行う。テクスチャセットが複数なら
+    /// 書き出す名前とフォルダにセットの名前を足す（セットごとに別のファイル）。全部のセットを一度に割り当てる口はまだ無い。</summary>
     public sealed partial class TexturePaintWindow
     {
         /// <summary>書き出し先の既定: 保存した .ylp が Assets の中ならその隣の &lt;名前&gt;_lilToon、そうでなければ尋ねる。</summary>
@@ -23,7 +24,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if(stroke!=null){message="Finish the stroke first.";return;}
             var material=preview.SourceMaterial(materialSlot);
-            string stem=projectPath!=null?Path.GetFileNameWithoutExtension(projectPath):"Texture";
+            string stem=(projectPath!=null?Path.GetFileNameWithoutExtension(projectPath):"Texture")+SetFileSuffix(currentSet);
             string folder=material==null?null:LilToonFolder(stem);
             if(material!=null&&folder==null){message="Choose a folder inside Assets for the lilToon textures.";return;}
             var plan=LilToonAssignment.Plan(document,material,folder,stem);

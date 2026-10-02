@@ -67,12 +67,14 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
             Assert.That(window.ProjectPath, Is.EqualTo(fake.File));
             var snapshot = YlpStore.Load(fake.File);
-            CollectionAssert.AreEquivalent(new[] { "ylp.json", "document.utpaint", "view.json", "brush.json", "composite/Color.png", "thumbnail.png" }, snapshot.Files.Keys);
-            Assert.That(snapshot.Files["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
+            var set = YlpFormat.Open(snapshot.Files).Project.CurrentSet;
+            CollectionAssert.AreEquivalent(new[] { "ylp.json", "project.json", "view.json", "brush.json", "thumbnail.png", YlpFormat.SetEntry(set, "document.utpaint"), YlpFormat.SetEntry(set, "composite/Color.png") }, snapshot.Files.Keys);
+            var setFiles = SetFiles(snapshot.Files);
+            Assert.That(setFiles["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
             var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
             try
             {
-                Assert.That(texture.LoadImage(snapshot.Files["composite/Color.png"]), Is.True);
+                Assert.That(texture.LoadImage(setFiles["composite/Color.png"]), Is.True);
                 Assert.That(texture.GetPixels32().SelectMany(c => new[] { c.r, c.g, c.b, c.a }).ToArray(), Is.EqualTo(window.Document.Composite(PaintChannel.Color)), "the composite is the exact straight RGBA8 result");
                 Assert.That(texture.LoadImage(snapshot.Files["thumbnail.png"]), Is.True); Assert.That(Math.Max(texture.width, texture.height), Is.LessThanOrEqualTo(256));
             }
@@ -104,8 +106,8 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.StatusMessage, Does.Contain("previous version is kept"));
             var backups = YlpStore.Backups(fake.File);
             Assert.That(backups.Count, Is.EqualTo(1));
-            Assert.That(YlpStore.Load(backups[0]).Files["document.utpaint"], Is.EqualTo(first), "the backup is the previous version");
-            Assert.That(YlpStore.Load(fake.File).Files["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
+            Assert.That(SetFiles(YlpStore.Load(backups[0]).Files)["document.utpaint"], Is.EqualTo(first), "the backup is the previous version");
+            Assert.That(SetFiles(YlpStore.Load(fake.File).Files)["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
         }
 
         [Test] public void OpenRestoresTheSavedDocumentInAnotherWindow()
@@ -157,7 +159,7 @@ namespace Yozolab.YoluPainter.Tests
             fake.File = NewYlpPath("Copy.ylp");
             window.SaveProject(true);
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
-            Assert.That(YlpStore.Load(fake.File).Files["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
+            Assert.That(SetFiles(YlpStore.Load(fake.File).Files)["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
         }
 
         [Test] public void SavingOverAnotherFileKeepsItAsABackupOrAsksWhenBackupsAreOff()
@@ -200,7 +202,7 @@ namespace Yozolab.YoluPainter.Tests
             fake.File = NewYlpPath();
             window.SaveProject(true);
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
-            Assert.That(YlpStore.Load(fake.File).Files["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
+            Assert.That(SetFiles(YlpStore.Load(fake.File).Files)["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
         }
 
         [Test] public void OpeningAnotherProjectAsksAboutUnsavedWorkAndKeepsARecoveryCheckpoint()
@@ -216,7 +218,7 @@ namespace Yozolab.YoluPainter.Tests
             window.OpenProject();
             Assert.That(window.Document, Is.Not.SameAs(unsaved));
             var recovery = GenerationStore.Load(window.RecoveryRoot);
-            Assert.That(recovery.Files["document.utpaint"], Is.EqualTo(DocumentBinary.Write(unsaved)), "the discarded work is kept as a recovery checkpoint");
+            Assert.That(SetFiles(recovery.Files)["document.utpaint"], Is.EqualTo(DocumentBinary.Write(unsaved)), "the discarded work is kept as a recovery checkpoint");
         }
 
         [Test] public void ImportingAnEditablePsdKeepsItsOriginalBytesForSaving()
@@ -230,7 +232,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.Document.Composite(PaintChannel.Color), Is.EqualTo(source.Composite(PaintChannel.Color)), window.StatusMessage);
             fake.File = NewYlpPath();
             window.SaveProject(true);
-            Assert.That(YlpStore.Load(fake.File).Files["imported-original.psd"], Is.EqualTo(psdBytes));
+            Assert.That(SetFiles(YlpStore.Load(fake.File).Files)["imported-original.psd"], Is.EqualTo(psdBytes));
             Assert.That(System.IO.File.ReadAllBytes(psdPath), Is.EqualTo(psdBytes), "the imported file itself is never rewritten");
         }
 
@@ -251,7 +253,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(fake.LastName, Is.EqualTo("Chara"));
             fake.File = Path.Combine(folder, "Chara.ylp");
             window.SaveProject(true);
-            Assert.That(YlpStore.Load(fake.File).Files["imported-original.psd"], Is.EqualTo(psdBytes));
+            Assert.That(SetFiles(YlpStore.Load(fake.File).Files)["imported-original.psd"], Is.EqualTo(psdBytes));
             // PSD として書き出す。取り込み元を上書きしそうなら確かめる
             fake.File = psdPath; fake.ConfirmAnswer = false; fake.Asked.Clear();
             window.ExportPsd();
@@ -301,7 +303,7 @@ namespace Yozolab.YoluPainter.Tests
             PaintDot(window, 777, 333);
             Invoke(window, "OnLostFocus");
             var recovery = GenerationStore.Load(window.RecoveryRoot);
-            Assert.That(recovery.Files["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
+            Assert.That(SetFiles(recovery.Files)["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
         }
 
         static int IndexOf(byte[] data, string key)

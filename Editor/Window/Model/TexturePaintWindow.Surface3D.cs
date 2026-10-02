@@ -47,7 +47,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 if(!preview.HasModel){message="Load a model (or the demo cube) to pick on the 3D view.";return;}
                 if(!preview.TryPick(surfaceRect,pointer,out var hit)){message="Nothing of the model under the pointer.";return;}
-                if(hit.MaterialSlot!=materialSlot){message="That part uses material slot "+hit.MaterialSlot+"; this document paints slot "+materialSlot+".";return;}
+                if(hit.MaterialSlot!=materialSlot){message=OtherSlotNote(hit.MaterialSlot);return;}
                 var region=SurfaceRegions.Selection(document,preview.Geometry,SurfaceRegions.Region(preview.Geometry,hit.TriangleIndex,surfacePick));
                 if(selecting){ApplySelection(region,mode);message=document.Selection==null?"Nothing selected.":"Selected the "+surfacePick+" ("+mode+").";}
                 else FillRegion(region,surfacePick.ToString());

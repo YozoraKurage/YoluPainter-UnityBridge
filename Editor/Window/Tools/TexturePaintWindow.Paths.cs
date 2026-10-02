@@ -60,7 +60,7 @@ namespace Yozolab.YoluPainter.Editor
                     if(preview.TryWorldToGui(surfaceRect,p,out var g)&&Vector2.Distance(g,pointer)<=PathGrabPoints){pathDrag=i;pathDragOnCanvas=false;pathDragGui=pointer;GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive);return;}
                 }
             if(!preview.TryPick(surfaceRect,pointer,out var hit)){message="Nothing of the model under the pointer.";return;}
-            if(hit.MaterialSlot!=materialSlot){message="That part uses material slot "+hit.MaterialSlot+"; this document paints slot "+materialSlot+".";return;}
+            if(hit.MaterialSlot!=materialSlot){message=OtherSlotNote(hit.MaterialSlot);return;}
             var point=SurfacePathRenderer.PointOf(hit);
             SurfacePath path;
             if(existing==null)
@@ -118,7 +118,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             var layer=document.GetLayer(selectedLayer);
             if(!(layer.Path is SurfacePath path)||index<0||index>=path.Points.Count)return;
-            if(!preview.TryPick(surfaceRect,pointer,out var hit)||hit.MaterialSlot!=materialSlot){message="Drop the point on the model (this material slot).";return;}
+            if(!preview.TryPick(surfaceRect,pointer,out var hit)||hit.MaterialSlot!=materialSlot){message="Drop the point on the model (this texture set's material slot).";return;}
             var points=path.Points.ToArray(); points[index]=SurfacePathRenderer.PointOf(hit,points[index].Pressure);
             ApplyPath(layer.Id,path.WithPoints(points),"Moved path point "+(index+1)+".");
         }

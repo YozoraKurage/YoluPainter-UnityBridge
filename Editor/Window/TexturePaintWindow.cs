@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Yozolab.YoluPainter.Core;
 using Yozolab.YoluPainter.Core.Persistence;
 using Yozolab.YoluPainter.Editor.Preview;
@@ -22,7 +23,7 @@ namespace Yozolab.YoluPainter.Editor
         TileGpuCompositor compositor;
         IsolatedModelPreview preview;
         string projectPath, projectToken, recoveryToken, message = "";
-        long renderedRevision = -1, savedRevision = -1, recoveredRevision = -1;
+        long renderedRevision = -1;
         bool repaintPixels = true, surfaceStroke, externalConflict, editMask;
         Vector2 previousPointer, layerScroll, canvasPan;
         float canvasZoom = 1, previousPressure = 1;
@@ -31,7 +32,6 @@ namespace Yozolab.YoluPainter.Editor
         PaintTool tool;
         int materialSlot, resolution = 1024;
         double lastRecovery, lastExternalCheck;
-        byte[] importedOriginal;
         /// <summary>このドキュメントを取り込んだ PSD のパス（取り込んでからまだ .ylp に保存していなければ保存先の提案に使う）。</summary>
         string importedPsdPath;
         Rect canvasRect, surfaceRect;
@@ -49,7 +49,16 @@ namespace Yozolab.YoluPainter.Editor
         internal string RecoveryRoot => recoveryRoot;
         /// <summary>開いている .ylp の絶対パス。まだ保存していなければ null。</summary>
         internal string ProjectPath => projectPath;
-        internal bool IsSaved => document != null && document.Revision == savedRevision;
+        /// <summary>全部のテクスチャセットとセットの並びが、開いた/保存したファイルと同じか。</summary>
+        internal bool IsSaved
+        {
+            get
+            {
+                if (document == null || currentSet == null) return false;
+                SyncCurrentSet();
+                return setsRevision == savedSetsRevision && textureSets.All(s => s.Document.Revision == s.SavedRevision);
+            }
+        }
         internal bool HasExternalConflict => externalConflict;
         internal PaintChannel Channel { get => channel; set { channel = value; repaintPixels = true; } }
         /// <summary>true のあいだ、ストロークは選択レイヤーの画素ではなくマスクに入る。</summary>
@@ -74,15 +83,17 @@ namespace Yozolab.YoluPainter.Editor
                 if (File.Exists(Path.Combine(recoveryRoot,"current")))
                 {
                     var snapshot=GenerationStore.Load(recoveryRoot); var recovered=YlpFormat.Open(snapshot.Files);
-                    document=DocumentBinary.Read(recovered.Files[YlpArchive.NativeName]); recoveryToken=snapshot.Token; projectCreatedBy=recovered.Info.CreatedBy;
-                    var recoveryNotes=new List<string>(); RestoreSavedSelection(recovered.Files,recoveryNotes);
+                    var sets=ReadTextureSets(recovered);
+                    ReplaceProject(sets,sets.First(s=>s.Id==recovered.Project.CurrentSet));
+                    ResetSetsBaseline(false); recoveryToken=snapshot.Token; projectCreatedBy=recovered.Info.CreatedBy;
+                    var recoveryNotes=new List<string>();
+                    foreach(var set in sets)RestoreSavedSelection(set,recovered.SetFiles(set.Id),recoveryNotes);
                     message="Recovered native source from the last durable checkpoint. Unsaved edits after that checkpoint may be missing."+(recoveryNotes.Count>0?" "+String.Join(" ",recoveryNotes):"");
                 }
             }
             catch (Exception ex) { message="Recovery was not loaded: "+ex.Message; }
             resolution=PainterSettings.DefaultResolution;
             if (document==null) CreateDocument(resolution);
-            selectedLayer=document.Layers.Count>0?document.Layers[document.Layers.Count-1].Id:Guid.Empty;
             BindDocument();
             if (model!=null) TryAction(()=>preview.Load(model));
             EditorApplication.update+=Tick; PainterSettings.Changed+=SettingsChanged;
@@ -92,31 +103,50 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>設定のメモリ予算をドキュメントに入れる。今の画素がすでに予算を超えているときは画素を捨てず、予算を今の量まで
         /// 広げてそう知らせる。</summary>
         /// <returns>予算を広げたときの知らせ。問題なければ null。</returns>
+        /// <remarks>予算はプロジェクト全体のもの。描けるのは今のテクスチャセットだけなので、今のセットの文書に「設定 − ほかのセットが使って
+        /// いる量」（レイヤーの画素と Undo の履歴）を入れる。ほかのセットは描いていないあいだ増えないので、セットを切り替える・足す・消す
+        /// ときに入れ直せば全体が設定を超えない（Undo の最小段数はセットごとに残る。1 回の操作の予算は同時に 1 つしか走らないのでそのまま）。</remarks>
         internal string ApplyBudgets()
         {
             if(document==null||stroke!=null)return null;
             if(compositor!=null)compositor.ResidentBudgetBytes=PainterSettings.GpuCacheBytes;
-            document.MinimumUndoSteps=PainterSettings.MinUndoSteps; document.UndoBudgetBytes=PainterSettings.UndoBudgetBytes; document.ActiveStrokeBudgetBytes=PainterSettings.StrokeBudgetBytes;
-            long source=PainterSettings.SourceBudgetBytes;
+            long otherSource=0,otherHistory=0;
+            foreach(var set in textureSets) if(set!=currentSet&&set.Document!=null){otherSource+=set.Document.AllocatedBytes;otherHistory+=set.Document.HistoryBytes;}
+            document.MinimumUndoSteps=PainterSettings.MinUndoSteps; document.UndoBudgetBytes=Math.Max(0,PainterSettings.UndoBudgetBytes-otherHistory); document.ActiveStrokeBudgetBytes=PainterSettings.StrokeBudgetBytes;
+            long budget=PainterSettings.SourceBudgetBytes, source=budget-otherSource;
             if(source>=document.AllocatedBytes){document.SourceBudgetBytes=source;return null;}
             document.SourceBudgetBytes=document.AllocatedBytes;
+            if(otherSource>0) return "This project already holds "+((document.AllocatedBytes+otherSource)>>20)+" MiB of layer pixels ("+(otherSource>>20)+" MiB in the other texture sets), above the "+(budget>>20)+" MiB budget in Project Settings > YoluPainter; nothing more can be added to this texture set until the budget is raised.";
             return "This document already holds "+(document.AllocatedBytes>>20)+" MiB of layer pixels, above the "+(source>>20)+" MiB budget in Project Settings > YoluPainter; nothing more can be added until the budget is raised.";
         }
         void SettingsChanged(){var note=ApplyBudgets();if(note!=null)message=note;Repaint();}
         internal static void OpenSettings()=>SettingsService.OpenProjectSettings(PainterSettingsProvider.Path);
+        /// <summary>今のテクスチャセットの文書を新しく結び付けたとき（新しいプロジェクト・開く・取り込み）: 予算を入れ、表示を作り直し、
+        /// メッシュマップ（前の文書のもの）を捨てる。</summary>
         void BindDocument()
         {
+            SyncCurrentSet();
             var budgetNote=ApplyBudgets(); if(budgetNote!=null)message=budgetNote;
-            document.HistoryTrimming += bytes => message="Undo budget reached; dropping "+(bytes/1024)+" KiB of the oldest history (the newest "+document.MinimumUndoSteps+" steps are always kept). Current source remains intact.";
+            WatchHistory(currentSet);
             repaintPixels=true; renderedRevision=-1; recoveredRevision=-1;
             ClearMeshMaps();
         }
+        /// <summary>size × size の空のレイヤー 1 枚の、テクスチャセットが 1 つのプロジェクトにする（スロットは今のまま）。ファイルとは結び付かない。</summary>
         void CreateDocument(int size)
         {
-            document=new PaintDocument(size,size,128,PainterSettings.UndoBudgetBytes);
+            var next=new PaintDocument(size,size,128,PainterSettings.UndoBudgetBytes);
+            int slot=currentSet!=null?materialSlot:0;
+            var set=new TextureSet(next.Id,BaseSetName(slot),slot,next);
+            ReplaceProject(new[]{set},set);
             ApplyBudgets();
             selectedLayer=document.AddLayer(L.Tr("Layer")+" 1").Id; document.ClearHistory(); pristineRevision=document.Revision;
-            projectPath=null; projectToken=null; savedRevision=-1; importedOriginal=null; importedPsdPath=null; externalConflict=false; canvasZoom=1; canvasPan=Vector2.zero; NewProjectRecord();
+            ForgetProjectFile();
+        }
+        /// <summary>今のプロジェクトをファイルから切り離す（新規・取り込み）。</summary>
+        void ForgetProjectFile()
+        {
+            projectPath=null; projectToken=null; savedRevision=-1; importedPsdPath=null; externalConflict=false; canvasZoom=1; canvasPan=Vector2.zero; NewProjectRecord();
+            ResetSetsBaseline(false);
         }
         void OnLostFocus() { FinishStroke(false); CancelToolDrag(); preview?.CancelNavigation(); SaveRecovery(); }
         void BeforeReload() { FinishStroke(false); preview?.CancelNavigation(); SaveRecovery(); }
@@ -125,17 +155,20 @@ namespace Yozolab.YoluPainter.Editor
         {
             FinishStroke(false); preview?.CancelNavigation(); SaveRecovery();
             EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
-            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeThumbnails(); DisposeColorPanel(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
+            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeThumbnails(); DisposeColorPanel(); DisposeTextureSetTextures(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
             if(selectionOverlay!=null){DestroyImmediate(selectionOverlay);selectionOverlay=null;overlayFor=null;}
         }
         void Tick()
         {
             if(document==null) return;
-            if(stroke==null && document.Revision!=recoveredRevision && EditorApplication.timeSinceStartup-lastRecovery>PainterSettings.RecoveryIntervalSeconds) SaveRecovery();
+            if(stroke==null && EditorApplication.timeSinceStartup-lastRecovery>PainterSettings.RecoveryIntervalSeconds && !RecoveryIsCurrent()) SaveRecovery();
             if(!String.IsNullOrEmpty(projectPath) && EditorApplication.timeSinceStartup-lastExternalCheck>3) CheckExternalChange();
+            // テクスチャセットのサムネイル（間隔を置いて作り直すので、描き直しを 1 度だけ頼む。パネルが見えていなければそれきり）
+            if(stroke==null && SetThumbnailStale && document.Revision!=thumbnailRepaintAsked && EditorApplication.timeSinceStartup-setThumbnailBuilt>SetThumbnailInterval){thumbnailRepaintAsked=document.Revision;Repaint();}
             // 描いていないあいだは GPU の写しを手放す（Update が来ないと合成器は古い写しを捨てられない）
             if(compositor!=null && compositor.ResidentBytes>0 && EditorApplication.timeSinceStartup-lastComposite>GpuCacheIdleSeconds) compositor.ReleaseResidentCaches();
         }
+        long thumbnailRepaintAsked=-1;
         internal const double GpuCacheIdleSeconds=120;
         double lastComposite;
         internal void CheckExternalChange()
@@ -158,13 +191,7 @@ namespace Yozolab.YoluPainter.Editor
             // 合成（GPU への転送と合成、Normal の出力、3D のプレビューの更新）は描くときだけ。入力のイベント（ストローク中の MouseDrag
             // など）のたびに合成すると 1 回の処理が重くなり、OS がマウスの移動をまとめて届く点がまばらになる。表示の前には必ず
             // Repaint が来るので、その間の変更はまとめて 1 回で合成する。
-            if(e.type==EventType.Repaint && (repaintPixels || renderedRevision!=document.Revision))
-            {
-                TryAction(()=> { compositor.Update(document,channel); UpdateNormalOutput(); preview.SetPaintTexture(DisplayTexture, materialSlot); });
-                TryAction(UpdatePreviewLighting);
-                lastComposite=EditorApplication.timeSinceStartup; CompositeCount++;
-                renderedRevision=document.Revision; repaintPixels=false;
-            }
+            if(e.type==EventType.Repaint && (repaintPixels || renderedRevision!=document.Revision)) RefreshPreviewTextures();
             LayoutShell();
             PaintGui.Fill(WindowRect,PaintTheme.WindowBg);
             if(canvasRect.width>0) DrawCanvas();
@@ -172,6 +199,15 @@ namespace Yozolab.YoluPainter.Editor
             DrawShell();
             if(surfaceRect.width>0) DrawSurfaceBrushCursor(pointerAtStart); // 3D の描画の後に GUI の状態を戻してから重ねる
             HandleCanvasInput(e);
+        }
+
+        /// <summary>合成し直して、2D の表示と 3D のプレビュー（全部のテクスチャセットとその照明）に入れる（Repaint から。テストも呼ぶ）。</summary>
+        internal void RefreshPreviewTextures()
+        {
+            TryAction(()=> { compositor.Update(document,channel); UpdateNormalOutput(); ShowTextureSets(); });
+            TryAction(UpdatePreviewLighting);
+            lastComposite=EditorApplication.timeSinceStartup; CompositeCount++;
+            renderedRevision=document.Revision; repaintPixels=false;
         }
 
         internal BrushState Brush { get => brush; set => brush = value; }

@@ -363,7 +363,7 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void ReadRefusesANewerManifestNamingANewerYoluPainter()
         {
             var files = Sample();
-            var z = StandardYlp(files, "YOLUPAINTER-YLP-2");
+            var z = StandardYlp(files, "YOLUPAINTER-YLP-3");
             Assert.That(() => YlpArchive.Read(z.Build()), Throws.TypeOf<InvalidDataException>().With.Message.Contains("newer YoluPainter"));
         }
 

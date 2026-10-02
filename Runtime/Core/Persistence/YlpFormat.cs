@@ -40,6 +40,41 @@ namespace Yozolab.YoluPainter.Core.Persistence
         }
     }
 
+    /// <summary>project.json の 1 つのテクスチャセット: ID（エントリの置き場 sets/&lt;ID&gt;/ の名前）、名前、描くマテリアルのスロット。</summary>
+    public sealed class YlpTextureSetInfo
+    {
+        public Guid Id { get; }
+        public string Name { get; }
+        /// <summary>モデルのプレビューで平らにしたマテリアルのスロットの番号（モデルが無ければ意味を持たない番号）。</summary>
+        public int MaterialSlot { get; }
+        public YlpTextureSetInfo(Guid id, string name, int materialSlot)
+        {
+            if (id == Guid.Empty) throw new ArgumentException("A texture set needs an ID.", nameof(id));
+            YlpFormat.CheckSetName(name);
+            if (materialSlot < 0 || materialSlot > YlpFormat.MaxMaterialSlot) throw new ArgumentOutOfRangeException(nameof(materialSlot), "The material slot must be 0–" + YlpFormat.MaxMaterialSlot + ".");
+            Id = id; Name = name; MaterialSlot = materialSlot;
+        }
+    }
+
+    /// <summary>project.json の中身: テクスチャセットの並び（1 つ以上。ID・名前・スロットはどれも重ならない）と、今のセット。</summary>
+    public sealed class YlpProjectInfo
+    {
+        public IReadOnlyList<YlpTextureSetInfo> Sets { get; }
+        public Guid CurrentSet { get; }
+        public YlpProjectInfo(IEnumerable<YlpTextureSetInfo> sets, Guid currentSet)
+        {
+            var list = (sets ?? throw new ArgumentNullException(nameof(sets))).ToList();
+            if (list.Count == 0) throw new ArgumentException("A project has at least one texture set.", nameof(sets));
+            if (list.Count > YlpFormat.MaxTextureSets) throw new ArgumentException("A project has at most " + YlpFormat.MaxTextureSets + " texture sets.", nameof(sets));
+            if (list.Any(s => s == null)) throw new ArgumentException("Null texture set.", nameof(sets));
+            if (list.Select(s => s.Id).Distinct().Count() != list.Count) throw new ArgumentException("Two texture sets have the same ID.", nameof(sets));
+            if (list.Select(s => s.MaterialSlot).Distinct().Count() != list.Count) throw new ArgumentException("Two texture sets paint the same material slot.", nameof(sets));
+            if (list.Select(s => s.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != list.Count) throw new ArgumentException("Two texture sets have the same name.", nameof(sets));
+            if (!list.Any(s => s.Id == currentSet)) throw new ArgumentException("The current texture set is not in the project.", nameof(currentSet));
+            Sets = list.AsReadOnly(); CurrentSet = currentSet;
+        }
+    }
+
     /// <summary>開いた .ylp の中身を今の形式にしたもの。</summary>
     public sealed class YlpOpened
     {
@@ -47,20 +82,33 @@ namespace Yozolab.YoluPainter.Core.Persistence
         public Dictionary<string, byte[]> Files { get; internal set; }
         /// <summary>ファイルに書かれていた形式と書いたアプリ（形式 1 のファイルは書いたアプリが分からない）。</summary>
         public YlpFormatInfo Info { get; internal set; }
+        /// <summary>テクスチャセットの並び（project.json。形式 2 までのファイルは移行で作った 1 つのセット）。</summary>
+        public YlpProjectInfo Project { get; internal set; }
         /// <summary>古い形式から今の形式へ移したか（保存すると今の形式で書き、古い YoluPainter では開けなくなる）。</summary>
         public bool Upgraded => Info.Format < YlpFormat.Current;
         /// <summary>この版の YoluPainter が知らないエントリ（保存すると残らない）。</summary>
         public IReadOnlyList<string> UnknownEntries { get; internal set; }
         /// <summary>移すときの知らせ。</summary>
         public IReadOnlyList<string> Notes { get; internal set; }
+
+        /// <summary>テクスチャセットのエントリ（sets/&lt;ID&gt;/ を取った名前 → 中身）。</summary>
+        public Dictionary<string, byte[]> SetFiles(Guid set)
+        {
+            string folder = YlpFormat.SetFolder(set);
+            var result = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+            foreach (var entry in Files) if (entry.Key.StartsWith(folder, StringComparison.Ordinal)) result.Add(entry.Key.Substring(folder.Length), entry.Value);
+            return result;
+        }
     }
 
     /// <summary>
     /// .ylp の中身の形式（Documentation~/YLP_FORMAT.md）。外側（zip・mimetype・manifest の SHA-256）は <see cref="YlpArchive"/>
-    /// の層で、ここはその中のエントリの並びと、それを書いたアプリの記録（ylp.json）を受け持つ。
+    /// の層で、ここはその中のエントリの並びと、それを書いたアプリの記録（ylp.json）とテクスチャセットの並び（project.json）を受け持つ。
     /// <list type="bullet">
     /// <item>形式 1: ylp.json の無いもの（2026-10-03 より前の YoluPainter）。</item>
     /// <item>形式 2: ylp.json を足した（エントリの並びは形式 1 と同じ）。</item>
+    /// <item>形式 3: テクスチャセット。根に project.json（セットの並びと今のセット）、正本と合成とメッシュマップはセットごとに
+    /// sets/&lt;ID&gt;/ の下。view.json の materialSlot は使わない（スロットは project.json に）。</item>
     /// </list>
     /// 開くときは <see cref="Open"/> が形式を読み、古い形式なら <see cref="Steps"/> を順に通して今の形式の並びにする（メモリの上だけで、
     /// ファイルは書き換えない）。今より新しい形式は、どのエントリにも触れずに断る。保存は <see cref="Stamp"/> でいつも今の形式で書く。
@@ -69,16 +117,25 @@ namespace Yozolab.YoluPainter.Core.Persistence
     public static class YlpFormat
     {
         /// <summary>今の形式。</summary>
-        public const int Current = 2;
+        public const int Current = 3;
         /// <summary>形式と書いたアプリの記録（形式 2 から）。</summary>
         public const string InfoName = "ylp.json";
+        /// <summary>テクスチャセットの並び（形式 3 から）。</summary>
+        public const string ProjectName = "project.json";
         public const string ViewName = "view.json", BrushName = "brush.json", ThumbnailName = "thumbnail.png", ImportedOriginalName = "imported-original.psd";
+        /// <summary>テクスチャセットごとのエントリの置き場（sets/&lt;ID&gt;/。ID は小文字のハイフン付きの 36 文字）。</summary>
+        public const string SetsFolder = "sets/";
+        /// <summary>形式 2 までのファイルを移すときに付ける、ただ 1 つのセットの名前（YoluPainter はモデルのマテリアルの名前に付け直す）。</summary>
+        public const string MigratedSetName = "Texture Set 1";
+        public const int MaxTextureSets = 64, MaxMaterialSlot = 65535, MaxTextureSetNameLength = MaxText;
         internal const int MaxText = 256, MaxInfoBytes = 64 * 1024;
+        const int GuidLength = 36;
 
         /// <summary>形式 k から k+1 へ移す段（Steps[k - 1]）。エントリの並びを変え、知らせを足す。</summary>
         static readonly Action<Dictionary<string, byte[]>, List<string>>[] Steps =
         {
             (files, notes) => { }, // 1 → 2: 並びは同じ（ylp.json を足しただけ）
+            ToTextureSets,         // 2 → 3: 1 つのテクスチャセットにする
         };
 
         /// <summary>エントリの種類。</summary>
@@ -86,7 +143,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
         {
             /// <summary>形式と書いたアプリの記録。</summary>
             Info,
-            /// <summary>正本と、描き手の作業そのもの（失うと作業を失う）。</summary>
+            /// <summary>正本と、描き手の作業そのもの（失うと作業を失う）。テクスチャセットの並びもこれ。</summary>
             Source,
             /// <summary>ウィンドウの状態（モデル・選んだチャンネル・ブラシ）。失うと開いた後の状態が既定に戻る。</summary>
             State,
@@ -94,39 +151,113 @@ namespace Yozolab.YoluPainter.Core.Persistence
             Derived,
         }
 
-        /// <summary>今の形式で知っているエントリなら種類を返す。</summary>
+        public static string SetFolder(Guid set) => SetsFolder + set.ToString("D") + "/";
+        public static string SetEntry(Guid set, string name) => SetFolder(set) + name;
+
+        /// <summary>sets/&lt;ID&gt;/&lt;名前&gt; なら ID と残りの名前。ID は小文字のハイフン付きの形だけを認める（同じセットに 2 つの名前を作らない）。</summary>
+        public static bool TrySplitSetEntry(string name, out Guid set, out string leaf)
+        {
+            set = Guid.Empty; leaf = null;
+            if (name == null || !name.StartsWith(SetsFolder, StringComparison.Ordinal) || name.Length <= SetsFolder.Length + GuidLength + 1 || name[SetsFolder.Length + GuidLength] != '/') return false;
+            string id = name.Substring(SetsFolder.Length, GuidLength);
+            if (!Guid.TryParseExact(id, "D", out set) || set.ToString("D") != id || set == Guid.Empty) { set = Guid.Empty; return false; }
+            leaf = name.Substring(SetsFolder.Length + GuidLength + 1);
+            return true;
+        }
+
+        /// <summary>今の形式で知っているエントリなら種類を返す（セットの下の名前は、どのセットかを見ない。並びにないセットは <see cref="Open"/> が知らせる）。</summary>
         public static EntryKind? KindOf(string name)
         {
             if (name == InfoName) return EntryKind.Info;
-            if (name == YlpArchive.NativeName || name == SelectionBinary.EntryName || name == ImportedOriginalName) return EntryKind.Source;
+            if (name == ProjectName) return EntryKind.Source;
             if (name == ViewName || name == BrushName) return EntryKind.State;
             if (name == ThumbnailName) return EntryKind.Derived;
-            if (name.StartsWith(YlpArchive.CompositeFolder, StringComparison.Ordinal) && name.EndsWith(".png", StringComparison.Ordinal))
+            return TrySplitSetEntry(name, out _, out var leaf) ? SetEntryKind(leaf) : null;
+        }
+
+        /// <summary>テクスチャセットの下のエントリの種類（形式 2 までは根にあった名前）。</summary>
+        static EntryKind? SetEntryKind(string leaf)
+        {
+            if (leaf == YlpArchive.NativeName || leaf == SelectionBinary.EntryName || leaf == ImportedOriginalName) return EntryKind.Source;
+            if (leaf.StartsWith(YlpArchive.CompositeFolder, StringComparison.Ordinal) && leaf.EndsWith(".png", StringComparison.Ordinal))
             {
-                string channel = name.Substring(YlpArchive.CompositeFolder.Length, name.Length - YlpArchive.CompositeFolder.Length - 4);
+                string channel = leaf.Substring(YlpArchive.CompositeFolder.Length, leaf.Length - YlpArchive.CompositeFolder.Length - 4);
                 return Enum.TryParse(channel, false, out PaintChannel c) && Enum.IsDefined(typeof(PaintChannel), c) && c.ToString() == channel ? EntryKind.Derived : (EntryKind?)null;
             }
-            if (name.StartsWith(MeshMapBinary.EntryPrefix, StringComparison.Ordinal) && name.EndsWith(MeshMapBinary.EntrySuffix, StringComparison.Ordinal) && name.IndexOf('/') < 0) return EntryKind.Derived;
+            if (leaf.StartsWith(MeshMapBinary.EntryPrefix, StringComparison.Ordinal) && leaf.EndsWith(MeshMapBinary.EntrySuffix, StringComparison.Ordinal) && leaf.IndexOf('/') < 0) return EntryKind.Derived;
             return null;
         }
 
+        /// <summary>形式 2 までの根のエントリのうち、形式 3 でテクスチャセットの下へ移るもの。</summary>
+        static bool MovesIntoSet(string name) =>
+            name == YlpArchive.NativeName || name == SelectionBinary.EntryName || name == ImportedOriginalName
+            || name.StartsWith(YlpArchive.CompositeFolder, StringComparison.Ordinal)
+            || name.StartsWith(MeshMapBinary.EntryPrefix, StringComparison.Ordinal) && name.IndexOf('/') < 0;
+
         /// <summary>
-        /// 開いたエントリを今の形式の並びにする。形式が新しすぎる・記録が壊れているときは InvalidDataException（理由と書いたアプリを添える）。
-        /// 渡した辞書は変えない。
+        /// 2 → 3: 根の正本・選択範囲・取り込んだ PSD・合成・メッシュマップを sets/&lt;ID&gt;/ へ動かし、view.json の materialSlot から 1 つの
+        /// セットの project.json を作る。ID は document.utpaint の頭にある文書の ID（同じファイルはいつも同じ ID になる）。view.json が
+        /// 読めなければスロット 0 にして知らせる（view.json は状態で、正本ではない）。
+        /// </summary>
+        static void ToTextureSets(Dictionary<string, byte[]> files, List<string> notes)
+        {
+            if (!files.TryGetValue(YlpArchive.NativeName, out var native)) throw new InvalidDataException("The file has no native document (" + YlpArchive.NativeName + ").");
+            var id = DocumentBinary.ReadId(native);
+            int slot = 0;
+            if (files.TryGetValue(ViewName, out var view))
+            {
+                try { slot = LegacyMaterialSlot(view); }
+                catch (InvalidDataException ex) { notes.Add("The material slot in view.json could not be read (" + ex.Message + "); the texture set uses slot 0."); }
+            }
+            string folder = SetFolder(id);
+            foreach (var name in files.Keys.Where(MovesIntoSet).ToList())
+            {
+                files.Add(folder + name, files[name]);
+                files.Remove(name);
+            }
+            files[ProjectName] = WriteProject(new YlpProjectInfo(new[] { new YlpTextureSetInfo(id, MigratedSetName, slot) }, id));
+        }
+
+        /// <summary>形式 2 までの view.json の materialSlot（無ければ 0。読めなければ InvalidDataException）。移行とインポーターが使う。</summary>
+        public static int LegacyMaterialSlot(byte[] bytes)
+        {
+            var root = ParseObject(bytes, ViewName);
+            if (!root.TryGetValue("materialSlot", out var value) || value == null) return 0;
+            if (!(value is long slot) || slot < 0 || slot > MaxMaterialSlot) throw new InvalidDataException("\"materialSlot\" is not an integer of 0–" + MaxMaterialSlot);
+            return (int)slot;
+        }
+
+        /// <summary>今より新しい形式なら、理由（形式の番号と書いたアプリ）を添えて断る。</summary>
+        public static void CheckReadable(YlpFormatInfo info)
+        {
+            if (info == null) throw new ArgumentNullException(nameof(info));
+            if (info.Format > Current)
+                throw new InvalidDataException("This file uses .ylp format " + info.Format + (info.SavedBy != null ? ", saved by " + info.SavedBy : "") +
+                    ". This YoluPainter reads up to format " + Current + "; update YoluPainter to open it. The file was not changed.");
+        }
+
+        /// <summary>
+        /// 開いたエントリを今の形式の並びにする。形式が新しすぎる・記録やセットの並びが壊れている・セットの正本が無いときは
+        /// InvalidDataException（理由と書いたアプリを添える）。渡した辞書は変えない。
         /// </summary>
         public static YlpOpened Open(IReadOnlyDictionary<string, byte[]> files)
         {
             if (files == null) throw new ArgumentNullException(nameof(files));
             var info = files.TryGetValue(InfoName, out var bytes) ? ReadInfo(bytes) : new YlpFormatInfo(1, null, null);
-            if (info.Format > Current)
-                throw new InvalidDataException("This file uses .ylp format " + info.Format + (info.SavedBy != null ? ", saved by " + info.SavedBy : "") +
-                    ". This YoluPainter reads up to format " + Current + "; update YoluPainter to open it. The file was not changed.");
+            CheckReadable(info);
             var upgraded = new Dictionary<string, byte[]>(StringComparer.Ordinal);
             foreach (var entry in files) if (entry.Key != InfoName) upgraded.Add(entry.Key, entry.Value);
             var notes = new List<string>();
             for (int format = info.Format; format < Current; format++) Steps[format - 1](upgraded, notes);
-            var unknown = upgraded.Keys.Where(k => KindOf(k) == null).OrderBy(k => k, StringComparer.Ordinal).ToList();
-            return new YlpOpened { Files = upgraded, Info = info, UnknownEntries = unknown, Notes = notes };
+            if (!upgraded.TryGetValue(ProjectName, out var projectBytes)) throw new InvalidDataException("The file has no " + ProjectName + " (its list of texture sets).");
+            var project = ReadProject(projectBytes);
+            foreach (var set in project.Sets)
+                if (!upgraded.ContainsKey(SetEntry(set.Id, YlpArchive.NativeName)))
+                    throw new InvalidDataException("Texture set \"" + set.Name + "\" has no native document (" + SetEntry(set.Id, YlpArchive.NativeName) + ").");
+            var listed = new HashSet<Guid>(project.Sets.Select(s => s.Id));
+            var unknown = upgraded.Keys.Where(k => KindOf(k) == null || TrySplitSetEntry(k, out var set, out _) && !listed.Contains(set))
+                .OrderBy(k => k, StringComparer.Ordinal).ToList();
+            return new YlpOpened { Files = upgraded, Info = info, Project = project, UnknownEntries = unknown, Notes = notes };
         }
 
         /// <summary>保存するエントリに ylp.json（今の形式・保存したアプリ・最初に作ったアプリ）を足す。既にあれば置き換える。</summary>
@@ -158,12 +289,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
         /// <summary>ylp.json を読む。知らないキーは読み飛ばす（形式の版が同じなら、足したキーは古い読み手に要らない約束）。</summary>
         public static YlpFormatInfo ReadInfo(byte[] bytes)
         {
-            if (bytes == null) throw new ArgumentNullException(nameof(bytes));
-            if (bytes.Length > MaxInfoBytes) throw new InvalidDataException("ylp.json is larger than " + (MaxInfoBytes >> 10) + " KiB.");
-            string text;
-            try { text = new UTF8Encoding(false, true).GetString(bytes); }
-            catch (DecoderFallbackException) { throw new InvalidDataException("ylp.json is not valid UTF-8."); }
-            if (!(new Json(text).ParseDocument() is Dictionary<string, object> root)) throw new InvalidDataException("ylp.json is not a JSON object.");
+            var root = ParseObject(bytes, InfoName);
             if (!root.TryGetValue("format", out var formatValue) || !(formatValue is long format) || format < 2 || format > int.MaxValue)
                 throw new InvalidDataException("ylp.json has no valid \"format\" (an integer of at least 2).");
             return new YlpFormatInfo((int)format, Writer(root, "savedBy", required: true), Writer(root, "createdBy", required: false));
@@ -186,6 +312,75 @@ namespace Yozolab.YoluPainter.Core.Persistence
             return new YlpWriterInfo(Text("app"), Text("version"), Text("unity"));
         }
 
+        // ───────── project.json ─────────
+
+        /// <summary>セットの名前の決まり: 1〜256 文字、空白だけでない、制御文字を含まない。合わなければ ArgumentException。</summary>
+        public static void CheckSetName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("A texture set needs a name.", nameof(name));
+            if (name.Length > MaxText) throw new ArgumentException("A texture set name is at most " + MaxText + " characters.", nameof(name));
+            if (name.Any(c => c < 0x20 || c == 0x7f)) throw new ArgumentException("A texture set name cannot hold control characters.", nameof(name));
+        }
+
+        public static byte[] WriteProject(YlpProjectInfo project)
+        {
+            if (project == null) throw new ArgumentNullException(nameof(project));
+            var s = new StringBuilder("{\n  \"sets\": [");
+            for (int i = 0; i < project.Sets.Count; i++)
+            {
+                var set = project.Sets[i];
+                s.Append(i == 0 ? "\n" : ",\n").Append("    { \"id\": ").Append(Quote(set.Id.ToString("D"))).Append(", \"name\": ").Append(Quote(set.Name))
+                 .Append(", \"materialSlot\": ").Append(set.MaterialSlot.ToString(CultureInfo.InvariantCulture)).Append(" }");
+            }
+            s.Append("\n  ],\n  \"current\": ").Append(Quote(project.CurrentSet.ToString("D"))).Append("\n}\n");
+            return Encoding.UTF8.GetBytes(s.ToString());
+        }
+
+        /// <summary>project.json を読む。知らないキーは読み飛ばす。ID は小文字のハイフン付きの形、セットは 1〜64、ID・名前（大文字小文字を
+        /// 区別しない）・スロットの重なり、今のセットが並びに無いものは断る（InvalidDataException）。</summary>
+        public static YlpProjectInfo ReadProject(byte[] bytes)
+        {
+            var root = ParseObject(bytes, ProjectName);
+            if (!root.TryGetValue("sets", out var setsValue) || !(setsValue is List<object> items)) throw new InvalidDataException("project.json has no \"sets\" list.");
+            var sets = new List<YlpTextureSetInfo>();
+            foreach (var item in items)
+            {
+                if (!(item is Dictionary<string, object> o)) throw new InvalidDataException("project.json \"sets\" holds something that is not an object.");
+                var id = ReadGuid(o, "id", "a texture set");
+                if (!o.TryGetValue("name", out var nameValue) || !(nameValue is string name)) throw new InvalidDataException("project.json: a texture set has no \"name\".");
+                if (!o.TryGetValue("materialSlot", out var slotValue) || !(slotValue is long slot)) throw new InvalidDataException("project.json: texture set \"" + name + "\" has no integer \"materialSlot\".");
+                try { sets.Add(new YlpTextureSetInfo(id, name, slot < 0 || slot > MaxMaterialSlot ? -1 : (int)slot)); }
+                catch (ArgumentException ex) { throw new InvalidDataException("project.json: " + Reason(ex), ex); }
+            }
+            var current = ReadGuid(root, "current", "the current texture set");
+            try { return new YlpProjectInfo(sets, current); }
+            catch (ArgumentException ex) { throw new InvalidDataException("project.json: " + Reason(ex), ex); }
+        }
+
+        /// <summary>ArgumentException の文から引数の名前の行を除いたもの。</summary>
+        static string Reason(ArgumentException ex) => ex.Message.Split('\n')[0].Split(new[] { " (Parameter" }, StringSplitOptions.None)[0];
+
+        static Guid ReadGuid(Dictionary<string, object> o, string key, string what)
+        {
+            if (!o.TryGetValue(key, out var value) || !(value is string text) || !Guid.TryParseExact(text, "D", out var id) || id.ToString("D") != text || id == Guid.Empty)
+                throw new InvalidDataException("project.json: " + what + " has no valid \"" + key + "\" (a lower-case GUID with hyphens).");
+            return id;
+        }
+
+        // ───────── 共通 ─────────
+
+        /// <summary>UTF-8 の JSON のオブジェクトを読む（<see cref="MaxInfoBytes"/> まで）。</summary>
+        static Dictionary<string, object> ParseObject(byte[] bytes, string entry)
+        {
+            if (bytes == null) throw new ArgumentNullException(nameof(bytes));
+            if (bytes.Length > MaxInfoBytes) throw new InvalidDataException(entry + " is larger than " + (MaxInfoBytes >> 10) + " KiB.");
+            string text;
+            try { text = new UTF8Encoding(false, true).GetString(bytes); }
+            catch (DecoderFallbackException) { throw new InvalidDataException(entry + " is not valid UTF-8."); }
+            if (!(new Json(text, entry).ParseDocument() is Dictionary<string, object> root)) throw new InvalidDataException(entry + " is not a JSON object.");
+            return root;
+        }
+
         static string Quote(string value)
         {
             var s = new StringBuilder("\"");
@@ -201,9 +396,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
         /// <summary>小さな JSON の読み手（オブジェクト・配列・文字列・整数・小数・true/false/null。深さと長さに上限）。</summary>
         sealed class Json
         {
-            readonly string text; int at;
+            readonly string text, entry; int at;
             const int MaxDepth = 16;
-            public Json(string text) { this.text = text; }
+            public Json(string text, string entry) { this.text = text; this.entry = entry; }
 
             public object ParseDocument()
             {
@@ -211,7 +406,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 if (at != text.Length) throw Error("unexpected text after the value");
                 return value;
             }
-            InvalidDataException Error(string what) => new InvalidDataException("ylp.json is not valid JSON (" + what + " at character " + at + ").");
+            InvalidDataException Error(string what) => new InvalidDataException(entry + " is not valid JSON (" + what + " at character " + at + ").");
             void Space() { while (at < text.Length && (text[at] == ' ' || text[at] == '\t' || text[at] == '\n' || text[at] == '\r')) at++; }
             bool Take(char c) { Space(); if (at < text.Length && text[at] == c) { at++; return true; } return false; }
             void Expect(char c) { if (!Take(c)) throw Error("'" + c + "' expected"); }

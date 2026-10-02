@@ -107,7 +107,7 @@ namespace Yozolab.YoluPainter.Tests
             var fake = UseFakeDialogs(window); fake.File = NewYlpPath();
             window.SaveProject(true);
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
-            var files = YlpStore.Load(fake.File).Files;
+            var files = SetFiles(YlpStore.Load(fake.File).Files);
             Assert.That(files.ContainsKey("composite/Normal.png"), Is.True, "Height → Normal gives a Normal texture without any Normal layer");
             Assert.That(Pixels(files["composite/Normal.png"]), Is.EqualTo(NormalMaps.Output(d)), "the .ylp texture is the Unity (OpenGL) output");
             var other = Open();

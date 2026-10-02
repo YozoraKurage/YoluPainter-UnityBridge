@@ -22,6 +22,9 @@ namespace Yozolab.YoluPainter.Editor
     /// 出す。窓を閉じてもベイクは続き、プロパティの欄に進み具合と取消が出る。持ち主を閉じる・リロード（OnDisable）・ドキュメントを替えると、
     /// 取り消して別のスレッドが終わるまで待ち、結果は捨てる。</item>
     /// <item><see cref="BakeMeshMaps"/>（新規プロジェクトの「作った後にベイク」など）は呼んだ所で待つ（取消できる Unity の進捗バー）。</item>
+    /// <item>テクスチャセットごとに焼く: 窓の上の一覧でチェックしたセットを並びの順に 1 つずつ焼く。仕事（<see cref="MeshBakeJob"/>）は 1 つの
+    /// セットの文書とスロットに結び付き、終わるたびにそのセットについて変わっていないかを確かめてから、そのセットのマップに入れる。取り消すと
+    /// 残りのセットも焼かない。</item>
     /// </list>
     /// 窓の配置は Substance Painter の Baker と同じ: 上に焼くテクスチャセット、左に共通の設定と焼くマップの一覧（チェックで焼くものを選び、
     /// 押すとその設定を右に出す。焼いた・古い・未のしるし）、右に選んだ項目の設定、下に進み具合・取消・「チェックしたマップをベイク」・閉じる。
@@ -35,6 +38,8 @@ namespace Yozolab.YoluPainter.Editor
             public readonly MeshBakeSettings Settings;
             public readonly MeshBakeInput Input, Reference;
             public readonly MeshBakeBudget Budget;
+            /// <summary>焼くテクスチャセット（結果を入れる先）と、始めたときのその文書。</summary>
+            public readonly TextureSet Set;
             public readonly PaintDocument Document;
             public readonly SurfaceGeometry Geometry;
             /// <summary>AO・ベントノーマル・厚みのレイの GPU。使わなければ null（使えない GPU でも作り、ベイクが CPU に戻す）。</summary>
@@ -44,8 +49,8 @@ namespace Yozolab.YoluPainter.Editor
             public Task<MeshBakeResult> Work { get; private set; }
             readonly object gate = new object(); double fraction; string phase = "Preparing";
 
-            public MeshBakeJob(MeshBakeSettings settings, MeshBakeInput input, MeshBakeInput reference, MeshBakeBudget budget, PaintDocument document, SurfaceGeometry geometry, GpuMeshBakeRayTracer tracer)
-            { Settings = settings; Input = input; Reference = reference; Budget = budget; Document = document; Geometry = geometry; Tracer = tracer; }
+            public MeshBakeJob(MeshBakeSettings settings, MeshBakeInput input, MeshBakeInput reference, MeshBakeBudget budget, TextureSet set, PaintDocument document, SurfaceGeometry geometry, GpuMeshBakeRayTracer tracer)
+            { Settings = settings; Input = input; Reference = reference; Budget = budget; Set = set; Document = document; Geometry = geometry; Tracer = tracer; }
 
             /// <summary>別のスレッドで焼き始める。拒否などの例外は <see cref="Work"/> に入る。</summary>
             public void Start()
@@ -61,6 +66,11 @@ namespace Yozolab.YoluPainter.Editor
 
         /// <summary>窓から始めて走っているベイク（無ければ null）。</summary>
         MeshBakeJob meshBakeJob;
+        /// <summary>窓から始めたベイクで、今の仕事の後に焼くテクスチャセット（並びの順）と、全体の数・済んだ数。</summary>
+        readonly List<TextureSet> meshBakeQueue = new List<TextureSet>();
+        int meshBakeTotal, meshBakeFinished;
+        /// <summary>ベイクの窓の一覧でチェックを外したテクスチャセット（既定は全部焼く）。</summary>
+        readonly HashSet<Guid> meshBakeSkipped = new HashSet<Guid>();
         /// <summary>窓の下に出す、最後のベイクの結果の一文と、それが成功か。</summary>
         string meshBakeOutcome; bool meshBakeOutcomeOk;
         double meshBakeRepainted;
@@ -82,36 +92,62 @@ namespace Yozolab.YoluPainter.Editor
             if (!preview.CanPaint) return L.Tr("Mesh maps are baked only from a complete static snapshot that can be painted; this one is incomplete (see the load diagnostics).");
             if (highPolyModel != null && CurrentHighPolyInput() == null) return L.Tr("Mesh maps cannot be baked: {0}", highPolyNote ?? L.Tr("the high poly has no readable mesh."));
             if (meshBakeSettings.Maps == null || meshBakeSettings.Maps.Length == 0) return L.Tr("Check at least one map to bake.");
+            if (CheckedBakeSets().Count == 0) return L.Tr("Check at least one texture set to bake.");
             return null;
         }
 
-        /// <summary>今の条件でベイクの仕事を用意する（まだ走らせない）。断るときは null と理由。</summary>
-        MeshBakeJob PrepareMeshBake(out string refusal)
+        /// <summary>焼くテクスチャセット（一覧でチェックしたもの、並びの順）。</summary>
+        List<TextureSet> CheckedBakeSets() { SyncCurrentSet(); return textureSets.Where(s => !meshBakeSkipped.Contains(s.Id)).ToList(); }
+
+        /// <summary>テクスチャセットのベイクの仕事を用意する（まだ走らせない）。断るときは null と理由。</summary>
+        MeshBakeJob PrepareMeshBake(TextureSet set, out string refusal)
         {
             refusal = MeshBakeRefusal();
             if (refusal != null) return null;
+            SyncCurrentSet();
+            if (!textureSets.Contains(set)) { refusal = L.Tr("The texture set {0} is no longer in the project.", set.Name); return null; }
+            if (set.MaterialSlot >= preview.MaterialSlotCount) { refusal = L.Tr("The texture set {0} paints material slot {1}, which the loaded model does not have.", set.Name, set.MaterialSlot); return null; }
+            var d = set.Document;
             var settings = meshBakeSettings.Clone();
-            settings.Width = document.Width; settings.Height = document.Height; settings.TargetSlot = materialSlot;
+            settings.Width = d.Width; settings.Height = d.Height; settings.TargetSlot = set.MaterialSlot;
             try { settings.Validate(); }
             catch (ArgumentException ex) { refusal = L.Tr("Mesh maps were not baked: {0}", ex.Message); return null; }
             return new MeshBakeJob(settings, CurrentMeshBakeInput(), CurrentHighPolyInput(), new MeshBakeBudget { MaxBytes = PainterSettings.StrokeBudgetBytes },
-                document, preview.Geometry, meshBakeUseGpu ? new GpuMeshBakeRayTracer(PainterSettings.GpuCacheBytes) : null);
+                set, d, preview.Geometry, meshBakeUseGpu ? new GpuMeshBakeRayTracer(PainterSettings.GpuCacheBytes) : null);
         }
 
-        /// <summary>選んだ mesh map を今のモデル・スロット・ドキュメントの大きさで焼き、同じ種類のマップを置き換える。呼んだ所で待つ（取消できる
-        /// 進捗バー）。取消・時間切れ・予算の拒否では今のマップを変えない。断る条件は <see cref="MeshBakeRefusal"/>（理由はステータスに出す）。</summary>
-        /// <returns>焼いた結果の状態。始めなかった・使わなかったら null。</returns>
+        /// <summary>選んだ mesh map を、チェックしたテクスチャセットごとに今のモデル・スロット・ドキュメントの大きさで焼き、同じ種類のマップを置き換える。
+        /// 呼んだ所で待つ（取消できる進捗バー）。取消・時間切れ・予算の拒否ではそのセットのマップを変えず、残りのセットも焼かない。断る条件は
+        /// <see cref="MeshBakeRefusal"/>（理由はステータスに出す）。</summary>
+        /// <returns>全部のセットを焼けたら Completed、途中で止まったらそのセットの状態。始めなかった・使わなかったら null。</returns>
         internal MeshBakeStatus? BakeMeshMaps()
         {
-            var job = PrepareMeshBake(out string refusal);
-            if (job == null) { message = refusal; return null; }
-            try { RunMeshBakeModal(job); }
-            finally { Dialogs.ClearProgress(); }
-            return FinishMeshBake(job);
+            var sets = CheckedBakeSets();
+            MeshBakeStatus? status = null;
+            for (int i = 0; i < sets.Count; i++)
+            {
+                var job = PrepareMeshBake(sets[i], out string refusal);
+                if (job == null) { message = refusal; return i == 0 ? null : status; }
+                try { RunMeshBakeModal(job, i, sets.Count); }
+                finally { Dialogs.ClearProgress(); }
+                status = FinishMeshBake(job);
+                if (status != MeshBakeStatus.Completed) return status;
+            }
+            if (sets.Count > 1) MeshBakeAllDone(sets.Count);
+            return status;
+        }
+
+        /// <summary>何枚目のセットか（「セット 2/3: 名前 · 」。1 つなら空）。</summary>
+        static string MeshBakeSetText(TextureSet set, int index, int count) => count > 1 ? L.Tr("Texture set {0}/{1}: {2}", index + 1, count, set.Name) + " · " : "";
+        /// <summary>複数のセットを焼き終えたときの知らせ。</summary>
+        void MeshBakeAllDone(int count)
+        {
+            string text = L.Tr("Baked the mesh maps of {0} texture sets.", count);
+            message = text + " " + message; meshBakeOutcome = text; meshBakeOutcomeOk = true; RepaintMeshBakeWindow();
         }
 
         /// <summary>別のスレッドで焼き、ここ（主スレッド）で進捗バーを出して取消を受ける。始める前にも 1 回尋ねる。</summary>
-        void RunMeshBakeModal(MeshBakeJob job)
+        void RunMeshBakeModal(MeshBakeJob job, int index, int count)
         {
             string title = L.Tr("Baking mesh maps");
             if (MeshBakeProgress(title, L.Tr("Preparing…"), 0)) job.Cancel.Cancel();
@@ -123,7 +159,7 @@ namespace Yozolab.YoluPainter.Editor
                 job.Tracer?.Pump();
                 if (job.Tracer != null && shown.ElapsedMilliseconds < 50) continue;
                 shown.Restart();
-                if (MeshBakeProgress(title, MeshBakeProgressText(job) + " (" + job.Settings.Width + "×" + job.Settings.Height + ", " + string.Join(", ", job.Settings.Maps.Select(MeshMapLabel)) + ")", (float)job.Fraction))
+                if (MeshBakeProgress(title, MeshBakeSetText(job.Set, index, count) + MeshBakeProgressText(job) + " (" + job.Settings.Width + "×" + job.Settings.Height + ", " + string.Join(", ", job.Settings.Maps.Select(MeshMapLabel)) + ")", (float)job.Fraction))
                     job.Cancel.Cancel();
             }
             job.Tracer?.Pump();
@@ -134,14 +170,36 @@ namespace Yozolab.YoluPainter.Editor
         /// （ステータスにも出す）、始めたら null。</summary>
         internal string StartMeshBake()
         {
-            var job = PrepareMeshBake(out string refusal);
+            string refusal = MeshBakeRefusal();
+            var sets = refusal == null ? CheckedBakeSets() : null;
+            var job = refusal == null ? PrepareMeshBake(sets[0], out refusal) : null;
             if (job == null) { message = refusal; RepaintMeshBakeWindow(); return refusal; }
+            meshBakeQueue.Clear(); meshBakeQueue.AddRange(sets.Skip(1)); meshBakeTotal = sets.Count; meshBakeFinished = 0;
             meshBakeJob = job; meshBakeOutcome = null;
             job.Start();
             EditorApplication.update -= MeshBakeTick; EditorApplication.update += MeshBakeTick;
             message = L.Tr("Baking mesh maps") + "…";
             Repaint(); RepaintMeshBakeWindow();
             return null;
+        }
+
+        /// <summary>窓から始めたベイクの次のテクスチャセットを焼き始める（並びから消えたセットは飛ばす）。始めたら true。断ったら refused も true
+        /// （理由は知らせてある）。</summary>
+        bool StartNextMeshBake(out bool refused)
+        {
+            refused = false;
+            while (meshBakeQueue.Count > 0)
+            {
+                var set = meshBakeQueue[0]; meshBakeQueue.RemoveAt(0);
+                if (!textureSets.Contains(set)) { meshBakeFinished++; continue; }
+                var job = PrepareMeshBake(set, out string refusal);
+                if (job == null) { meshBakeQueue.Clear(); MeshBakeEnded(null, refusal, false); refused = true; return false; }
+                meshBakeJob = job; job.Start();
+                EditorApplication.update -= MeshBakeTick; EditorApplication.update += MeshBakeTick;
+                Repaint(); RepaintMeshBakeWindow();
+                return true;
+            }
+            return false;
         }
 
         void MeshBakeTick()
@@ -168,8 +226,15 @@ namespace Yozolab.YoluPainter.Editor
             }
             job.Tracer?.Pump();
             meshBakeJob = null; EditorApplication.update -= MeshBakeTick;
-            try { FinishMeshBake(job); }
+            MeshBakeStatus? status = null;
+            try { status = FinishMeshBake(job); }
             catch (Exception ex) { MeshBakeEnded(null, ex.Message, false); Debug.LogWarning("Texture Painter: " + ex.Message); }
+            meshBakeFinished++;
+            // 次のテクスチャセット（取消・時間切れ・拒否・条件の変化で止まったら、残りは焼かない）
+            bool refused = false;
+            if (status == MeshBakeStatus.Completed && StartNextMeshBake(out refused)) return true;
+            if (status == MeshBakeStatus.Completed && !refused && meshBakeTotal > 1) MeshBakeAllDone(meshBakeTotal);
+            meshBakeQueue.Clear();
             Repaint();
             return false;
         }
@@ -178,6 +243,7 @@ namespace Yozolab.YoluPainter.Editor
         internal void CancelMeshBake()
         {
             if (meshBakeJob == null) return;
+            meshBakeQueue.Clear();
             meshBakeJob.Cancel.Cancel();
             message = L.Tr("Canceling the mesh-map bake…");
             Repaint(); RepaintMeshBakeWindow();
@@ -189,6 +255,7 @@ namespace Yozolab.YoluPainter.Editor
         bool AbandonMeshBake()
         {
             var job = meshBakeJob;
+            meshBakeQueue.Clear();
             if (job == null) return false;
             meshBakeJob = null; EditorApplication.update -= MeshBakeTick;
             job.Cancel.Cancel();
@@ -207,19 +274,19 @@ namespace Yozolab.YoluPainter.Editor
             try { result = job.Work.GetAwaiter().GetResult(); } // 拒否などの例外はそのまま（AggregateException に包まない）
             catch (Exception ex) when (ex is MeshBakeRefusedException || ex is ArgumentException)
             { return MeshBakeEnded(null, L.Tr("Mesh maps were not baked: {0}", ex.Message), false); }
-            lastMeshBakeReport = result.Report;
+            job.Set.LastMeshBakeReport = result.Report;
             if (result.Status != MeshBakeStatus.Completed)
                 return MeshBakeEnded(result.Status, result.Status == MeshBakeStatus.TimedOut ? L.Tr("The mesh-map bake hit its time limit; the previous maps are unchanged.") : L.Tr("The mesh-map bake was canceled; the previous maps are unchanged."), false);
             string changed = MeshBakeChanged(job);
             if (changed != null) return MeshBakeEnded(null, L.Tr("The baked maps were not used because {0} changed during the bake; the previous maps are unchanged. Bake again.", changed), false);
-            meshMaps.Put(result.Maps);
-            if (meshMapView == MeshMapView.None) meshMapView = MeshMapView.Coverage;
+            job.Set.MeshMaps.Put(result.Maps);
+            if (job.Set == currentSet && meshMapView == MeshMapView.None) meshMapView = MeshMapView.Coverage;
             Repaint();
             var s = job.Settings; var report = result.Report;
             // ステータスには全部、窓の下の帯には短く（詳しい記録は窓の共通の設定の「最後のベイク」）
             string summary = L.Tr("Baked {0} map(s) in {1} s.", result.Maps.Count, report.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture))
                 + (report.OverlapTexels > 0 ? " " + L.Tr("{0} texels have overlapping UVs (the lower triangle index wins).", report.OverlapTexels.ToString("N0", CultureInfo.InvariantCulture)) : "");
-            return MeshBakeEnded(result.Status, L.Tr("Baked {0} at {1}×{2} for slot {3} (rays: {4}): {5}. Mesh maps are derived data, not layers; Save keeps them in the .ylp.",
+            return MeshBakeEnded(result.Status, (textureSets.Count > 1 ? job.Set.Name + ": " : "") + L.Tr("Baked {0} at {1}×{2} for slot {3} (rays: {4}): {5}. Mesh maps are derived data, not layers; Save keeps them in the .ylp.",
                 string.Join(", ", result.Maps.Select(m => MeshMapLabel(m.Kind))), s.Width, s.Height, s.TargetSlot, report.RayBackend, report.Summary()), true, summary);
         }
         MeshBakeStatus? MeshBakeEnded(MeshBakeStatus? status, string text, bool ok, string summary = null)
@@ -229,12 +296,16 @@ namespace Yozolab.YoluPainter.Editor
             return status;
         }
 
-        /// <summary>始めたときから、結果の意味を変えるもの（ドキュメントとその大きさ・スロット・モデルのスナップショット（ポーズを含む）・高ポリ）が
-        /// 変わったか。変わったものの名前、同じなら null。焼いている間の描画・設定の変更は結果の意味を変えない（由来に始めたときの設定が残る）。</summary>
+        /// <summary>始めたときから、結果の意味を変えるもの（テクスチャセット・その文書と大きさ・スロット・モデルのスナップショット（ポーズを含む）・
+        /// 高ポリ）が変わったか。変わったものの名前、同じなら null。焼いている間の描画・設定の変更・今のセットの切り替えは結果の意味を変えない
+        /// （由来に始めたときの設定が残る）。</summary>
         string MeshBakeChanged(MeshBakeJob job)
         {
-            if (!ReferenceEquals(document, job.Document) || document.Width != job.Settings.Width || document.Height != job.Settings.Height) return L.Tr("the document");
-            if (materialSlot != job.Settings.TargetSlot) return L.Tr("the material slot");
+            SyncCurrentSet();
+            if (!textureSets.Contains(job.Set)) return L.Tr("the texture set");
+            var d = job.Set.Document;
+            if (!ReferenceEquals(d, job.Document) || d.Width != job.Settings.Width || d.Height != job.Settings.Height) return L.Tr("the document");
+            if (job.Set.MaterialSlot != job.Settings.TargetSlot) return L.Tr("the material slot");
             if (preview == null || !ReferenceEquals(preview.Geometry, job.Geometry)) return L.Tr("the model or its pose");
             if (!ReferenceEquals(CurrentHighPolyInput(), job.Reference)) return L.Tr("the high poly");
             return null;
@@ -264,22 +335,36 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>焼くテクスチャセット（窓の上の一覧の 1 行）。</summary>
         internal readonly struct MeshBakeTarget
         {
+            public readonly Guid Id;
             public readonly int Slot, Width, Height;
             public readonly string Name;
             /// <summary>焼くか（一覧のチェック）。</summary>
             public readonly bool Bake;
-            /// <summary>チェックを外せないか（プロジェクトにテクスチャセットが 1 つしかない）。</summary>
+            /// <summary>チェックを外せないか（プロジェクトにテクスチャセットが 1 つしかない・チェックしたものが最後の 1 つ）。</summary>
             public readonly bool Fixed;
-            public MeshBakeTarget(int slot, string name, int width, int height, bool bake, bool @fixed) { Slot = slot; Name = name; Width = width; Height = height; Bake = bake; Fixed = @fixed; }
+            public MeshBakeTarget(Guid id, int slot, string name, int width, int height, bool bake, bool @fixed) { Id = id; Slot = slot; Name = name; Width = width; Height = height; Bake = bake; Fixed = @fixed; }
         }
 
-        /// <summary>焼くテクスチャセットの一覧。今のプロジェクトはテクスチャセットを 1 つ（開いているドキュメントと、それが描くマテリアルのスロット）
-        /// しか持たないので 1 行だけ。複数のテクスチャセットを持つようになったら、ここがセットごとの行を返し、窓はその数だけ行を出す（焼く
-        /// ものをチェックで選ぶのは <see cref="SetMeshBakeTarget"/>）。</summary>
-        internal IReadOnlyList<MeshBakeTarget> MeshBakeTargets() => new[] { new MeshBakeTarget(materialSlot, SlotName(materialSlot), document.Width, document.Height, true, true) };
+        /// <summary>焼くテクスチャセットの一覧（プロジェクトのセットの並び。チェックは <see cref="SetMeshBakeTarget"/>、既定は全部）。</summary>
+        internal IReadOnlyList<MeshBakeTarget> MeshBakeTargets()
+        {
+            SyncCurrentSet();
+            int checkedCount = textureSets.Count(s => !meshBakeSkipped.Contains(s.Id));
+            return textureSets.Select(s =>
+            {
+                bool bake = !meshBakeSkipped.Contains(s.Id);
+                return new MeshBakeTarget(s.Id, s.MaterialSlot, s.Name, s.Document.Width, s.Document.Height, bake, textureSets.Count == 1 || bake && checkedCount == 1);
+            }).ToList();
+        }
 
-        /// <summary>テクスチャセットを焼くかどうかを変える口。1 つしか無い今は外せない（何もしない）。</summary>
-        internal void SetMeshBakeTarget(int slot, bool bake) { }
+        /// <summary>スロットを描くテクスチャセットを焼くかどうかを変える。最後にチェックしたセットは外さない（焼くものが無い状態を作らない）。</summary>
+        internal void SetMeshBakeTarget(int slot, bool bake)
+        {
+            var set = SetOfSlot(slot); if (set == null) return;
+            if (bake) meshBakeSkipped.Remove(set.Id);
+            else if (textureSets.Count(s => s != set && !meshBakeSkipped.Contains(s.Id)) > 0) meshBakeSkipped.Add(set.Id);
+            Repaint(); RepaintMeshBakeWindow();
+        }
 
         /// <summary>焼くマップに kind を入れる・外す。最後の 1 つは外さない（焼くものが無い状態を作らない）。</summary>
         internal void SetMeshBakeKind(MeshMapKind kind, bool bake)
@@ -362,15 +447,16 @@ namespace Yozolab.YoluPainter.Editor
         {
             var check = new Rect(row.x + 4, row.y, 22, row.height);
             bool next = PaintGui.Toggle(host.Spot("bake.set." + target.Slot, check), "", target.Bake,
-                target.Fixed ? L.Tr("This project has one texture set: the material slot the document paints.") : null, !baking && !target.Fixed);
+                textureSets.Count == 1 ? L.Tr("This project has one texture set: the material slot the document paints.") : target.Fixed ? L.Tr("At least one texture set stays checked.") : L.Tr("Bake this texture set"), !baking && !target.Fixed);
             if (next != target.Bake) SetMeshBakeTarget(target.Slot, next);
             string size = target.Width + " × " + target.Height;
             float sizeWidth = PaintGui.TextWidth(size, PaintTheme.LabelDim) + 4;
             PaintGui.Icon(new Rect(check.xMax + 2, row.y, 18, row.height), "texture", PaintTheme.TextDim, 15);
             float nameX = check.xMax + 24;
-            PaintGui.Text(new Rect(nameX, row.y, row.xMax - sizeWidth - 8 - nameX, row.height), PaintGui.Fit(target.Name, row.xMax - sizeWidth - 8 - nameX, PaintTheme.Label, false), PaintTheme.Label);
+            bool current = target.Id == currentSet.Id;
+            PaintGui.Text(new Rect(nameX, row.y, row.xMax - sizeWidth - 8 - nameX, row.height), PaintGui.Fit(target.Name, row.xMax - sizeWidth - 8 - nameX, current ? PaintTheme.LabelBold : PaintTheme.Label, false), current ? PaintTheme.LabelBold : PaintTheme.Label);
             PaintGui.Text(new Rect(row.xMax - sizeWidth, row.y, sizeWidth, row.height), size, StateStyle);
-            PaintGui.Tooltip(new Rect(nameX, row.y, row.xMax - nameX, row.height), target.Name + "\n" + L.Tr("Mesh maps are baked at the document size, for the material slot this document paints"));
+            PaintGui.Tooltip(new Rect(nameX, row.y, row.xMax - nameX, row.height), target.Name + " · " + SlotName(target.Slot) + "\n" + L.Tr("Mesh maps are baked at the document size, for the material slot this document paints"));
         }
 
         // ───────── 左の一覧 ─────────
@@ -441,8 +527,9 @@ namespace Yozolab.YoluPainter.Editor
             NoteRow(rows, L.Tr("These apply to every map. Distances are relative to the model's bounding-box diagonal, so they do not depend on its size or units."));
             // 出力
             PaintGui.GroupLabel(rows.Row(16), L.TrIn("mesh map", "Output"));
-            PaintGui.ValueBox(rows.Row(), L.TrIn("mesh bake", "Size"), document.Width + " × " + document.Height, BakeLabelWidth, null, L.Tr("Mesh maps are baked at the document size, for the material slot this document paints"));
-            PaintGui.ValueBox(rows.Row(), L.Tr("Texture Set"), SlotName(materialSlot), BakeLabelWidth, null, null, true);
+            var bakeSets = CheckedBakeSets();
+            PaintGui.ValueBox(rows.Row(), L.TrIn("mesh bake", "Size"), string.Join(", ", bakeSets.Select(t => t.Document.Width + " × " + t.Document.Height).Distinct()), BakeLabelWidth, null, L.Tr("Mesh maps are baked at the document size, for the material slot this document paints"));
+            PaintGui.ValueBox(rows.Row(), L.Tr("Texture Set"), textureSets.Count == 1 ? SlotName(materialSlot) : string.Join(", ", bakeSets.Select(t => t.Name)), BakeLabelWidth, null, null, true);
             s.Padding = PaintGui.KeepIntSlider(host.Spot("bake.padding", rows.Row()), L.TrIn("mesh map", "Padding"), s.Padding, 0, MeshBakeSettings.MaxPadding, " px", L.Tr("Texels the islands are extended into the empty space around them (never over another island)"));
             BakeChoice(host, rows.Row(), L.TrIn("mesh map", "Antialiasing"), s.Antialiasing, new[] { 1, 2, 3, 4 }, n => n == 1 ? L.Tr("None") : n + " × " + n, n => meshBakeSettings.Antialiasing = n,
                 L.Tr("Subsamples per texel side (the bake takes n² times as long)"));
@@ -605,7 +692,7 @@ namespace Yozolab.YoluPainter.Editor
                 float f = Mathf.Clamp01((float)job.Fraction);
                 if (f > 0) PaintGui.Rounded(new Rect(bar.x, bar.y, Mathf.Max(8, bar.width * f), bar.height), job.Canceling ? PaintTheme.TextDim : PaintTheme.Accent, 4);
                 var elapsed = job.Clock.Elapsed;
-                string text = MeshBakeProgressText(job) + " · " + ((int)elapsed.TotalMinutes) + ":" + elapsed.Seconds.ToString("00", CultureInfo.InvariantCulture);
+                string text = MeshBakeSetText(job.Set, meshBakeFinished, meshBakeTotal) + MeshBakeProgressText(job) + " · " + ((int)elapsed.TotalMinutes) + ":" + elapsed.Seconds.ToString("00", CultureInfo.InvariantCulture);
                 PaintGui.Text(new Rect(status.x, bar.yMax + 4, status.width, 20), PaintGui.Fit(text, status.width, PaintTheme.Label, false), PaintTheme.Label);
                 if (PaintGui.Button(host.Spot("bake.cancel", bake), cancelText, false, !job.Canceling, L.Tr("Stop the bake; the previous maps stay as they are"), "close")) CancelMeshBake();
             }
@@ -645,7 +732,7 @@ namespace Yozolab.YoluPainter.Editor
             PaintGui.Rounded(bar, PaintTheme.ControlBg, 3);
             float f = Mathf.Clamp01((float)job.Fraction);
             if (f > 0) PaintGui.Rounded(new Rect(bar.x, bar.y, Mathf.Max(6, bar.width * f), bar.height), job.Canceling ? PaintTheme.ControlHover : PaintTheme.AccentDim, 3);
-            string text = MeshBakeProgressText(job);
+            string text = MeshBakeSetText(job.Set, meshBakeFinished, meshBakeTotal) + MeshBakeProgressText(job);
             PaintGui.Text(new Rect(bar.x + 7, bar.y, bar.width - 14, bar.height), PaintGui.Fit(text, bar.width - 14, PaintTheme.Label, false), PaintTheme.Label);
             PaintGui.Tooltip(bar, L.Tr("Baking mesh maps") + ": " + text);
             if (PaintGui.IconButton(Spot("meshmap.cancel", new Rect(row.xMax - 26, row.y, 26, row.height)), "close", L.Tr("Stop the bake; the previous maps stay as they are"), false, !job.Canceling, 16)) CancelMeshBake();

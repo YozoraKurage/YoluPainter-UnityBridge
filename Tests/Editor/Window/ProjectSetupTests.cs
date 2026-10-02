@@ -48,7 +48,7 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void ANewProjectUsesTheTemplateChannelsResolutionNormalFormatAndModel()
         {
             var model = PrefabModel("Board");
-            window.CreateProject(new NewProjectSettings { Template = ProjectTemplate.LilToon, Model = model, MaterialSlot = 7, Resolution = 512, NormalFormat = NormalYDirection.DirectX });
+            window.CreateProject(new NewProjectSettings { Template = ProjectTemplate.LilToon, Model = model, Slots = new[] { 7 }, Resolution = 512, NormalFormat = NormalYDirection.DirectX });
             var d = window.Document;
             Assert.That((d.Width, d.Height), Is.EqualTo((512, 512)));
             Assert.That(d.Layers.Count, Is.EqualTo(1));
@@ -104,7 +104,7 @@ namespace Yozolab.YoluPainter.Tests
                         {
                             L.OverrideLanguage(language); dialog.Configure = configure;
                             string path = Path.Combine(Path.GetFullPath("Logs"), "YoluPainterSnapshots", "new-project-" + language + (configure ? "-configure" : "") + ".png");
-                            OffscreenGui.RenderToPng(640, 520, () => dialog.DrawContent(new Rect(0, 0, 640, 520)), path, PaintTheme.PanelBg);
+                            OffscreenGui.RenderToPng((int)NewProjectWindow.Width, (int)NewProjectWindow.Height, () => dialog.DrawContent(new Rect(0, 0, NewProjectWindow.Width, NewProjectWindow.Height)), path, PaintTheme.PanelBg);
                             Assert.That(File.Exists(path), Is.True);
                         }
                 got = dialog.TakeSettings();

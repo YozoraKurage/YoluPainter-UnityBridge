@@ -7,12 +7,14 @@ using Yozolab.YoluPainter.Core.Persistence;
 
 namespace Yozolab.YoluPainter.Editor
 {
-    /// <summary>.ylp に入れる中身の約束（書く側のウィンドウと読む側のインポーターで共有する）。
+    /// <summary>.ylp に入れる中身の約束（書く側のウィンドウと読む側のインポーターで共有する）。形式 3 から、正本・合成・選択範囲・取り込んだ PSD・
+    /// メッシュマップはテクスチャセットごとに sets/&lt;ID&gt;/ の下（<see cref="YlpFormat.SetEntry"/>）に置き、根には project.json（セットの並び）・
+    /// view.json・brush.json・thumbnail.png を置く。下の名前はセットの下の名前（thumbnail.png だけは根）。
     /// <list type="bullet">
     /// <item>document.utpaint: ネイティブ正本（唯一の正本）</item>
     /// <item>composite/&lt;チャンネル&gt;.png: そのチャンネルを使うレイヤーがあるときの合成結果。straight RGBA8、PNG なので外から見ても
     /// 上下は正しい。正本から作った派生物で、読み込み時の正本にはしない。Normal は Unity 向けの出力（<see cref="Image"/>）</item>
-    /// <item>thumbnail.png: Color（無ければ最初のチャンネル）の合成を長辺 256px 以下に縮めたもの</item>
+    /// <item>thumbnail.png（根）: 今のテクスチャセットの Color（無ければ最初のチャンネル）の合成を長辺 256px 以下に縮めたもの</item>
     /// <item>view.json / brush.json / imported-original.psd（PSD から取り込んだときの原本のバイト列）</item>
     /// <item>selection.bin: 選択範囲（Core の SelectionBinary。選択が無ければ入れない。読めなければ選択なしで開いて知らせる）</item>
     /// <item>meshmap-&lt;種類&gt;.bin: ベイクした mesh map と由来（Core の MeshMapBinary。派生物で、読めなければ焼き直す。
@@ -50,18 +52,23 @@ namespace Yozolab.YoluPainter.Editor
         public static byte[] FileImage(PaintDocument document, PaintChannel channel)
         { return channel == PaintChannel.Normal ? NormalMaps.FileOutput(document) : document.Composite(channel); }
 
-        /// <summary>合成済み PNG とサムネイル。</summary>
-        public static Dictionary<string, byte[]> Composites(PaintDocument document)
+        /// <summary>合成済み PNG（と、thumbnail なら <see cref="ThumbnailName"/> のサムネイル）。</summary>
+        public static Dictionary<string, byte[]> Composites(PaintDocument document, bool thumbnail = true)
         {
             var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
             var channels = UsedChannels(document);
             foreach (var channel in channels) files.Add(CompositeName(channel), EncodePng(Image(document, channel), document.Width, document.Height));
-            if (channels.Count > 0)
-            {
-                var main = channels.Contains(PaintChannel.Color) ? PaintChannel.Color : channels[0];
-                files.Add(ThumbnailName, Thumbnail(Image(document, main), document.Width, document.Height));
-            }
+            if (thumbnail && channels.Count > 0) files.Add(ThumbnailName, Thumbnail(document));
             return files;
+        }
+
+        /// <summary>Color（無ければ最初に使っているチャンネル）の合成のサムネイルの PNG。どのチャンネルも使っていなければ null。</summary>
+        public static byte[] Thumbnail(PaintDocument document)
+        {
+            var channels = UsedChannels(document);
+            if (channels.Count == 0) return null;
+            var main = channels.Contains(PaintChannel.Color) ? PaintChannel.Color : channels[0];
+            return Thumbnail(Image(document, main), document.Width, document.Height);
         }
 
         /// <summary>左下原点の RGBA8 を PNG に。</summary>
@@ -75,7 +82,19 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>箱フィルタで長辺 <see cref="ThumbnailSize"/> 以下に縮める（アルファで重み付けし、透明画素の色を混ぜない）。</summary>
         static byte[] Thumbnail(byte[] rgba, int width, int height)
         {
-            int step = Math.Max(1, (Math.Max(width, height) + ThumbnailSize - 1) / ThumbnailSize);
+            var (pixels, w, h) = Box(rgba, width, height, ThumbnailSize);
+            return EncodePng(pixels, w, h);
+        }
+
+        /// <summary>左下原点の straight RGBA8 を、整数分の 1 の箱フィルタで長辺 maxSide 以下に縮める（アルファで重み付けし、透明画素の色を
+        /// 混ぜない）。収まっていればそのまま返す。</summary>
+        public static (byte[] rgba, int width, int height) Shrink(byte[] rgba, int width, int height, int maxSide)
+            => Math.Max(width, height) <= maxSide ? (rgba, width, height) : Box(rgba, width, height, maxSide);
+
+        /// <summary><see cref="Shrink"/> の箱フィルタ（収まっていても通す。透明画素の RGB は 0 になる）。</summary>
+        static (byte[] rgba, int width, int height) Box(byte[] rgba, int width, int height, int maxSide)
+        {
+            int step = Math.Max(1, (Math.Max(width, height) + maxSide - 1) / maxSide);
             int w = Math.Max(1, width / step), h = Math.Max(1, height / step);
             var result = new byte[w * h * 4];
             for (int y = 0; y < h; y++) for (int x = 0; x < w; x++)
@@ -90,7 +109,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (a > 0) { result[o] = (byte)(r / a); result[o + 1] = (byte)(g / a); result[o + 2] = (byte)(b / a); }
                 result[o + 3] = (byte)(a / Math.Max(1, n));
             }
-            return EncodePng(result, w, h);
+            return (result, w, h);
         }
     }
 }

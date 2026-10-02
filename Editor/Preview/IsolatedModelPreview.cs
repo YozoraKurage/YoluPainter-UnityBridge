@@ -559,6 +559,35 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 materials[i].SetColor("_Color", selected ? Color.white : sourceColors[i]);
             }
         }
+        /// <summary>スロットごとに描いたテクスチャを見せる（テクスチャセットごとの合成）。textures に無いスロットと null のスロットは
+        /// 元のマテリアルのテクスチャと色に戻す。表示だけで、元のマテリアルには触れない。</summary>
+        public void SetPaintTextures(IReadOnlyDictionary<int, Texture> textures)
+        {
+            ThrowIfDisposed();
+            for (int i = 0; i < materials.Count; i++)
+            {
+                Texture texture = null;
+                bool painted = textures != null && textures.TryGetValue(i, out texture) && texture != null;
+                materials[i].SetTexture("_MainTex", painted ? texture : sourceTextures[i] != null ? sourceTextures[i] : Texture2D.whiteTexture);
+                materials[i].SetColor("_Color", painted ? Color.white : sourceColors[i]);
+            }
+        }
+        /// <summary>スロットごとのノーマルマップ（<see cref="SetNormalTexture"/> と同じ形）。normals に無いスロットと null は使わない。</summary>
+        public void SetNormalTextures(IReadOnlyDictionary<int, Texture> normals)
+        {
+            ThrowIfDisposed();
+            for (int i = 0; i < materials.Count; i++)
+            {
+                Texture normal = null;
+                bool used = normals != null && normals.TryGetValue(i, out normal) && normal != null;
+                materials[i].SetTexture("_NormalMap", used ? normal : null);
+                materials[i].SetFloat("_UseNormalMap", used ? 1 : 0);
+            }
+        }
+        /// <summary>スロットのプレビューのマテリアルが今見せているテクスチャ（試験用。範囲外は null）。</summary>
+        internal Texture ShownTexture(int slot) => slot >= 0 && slot < materials.Count ? materials[slot].GetTexture("_MainTex") : null;
+        /// <summary>スロットのプレビューのマテリアルの照明に使っているノーマルマップ（試験用。使っていない・範囲外は null）。</summary>
+        internal Texture ShownNormal(int slot) => slot >= 0 && slot < materials.Count && materials[slot].GetFloat("_UseNormalMap") > .5f ? materials[slot].GetTexture("_NormalMap") : null;
         /// <summary>ノーマルマップ（接空間、リニアの RGB、OpenGL の Y+）をスロットの照明に使う。null で使わない。表示だけで、元のマテリアルには触れない。</summary>
         public void SetNormalTexture(Texture normalMap, int materialSlot = -1)
         {

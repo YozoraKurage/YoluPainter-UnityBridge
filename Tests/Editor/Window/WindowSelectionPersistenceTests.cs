@@ -17,7 +17,7 @@ namespace Yozolab.YoluPainter.Tests
             byte[] expected = SelectionBinary.Write(d.Selection);
             window.SaveProject(true);
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
-            Assert.That(YlpStore.Load(fake.File).Files[SelectionBinary.EntryName], Is.EqualTo(expected));
+            Assert.That(SetFiles(YlpStore.Load(fake.File).Files)[SelectionBinary.EntryName], Is.EqualTo(expected));
             var other = Open();
             try
             {
@@ -30,20 +30,21 @@ namespace Yozolab.YoluPainter.Tests
             finally { Close(other); }
             // 選択を外して保存すると、エントリーも無くなる
             d.ClearSelection(); window.SaveProject(false);
-            Assert.That(YlpStore.Load(fake.File).Files.ContainsKey(SelectionBinary.EntryName), Is.False);
+            Assert.That(SetFiles(YlpStore.Load(fake.File).Files).ContainsKey(SelectionBinary.EntryName), Is.False);
         }
 
         [Test] public void AnUnreadableSelectionOpensTheDocumentWithoutOneAndSaysSo()
         {
             var fake = UseFakeDialogs(window); fake.File = NewYlpPath();
             PaintDot(window, 200, 300); window.SaveProject(true);
-            var files = new Dictionary<string, byte[]>(YlpStore.Load(fake.File).Files) { [SelectionBinary.EntryName] = new byte[] { 1, 2, 3 } };
+            var loaded = YlpStore.Load(fake.File).Files; var set = YlpFormat.Open(loaded).Project.CurrentSet;
+            var files = new Dictionary<string, byte[]>(loaded) { [YlpFormat.SetEntry(set, SelectionBinary.EntryName)] = new byte[] { 1, 2, 3 } };
             string path = NewYlpPath("Broken.ylp"); YlpStore.Save(path, files, null, false);
             var other = Open();
             try
             {
                 UseFakeDialogs(other); other.OpenProjectAt(path);
-                Assert.That(DocumentBinary.Write(other.Document), Is.EqualTo(files[YlpArchive.NativeName]), other.StatusMessage);
+                Assert.That(DocumentBinary.Write(other.Document), Is.EqualTo(files[YlpFormat.SetEntry(set, YlpArchive.NativeName)]), other.StatusMessage);
                 Assert.That(other.Document.Selection, Is.Null);
                 Assert.That(other.StatusMessage, Does.Contain("selection was not restored"));
             }
@@ -56,9 +57,9 @@ namespace Yozolab.YoluPainter.Tests
             var d = window.Document; d.SetSelection(SelectionMask.Rectangle(d, 10, 20, 300, 200));
             Invoke(window, "OnLostFocus");
             var recovery = GenerationStore.Load(window.RecoveryRoot);
-            Assert.That(recovery.Files[SelectionBinary.EntryName], Is.EqualTo(SelectionBinary.Write(d.Selection)));
+            Assert.That(SetFiles(recovery.Files)[SelectionBinary.EntryName], Is.EqualTo(SelectionBinary.Write(d.Selection)));
             d.ClearSelection(); Invoke(window, "OnLostFocus");
-            Assert.That(GenerationStore.Load(window.RecoveryRoot).Files.ContainsKey(SelectionBinary.EntryName), Is.False);
+            Assert.That(SetFiles(GenerationStore.Load(window.RecoveryRoot).Files).ContainsKey(SelectionBinary.EntryName), Is.False);
         }
     }
 }

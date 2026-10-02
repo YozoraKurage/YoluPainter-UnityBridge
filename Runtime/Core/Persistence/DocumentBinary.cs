@@ -97,6 +97,20 @@ namespace Yozolab.YoluPainter.Core.Persistence
             }
         }
 
+        /// <summary>The document ID from the archive header (magic, version 1–<see cref="CurrentVersion"/>, ID) without reading the
+        /// layers. The .ylp format 2 → 3 migration names the texture set after it.</summary>
+        public static Guid ReadId(byte[] bytes)
+        {
+            if (bytes == null || bytes.Length < Magic.Length + 4 + 16) throw new InvalidDataException("The native document is too short to hold its header.");
+            for (int i = 0; i < Magic.Length; i++) if (bytes[i] != Magic[i]) throw new InvalidDataException("Not a dot paint archive.");
+            int version = BitConverter.ToInt32(bytes, Magic.Length);
+            if (!BitConverter.IsLittleEndian) version = (int)((uint)version >> 24 | ((uint)version >> 8 & 0xff00) | ((uint)version << 8 & 0xff0000) | (uint)version << 24);
+            if (version < 1 || version > Version) throw new InvalidDataException("Unsupported archive version; source retained unchanged.");
+            var id = new Guid(bytes.Skip(Magic.Length + 4).Take(16).ToArray());
+            if (id == Guid.Empty) throw new InvalidDataException("The native document has no ID.");
+            return id;
+        }
+
         public static PaintDocument Read(byte[] bytes)
         {
             if (bytes == null || bytes.LongLength > MaxArchiveBytes) throw new InvalidDataException("Archive is missing or exceeds its safety budget.");
