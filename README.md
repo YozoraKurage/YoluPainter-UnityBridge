@@ -7,9 +7,10 @@ Unity Editor 内の専用ウィンドウで、同じレイヤーへ 2D と 3D �
 
 ## 今あるもの
 
-- 疎な RGBA8 タイルを正本にした描画、筆圧・硬さ・間隔・消去、ストローク単位の正確な Undo/Redo/取消
+- 疎な RGBA8 タイルを正本にした描画、ストローク単位の正確な Undo/Redo/取消
+- ブラシ: 丸/画像の筆先、筆圧・硬さ・間隔・角度・丸さ・ゆらぎ・散布・紙の質感、ストローク内で不透明度を超えない濃さ。内蔵 13 種と Krita 4 既定の筆先 76 種（CC0、`BrushSets~/`）を同梱。GIMP（.gbr / .gih / .vbr）、Photoshop（.abr）、PNG の筆先を取り込める（取り込んだものは Unity プロジェクトの `UserSettings/YoluPainter/Brushes/` に保存。対応しない設定は取り込み時に一覧で知らせる）。CLIP STUDIO の .sut は未対応
 - 2D キャンバス、隔離した静的メッシュの 3D プレビュー、可視性・連結性・UV 継ぎ目を調べる表面描画
-- レイヤーの順序・名前・表示・不透明度・Normal/Multiply/Screen、チャンネル別ソース（Color / Roughness / Metallic / Height / Normal / Emission）
+- レイヤーの順序・名前・表示・不透明度・Normal/Multiply/Screen、ラスターマスク、Fill レイヤー、調整レイヤー（反転・レベル補正・色相/彩度/明度）、クリッピング、チャンネル別ソース（Color / Roughness / Metallic / Height / Normal / Emission）
 - 常駐レイヤー全面テクスチャを作らない GPU タイル合成（変わったタイルだけ再合成）、GPU が使えないときの CPU 代替
 - 原画素を保持する独自プロジェクト、チェックサム付き世代保存、保存途中の障害・外部改変の拒否
 - 制限を明確にした RGB8 ラスター PSD コーデック、未対応情報を検出した場合の編集禁止
@@ -49,4 +50,4 @@ Save As は新しい専用フォルダーを指定します。保存内容は `g
 
 ## まだ無い主要機能
 
-マスク/クリッピング、グループ、調整レイヤー編集、塗りつぶし/選択/変形、Generator/Filter の実行と UI、mesh map ベイク、編集可能な 3D パス、スキン/ポーズ/BlendShape、lilToon 専用出力、ICC/高 bit PSD、GPU 正本ブラシ、Jobs/Burst、ディスク退避、4K の実測性能保証。どれも最終スコープから外していません。
+グループ、合成モードの拡充、トーンカーブ等の調整、PSD のマスク/調整/クリッピング、塗りつぶし/選択/変形、プロジェクトごとの設定画面、Generator/Filter の実行と UI、mesh map ベイク、編集可能な 3D パス、スキン/ポーズ/BlendShape、lilToon 専用出力、ICC/高 bit PSD、GPU 正本ブラシ、Jobs/Burst、ディスク退避、4K の実測性能保証。どれも最終スコープから外していません。

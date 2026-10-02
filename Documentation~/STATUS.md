@@ -6,8 +6,8 @@
 
 | 仕様 | 今回の現物 | 検証 | 残り / ゲート |
 |---|---|---|---|
-| 1 制作フロー・専用画面 | EditorWindow、2D/3D、ブラシ/レイヤー/保存UI、隔離スクリプト非生成プレビュー、デモキューブ | Unity で WindowTests 12 件（入力・取消・Undo・3D 描画・複数ウィンドウ・後片付け・元アセット非変更）、プレビュー所有権 3 件 | 実Unity UI、操作復帰、UV診断の拡大、マルチTexture Set |
-| 2 ブラシ・入力 | 円形/硬さ/間隔/Opacity/Flow/消去、サイズ・濃度・流量の圧力割当、UI圧力カーブ/JSONプリセット、2Dズーム/パン | 純C#サンプリング・圧力・Undo、入力UI未実行 | 実ペン、補正/入り抜き、画像筆先、混色、水彩、散布、定規、選択、塗潰し、勾配、変形、キャンバス回転 |
+| 1 制作フロー・専用画面 | EditorWindow、2D/3D、ブラシ/レイヤー/保存UI、隔離スクリプト非生成プレビュー、デモキューブ | Unity で WindowTests 29 件（入力・取消・Undo・3D 描画・複数ウィンドウ・後片付け・元アセット非変更・保存まわり・マスク・ブラシの取り込み/削除/保存復元）、プレビュー所有権 3 件 | 実Unity UI、操作復帰、UV診断の拡大、マルチTexture Set、プロジェクトごとの設定画面 |
+| 2 ブラシ・入力 | 丸/画像の筆先（複数の筆先をランダム/順番に）、硬さ/間隔/角度/丸さ/進行方向、ストローク内の濃さ（流量で溜まり不透明度×筆圧が天井）、サイズ・角度・丸さ・不透明度・流量のゆらぎ、散布/数、紙の質感、サイズ・濃度・流量の圧力割当、UI圧力カーブ/JSONプリセット（schema 2）、2Dズーム/パン。内蔵 13 種、同梱 Krita 4 既定の筆先 76 種（CC0）、取り込み: GIMP .gbr/.gih/.vbr、Photoshop .abr（v1/2、v6+ の筆先と設定）、PNG。取り込んだブラシはプロジェクトの UserSettings に保存し、対応しない設定はブラシごとに知らせる | Unity EditMode（BrushTests・GimpBrushTests・PhotoshopBrushTests・BrushLibraryTests、ウィンドウからの取り込み）。.abr はテスト内で組み立てたファイルだけで、Photoshop 実機で作ったファイルは未確認 | 実ペン、補正/入り抜き、混色、水彩、デュアルブラシ、カラーダイナミクス、パターン（.abr の patt）、筆圧以外のコントロール（フェード・傾き等）、CLIP STUDIO .sut（筆先が保護されたコンテナ内のため未対応）、Krita .kpp、定規、選択、塗潰し、勾配、変形、キャンバス回転 |
 | 3 レイヤー | 追加/削除/移動/名前/可視性/不透明度、Normal/Multiply/Screen、構造Undo（スライダー操作は 1 つにまとめる）、ラスターマスク（隠す/見せる・有効・反転・濃度、全チャンネル共有）、Fill レイヤー、調整レイヤー（反転・レベル補正・色相/彩度/明度、アルファは変えない）、クリッピング（Photoshop 既定のグループ合成と同じ考え方。調整・Fill もクリッピング可） | Unity EditMode（MaskTests・FillTests・AdjustmentTests・ClippingTests・ウィンドウからのマスク描画） | グループ、複製/統合、マスクのぼかし/表示/選択から作成、各ロック、トーンカーブ等の調整、合成モードの拡充（オーバーレイ等）、複数選択、コピー貼付、PSD固有演算、PSD のマスク読み書き |
 | 4 マルチチャンネル/lilToon | Color/Roughness/Metallic/Height/Normal/Emissionの分離ソース、選択チャンネル表示/描画、PNG/PSD出力 | 純C#分離、PSD橋渡し | 同時複数チャンネルの一筆、チャンネル別設定、専用Normal合成、Height派生、lilToon版固定/アダプター/適用。現在は中立シェーダー |
 | 5 手続き効果 | Fill レイヤー（チャンネルごとの一定値を正本に、タイルをその場で生成。マスクと組み合わせ）、型付きノード/依存検証の基盤 | Fill の合成・Undo・変更追跡・保存、DAG型・順序テスト | 画像/手続き入力の Fill と UV 変換、mask/content効果スタック、Filter実行、Generator実行、プリセット/版/シード |
@@ -34,10 +34,11 @@
 
 ## 次の実装順
 
-1. ユーザーの実環境（Windows の Unity、実 GPU、ペンタブ）での G0 確認、ウィンドウの保存 UI の実地確認、4K の実メモリ計測
-2. 構造変更時の部分再合成、GPU筆跡の非同期tile readback正本同期、BVH/Jobsで先にボトルネックを減らす
-3. mask/Fill/selectionと主要native Filter、永続DAG/Anchor、PSD再読込競合UI
-4. skinned preview/pose/BlendShape、model fingerprint、編集可能surface pathと再結合
-5. Generator/mesh map bake、lilToon版固定アダプター、PSDの型別編集/保持/合成互換拡張
+1. ユーザーの実環境（Windows の Unity、実 GPU、ペンタブ）での G0 確認、ウィンドウの保存 UI の実地確認、4K の実メモリ計測、実際の .abr / GIMP ブラシでの取り込み確認
+2. プロジェクトごとの設定（Project Settings のページ。共有する設定は ProjectSettings、個人の設定とブラシ置き場は UserSettings）
+3. 構造変更時の部分再合成、GPU筆跡の非同期tile readback正本同期、BVH/Jobsで先にボトルネックを減らす
+4. selectionと主要native Filter、永続DAG/Anchor、PSD再読込競合UI
+5. skinned preview/pose/BlendShape、model fingerprint、編集可能surface pathと再結合
+6. Generator/mesh map bake、lilToon版固定アダプター、PSDの型別編集/保持/合成互換拡張
 
 対象Unity 2022.3はユーザー確認済みです。正確なpatch、OS、ペンタブ、lilToon版の確認でテスト対象をさらに絞れます。未対応要望を削除していません。
