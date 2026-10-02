@@ -176,7 +176,7 @@ namespace Yozolab.YoluPainter.Core
 
     /// <summary>Single-writer CPU raster document. Layers are bottom-to-top. Histories store exact changed tile states,
     /// never brush replay or a full canvas copy. Structural edits and strokes cannot interleave.</summary>
-    public sealed class PaintDocument
+    public sealed partial class PaintDocument
     {
         private readonly List<PaintLayer> layers = new List<PaintLayer>();
         private readonly List<IHistoryCommand> undo = new List<IHistoryCommand>();

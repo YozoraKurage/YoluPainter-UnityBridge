@@ -16,6 +16,9 @@ namespace Yozolab.YoluPainter.Core
         private readonly Dictionary<TileCoord, TileStorage> before = new Dictionary<TileCoord, TileStorage>();
         // Accumulated stroke coverage (0..1) per touched pixel, tile-local row-major. Freed with the stroke.
         private readonly Dictionary<TileCoord, float[]> washes = new Dictionary<TileCoord, float[]>();
+        /// <summary>The document's selection when the stroke began (null = everything). Results are mixed back toward the
+        /// pixel before the stroke by the selected amount, so a half-selected pixel never changes more than halfway.</summary>
+        private readonly SelectionMask selection;
         private bool finished, hasSample;
         private BrushSample previous;
         private double distanceSinceStamp;
@@ -30,7 +33,8 @@ namespace Yozolab.YoluPainter.Core
         public int ChangedTileCount { get { return before.Count; } }
         public long RollbackBytes { get { return rollbackBytes; } }
         internal BrushStroke(PaintDocument document, SparseTileSurface surface, BrushSettings settings)
-        { this.document = document; this.surface = surface; this.settings = settings; TransactionId = Guid.NewGuid(); random = new Random(settings.Seed); }
+        {
+            selection = document.Selection; this.document = document; this.surface = surface; this.settings = settings; TransactionId = Guid.NewGuid(); random = new Random(settings.Seed); }
 
         public void Add(BrushSample sample)
         {
@@ -163,6 +167,8 @@ namespace Yozolab.YoluPainter.Core
         private bool ApplyPixelInternal(int x, int y, double coverage, double pressure, double opacityScale = 1, double flowScale = 1)
         {
             if (x < 0 || y < 0 || x >= surface.Width || y >= surface.Height) return false;
+            double selected = selection == null ? 1 : selection.Coverage(x, y);
+            if (selected <= 0) return false;
             double ceiling = settings.Opacity * opacityScale * (settings.PressureOpacity ? pressure : 1);
             double flow = coverage * settings.Flow * flowScale * (settings.PressureFlow ? pressure : 1);
             if (flow <= 0 || ceiling <= 0) return false;
@@ -187,6 +193,7 @@ namespace Yozolab.YoluPainter.Core
                 next = alpha == 0 ? Rgba32.Transparent : new Rgba32(start.R, start.G, start.B, alpha);
             }
             else next = CpuCompositor.Blend(start, settings.Color, Math.Min(1, accumulated));
+            if (selected < 1) next = CpuCompositor.Fade(start, next, selected);
             if (next == surface.GetPixel(x, y)) return false;
             return surface.SetPixelInternal(x, y, next);
         }
