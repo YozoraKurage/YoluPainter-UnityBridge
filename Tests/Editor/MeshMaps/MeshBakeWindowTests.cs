@@ -25,6 +25,29 @@ namespace Yozolab.YoluPainter.Tests
     /// </summary>
     public sealed class MeshBakeWindowTests
     {
+        /// <summary>焼く条件はウィンドウの状態としてシリアライズされ、ドメインのリロード（ここでは状態の書き出しと読み戻しで代える）で既定に戻らない。</summary>
+        [Test] public void TheBakeSettingsSurviveTheWindowsSerialization()
+        {
+            var w = ScriptableObject.CreateInstance<TexturePaintWindow>(); var copy = ScriptableObject.CreateInstance<TexturePaintWindow>();
+            try
+            {
+                var s = w.MeshBakeSettings;
+                s.Padding = 7; s.Antialiasing = 3; s.AoSamples = 33; s.AoMaxDistance = 0.25; s.Maps = new[] { Yozolab.YoluPainter.Core.MeshMaps.MeshMapKind.Curvature };
+                s.Occluders = Yozolab.YoluPainter.Core.MeshMaps.MeshOccluders.TargetSlotOnly; s.ReferenceMatchByName = true;
+                string json = UnityEditor.EditorJsonUtility.ToJson(w);
+                Assert.That(json, Does.Contain("meshBakeSettings"));
+                UnityEditor.EditorJsonUtility.FromJsonOverwrite(json, copy);
+                var r = copy.MeshBakeSettings;
+                Assert.That((r.Padding, r.Antialiasing, r.AoSamples, r.AoMaxDistance, r.Occluders, r.ReferenceMatchByName), Is.EqualTo((7, 3, 33, 0.25, Yozolab.YoluPainter.Core.MeshMaps.MeshOccluders.TargetSlotOnly, true)));
+                Assert.That(r.Maps, Is.EqualTo(new[] { Yozolab.YoluPainter.Core.MeshMaps.MeshMapKind.Curvature }));
+                Assert.That(r.KindKey(Yozolab.YoluPainter.Core.MeshMaps.MeshMapKind.AmbientOcclusion), Is.EqualTo(s.KindKey(Yozolab.YoluPainter.Core.MeshMaps.MeshMapKind.AmbientOcclusion)), "the same conditions after the round trip");
+            }
+            finally
+            {
+                foreach (var x in new[] { w, copy }) { string recovery = x.RecoveryRoot; Object.DestroyImmediate(x); if (System.IO.Directory.Exists(recovery)) System.IO.Directory.Delete(recovery, true); }
+            }
+        }
+
         static string Folder => Path.GetFullPath(Path.Combine("Logs", "YoluPainterSnapshots", "mesh-bake"));
         /// <summary>窓の最小の大きさと、広い大きさ。</summary>
         static readonly (int Width, int Height)[] Sizes = { ((int)MeshBakeWindow.MinWidth, (int)MeshBakeWindow.MinHeight), (1100, 760) };

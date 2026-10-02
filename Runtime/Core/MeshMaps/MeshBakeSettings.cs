@@ -47,7 +47,9 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
     public enum MeshOcclusionFalloff { None = 0, Linear = 1 }
 
     /// <summary>ベイクの条件。距離はすべてモデル全体の境界箱の対角線を 1 とする相対値（モデルの大きさと単位に依らない）。
-    /// 種類ごとの条件の文字列（<see cref="KindKey"/>）は由来に記録し、違う条件の結果を同じものとして使わない。</summary>
+    /// 種類ごとの条件の文字列（<see cref="KindKey"/>）は由来に記録し、違う条件の結果を同じものとして使わない。
+    /// 公開のフィールドだけでできていて [Serializable] なので、エディタはウィンドウの状態としてそのまま持てる（ドメインのリロードをまたぐ）。</summary>
+    [Serializable]
     public sealed class MeshBakeSettings
     {
         public const int MaxSize = 8192, MaxPadding = 64, MaxSamples = 1024;

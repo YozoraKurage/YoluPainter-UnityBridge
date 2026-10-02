@@ -41,7 +41,8 @@ namespace Yozolab.YoluPainter.Editor
         IsolatedModelPreview highPolyPreview; GameObject highPolyLoaded; Vector3 highPolyOrigin; Matrix4x4 highPolyMatrix; string highPolyNote;
         SurfaceGeometry highPolyInputFor; MeshBakeInput highPolyInput;
 
-        MeshBakeSettings meshBakeSettings = new MeshBakeSettings();
+        /// <summary>焼く条件（プロジェクトで 1 つ）。ウィンドウの状態としてシリアライズし、スクリプトのコンパイル（ドメインのリロード）をまたいで残す。</summary>
+        [SerializeField] MeshBakeSettings meshBakeSettings = new MeshBakeSettings();
         MeshMapView meshMapView = MeshMapView.None; float meshMapOpacity = 1;
         Texture2D meshMapOverlay; long overlayRevision = -1; MeshMapView overlayView = MeshMapView.None;
         SurfaceGeometry meshBakeInputFor; MeshBakeInput meshBakeInput;
