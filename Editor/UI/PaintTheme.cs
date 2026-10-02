@@ -54,7 +54,7 @@ namespace Yozolab.YoluPainter.Editor
         static Color Hex(int rgb) => new Color(((rgb >> 16) & 255) / 255f, ((rgb >> 8) & 255) / 255f, (rgb & 255) / 255f, 1);
     }
 
-    /// <summary>Editor/Icons の Material Symbols（Apache License 2.0、白の 48 px）。名前は Material Symbols の名前。</summary>
+    /// <summary>Editor/UI/Icons のアイコン（Fluent UI System Icons と Phosphor、どちらも MIT。白の 48 px）。名前は Documentation~/tools/icons.txt の使う名前。</summary>
     internal static class PaintIcons
     {
         static readonly Dictionary<string, Texture2D> s_cache = new Dictionary<string, Texture2D>();
@@ -70,22 +70,7 @@ namespace Yozolab.YoluPainter.Editor
             return texture;
         }
 
-        /// <summary>アイコンのフォルダ（アセットのパス）。ローカライズの目印のスクリプトから辿る（パッケージがどこに入っても見つかる）。</summary>
-        static string Folder
-        {
-            get
-            {
-                if (s_folder != null) return s_folder;
-                var probe = ScriptableObject.CreateInstance<LocalizationAnchor>();
-                try
-                {
-                    var script = MonoScript.FromScriptableObject(probe);
-                    string path = script == null ? null : AssetDatabase.GetAssetPath(script); // .../Editor/Localization/LocalizationAnchor.cs
-                    s_folder = path == null ? "Packages/net.yozolab.yolupainter/Editor/Icons" : Path.GetDirectoryName(Path.GetDirectoryName(path)).Replace('\\', '/') + "/Icons";
-                }
-                finally { Object.DestroyImmediate(probe); }
-                return s_folder;
-            }
-        }
+        /// <summary>アイコンのフォルダ（アセットのパス）。</summary>
+        static string Folder => s_folder ?? (s_folder = PackagePaths.Asset("Editor/UI/Icons"));
     }
 }

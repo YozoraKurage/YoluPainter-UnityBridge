@@ -1,7 +1,7 @@
 # アイコンの対応表: <使う名前> <セット> <そのセットの名前>
 # fluent   = Microsoft Fluent UI System Icons（MIT。24 px の regular、ツールは filled も）
 # phosphor = Phosphor Icons（MIT。regular、ツールは fill も）
-# UI のアイコンは Editor/Icons/<使う名前>.png（白・48 px）。tools/ で始まるものはツールのアイコン（Editor/Icons/Tools/<id>.png と
+# UI のアイコンは Editor/UI/Icons/<使う名前>.png（白・48 px）。tools/ で始まるものはツールのアイコン（Editor/UI/Icons/Tools/<id>.png と
 # 選択中の <id>_selected.png）で、利用者やプラグインが差し替えられる（Editor/UI/PainterToolIcons.cs）。4 列目は選択中の版の太さ
 # （既定は fluent の filled・phosphor の fill。塗ると形が分からなくなるものは bold）。
 add fluent add

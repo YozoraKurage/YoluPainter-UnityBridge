@@ -96,5 +96,22 @@ namespace Yozolab.YoluPainter.Editor
             if (suggestedFolder != null) return (suggestedFolder, suggestedName ?? "Texture");
             return (Application.dataPath, "Texture");
         }
+
+        void LoadDemoCube() { model = null; preview.LoadDemoMesh(); materialSlot = 0; repaintPixels = true; message = L.Tr("Loaded the tool's seam-test cube. No scene or source asset changed."); }
+
+        const int ModelPickerId = 0x59500001;
+        /// <summary>モデルの選択（オブジェクトピッカーで選んだとき）。</summary>
+        void HandleModelPicker(Event e)
+        {
+            if (e.type != EventType.ExecuteCommand || EditorGUIUtility.GetObjectPickerControlID() != ModelPickerId) return;
+            if (e.commandName != "ObjectSelectorClosed" && e.commandName != "ObjectSelectorUpdated") return;
+            if (EditorGUIUtility.GetObjectPickerObject() is GameObject picked && picked != model) SetModel(picked);
+            e.Use();
+        }
+        internal void SetModel(GameObject next)
+        {
+            model = next;
+            TryAction(() => { preview.Load(model); materialSlot = Mathf.Clamp(materialSlot, 0, Mathf.Max(0, preview.MaterialSlotCount - 1)); message = string.Join("; ", preview.Diagnostics); repaintPixels = true; });
+        }
     }
 }

@@ -101,13 +101,13 @@ namespace Yozolab.YoluPainter.Tests
 
         // ───────── 部品だけで描いていること ─────────
 
-        static readonly string[] ToolPanelFiles = { "TexturePaintWindow.ToolPanels.cs", "TexturePaintWindow.Stroke.cs", "TexturePaintWindow.BrushDynamics.cs", "TexturePaintWindow.Paths.cs", "TexturePaintWindow.Surface3D.cs" };
+        static readonly string[] ToolPanelFiles = { "Window/Tools/TexturePaintWindow.ToolPanels.cs", "Window/Tools/TexturePaintWindow.Stroke.cs", "Window/Tools/TexturePaintWindow.BrushDynamics.cs", "Window/Tools/TexturePaintWindow.Paths.cs", "Window/Model/TexturePaintWindow.Surface3D.cs" };
         /// <summary>Unity の標準の見た目の部品（と、それで描く区画）。EditorGUI.DrawRect はパスの印を描くだけなので除く。</summary>
         static readonly Regex UnityControls = new Regex(@"\b(?:EditorGUILayout|GUILayout|EditorStyles)\.|\bLegacySection\s*\(|\bEditorGUI\.(?!DrawRect\b)|\bGUI\.(?:Button|Toggle|TextField|TextArea|HorizontalSlider|VerticalSlider|Box|Label|Toolbar|SelectionGrid|BeginScrollView)\b");
 
         [Test] public void TheToolPanelsUseOnlyThePaintKit()
         {
-            string editor = Path.GetDirectoryName(PoCatalog.Folder());
+            string editor = PackagePaths.Physical("Editor");
             var found = new List<string>();
             foreach (var file in ToolPanelFiles)
             {

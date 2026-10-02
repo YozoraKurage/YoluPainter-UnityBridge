@@ -17,7 +17,7 @@ namespace Yozolab.YoluPainter.Editor
     /// </summary>
     internal sealed class GpuMeshBakeRayTracer : IMeshBakeRayTracer
     {
-        public const string ShaderPath = "Packages/net.yozolab.yolupainter/Shaders/MeshBake.compute";
+        public static string ShaderPath => PackagePaths.Asset("Shaders/MeshBake.compute");
         /// <summary>1 回の Dispatch で処理するサンプルの数の上限（バッファの大きさ）。</summary>
         public const int DispatchJobs = 65536;
         /// <summary>

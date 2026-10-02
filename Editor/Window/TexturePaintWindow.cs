@@ -1,0 +1,181 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using Yozolab.YoluPainter.Core;
+using Yozolab.YoluPainter.Core.Persistence;
+using Yozolab.YoluPainter.Editor.Preview;
+using UnityEditor;
+using UnityEngine;
+
+namespace Yozolab.YoluPainter.Editor
+{
+    /// <summary>Single IMGUI input path: no duplicate pointer/mouse event subscription.</summary>
+    public sealed partial class TexturePaintWindow : EditorWindow
+    {
+        [SerializeField] string recoveryRoot;
+        [SerializeField] GameObject model;
+        [SerializeField] BrushState brush = new BrushState();
+        PaintDocument document;
+        Guid selectedLayer;
+        PaintChannel channel;
+        BrushStroke stroke;
+        TileGpuCompositor compositor;
+        IsolatedModelPreview preview;
+        string projectPath, projectToken, recoveryToken, message = "";
+        long renderedRevision = -1, savedRevision = -1, recoveredRevision = -1;
+        bool repaintPixels = true, surfaceStroke, externalConflict, editMask;
+        Vector2 previousPointer, layerScroll, canvasPan;
+        float canvasZoom = 1, previousPressure = 1;
+        /// <summary>キャンバスでの左ボタンの働き。</summary>
+        internal enum PaintTool { Brush, Fill, Gradient, SelectRectangle, SelectEllipse, Lasso, MagicWand, Move, Path, Eyedropper }
+        PaintTool tool;
+        int materialSlot, resolution = 1024;
+        double lastRecovery, lastExternalCheck;
+        byte[] importedOriginal;
+        /// <summary>このドキュメントを取り込んだ PSD のパス（取り込んでからまだ .ylp に保存していなければ保存先の提案に使う）。</summary>
+        string importedPsdPath;
+        Rect canvasRect, surfaceRect;
+
+        [MenuItem("YozoLab/YoluPainter (Prototype)")]
+        public static void Open() => GetWindow<TexturePaintWindow>("Texture Painter");
+
+        // EditMode テスト用の参照口。入力は SendEvent で本物の経路を通す。
+        internal PaintDocument Document => document;
+        internal bool IsStroking => stroke != null;
+        internal IsolatedModelPreview Preview => preview;
+        internal TileGpuCompositor Compositor => compositor;
+        internal Rect SurfaceRect => surfaceRect;
+        internal string StatusMessage => message;
+        internal string RecoveryRoot => recoveryRoot;
+        /// <summary>開いている .ylp の絶対パス。まだ保存していなければ null。</summary>
+        internal string ProjectPath => projectPath;
+        internal bool IsSaved => document != null && document.Revision == savedRevision;
+        internal bool HasExternalConflict => externalConflict;
+        internal PaintChannel Channel { get => channel; set { channel = value; repaintPixels = true; } }
+        /// <summary>true のあいだ、ストロークは選択レイヤーの画素ではなくマスクに入る。</summary>
+        internal bool EditMask { get => editMask; set => editMask = value; }
+        internal Guid SelectedLayer { get => selectedLayer; set => selectedLayer = value; }
+        /// <summary>モーダルダイアログの差し替え口（テスト用）。</summary>
+        internal IPainterDialogs Dialogs { get; set; } = EditorPainterDialogs.Instance;
+        /// <summary>PaintAt の 2D 写像の逆。ピクセル中心 (x+0.5, y+0.5) の GUI 座標を返す。</summary>
+        internal Vector2 PixelToGui(int x, int y)
+        {
+            var image = ImageRect();
+            return new Vector2(image.x + (x + .5f) / document.Width * image.width, image.y + (1 - (y + .5f) / document.Height) * image.height);
+        }
+
+        void OnEnable()
+        {
+            minSize = new Vector2(980,640); wantsMouseMove = true; L.LanguageChanged += Repaint; PainterToolIcons.Changed += Repaint;
+            compositor = new TileGpuCompositor(); preview = new IsolatedModelPreview();
+            if (String.IsNullOrEmpty(recoveryRoot)) recoveryRoot=Path.GetFullPath(Path.Combine("Library","YoluPainter","recovery-"+Guid.NewGuid().ToString("N")));
+            try
+            {
+                if (File.Exists(Path.Combine(recoveryRoot,"current")))
+                {
+                    var snapshot=GenerationStore.Load(recoveryRoot); document=DocumentBinary.Read(snapshot.Files["document.utpaint"]); recoveryToken=snapshot.Token;
+                    var recoveryNotes=new List<string>(); RestoreSavedSelection(snapshot.Files,recoveryNotes);
+                    message="Recovered native source from the last durable checkpoint. Unsaved edits after that checkpoint may be missing."+(recoveryNotes.Count>0?" "+String.Join(" ",recoveryNotes):"");
+                }
+            }
+            catch (Exception ex) { message="Recovery was not loaded: "+ex.Message; }
+            resolution=PainterSettings.DefaultResolution;
+            if (document==null) CreateDocument(resolution);
+            selectedLayer=document.Layers.Count>0?document.Layers[document.Layers.Count-1].Id:Guid.Empty;
+            BindDocument();
+            if (model!=null) TryAction(()=>preview.Load(model));
+            EditorApplication.update+=Tick; PainterSettings.Changed+=SettingsChanged;
+            AssemblyReloadEvents.beforeAssemblyReload+=BeforeReload;
+            EditorApplication.playModeStateChanged+=PlayModeChanged;
+        }
+        /// <summary>設定のメモリ予算をドキュメントに入れる。今の画素がすでに予算を超えているときは画素を捨てず、予算を今の量まで
+        /// 広げてそう知らせる。</summary>
+        /// <returns>予算を広げたときの知らせ。問題なければ null。</returns>
+        internal string ApplyBudgets()
+        {
+            if(document==null||stroke!=null)return null;
+            if(compositor!=null)compositor.ResidentBudgetBytes=PainterSettings.GpuCacheBytes;
+            document.MinimumUndoSteps=PainterSettings.MinUndoSteps; document.UndoBudgetBytes=PainterSettings.UndoBudgetBytes; document.ActiveStrokeBudgetBytes=PainterSettings.StrokeBudgetBytes;
+            long source=PainterSettings.SourceBudgetBytes;
+            if(source>=document.AllocatedBytes){document.SourceBudgetBytes=source;return null;}
+            document.SourceBudgetBytes=document.AllocatedBytes;
+            return "This document already holds "+(document.AllocatedBytes>>20)+" MiB of layer pixels, above the "+(source>>20)+" MiB budget in Project Settings > YoluPainter; nothing more can be added until the budget is raised.";
+        }
+        void SettingsChanged(){var note=ApplyBudgets();if(note!=null)message=note;Repaint();}
+        internal static void OpenSettings()=>SettingsService.OpenProjectSettings(PainterSettingsProvider.Path);
+        void BindDocument()
+        {
+            var budgetNote=ApplyBudgets(); if(budgetNote!=null)message=budgetNote;
+            document.HistoryTrimming += bytes => message="Undo budget reached; dropping "+(bytes/1024)+" KiB of the oldest history (the newest "+document.MinimumUndoSteps+" steps are always kept). Current source remains intact.";
+            repaintPixels=true; renderedRevision=-1; recoveredRevision=-1;
+            ClearMeshMaps();
+        }
+        void CreateDocument(int size)
+        {
+            document=new PaintDocument(size,size,128,PainterSettings.UndoBudgetBytes);
+            ApplyBudgets();
+            selectedLayer=document.AddLayer(L.Tr("Layer")+" 1").Id; document.ClearHistory(); pristineRevision=document.Revision;
+            projectPath=null; projectToken=null; savedRevision=-1; importedOriginal=null; importedPsdPath=null; externalConflict=false; canvasZoom=1; canvasPan=Vector2.zero;
+        }
+        void OnLostFocus() { FinishStroke(false); CancelToolDrag(); preview?.CancelNavigation(); SaveRecovery(); }
+        void BeforeReload() { FinishStroke(false); preview?.CancelNavigation(); SaveRecovery(); }
+        void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ FinishStroke(false); SaveRecovery(); } }
+        void OnDisable()
+        {
+            FinishStroke(false); preview?.CancelNavigation(); SaveRecovery();
+            EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
+            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeThumbnails(); DisposeColorPanel(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
+            if(selectionOverlay!=null){DestroyImmediate(selectionOverlay);selectionOverlay=null;overlayFor=null;}
+        }
+        void Tick()
+        {
+            if(document==null) return;
+            if(stroke==null && document.Revision!=recoveredRevision && EditorApplication.timeSinceStartup-lastRecovery>PainterSettings.RecoveryIntervalSeconds) SaveRecovery();
+            if(!String.IsNullOrEmpty(projectPath) && EditorApplication.timeSinceStartup-lastExternalCheck>3) CheckExternalChange();
+            // 描いていないあいだは GPU の写しを手放す（Update が来ないと合成器は古い写しを捨てられない）
+            if(compositor!=null && compositor.ResidentBytes>0 && EditorApplication.timeSinceStartup-lastComposite>GpuCacheIdleSeconds) compositor.ReleaseResidentCaches();
+        }
+        internal const double GpuCacheIdleSeconds=120;
+        double lastComposite;
+        internal void CheckExternalChange()
+        {
+            if(String.IsNullOrEmpty(projectPath)) return;
+            lastExternalCheck=EditorApplication.timeSinceStartup;
+            externalConflict=YlpStore.HasExternalChange(projectPath,projectToken);
+            if(externalConflict) message="The saved file changed outside this window. Normal save is blocked; use Save As or explicitly reopen after reviewing local edits.";
+        }
+        void OnGUI()
+        {
+            if(document==null) return;
+            var e=Event.current; var pointerAtStart=e.mousePosition; // 途中のクリップや 3D の描画の後でも同じ位置を使う
+            if(e.type==EventType.MouseMove) Repaint(); // マウスの乗った部品の見た目
+            // スライダーのドラッグ中の変更は 1 つの Undo にまとめる。離したところで区切る。
+            if(e.rawType==EventType.MouseUp) document.EndCoalescing();
+            HandleModelPicker(e);
+            HandleKeys(e);
+            if(e.type==EventType.KeyDown&&HandleToolKeys(e))return;
+            if(repaintPixels || renderedRevision!=document.Revision)
+            {
+                TryAction(()=> { compositor.Update(document,channel); UpdateNormalOutput(); preview.SetPaintTexture(DisplayTexture, materialSlot); });
+                TryAction(UpdatePreviewLighting);
+                lastComposite=EditorApplication.timeSinceStartup;
+                renderedRevision=document.Revision; repaintPixels=false;
+            }
+            LayoutShell();
+            PaintGui.Fill(WindowRect,PaintTheme.WindowBg);
+            if(canvasRect.width>0) DrawCanvas();
+            if(surfaceRect.width>0 && e.type==EventType.Repaint){ PaintGui.Fill(surfaceRect,PaintTheme.CanvasBg); preview.Render(surfaceRect); DrawPathMarkers(); }
+            DrawShell();
+            if(surfaceRect.width>0) DrawSurfaceBrushCursor(pointerAtStart); // 3D の描画の後に GUI の状態を戻してから重ねる
+            HandleCanvasInput(e);
+        }
+
+        internal BrushState Brush { get => brush; set => brush = value; }
+        internal PaintTool Tool { get => tool; set { CancelToolDrag(); tool = value; } }
+
+        void TryAction(Action action)
+        {
+            try{action();}catch(Exception ex){if(stroke!=null)FinishStroke(false);message=ex.Message;Debug.LogWarning("Texture Painter: "+ex.Message);}
+        }
+    }
+}

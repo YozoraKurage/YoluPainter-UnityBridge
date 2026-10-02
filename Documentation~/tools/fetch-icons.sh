@@ -1,9 +1,9 @@
 #!/bin/bash
-# icons.txt の対応表のとおりにアイコンを取ってきて、Editor/Icons に白・透明背景・48 px の PNG として置く。
+# icons.txt の対応表のとおりにアイコンを取ってきて、Editor/UI/Icons に白・透明背景・48 px の PNG として置く。
 # 要るもの: curl、rsvg-convert（librsvg2-bin）。.meta は Unity で取り込み設定（GUI 用・ミップマップ無し・圧縮無し）を付けて作る。
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-out="$here/../../Editor/Icons"
+out="$here/../../Editor/UI/Icons"
 size="${ICON_SIZE:-48}"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 FLUENT=https://raw.githubusercontent.com/microsoft/fluentui-system-icons/main/assets

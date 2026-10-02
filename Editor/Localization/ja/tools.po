@@ -1,5 +1,5 @@
 # Japanese translation for YoluPainter: the tool part of the Properties panel
-# (TexturePaintWindow.ToolPanels.cs, .Stroke.cs, .BrushDynamics.cs, .Paths.cs, .Surface3D.cs).
+# (Editor/Window/Tools: TexturePaintWindow.ToolPanels.cs, .Stroke.cs, .BrushDynamics.cs, .Paths.cs; Editor/Window/Model: .Surface3D.cs).
 # Terms follow the Japanese Photoshop brush settings and CLIP STUDIO PAINT (手ぶれ補正, 入り抜き).
 # Short generic words carry a msgctxt (brush, selection, transform, path, 3D pick) so that they never collide with
 # another catalog in this folder and can be translated for the narrow panel.

@@ -93,7 +93,7 @@ namespace Yozolab.YoluPainter.Tests
             var catalog = PoCatalog.Load("ja");
             Assert.That(catalog, Is.Not.Empty, "ja.po did not load; the rest of this test would prove nothing");
             var wanted = new Dictionary<string, string>(); // キー → どこで使っているか
-            string editor = Path.GetDirectoryName(PoCatalog.Folder());
+            string editor = PackagePaths.Physical("Editor");
             foreach (var file in Directory.GetFiles(editor, "*.cs", SearchOption.AllDirectories))
             {
                 string text = File.ReadAllText(file), name = Path.GetFileName(file);

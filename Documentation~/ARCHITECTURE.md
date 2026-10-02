@@ -1,5 +1,18 @@
 # Architecture and invariants
 
+## Source layout
+
+Folders group files by concern; namespaces follow folders only where they already did (`Core.Brushes`, `Core.MeshMaps`, `Core.Paths`, `Core.Persistence`, `Core.Psd`, `Editor.Preview`, `Editor.LilToon`, `Editor.LilToonApply`). Everything else in `Editor` is `Yozolab.YoluPainter.Editor`.
+
+- `Runtime/Core` — the engine-independent document, brush, compositing, selection and filter code (see `Runtime/Core/README.md`).
+- `Editor/Window` — `TexturePaintWindow`, one partial class split by concern: the class file holds state, lifecycle and `OnGUI`; `Keys` the shortcuts; `Shell/` the frame (layout, menu bar, options bar, tool strip, status bar, dock columns and `DockLayout`, the Properties panel host); `Panels/` the dock panels (color, texture set, layers, thumbnails); `Canvas/` the 2D canvas view, input routing and brush cursor; `Tools/` brush settings and strokes, canvas tools, selection, transform, paths and the tool sections of Properties; `Layers/` the layer, mask, filter and normal sections; `Model/` the 3D view (surface tools, lighting, pose, mesh maps, lilToon); `Project/` new project, project configuration and file I/O (.ylp, recovery, PSD, image export).
+- `Editor/UI` — the paint UI kit (`PaintTheme`, `PaintGui`, `PaintIcons`, `PainterToolIcons`, `OffscreenGui`, dialogs) and `UI/Icons`.
+- `Editor/Localization` — `L` and the gettext catalogs.
+- `Editor/Preview` — the isolated model preview and surface geometry. `Editor/LilToon`, `Editor/LilToonApply` — lilToon inspection and the explicit apply command.
+- `Editor/Gpu` — the tile compositor, GPU mesh baking, normal output and the GPU brush probe. `Editor/Brushes` — brush tips, the brush library and importers. `Editor/Ylp` — the .ylp importer and archive content. `Editor/Settings` — project settings.
+- `Editor/PackagePaths` finds the package root (package info, else the Editor assembly definition), so icons, catalogs and shaders load wherever the package is installed.
+- `Tests/Editor` mirrors these areas (`Core`, `Brushes`, `Paths`, `Psd`, `Persistence`, `MeshMaps`, `Preview`, `Gpu`, `UI`, `Window`, `Support`).
+
 ## Source and adapters
 
 `Runtime/Core` is engine-independent C#8 using System only. Unity compiles it as an editor-only assembly with no engine references (`noEngineReferences`); its tests run as ordinary Unity EditMode tests. Its source archive is RGBA8 straight alpha, bottom-left row order. Color and emission currently retain untagged encoded samples; no ICC transform, HDR or Photoshop rendering equivalence is claimed. Scalar channel UI replicates a scalar into RGB. The Normal channel composites as tangent-space unit vectors (`NormalMaps`: renormalized source-over, Overlay = Reoriented Normal Mapping detail, other modes replace; adjustments stay encoded-space), and its output is the painted composite flattened onto flat with the Height-derived normal as the RNM base (opaque, OpenGL Y+; DirectX only for files).
@@ -8,7 +21,7 @@ The authoritative CPU brush is the correctness/reference backend for this checkp
 
 The window chrome is custom-drawn IMGUI (`Editor/UI`: `PaintTheme` colors and text styles, `PaintGui` widgets drawn from rectangles and rounded rects instead of Unity's built-in control styles, `PaintIcons` for the bundled Fluent UI / Phosphor icons, `PainterToolIcons` for replaceable tool icons). `TexturePaintWindow.Shell.cs` lays out the menu bar, options bar, tool strip, view area and status bar; `TexturePaintWindow.Dock.cs` draws the texture set, layers and properties panels. All UI text goes through `L.Tr` (`Editor/Localization`, gettext `.po` files, English source strings as keys, `msgctxt` for the same English with two meanings). `OffscreenGui` renders the window into a RenderTexture in batch-gl so its look can be checked where the GUI-mode editor cannot draw.
 
-`Editor/TexturePaintWindow` uses one IMGUI event route with `Event.pressure`, explicit mouse capture, pressure curve, and fallback semantics provided by Unity. A stroke freezes its brush. Escape, focus loss, reload and play transition roll back the active stroke. Structural controls and camera navigation are disabled during painting. Rendering can skip frames; committed dab samples are not discarded. The 2D reference sampler is arc-distance based. The surface adapter resamples screen motion, rerays visible triangles and rasterizes surface coverage in UV, never draws a line between distant UV islands.
+`TexturePaintWindow` (`Editor/Window`) uses one IMGUI event route with `Event.pressure`, explicit mouse capture, pressure curve, and fallback semantics provided by Unity. A stroke freezes its brush. Escape, focus loss, reload and play transition roll back the active stroke. Structural controls and camera navigation are disabled during painting. Rendering can skip frames; committed dab samples are not discarded. The 2D reference sampler is arc-distance based. The surface adapter resamples screen motion, rerays visible triangles and rasterizes surface coverage in UV, never draws a line between distant UV islands.
 
 ## GPU status
 

@@ -25,8 +25,8 @@ namespace Yozolab.YoluPainter.Tests
         /// <summary>このセクションを描くファイル（ほかの人が持つツール側のファイルは含めない）。</summary>
         static readonly string[] Files =
         {
-            "TexturePaintWindow.LayerPanels.cs", "TexturePaintWindow.Filters.cs", "TexturePaintWindow.Normal.cs",
-            "TexturePaintWindow.MeshMaps.cs", "TexturePaintWindow.Pose.cs", "UI/PaintGui.Layers.cs",
+            "Window/Layers/TexturePaintWindow.LayerPanels.cs", "Window/Layers/TexturePaintWindow.Filters.cs", "Window/Layers/TexturePaintWindow.Normal.cs",
+            "Window/Model/TexturePaintWindow.MeshMaps.cs", "Window/Model/TexturePaintWindow.Pose.cs", "UI/PaintGui.Layers.cs",
         };
         static readonly Regex Standard = new Regex(@"\bLegacySection\s*\(|\bEditorGUILayout\.|\bGUILayout\.|\bEditorGUI\.|\bEditorStyles\.", RegexOptions.Compiled);
         static readonly string[] Sections = { "layer", "mask", "filters", "normal", "mesh-maps", "pose" };
@@ -44,7 +44,7 @@ namespace Yozolab.YoluPainter.Tests
         /// </summary>
         [Test] public void TheSectionsUseOnlyThePaintKit()
         {
-            string editor = Path.GetDirectoryName(PoCatalog.Folder());
+            string editor = PackagePaths.Physical("Editor");
             var found = new List<string>();
             foreach (var name in Files)
             {

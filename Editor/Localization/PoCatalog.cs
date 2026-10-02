@@ -40,14 +40,8 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>.po のあるフォルダの絶対パス（見つからなければ null）。</summary>
         public static string Folder()
         {
-            var probe = ScriptableObject.CreateInstance<LocalizationAnchor>();
-            try
-            {
-                var script = MonoScript.FromScriptableObject(probe);
-                string assetPath = script == null ? null : AssetDatabase.GetAssetPath(script);
-                return string.IsNullOrEmpty(assetPath) ? null : Path.GetDirectoryName(Path.GetFullPath(FileUtil.GetPhysicalPath(assetPath)));
-            }
-            finally { UnityEngine.Object.DestroyImmediate(probe); }
+            string folder = PackagePaths.Physical("Editor/Localization");
+            return Directory.Exists(folder) ? folder : null;
         }
 
         public static Dictionary<string, string> Parse(string text, string source = "po")

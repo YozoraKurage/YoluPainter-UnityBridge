@@ -10,7 +10,7 @@ namespace Yozolab.YoluPainter.Editor
     /// <summary>
     /// ツールのアイコン（UI のアイコンとは別の種類）。CLIP STUDIO のサブツールのように、描き手やプラグインが絵を差し替えられる。
     /// 探す順は (1) プラグインの登録 <see cref="Register"/>、(2) 描き手の画像（UserSettings/YoluPainter/ToolIcons/&lt;id&gt;.png、選択中は
-    /// &lt;id&gt;_selected.png。無ければ通常の絵）、(3) 同梱の絵（Editor/Icons/Tools。白なので UI の色を付けて描く）。描き手と
+    /// &lt;id&gt;_selected.png。無ければ通常の絵）、(3) 同梱の絵（Editor/UI/Icons/Tools。白なので UI の色を付けて描く）。描き手と
     /// プラグインの絵は色を付けずにそのまま描く（色付きの絵も使える）。
     /// </summary>
     public static class PainterToolIcons
