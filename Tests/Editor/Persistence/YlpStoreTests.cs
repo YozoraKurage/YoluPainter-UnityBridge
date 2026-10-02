@@ -197,6 +197,21 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(File.ReadAllBytes(backups[1]), Is.EqualTo(bytes[2]), "version 3");
         }
 
+        /// <summary>同じミリ秒に何度も保存し、整理で古い版を消した後でも、新しい版がいつも先に並ぶ（同じ名前を使い直さない）。</summary>
+        [Test] public void BackupsInTheSameMillisecondStayInOrderAfterPruning()
+        {
+            string folder = YlpStore.BackupFolder(path); Directory.CreateDirectory(folder);
+            var when = new DateTime(2026, 10, 3, 1, 2, 3, 456, DateTimeKind.Utc);
+            string first = YlpStore.BackupName(folder, "doc", when); File.WriteAllBytes(first, new byte[] { 1 });
+            string second = YlpStore.BackupName(folder, "doc", when); File.WriteAllBytes(second, new byte[] { 2 });
+            string third = YlpStore.BackupName(folder, "doc", when); File.WriteAllBytes(third, new byte[] { 3 });
+            File.Delete(first); // 整理で一番古いものを消した
+            string fourth = YlpStore.BackupName(folder, "doc", when);
+            Assert.That(fourth, Is.Not.EqualTo(first), "a freed name is not reused");
+            File.WriteAllBytes(fourth, new byte[] { 4 });
+            Assert.That(YlpStore.Backups(path).Select(f => File.ReadAllBytes(f)[0]), Is.EqualTo(new byte[] { 4, 3, 2 }), "newest first");
+        }
+
         [Test] public void KeepingZeroBackupsLeavesNoCopyOfTheOldVersion()
         {
             var first = YlpStore.Save(path, Version(1), null, false, 0);

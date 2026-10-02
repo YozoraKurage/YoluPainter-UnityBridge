@@ -71,8 +71,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         if (backupsToKeep != 0)
                         {
                             string folder = BackupFolder(path); Directory.CreateDirectory(folder);
-                            backup = System.IO.Path.Combine(folder, System.IO.Path.GetFileNameWithoutExtension(path) + "-" + DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmssfff'Z'", CultureInfo.InvariantCulture) + YlpArchive.Extension);
-                            while (File.Exists(backup)) backup = backup.Substring(0, backup.Length - YlpArchive.Extension.Length) + "_" + YlpArchive.Extension;
+                            backup = BackupName(folder, System.IO.Path.GetFileNameWithoutExtension(path), DateTime.UtcNow);
                             File.Replace(temp, path, backup);
                         }
                         else File.Replace(temp, path, null);
@@ -112,6 +111,21 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 .Where(f => pattern.IsMatch(System.IO.Path.GetFileName(f)))
                 .OrderByDescending(f => System.IO.Path.GetFileName(f).Replace("_", ""), StringComparer.Ordinal)
                 .ThenByDescending(f => System.IO.Path.GetFileName(f).Length).ToList();
+        }
+
+        /// <summary>退避の名前「&lt;名前&gt;-&lt;UTC の時刻（ミリ秒）&gt;.ylp」。同じミリ秒の版が既にあれば、そのうちいちばん多い下線より 1 つ多い
+        /// 下線を付ける（整理で古い版を消した後に同じ名前を使い直すと、新しい版が古い版より前に並んでしまうため）。</summary>
+        public static string BackupName(string folder, string stem, DateTime utc)
+        {
+            string stamp = stem + "-" + utc.ToString("yyyyMMdd'T'HHmmssfff'Z'", CultureInfo.InvariantCulture);
+            int underscores = -1;
+            if (Directory.Exists(folder))
+                foreach (var file in Directory.GetFiles(folder, stamp + "*" + YlpArchive.Extension))
+                {
+                    string name = System.IO.Path.GetFileName(file), middle = name.Substring(stamp.Length, name.Length - stamp.Length - YlpArchive.Extension.Length);
+                    if (middle.All(c => c == '_')) underscores = Math.Max(underscores, middle.Length);
+                }
+            return System.IO.Path.Combine(folder, stamp + new string('_', underscores + 1) + YlpArchive.Extension);
         }
 
         /// <summary>保持数を超えた古い版を消す。いま退避した版は数に入れるが、決して消さない。</summary>
