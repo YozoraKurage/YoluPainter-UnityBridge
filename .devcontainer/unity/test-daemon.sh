@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # YoluPainter 常駐 Unity: テストと Editor 操作を、起動費を払わずに依頼できるようにする。
 #
-#   test-daemon.sh start [--batch]   受け口をインストールして常駐 Unity を起動
+#   test-daemon.sh start [--batch|--batch-gl]   受け口をインストールして常駐 Unity を起動
 #   test-daemon.sh stop              行儀よく終了（応答が無ければ kill）
 #   test-daemon.sh status            生死・モード・ハートビートの鮮度
-#   test-daemon.sh restart [--batch]
+#   test-daemon.sh restart [--batch|--batch-gl]
 #
 # 既定は GUI モード（xvfb の仮想画面上で、-batchmode を付けずに起動する）。
 # batchmode と -nographics が禁じていた Play モード・EditorWindow・描画が使える。
 # --batch は GL が動かない環境向けの従来起動。
+# --batch-gl は -batchmode だけ付けて -nographics は付けず xvfb に載せる。EditorWindow は
+# 描けないが、OpenGL のデバイスがあるのでシェーダー・RenderTexture・GPU 読み戻しが動く。
+# この devcontainer では GUI モードだけシェーダーのインクルード解決が壊れる（組み込みの
+# HLSLSupport.cginc すら開けずマゼンタになる、2026-10-02 実測・原因未特定）ので、
+# シェーダーや GPU の結果を見る試験は --batch-gl で回す。
 #
 # コンパイルエラーがある状態で開くと（実測 2026-09-15）、GUI は「Enter Safe Mode?」の
 # ダイアログで主スレッドが止まり（受け口も鼓動も動かない）、batchmode は
@@ -30,12 +35,13 @@ readonly RECEIVER_SRC="$SCRIPT_DIR/daemon/YoluPainterTestDaemon.cs"
 readonly RECEIVER_DST="$UNITY_PROJECT/Assets/YoluPainterTestDaemon/Editor/YoluPainterTestDaemon.cs"
 readonly DAEMON_LOG="$UNITY_LOG_DIR/daemon.log"
 
-MODE="${YOLUPAINTER_DAEMON_MODE:-gui}"   # gui | batch
+MODE="${YOLUPAINTER_DAEMON_MODE:-gui}"   # gui | batch | batch-gl
 
 parse_mode() {
   for a in "$@"; do
     case "$a" in
       --batch) MODE=batch ;;
+      --batch-gl) MODE=batch-gl ;;
       --gui)   MODE=gui ;;
       *) die "不明な引数: $a" ;;
     esac
@@ -70,6 +76,10 @@ launch() {
   if [[ "$MODE" == batch ]]; then
     nohup "$UNITY_EDITOR" -batchmode -nographics \
       -projectPath "$UNITY_PROJECT" -logFile "$DAEMON_LOG" \
+      >/dev/null 2>&1 &
+  elif [[ "$MODE" == batch-gl ]]; then
+    # ラッパーが xvfb と -batchmode を被せる。-nographics を付けないので GL デバイスが付く。
+    nohup "$UNITY_EDITOR" -projectPath "$UNITY_PROJECT" -logFile "$DAEMON_LOG" \
       >/dev/null 2>&1 &
   else
     # unity-editor ラッパーは必ず -batchmode を足すので、本体を直接 xvfb に載せる。
@@ -214,7 +224,9 @@ status() {
   if pid_alive; then
     local pid mode="GUI"
     pid="$(cat "$PID_FILE")"
-    ps -o args= -p "$pid" 2>/dev/null | grep -q -- '-batchmode' && mode="batch"
+    local args; args="$(ps -o args= -p "$pid" 2>/dev/null)"
+    if [[ "$args" == *-nographics* ]]; then mode="batch"
+    elif [[ "$args" == *-batchmode* ]]; then mode="batch-gl"; fi
     info "起動中 (PID $pid、${mode} モード、ハートビート $(beat_age) 秒前)"
   else
     info "停止中"
