@@ -11,6 +11,10 @@ namespace Yozolab.YoluPainter.Core
             MathUtil.RequireFinite(opacity, nameof(opacity));
             if (opacity < 0 || opacity > 1) throw new ArgumentOutOfRangeException(nameof(opacity));
             if (!Enum.IsDefined(typeof(LayerBlendMode), mode)) throw new ArgumentOutOfRangeException(nameof(mode));
+            return BlendUnchecked(destination, source, opacity, mode);
+        }
+        private static Rgba32 BlendUnchecked(Rgba32 destination, Rgba32 source, double opacity, LayerBlendMode mode)
+        {
             double sa = source.A / 255.0 * opacity, da = destination.A / 255.0;
             if (sa <= 0) return destination;
             double a = sa + da * (1 - sa);
@@ -57,12 +61,42 @@ namespace Yozolab.YoluPainter.Core
             if (width < 0 || height < 0 || x < 0 || y < 0 || (long)x + width > document.Width || (long)y + height > document.Height)
                 throw new ArgumentOutOfRangeException("region");
             var bytes = new byte[checked(width * height * 4)];
-            for (int row = 0; row < height; row++) for (int col = 0; col < width; col++)
+            if (width == 0 || height == 0) return bytes;
+            // Same per-pixel arithmetic as CompositePixel, but each layer's tile is read once instead of one dictionary
+            // lookup per pixel per layer. Layers without a tile contribute transparent pixels, which Blend leaves unchanged.
+            var surfaces = new System.Collections.Generic.List<SparseTileSurface>();
+            var layers = new System.Collections.Generic.List<PaintLayer>();
+            foreach (PaintLayer layer in document.Layers)
             {
-                var pixel = CompositePixel(document, channel, x + col, y + row);
-                int offset = (row * width + col) * 4;
-                bytes[offset] = pixel.R; bytes[offset + 1] = pixel.G; bytes[offset + 2] = pixel.B; bytes[offset + 3] = pixel.A;
+                SparseTileSurface surface;
+                if (!layer.Visible || layer.Opacity <= 0 || !layer.IsChannelEnabled(channel) || !layer.TryGetChannel(channel, out surface)) continue;
+                surfaces.Add(surface); layers.Add(layer);
             }
+            int tile = document.TileSize, tileBytes = checked(tile * tile * 4);
+            var buffers = new byte[surfaces.Count][]; var present = new bool[surfaces.Count];
+            for (int i = 0; i < buffers.Length; i++) buffers[i] = new byte[tileBytes];
+            for (int ty = y / tile; ty <= (y + height - 1) / tile; ty++)
+                for (int tx = x / tile; tx <= (x + width - 1) / tile; tx++)
+                {
+                    var coord = new TileCoord(tx, ty); bool any = false;
+                    for (int i = 0; i < surfaces.Count; i++) any |= present[i] = surfaces[i].CopyTile(coord, buffers[i]);
+                    if (!any) continue; // region bytes are already transparent
+                    int x0 = Math.Max(x, tx * tile), x1 = Math.Min(x + width, (tx + 1) * tile);
+                    int y0 = Math.Max(y, ty * tile), y1 = Math.Min(y + height, (ty + 1) * tile);
+                    for (int py = y0; py < y1; py++) for (int px = x0; px < x1; px++)
+                    {
+                        int source = ((py - ty * tile) * tile + (px - tx * tile)) * 4;
+                        Rgba32 result = Rgba32.Transparent;
+                        for (int i = 0; i < surfaces.Count; i++)
+                        {
+                            if (!present[i]) continue;
+                            var b = buffers[i];
+                            result = BlendUnchecked(result, new Rgba32(b[source], b[source + 1], b[source + 2], b[source + 3]), layers[i].Opacity, layers[i].BlendMode);
+                        }
+                        int offset = ((py - y) * width + (px - x)) * 4;
+                        bytes[offset] = result.R; bytes[offset + 1] = result.G; bytes[offset + 2] = result.B; bytes[offset + 3] = result.A;
+                    }
+                }
             return bytes;
         }
     }

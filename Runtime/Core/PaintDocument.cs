@@ -37,6 +37,7 @@ namespace Yozolab.YoluPainter.Core
                 surface.BeforeExternalMutation = document.BeforeExternalMutation;
                 surface.AfterExternalMutation = document.AfterExternalMutation;
                 surface.BeforeSourceGrowth = document.EnsureSourceGrowth;
+                surface.TileChanged = coord => document.MarkTileChanged(channel, coord);
                 channels.Add(channel, surface); enabled.Add(channel);
             }
             return surface;
@@ -62,6 +63,9 @@ namespace Yozolab.YoluPainter.Core
         private long activeStrokeBudgetBytes = 64L * 1024 * 1024;
         private BrushStroke activeStroke;
         private bool notifyingHistory;
+        // Composite invalidation journal. Not part of undo history or persistence.
+        private long changeSerial, structureSerial;
+        private readonly Dictionary<PaintChannel, Dictionary<TileCoord, long>> tileSerials = new Dictionary<PaintChannel, Dictionary<TileCoord, long>>();
         public Guid Id { get; private set; }
         public int Width { get; private set; }
         public int Height { get; private set; }
@@ -98,6 +102,9 @@ namespace Yozolab.YoluPainter.Core
         public long PeakWorkingBytes { get { return AllocatedBytes + HistoryBytes + (activeStroke == null ? 0 : activeStroke.RollbackBytes); } }
         /// <summary>Raised before budget eviction, with the payload bytes to discard. Notification handlers cannot abort a committed edit.</summary>
         public event Action<long> HistoryTrimming;
+        /// <summary>Monotonic counter of changes that can affect a composite. Read it after consuming a composite, then
+        /// pass it to TryGetChangedTiles to learn what changed since. Independent of Revision and of undo history.</summary>
+        public long ChangeSerial { get { return changeSerial; } }
         public PaintDocument(int width, int height, int tileSize = 128, long undoBudgetBytes = 67108864, Guid? id = null)
         {
             // Share the surface's dimension contract without allocating any pixels.
@@ -116,7 +123,7 @@ namespace Yozolab.YoluPainter.Core
             var layer = new PaintLayer(this, name ?? "Layer", layerId);
             layer.GetChannel(PaintChannel.Color);
             int index = layers.Count;
-            Execute(new DelegateCommand(() => { EnsureSourceGrowth(layer.AllocatedBytes); layers.Insert(index, layer); }, () => layers.Remove(layer), 128));
+            Execute(Structural(() => { EnsureSourceGrowth(layer.AllocatedBytes); layers.Insert(index, layer); }, () => layers.Remove(layer), 128));
             return layer;
         }
         public PaintLayer GetLayer(Guid id)
@@ -127,14 +134,14 @@ namespace Yozolab.YoluPainter.Core
         public void RemoveLayer(Guid id)
         {
             EnsureNoStroke(); PaintLayer layer = GetLayer(id); int index = layers.IndexOf(layer);
-            Execute(new DelegateCommand(() => layers.Remove(layer), () => { EnsureSourceGrowth(layer.AllocatedBytes); layers.Insert(index, layer); }, 128 + layer.AllocatedBytes));
+            Execute(Structural(() => layers.Remove(layer), () => { EnsureSourceGrowth(layer.AllocatedBytes); layers.Insert(index, layer); }, 128 + layer.AllocatedBytes));
         }
         public void MoveLayer(Guid id, int newIndex)
         {
             EnsureNoStroke(); var layer = GetLayer(id);
             if (newIndex < 0 || newIndex >= layers.Count) throw new ArgumentOutOfRangeException(nameof(newIndex));
             int oldIndex = layers.IndexOf(layer); if (oldIndex == newIndex) return;
-            Execute(new DelegateCommand(() => MoveLayerInternal(layer, newIndex), () => MoveLayerInternal(layer, oldIndex), 64));
+            Execute(Structural(() => MoveLayerInternal(layer, newIndex), () => MoveLayerInternal(layer, oldIndex), 64));
         }
         private void MoveLayerInternal(PaintLayer layer, int index) { layers.Remove(layer); layers.Insert(index, layer); }
         public void SetLayerName(Guid id, string name)
@@ -146,26 +153,26 @@ namespace Yozolab.YoluPainter.Core
         public void SetLayerVisibility(Guid id, bool visible)
         {
             EnsureNoStroke(); var layer = GetLayer(id); bool old = layer.Visible; if (old == visible) return;
-            Execute(new DelegateCommand(() => layer.Visible = visible, () => layer.Visible = old, 64));
+            Execute(Structural(() => layer.Visible = visible, () => layer.Visible = old, 64));
         }
         public void SetLayerOpacity(Guid id, double opacity)
         {
             EnsureNoStroke(); MathUtil.RequireFinite(opacity, nameof(opacity));
             if (opacity < 0 || opacity > 1) throw new ArgumentOutOfRangeException(nameof(opacity));
             var layer = GetLayer(id); double old = layer.Opacity; if (old == opacity) return;
-            Execute(new DelegateCommand(() => layer.Opacity = opacity, () => layer.Opacity = old, 64));
+            Execute(Structural(() => layer.Opacity = opacity, () => layer.Opacity = old, 64));
         }
         public void SetLayerBlendMode(Guid id, LayerBlendMode mode)
         {
             EnsureNoStroke(); if (!Enum.IsDefined(typeof(LayerBlendMode), mode)) throw new ArgumentOutOfRangeException(nameof(mode));
             var layer = GetLayer(id); var old = layer.BlendMode; if (old == mode) return;
-            Execute(new DelegateCommand(() => layer.BlendMode = mode, () => layer.BlendMode = old, 64));
+            Execute(Structural(() => layer.BlendMode = mode, () => layer.BlendMode = old, 64));
         }
         public void SetChannelEnabled(Guid id, PaintChannel channel, bool enabled)
         {
             EnsureNoStroke(); PaintLayer.ValidateChannel(channel); var layer = GetLayer(id);
             bool old = layer.IsChannelEnabled(channel); if (old == enabled) return;
-            Execute(new DelegateCommand(() => layer.Enable(channel, enabled), () => layer.Enable(channel, old), 64));
+            Execute(Structural(() => layer.Enable(channel, enabled), () => layer.Enable(channel, old), 64));
         }
         public BrushStroke BeginStroke(Guid layerId, PaintChannel channel, BrushSettings settings)
         {
@@ -193,8 +200,31 @@ namespace Yozolab.YoluPainter.Core
             if (activeStroke != null) throw new InvalidOperationException("Finish or cancel the active stroke first.");
         }
         internal void BeforeExternalMutation() { EnsureNoStroke(); }
-        internal void AfterExternalMutation() { ClearHistory(); Revision++; }
+        internal void AfterExternalMutation() { ClearHistory(); Revision++; MarkStructureChanged(); }
         internal void PixelsChanged() { Revision++; }
+        /// <summary>Adds the tiles of a channel whose pixels changed after since (a ChangeSerial value) to changed.
+        /// Returns false when the caller must treat the whole channel as changed: layer structure, visibility, opacity,
+        /// blend or enabled channels changed, pixels were mutated outside history, or since is not from this document.
+        /// The result can include tiles whose pixels changed and changed back.</summary>
+        public bool TryGetChangedTiles(PaintChannel channel, long since, ICollection<TileCoord> changed)
+        {
+            PaintLayer.ValidateChannel(channel);
+            if (changed == null) throw new ArgumentNullException(nameof(changed));
+            if (since < 0 || since > changeSerial || since < structureSerial) return false;
+            Dictionary<TileCoord, long> serials;
+            if (tileSerials.TryGetValue(channel, out serials))
+                foreach (var entry in serials) if (entry.Value > since) changed.Add(entry.Key);
+            return true;
+        }
+        internal void MarkTileChanged(PaintChannel channel, TileCoord coord)
+        {
+            Dictionary<TileCoord, long> serials;
+            if (!tileSerials.TryGetValue(channel, out serials)) tileSerials.Add(channel, serials = new Dictionary<TileCoord, long>());
+            serials[coord] = ++changeSerial;
+        }
+        private void MarkStructureChanged() { structureSerial = ++changeSerial; }
+        private DelegateCommand Structural(Action apply, Action revert, long cost)
+        { return new DelegateCommand(() => { apply(); MarkStructureChanged(); }, () => { revert(); MarkStructureChanged(); }, cost); }
         internal void EnsureSourceGrowth(long additionalBytes)
         {
             if (additionalBytes > 0 && additionalBytes > sourceBudgetBytes - AllocatedBytes)

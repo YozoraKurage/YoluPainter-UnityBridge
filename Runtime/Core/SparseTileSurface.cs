@@ -11,6 +11,9 @@ namespace Yozolab.YoluPainter.Core
         internal Action BeforeExternalMutation;
         internal Action AfterExternalMutation;
         internal Action<long> BeforeSourceGrowth;
+        /// <summary>Raised after a history-tracked pixel write or tile restore changes a tile. External mutations
+        /// (SetPixel/ImportTile/Clear) are reported through AfterExternalMutation instead.</summary>
+        internal Action<TileCoord> TileChanged;
         public int Width { get; private set; }
         public int Height { get; private set; }
         public int TileSize { get; private set; }
@@ -57,6 +60,7 @@ namespace Yozolab.YoluPainter.Core
             if (tile.Get(index) == color) return false;
             if (tile.ByteSize == 4) EnsureGrowth(checked(TileSize * TileSize * 4) - 4);
             tile.Set(index, color, checked(TileSize * TileSize * 4));
+            if (TileChanged != null) TileChanged(coord);
             return true;
         }
         /// <summary>Imports a complete tile. Padding outside the canvas must be zero; caller buffers are copied.</summary>
@@ -80,6 +84,19 @@ namespace Yozolab.YoluPainter.Core
             if (BeforeExternalMutation != null) BeforeExternalMutation();
             Restore(coord, next);
             if (AfterExternalMutation != null) AfterExternalMutation();
+        }
+        /// <summary>Copies one tile into a caller-owned buffer of TileSize*TileSize*4 bytes (row-major RGBA8, lowest Y first,
+        /// edge padding zero). Absent tiles are written as zero and return false. The surface never keeps the buffer.</summary>
+        public bool CopyTile(TileCoord coord, byte[] destination)
+        {
+            CheckCoord(coord);
+            if (destination == null) throw new ArgumentNullException(nameof(destination));
+            int length = checked(TileSize * TileSize * 4);
+            if (destination.Length != length) throw new ArgumentException("Incorrect tile byte length.", nameof(destination));
+            TileStorage tile;
+            if (!tiles.TryGetValue(coord, out tile)) { Array.Clear(destination, 0, length); return false; }
+            tile.CopyTo(destination, length);
+            return true;
         }
         /// <summary>Stable Y-then-X snapshot of occupied coordinates. Copies only keys, never pixel buffers.
         /// The returned snapshot is read-only and unaffected by later surface edits.</summary>
@@ -109,6 +126,7 @@ namespace Yozolab.YoluPainter.Core
         {
             if (snapshot == null) tiles.Remove(coord);
             else tiles[coord] = snapshot.Clone();
+            if (TileChanged != null) TileChanged(coord);
         }
         internal void Compact(TileCoord coord)
         {
@@ -155,6 +173,12 @@ namespace Yozolab.YoluPainter.Core
         {
             if (data != null) return (byte[])data.Clone();
             var result = new byte[length]; Fill(result, uniform); return result;
+        }
+        internal void CopyTo(byte[] destination, int length)
+        {
+            if (data != null) Buffer.BlockCopy(data, 0, destination, 0, length);
+            else if (uniform == Rgba32.Transparent) Array.Clear(destination, 0, length);
+            else Fill(destination, uniform);
         }
         internal TileStorage Compact()
         {
