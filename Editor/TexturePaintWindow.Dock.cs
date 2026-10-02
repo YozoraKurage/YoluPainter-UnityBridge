@@ -149,6 +149,7 @@ namespace Yozolab.YoluPainter.Editor
             PaintGui.BeginScroll(list, layerScroll);
             int row = 0;
             for (int i = document.Layers.Count - 1; i >= 0; i--, row++) DrawLayerRow(new Rect(0, row * LayerRowHeight, view.width, LayerRowHeight), document.Layers[i], i);
+            HandleLayerDrag(view.width);
             PaintGui.EndScroll();
             if (Event.current.type == EventType.ScrollWheel && list.Contains(Event.current.mousePosition))
             { layerScroll.y = Mathf.Clamp(layerScroll.y + Event.current.delta.y * 12, 0, Mathf.Max(0, content - list.height)); Event.current.Use(); Repaint(); }
@@ -227,9 +228,71 @@ namespace Yozolab.YoluPainter.Editor
                 selectedLayer = layer.Id; lastLayerClicked = layer.Id; lastLayerClick = EditorApplication.timeSinceStartup;
                 if (twice && nameRect.Contains(e.mousePosition)) renamingLayer = layer.Id;
                 if (!selected) editMask = false;
+                layerDragCandidate = layer.Id; layerDragStart = e.mousePosition; layerDragging = false;
                 e.Use(); Repaint();
             }
             if (e.type == EventType.ContextClick && hover && GUI.enabled) { selectedLayer = layer.Id; var menu = new GenericMenu(); LayerMenu(menu); menu.ShowAsContext(); e.Use(); }
+        }
+
+        // ───────── ドラッグでの並べ替え ─────────
+        Guid layerDragCandidate; Vector2 layerDragStart; bool layerDragging;
+
+        /// <summary>ドラッグで落とす先: 行と行の間（gap 番目の行のすぐ上。gap が行の数なら一番下）か、グループの行の中ほど（その中の一番上）。</summary>
+        (int gap, PaintLayer into) LayerDropTarget(float y)
+        {
+            int n = document.Layers.Count, rowIndex = Mathf.FloorToInt(y / LayerRowHeight);
+            float within = y / LayerRowHeight - rowIndex;
+            if (rowIndex >= 0 && rowIndex < n)
+            {
+                var layer = document.Layers[n - 1 - rowIndex];
+                if (layer.IsGroup && within > .3f && within < .7f) return (-1, layer);
+            }
+            return (Mathf.Clamp(within < .5f ? rowIndex : rowIndex + 1, 0, n), null);
+        }
+
+        void HandleLayerDrag(float width)
+        {
+            var e = Event.current;
+            if (layerDragCandidate == Guid.Empty) return;
+            if (e.rawType == EventType.MouseUp)
+            {
+                if (layerDragging) { var target = LayerDropTarget(e.mousePosition.y); var id = layerDragCandidate; TryAction(() => DropLayer(id, target.gap, target.into)); }
+                layerDragCandidate = Guid.Empty; layerDragging = false; Repaint();
+                return;
+            }
+            if (e.type == EventType.MouseDrag && e.button == 0)
+            {
+                if (!layerDragging && Vector2.Distance(e.mousePosition, layerDragStart) > 5) layerDragging = true;
+                if (layerDragging) { e.Use(); Repaint(); }
+            }
+            if (layerDragging && e.type == EventType.Repaint)
+            {
+                var target = LayerDropTarget(e.mousePosition.y);
+                if (target.into != null)
+                {
+                    int rowOf = document.Layers.Count - 1 - document.Layers.ToList().IndexOf(target.into);
+                    PaintGui.Outline(new Rect(1, rowOf * LayerRowHeight + 1, width - 2, LayerRowHeight - 2), PaintTheme.Accent, 2, 3);
+                }
+                else PaintGui.Fill(new Rect(4, target.gap * LayerRowHeight - 1, width - 8, 2), PaintTheme.Accent);
+            }
+        }
+
+        /// <summary>ドラッグで落とした所へ層を移す（1 回の Undo）。</summary>
+        internal void DropLayer(Guid id, int gap, PaintLayer into)
+        {
+            var dragged = document.GetLayer(id);
+            if (into != null)
+            {
+                if (into == dragged) return;
+                document.MoveLayerTo(id, into.Id, document.ChildrenOf(into.Id).Count(l => l != dragged));
+                message = L.Tr("Moved into {0}.", into.Name); return;
+            }
+            int n = document.Layers.Count;
+            if (gap >= n) { document.MoveLayerTo(id, Guid.Empty, 0); return; } // 一番下
+            var below = document.Layers[n - 1 - gap]; // 落とした線のすぐ下の行の層。その上に置く
+            if (below == dragged) return;
+            var siblings = document.ChildrenOf(below.ParentId).Where(l => l != dragged).ToList();
+            document.MoveLayerTo(id, below.ParentId, siblings.IndexOf(below) + 1);
         }
 
         static string BlendName(LayerBlendMode mode)

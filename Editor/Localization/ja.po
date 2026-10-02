@@ -657,6 +657,9 @@ msgstr "ポーズ"
 msgid "not converted yet; drawn with Unity's controls"
 msgstr "移行前のため Unity の部品で表示"
 
+msgid "Moved into {0}."
+msgstr "{0} の中に移しました。"
+
 # ---- blend modes (msgctxt "blend mode") ----
 
 msgctxt "blend mode"
