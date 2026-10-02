@@ -23,7 +23,6 @@ namespace Yozolab.YoluPainter.Editor
             public int fadeSize, fadeOpacity, fadeFlow;
             public bool tiltSize, tiltOpacity, tiltFlow, tiltAngle;
         }
-        bool showColorDynamics, showDualBrush, showFadeTilt;
 
         static void UpgradeBrushState(BrushState b)
         {
@@ -68,74 +67,122 @@ namespace Yozolab.YoluPainter.Editor
             return new BrushSample(x, y, pressure, EditorApplication.timeSinceStartup, tilt.x, -tilt.y);
         }
 
-        void DrawBrushDynamics()
+        // ───────── プロパティの欄（テクスチャ・デュアルブラシ・色の変化・フェードとペンの傾き） ─────────
+
+        void TextureSection(UiRows rows)
         {
-            showColorDynamics = EditorGUILayout.Foldout(showColorDynamics, "Color dynamics", true);
-            if (showColorDynamics)
+            if (!ToolSection(rows, "brush-texture", L.Tr("Texture"), "grid_dots")) return;
+            bool none = string.IsNullOrEmpty(brush.textureId), missing = !none && BrushTips.ResolveRef(brush.textureId) == null;
+            string name = none ? L.Tr("None") : missing ? L.Tr("Missing") + ": " + brush.textureId : brush.textureId;
+            PaintGui.FitDropdown(Mark("texture", rows.Row()), null, name, TextureMenu,
+                L.Tr("Paper texture: built-in grains, or the textures of imported brushes (Photoshop .pat / .abr patterns)"), valueIsData: !none);
+            if (!none)
             {
-                if (EditingMask || !BrushSettings.CarriesColor(channel))
-                    EditorGUILayout.HelpBox("Colour dynamics apply to the Color and Emission channels only. This " + (EditingMask ? "mask" : channel + " channel") + " is painted with the exact value.", MessageType.None);
-                brush.secondaryColor = EditorGUILayout.ColorField(new GUIContent("Background", "The second colour for foreground/background jitter"), brush.secondaryColor);
-                brush.fgBgJitter = EditorGUILayout.Slider(new GUIContent("Fg/Bg jitter", "Each dab mixes toward the background colour by a random amount up to this"), brush.fgBgJitter, 0, 1);
-                brush.hueJitter = EditorGUILayout.Slider(new GUIContent("Hue jitter", "Up to ± this × 180°"), brush.hueJitter, 0, 1);
-                brush.saturationJitter = EditorGUILayout.Slider(new GUIContent("Saturation jitter", "HSV saturation moves by up to ± this"), brush.saturationJitter, 0, 1);
-                brush.brightnessJitter = EditorGUILayout.Slider(new GUIContent("Brightness jitter", "HSV value moves by up to ± this"), brush.brightnessJitter, 0, 1);
-                brush.purity = EditorGUILayout.Slider(new GUIContent("Purity", "-1 grey … 0 unchanged … 1 fully saturated"), brush.purity, -1, 1);
-                brush.colorPerTip = EditorGUILayout.Toggle(new GUIContent("Per tip", "A new colour for every dab (2D canvas). Off: one colour per stroke. The 3D brush always uses one colour per stroke."), brush.colorPerTip);
+                var c = UiRows.Split(rows.Row(), 2, 6);
+                brush.textureDepth = PercentSlider(c[0], L.TrIn("brush", "Depth"), brush.textureDepth, 0, 1, L.Tr("Texture depth"));
+                brush.textureScale = PercentSlider(c[1], L.TrIn("brush", "Scale"), brush.textureScale, .05f, 16, L.Tr("Texture scale"));
             }
-            showDualBrush = EditorGUILayout.Foldout(showDualBrush, "Dual brush", true);
-            if (showDualBrush)
-            {
-                brush.dualEnabled = EditorGUILayout.Toggle(new GUIContent("Enabled", "A second tip along the same path masks the main tip (2D canvas)"), brush.dualEnabled);
-                using (new EditorGUI.DisabledScope(!brush.dualEnabled))
-                {
-                    GUILayout.BeginHorizontal();
-                    EditorGUILayout.PrefixLabel("Tip");
-                    string label = string.IsNullOrEmpty(brush.dualTipId) ? "Round (hardness)" : BrushTips.ResolveRef(brush.dualTipId) == null ? "Missing: " + brush.dualTipId + " (round)" : brush.dualTipId;
-                    if (GUILayout.Button(label, EditorStyles.popup)) DualTipMenu();
-                    GUILayout.EndHorizontal();
-                    brush.dualMode = (int)(DualBrushMode)EditorGUILayout.EnumPopup("Mode", (DualBrushMode)brush.dualMode);
-                    brush.dualRadius = EditorGUILayout.Slider("Radius px", brush.dualRadius, .5f, 128);
-                    if (string.IsNullOrEmpty(brush.dualTipId)) brush.dualHardness = EditorGUILayout.Slider("Hardness", brush.dualHardness, 0, 1);
-                    brush.dualSpacing = EditorGUILayout.Slider("Spacing", brush.dualSpacing, .01f, 1);
-                    brush.dualAngle = EditorGUILayout.Slider("Angle", brush.dualAngle, -180, 180);
-                    brush.dualRoundness = EditorGUILayout.Slider("Roundness", brush.dualRoundness, .01f, 1);
-                    brush.dualScatter = EditorGUILayout.Slider("Scatter", brush.dualScatter, 0, 10);
-                    brush.dualCount = EditorGUILayout.IntSlider("Count", brush.dualCount, 1, 16);
-                }
-            }
-            showFadeTilt = EditorGUILayout.Foldout(showFadeTilt, "Fade & tilt", true);
-            if (showFadeTilt)
-            {
-                EditorGUILayout.LabelField("Fade over N dabs (0 = off)", EditorStyles.miniLabel);
-                brush.fadeSize = Mathf.Clamp(EditorGUILayout.IntField("Fade size", brush.fadeSize), 0, BrushSettings.MaxFade);
-                brush.fadeOpacity = Mathf.Clamp(EditorGUILayout.IntField("Fade opacity", brush.fadeOpacity), 0, BrushSettings.MaxFade);
-                brush.fadeFlow = Mathf.Clamp(EditorGUILayout.IntField("Fade flow", brush.fadeFlow), 0, BrushSettings.MaxFade);
-                EditorGUILayout.LabelField(new GUIContent("Pen tilt (upright = full)", "From Unity's Event.tilt. A mouse reports no tilt, so these change nothing for it. Not yet checked with a real pen."), EditorStyles.miniLabel);
-                brush.tiltSize = EditorGUILayout.Toggle("Tilt size", brush.tiltSize);
-                brush.tiltOpacity = EditorGUILayout.Toggle("Tilt opacity", brush.tiltOpacity);
-                brush.tiltFlow = EditorGUILayout.Toggle("Tilt flow", brush.tiltFlow);
-                brush.tiltAngle = EditorGUILayout.Toggle(new GUIContent("Tilt angle", "Turns the tip toward the direction the pen leans"), brush.tiltAngle);
-            }
-            GUILayout.BeginHorizontal();
-            EditorGUILayout.PrefixLabel("Texture");
-            if (GUILayout.Button(new GUIContent("Choose…", "Paper texture: built-in grains, or the textures of imported brushes (Photoshop .pat / .abr patterns)"), EditorStyles.miniButton)) TextureMenu();
-            GUILayout.EndHorizontal();
+            rows.Space(4);
         }
 
-        void DualTipMenu()
+        void DualBrushSection(UiRows rows)
         {
-            var menu = new GenericMenu();
-            menu.AddItem(new GUIContent("Round"), string.IsNullOrEmpty(brush.dualTipId), () => brush.dualTipId = "");
-            if (!string.IsNullOrEmpty(brush.tipId)) menu.AddItem(new GUIContent("Same as the main tip"), brush.dualTipId == brush.tipId, () => brush.dualTipId = brush.tipId);
-            foreach (var id in BuiltInBrushes.TipIds) { string full = "builtin:" + id; menu.AddItem(new GUIContent("Built-in/" + id), brush.dualTipId == full, () => brush.dualTipId = full); }
-            menu.ShowAsContext();
+            if (!ToolSection(rows, "brush-dual", L.Tr("Dual Brush"), "content_copy")) return;
+            brush.dualEnabled = PaintGui.FitToggle(rows.Row(), L.Tr("Use a dual brush"), brush.dualEnabled, L.Tr("A second tip along the same path masks the main tip (2D canvas)"));
+            bool on = brush.dualEnabled, round = string.IsNullOrEmpty(brush.dualTipId), missing = !round && BrushTips.ResolveRef(brush.dualTipId) == null;
+            string tip = round ? L.Tr("Round (hardness)") : missing ? L.Tr("Missing") + ": " + brush.dualTipId : brush.dualTipId;
+            PaintGui.FitDropdown(rows.Row(), L.Tr("Tip"), tip, DualTipMenu, missing ? L.Tr("This tip is not in this Unity project; a round tip is used instead.") : null, on, LabelColumn, !round);
+            PaintGui.FitDropdown(rows.Row(), L.TrIn("brush", "Mode"), DualModeName((DualBrushMode)brush.dualMode), at =>
+            {
+                var menu = new GenericMenu();
+                foreach (DualBrushMode mode in Enum.GetValues(typeof(DualBrushMode))) { var m = mode; menu.AddItem(new GUIContent(DualModeName(m)), (int)m == brush.dualMode, () => brush.dualMode = (int)m); }
+                menu.DropDown(at);
+            }, L.Tr("How the second tip's coverage combines with the main tip's"), on, LabelColumn);
+            var c = UiRows.Split(rows.Row(), 2, 6);
+            float size = brush.dualRadius * 2, nextSize = PaintGui.FitSlider(c[0], L.Tr("Size"), size, 1, 256, "0", " px", L.Tr("Diameter of the second tip"), on);
+            if (nextSize != size) brush.dualRadius = Mathf.Max(.5f, nextSize / 2);
+            brush.dualHardness = PercentSlider(c[1], L.Tr("Hardness"), brush.dualHardness, 0, 1, L.Tr("Hardness of the round second tip (an image tip keeps its own edge)"), on && round);
+            c = UiRows.Split(rows.Row(), 2, 6);
+            brush.dualSpacing = PercentSlider(c[0], L.Tr("Spacing"), brush.dualSpacing, .01f, 1, null, on);
+            brush.dualAngle = PaintGui.FitSlider(c[1], L.Tr("Angle"), brush.dualAngle, -180, 180, "0", "°", null, on);
+            c = UiRows.Split(rows.Row(), 2, 6);
+            brush.dualRoundness = PercentSlider(c[0], L.Tr("Roundness"), brush.dualRoundness, .01f, 1, null, on);
+            brush.dualScatter = PercentSlider(c[1], L.Tr("Scatter"), brush.dualScatter, 0, 10, L.Tr("How far the dabs spread across the stroke, in % of the diameter"), on);
+            c = UiRows.Split(rows.Row(), 2, 6);
+            brush.dualCount = PaintGui.FitIntSlider(c[0], L.Tr("Count"), brush.dualCount, 1, 16, "", L.Tr("Dabs placed at every spacing step"), on);
+            rows.Space(4);
         }
-        void TextureMenu()
+
+        static string DualModeName(DualBrushMode mode)
+        {
+            switch (mode)
+            {
+                case DualBrushMode.Multiply: return L.TrIn("blend mode", "Multiply");
+                case DualBrushMode.Darken: return L.TrIn("blend mode", "Darken");
+                case DualBrushMode.Overlay: return L.TrIn("blend mode", "Overlay");
+                case DualBrushMode.ColorDodge: return L.TrIn("blend mode", "Color Dodge");
+                case DualBrushMode.ColorBurn: return L.TrIn("blend mode", "Color Burn");
+                case DualBrushMode.LinearBurn: return L.TrIn("blend mode", "Linear Burn");
+                case DualBrushMode.HardMix: return L.TrIn("blend mode", "Hard Mix");
+                case DualBrushMode.Subtract: return L.TrIn("blend mode", "Subtract");
+                default: return mode.ToString();
+            }
+        }
+
+        void ColorDynamicsSection(UiRows rows)
+        {
+            if (!ToolSection(rows, "brush-color", L.Tr("Color Dynamics"), "palette")) return;
+            if (EditingMask) PaintGui.Notice(rows, L.Tr("Color dynamics apply to the Color and Emission channels only; a mask is painted with the exact value."), "info", PaintTheme.TextDim);
+            else if (!BrushSettings.CarriesColor(channel)) PaintGui.Notice(rows, L.Tr("Color dynamics apply to the Color and Emission channels only; this channel is painted with the exact value."), "info", PaintTheme.TextDim);
+            var row = rows.Row();
+            PaintGui.ColorSwatch(new Rect(row.x, row.y, 30, row.height), brush.secondaryColor, color => { brush.secondaryColor = color; Repaint(); }, true,
+                L.Tr("Background color") + "\n" + L.Tr("The second color for foreground/background jitter"));
+            brush.fgBgJitter = PercentSlider(new Rect(row.x + 36, row.y, row.width - 36, row.height), L.TrIn("brush", "Fg/Bg jitter"), brush.fgBgJitter, 0, 1,
+                L.Tr("Each dab mixes toward the background color by a random amount up to this"));
+            PaintGui.GroupLabel(rows.Row(16), L.TrIn("brush", "Jitter"));
+            var c = UiRows.Split(rows.Row(), 2, 6);
+            brush.hueJitter = PercentSlider(c[0], L.TrIn("brush", "Hue"), brush.hueJitter, 0, 1, L.Tr("The hue moves by up to ± this × 180°"));
+            brush.saturationJitter = PercentSlider(c[1], L.TrIn("brush", "Saturation"), brush.saturationJitter, 0, 1, L.Tr("HSV saturation moves by up to ± this"));
+            c = UiRows.Split(rows.Row(), 2, 6);
+            brush.brightnessJitter = PercentSlider(c[0], L.TrIn("brush", "Brightness"), brush.brightnessJitter, 0, 1, L.Tr("HSV value moves by up to ± this"));
+            brush.purity = PercentSlider(c[1], L.TrIn("brush", "Purity"), brush.purity, -1, 1, L.Tr("-100% gray … 0 unchanged … 100% fully saturated"));
+            brush.colorPerTip = PaintGui.FitToggle(rows.Row(), L.Tr("Apply per tip"), brush.colorPerTip,
+                L.Tr("A new color for every dab (2D canvas). Off: one color per stroke. The 3D brush always uses one color per stroke."));
+            rows.Space(4);
+        }
+
+        void FadeTiltSection(UiRows rows)
+        {
+            if (!ToolSection(rows, "brush-fade", L.Tr("Fade & Pen Tilt"), "stylus")) return;
+            PaintGui.GroupLabel(rows.Row(16), L.Tr("Fade (steps, 0 = off)"), L.Tr("The value falls from full to nothing over this many dabs from the start of the stroke. Drag sideways or click to type."));
+            var c = UiRows.Split(rows.Row(), 2, 6);
+            brush.fadeSize = PaintGui.IntField(c[0], L.Tr("Size"), brush.fadeSize, 0, BrushSettings.MaxFade, "", L.Tr("The size fades out over this many dabs"));
+            brush.fadeOpacity = PaintGui.IntField(c[1], L.Tr("Opacity"), brush.fadeOpacity, 0, BrushSettings.MaxFade, "", L.Tr("The opacity fades out over this many dabs"));
+            c = UiRows.Split(rows.Row(), 2, 6);
+            brush.fadeFlow = PaintGui.IntField(c[0], L.Tr("Flow"), brush.fadeFlow, 0, BrushSettings.MaxFade, "", L.Tr("The flow fades out over this many dabs"));
+            PaintGui.GroupLabel(rows.Row(16), L.Tr("Pen tilt (upright = full)"), L.Tr("From Unity's Event.tilt. A mouse reports no tilt, so these change nothing for it. Not yet checked with a real pen."));
+            c = UiRows.Split(rows.Row(), 2, 6);
+            brush.tiltSize = PaintGui.FitToggle(c[0], L.Tr("Size"), brush.tiltSize, L.Tr("The more the pen leans, the smaller the tip"));
+            brush.tiltOpacity = PaintGui.FitToggle(c[1], L.Tr("Opacity"), brush.tiltOpacity, L.Tr("The more the pen leans, the lower the opacity"));
+            c = UiRows.Split(rows.Row(), 2, 6);
+            brush.tiltFlow = PaintGui.FitToggle(c[0], L.Tr("Flow"), brush.tiltFlow, L.Tr("The more the pen leans, the lower the flow"));
+            brush.tiltAngle = PaintGui.FitToggle(c[1], L.Tr("Angle"), brush.tiltAngle, L.Tr("Turns the tip toward the direction the pen leans"));
+            rows.Space(4);
+        }
+
+        void DualTipMenu(Rect at)
         {
             var menu = new GenericMenu();
-            menu.AddItem(new GUIContent("None"), string.IsNullOrEmpty(brush.textureId), () => brush.textureId = "");
-            foreach (var id in BuiltInBrushes.TipIds) { string full = "builtin:" + id; menu.AddItem(new GUIContent("Built-in/" + id), brush.textureId == full, () => SetTexture(full)); }
+            menu.AddItem(new GUIContent(L.TrIn("brush", "Round")), string.IsNullOrEmpty(brush.dualTipId), () => brush.dualTipId = "");
+            if (!string.IsNullOrEmpty(brush.tipId)) menu.AddItem(new GUIContent(L.Tr("Same as the main tip")), brush.dualTipId == brush.tipId, () => brush.dualTipId = brush.tipId);
+            foreach (var id in BuiltInBrushes.TipIds) { string full = "builtin:" + id; menu.AddItem(new GUIContent(L.TrIn("brush", "Built-in") + "/" + id), brush.dualTipId == full, () => brush.dualTipId = full); }
+            menu.DropDown(at);
+        }
+        void TextureMenu(Rect at)
+        {
+            var menu = new GenericMenu();
+            menu.AddItem(new GUIContent(L.Tr("None")), string.IsNullOrEmpty(brush.textureId), () => brush.textureId = "");
+            foreach (var id in BuiltInBrushes.TipIds) { string full = "builtin:" + id; menu.AddItem(new GUIContent(L.TrIn("brush", "Built-in") + "/" + id), brush.textureId == full, () => SetTexture(full)); }
             foreach (var library in BrushLibrary.All)
                 foreach (var preset in library.Presets)
                 {
@@ -143,8 +190,9 @@ namespace Yozolab.YoluPainter.Editor
                     if (string.IsNullOrEmpty(id)) continue;
                     menu.AddItem(new GUIContent(library.MenuName + "/" + preset.Name), brush.textureId == id, () => SetTexture(id));
                 }
-            menu.ShowAsContext();
+            menu.DropDown(at);
         }
+
         /// <summary>紙の質感を選ぶ。効かないまま選ばれないよう、深さが 0 なら 1 にする。</summary>
         internal void SetTexture(string id)
         {

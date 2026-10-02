@@ -59,3 +59,14 @@ tools/magic-wand fluent wand
 tools/move fluent arrow_move
 tools/path fluent pen
 tools/eyedropper fluent eyedropper
+
+# ---- プロパティの欄のツールの設定（TexturePaintWindow.ToolPanels.cs など） ----
+paint_brush fluent paint_brush
+ink_stroke fluent ink_stroke
+data_scatter fluent data_scatter
+grid_dots fluent grid_dots
+content_copy fluent copy
+flip_vertical fluent flip_vertical
+rotate_90_degrees_ccw fluent arrow_rotate_counterclockwise
+import fluent arrow_import
+transform fluent resize

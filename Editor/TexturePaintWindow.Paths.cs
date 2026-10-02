@@ -138,33 +138,38 @@ namespace Yozolab.YoluPainter.Editor
             message=done+(render.Gaps>0?" "+render.Gaps+" sample(s) could not be projected onto the surface and were skipped.":"");repaintPixels=true;
         }
 
-        void DrawPathSettings()
+        void PathSection(UiRows rows)
         {
-            EditorGUILayout.LabelField("Click the model in the 3D view or the 2D canvas to add points; drag a point to move it; Delete removes the last point. The layer is redrawn from the path each time.",EditorStyles.wordWrappedMiniLabel);
-            var layer=document.Layers.FirstOrDefault(l=>l.Id==selectedLayer);
-            if(layer?.Path is CanvasPath canvasPath)
+            if (!ToolSection(rows, "path", L.Tr("Path"), "conversion_path")) return;
+            PaintGui.Paragraph(rows, L.Tr("Click the model in the 3D view or the 2D canvas to add points; drag a point to move it; Delete removes the last point. The layer is redrawn from the path each time."));
+            var layer = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
+            string rasterizeTip = L.Tr("Keep the pixels and remove the path, so the layer can be painted");
+            if (layer?.Path is CanvasPath canvasPath)
             {
-                EditorGUILayout.LabelField("Canvas path: "+canvasPath.Points.Count+" point(s) on "+canvasPath.Channel,EditorStyles.miniLabel);
-                GUILayout.BeginHorizontal();
-                using(new EditorGUI.DisabledScope(stroke!=null))
-                    if(GUILayout.Button(new GUIContent("Use brush","Redraw the path with the current brush")))TryAction(()=>ApplyCanvasPath(layer.Id,canvasPath.WithBrush(CurrentPathBrush(true)),"Path redrawn with the current brush."));
-                if(GUILayout.Button(new GUIContent("Rasterize","Keep the pixels and remove the path, so the layer can be painted")))TryAction(()=>{document.Rasterize(layer.Id);message="Rasterized: the layer keeps its pixels and can be painted.";});
-                GUILayout.EndHorizontal();
+                PaintGui.Text(rows.Row(18), L.Tr("Canvas path: {0} point(s) on {1}", canvasPath.Points.Count, L.Tr(canvasPath.Channel.ToString())), PaintTheme.LabelDim);
+                var c = UiRows.Split(rows.Row(24), 2, 6);
+                if (PaintGui.FitButton(c[0], L.TrIn("path", "Use Brush"), false, stroke == null, L.Tr("Redraw the path with the current brush")))
+                    TryAction(() => ApplyCanvasPath(layer.Id, canvasPath.WithBrush(CurrentPathBrush(true)), L.Tr("Path redrawn with the current brush.")));
+                if (PaintGui.FitButton(c[1], L.TrIn("path", "Rasterize"), false, true, rasterizeTip)) TryAction(() => RasterizePath(layer.Id));
+                rows.Space(4);
                 return;
             }
-            if(!(layer?.Path is SurfacePath surfacePath))return;
-            EditorGUILayout.LabelField("Path: "+surfacePath.Points.Count+" point(s) on "+surfacePath.Channel,EditorStyles.miniLabel);
-            bool bound=preview.Geometry!=null&&SurfacePathRenderer.Fingerprint(preview.Geometry)==surfacePath.ModelFingerprint;
-            if(!bound)EditorGUILayout.HelpBox("This path was drawn on another model snapshot (different triangles or UVs). Load that model to edit it, or rasterize it.",MessageType.Warning);
-            GUILayout.BeginHorizontal();
-            using(new EditorGUI.DisabledScope(!bound||stroke!=null))
+            if (layer?.Path is SurfacePath surfacePath)
             {
-                if(GUILayout.Button(new GUIContent("Use brush","Redraw the path with the current brush")))TryAction(()=>ApplyPath(layer.Id,surfacePath.WithBrush(CurrentPathBrush()),"Path redrawn with the current brush."));
-                if(GUILayout.Button(new GUIContent("Redraw","Redraw on the current pose")))TryAction(()=>ApplyPath(layer.Id,surfacePath,"Path redrawn."));
+                PaintGui.Text(rows.Row(18), L.Tr("Path on the model: {0} point(s) on {1}", surfacePath.Points.Count, L.Tr(surfacePath.Channel.ToString())), PaintTheme.LabelDim);
+                bool bound = preview.Geometry != null && SurfacePathRenderer.Fingerprint(preview.Geometry) == surfacePath.ModelFingerprint;
+                if (!bound) PaintGui.Notice(rows, L.Tr("This path was drawn on another model snapshot (different triangles or UVs). Load that model to edit it, or rasterize it."), "warning", PaintTheme.Warning);
+                var c = UiRows.Split(rows.Row(24), 3, 6);
+                if (PaintGui.FitButton(c[0], L.TrIn("path", "Use Brush"), false, bound && stroke == null, L.Tr("Redraw the path with the current brush")))
+                    TryAction(() => ApplyPath(layer.Id, surfacePath.WithBrush(CurrentPathBrush()), L.Tr("Path redrawn with the current brush.")));
+                if (PaintGui.FitButton(c[1], L.TrIn("path", "Redraw"), false, bound && stroke == null, L.Tr("Redraw on the current pose")))
+                    TryAction(() => ApplyPath(layer.Id, surfacePath, L.Tr("Path redrawn.")));
+                if (PaintGui.FitButton(c[2], L.TrIn("path", "Rasterize"), false, true, rasterizeTip)) TryAction(() => RasterizePath(layer.Id));
             }
-            if(GUILayout.Button(new GUIContent("Rasterize","Keep the pixels and remove the path, so the layer can be painted")))TryAction(()=>{document.Rasterize(layer.Id);message="Rasterized: the layer keeps its pixels and can be painted.";});
-            GUILayout.EndHorizontal();
+            rows.Space(4);
         }
+
+        void RasterizePath(Guid layerId) { document.Rasterize(layerId); message = L.Tr("Rasterized: the layer keeps its pixels and can be painted."); }
 
         /// <summary>選んだ層のパスの制御点と線を 3D ビューに重ねる（Repaint のとき）。</summary>
         void DrawPathMarkers()

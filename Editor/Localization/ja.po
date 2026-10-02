@@ -495,9 +495,6 @@ msgstr "筆圧で流量を変える"
 msgid "Pressure curve"
 msgstr "筆圧のカーブ"
 
-msgid "Tip & dynamics"
-msgstr "ブラシ先端とダイナミクス"
-
 msgid "Tip"
 msgstr "先端"
 
@@ -512,9 +509,6 @@ msgstr "角度"
 
 msgid "Roundness"
 msgstr "真円率"
-
-msgid "Follow direction"
-msgstr "進行方向に合わせる"
 
 msgid "Size jitter"
 msgstr "直径のジッター"

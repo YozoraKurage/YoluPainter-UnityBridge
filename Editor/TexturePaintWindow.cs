@@ -46,7 +46,7 @@ namespace Yozolab.YoluPainter.Editor
         string projectPath, projectToken, recoveryToken, message = "";
         long renderedRevision = -1, savedRevision = -1, recoveredRevision = -1;
         bool repaintPixels = true, surfaceStroke, externalConflict, editMask;
-        Vector2 previousPointer, layerScroll, brushScroll, canvasPan;
+        Vector2 previousPointer, layerScroll, canvasPan;
         float canvasZoom = 1, previousPressure = 1;
         /// <summary>キャンバスでの左ボタンの働き。</summary>
         internal enum PaintTool { Brush, Fill, Gradient, SelectRectangle, SelectEllipse, Lasso, MagicWand, Move, Path, Eyedropper }
@@ -60,7 +60,6 @@ namespace Yozolab.YoluPainter.Editor
         bool toolDragging; Vector2 toolStart, toolCurrent; readonly List<Vector2> lassoPoints = new List<Vector2>();
         Texture2D selectionOverlay; SelectionMask overlayFor;
         int materialSlot, resolution = 1024;
-        bool showDynamics;
         double lastRecovery, lastExternalCheck;
         byte[] importedOriginal;
         /// <summary>このドキュメントを取り込んだ PSD のパス（取り込んでからまだ .ylp に保存していなければ保存先の提案に使う）。</summary>

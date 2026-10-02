@@ -179,7 +179,9 @@ namespace Yozolab.YoluPainter.Editor
             {
                 bool active = GUIUtility.hotControl == id;
                 Rounded(r, PaintTheme.ControlBg, 3);
-                var fill = new Rect(r.x, r.y, Mathf.Max(0, r.width * t), r.height);
+                // 0 をまたぐ範囲（角度 −180〜180 など）は 0 の位置から塗る（0 が半分まで塗られて見えないように）
+                float from = min < 0 && max > 0 ? Mathf.Clamp01(-min / (max - min)) : 0;
+                var fill = new Rect(r.x + r.width * Mathf.Min(from, t), r.y, Mathf.Max(0, r.width * Mathf.Abs(t - from)), r.height);
                 if (fill.width > 0) Rounded(fill, !enabled ? PaintTheme.ControlHover : active || hover ? PaintTheme.SliderFillHover : PaintTheme.SliderFill, 3);
                 Outline(r, hover || active ? PaintTheme.AccentDim : PaintTheme.Border, 1, 3);
                 var inner = new Rect(r.x + 7, r.y, r.width - 14, r.height);

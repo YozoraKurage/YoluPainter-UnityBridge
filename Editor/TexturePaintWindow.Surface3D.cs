@@ -13,9 +13,28 @@ namespace Yozolab.YoluPainter.Editor
         SurfaceRegionKind surfacePick = SurfaceRegionKind.UvIsland;
         internal SurfaceRegionKind SurfacePick { get => surfacePick; set => surfacePick = value; }
 
-        void DrawSurfacePick()
+        void SurfacePickSection(UiRows rows)
         {
-            surfacePick=(SurfaceRegionKind)EditorGUILayout.EnumPopup(new GUIContent("3D view picks","What a click on the model in the 3D view selects or fills"),surfacePick);
+            if (!ToolSection(rows, "surface-pick", L.Tr("3D Pick"), "view_in_ar")) return;
+            PaintGui.FitDropdown(rows.Row(), L.TrIn("3D pick", "Region"), SurfacePickName(surfacePick), at =>
+            {
+                var menu = new GenericMenu();
+                foreach (SurfaceRegionKind kind in Enum.GetValues(typeof(SurfaceRegionKind))) { var k = kind; menu.AddItem(new GUIContent(SurfacePickName(k)), k == surfacePick, () => surfacePick = k); }
+                menu.DropDown(at);
+            }, L.Tr("What a click on the model in the 3D view selects or fills"), true, LabelColumn);
+            rows.Space(4);
+        }
+
+        static string SurfacePickName(SurfaceRegionKind kind)
+        {
+            switch (kind)
+            {
+                case SurfaceRegionKind.Triangle: return L.TrIn("3D pick", "Triangle");
+                case SurfaceRegionKind.UvIsland: return L.TrIn("3D pick", "UV Island");
+                case SurfaceRegionKind.MeshPart: return L.TrIn("3D pick", "Mesh Part");
+                case SurfaceRegionKind.Material: return L.Tr("Material");
+                default: return kind.ToString();
+            }
         }
 
         /// <summary>選択ツールとバケツの、3D ビューでのクリック。扱ったら true。</summary>
