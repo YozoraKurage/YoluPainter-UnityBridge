@@ -43,7 +43,8 @@ namespace Yozolab.YoluPainter.Core
             {
                 if (!layer.Visible || layer.Opacity <= 0 || !layer.IsChannelEnabled(channel) || !layer.HasContent(channel)) continue;
                 double maskFactor = layer.Mask == null ? 1 : layer.Mask.FactorAt(x, y);
-                result = Blend(result, layer.GetPixel(channel, x, y), layer.Opacity * maskFactor, layer.BlendMode);
+                if (layer.Kind == LayerKind.Adjustment) result = layer.Adjustment.Composite(result, layer.Opacity * maskFactor, layer.BlendMode);
+                else result = Blend(result, layer.GetPixel(channel, x, y), layer.Opacity * maskFactor, layer.BlendMode);
             }
             return result;
         }
@@ -71,15 +72,20 @@ namespace Yozolab.YoluPainter.Core
             var buffers = new byte[layers.Count][]; var present = new bool[layers.Count];
             for (int i = 0; i < buffers.Length; i++) buffers[i] = new byte[tileBytes];
             // Masks that can change a pixel. A neutral mask multiplies by exactly 1, so skipping it is exact.
-            var masks = new LayerMask[layers.Count]; var maskBuffers = new byte[layers.Count][];
+            var masks = new RasterMask[layers.Count]; var maskBuffers = new byte[layers.Count][];
             for (int i = 0; i < masks.Length; i++)
                 if (layers[i].Mask != null && !layers[i].Mask.IsNeutral) { masks[i] = layers[i].Mask; maskBuffers[i] = new byte[tileBytes]; }
             for (int ty = y / tile; ty <= (y + height - 1) / tile; ty++)
                 for (int tx = x / tile; tx <= (x + width - 1) / tile; tx++)
                 {
                     var coord = new TileCoord(tx, ty); bool any = false;
-                    for (int i = 0; i < layers.Count; i++) any |= present[i] = layers[i].CopyTile(channel, coord, buffers[i]);
-                    if (!any) continue; // region bytes are already transparent
+                    for (int i = 0; i < layers.Count; i++)
+                    {
+                        if (layers[i].Kind == LayerKind.Adjustment) { present[i] = true; continue; } // applied to the result below
+                        any |= present[i] = layers[i].CopyTile(channel, coord, buffers[i]);
+                    }
+                    // Nothing with pixels here: the result stays transparent, and adjustments leave transparent pixels alone.
+                    if (!any) continue;
                     for (int i = 0; i < layers.Count; i++) if (present[i] && masks[i] != null) masks[i].Surface.CopyTile(coord, maskBuffers[i]);
                     int x0 = Math.Max(x, tx * tile), x1 = Math.Min(x + width, (tx + 1) * tile);
                     int y0 = Math.Max(y, ty * tile), y1 = Math.Min(y + height, (ty + 1) * tile);
@@ -92,7 +98,8 @@ namespace Yozolab.YoluPainter.Core
                             if (!present[i]) continue;
                             var b = buffers[i];
                             double opacity = masks[i] == null ? layers[i].Opacity : layers[i].Opacity * masks[i].Factor(maskBuffers[i][source + 3]);
-                            result = BlendUnchecked(result, new Rgba32(b[source], b[source + 1], b[source + 2], b[source + 3]), opacity, layers[i].BlendMode);
+                            if (layers[i].Kind == LayerKind.Adjustment) result = layers[i].Adjustment.Composite(result, opacity, layers[i].BlendMode);
+                            else result = BlendUnchecked(result, new Rgba32(b[source], b[source + 1], b[source + 2], b[source + 3]), opacity, layers[i].BlendMode);
                         }
                         int offset = ((py - y) * width + (px - x)) * 4;
                         bytes[offset] = result.R; bytes[offset + 1] = result.G; bytes[offset + 2] = result.B; bytes[offset + 3] = result.A;

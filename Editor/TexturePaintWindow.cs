@@ -126,6 +126,8 @@ namespace Yozolab.YoluPainter.Editor
         void OnGUI()
         {
             if(document==null) return;
+            // スライダーのドラッグ中の変更は 1 つの Undo にまとめる。離したところで区切る。
+            if(Event.current.rawType==EventType.MouseUp) document.EndCoalescing();
             HandleKeys(Event.current);
             using(new EditorGUI.DisabledScope(stroke!=null)) DrawToolbar();
             if(repaintPixels || renderedRevision!=document.Revision)
@@ -212,6 +214,14 @@ namespace Yozolab.YoluPainter.Editor
                 GUILayout.BeginHorizontal();
                 if(GUILayout.Button("+")) selectedLayer=document.AddLayer("Paint "+(document.Layers.Count+1)).Id;
                 if(GUILayout.Button("+ Fill")) selectedLayer=document.AddFillLayer("Fill "+(document.Layers.Count+1),new Dictionary<PaintChannel,Rgba32>{{channel,GetBrush().Color}}).Id;
+                if(GUILayout.Button("+ Adjust"))
+                {
+                    var menu=new GenericMenu();
+                    menu.AddItem(new GUIContent("Invert"),false,()=>selectedLayer=document.AddAdjustmentLayer("Invert",AdjustmentSettings.Invert()).Id);
+                    menu.AddItem(new GUIContent("Levels"),false,()=>selectedLayer=document.AddAdjustmentLayer("Levels",AdjustmentSettings.Levels()).Id);
+                    menu.AddItem(new GUIContent("Hue / Saturation"),false,()=>selectedLayer=document.AddAdjustmentLayer("Hue / Saturation",AdjustmentSettings.HueSaturation()).Id);
+                    menu.ShowAsContext();
+                }
                 using(new EditorGUI.DisabledScope(document.Layers.Count<2)) if(GUILayout.Button("−")){document.RemoveLayer(selectedLayer);selectedLayer=document.Layers[document.Layers.Count-1].Id;}
                 GUILayout.EndHorizontal();
                 layerScroll=GUILayout.BeginScrollView(layerScroll);
@@ -219,7 +229,7 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     var layer=document.Layers[i]; GUILayout.BeginHorizontal();
                     bool visible=GUILayout.Toggle(layer.Visible,"",GUILayout.Width(18)); if(visible!=layer.Visible) document.SetLayerVisibility(layer.Id,visible);
-                    if(GUILayout.Toggle(selectedLayer==layer.Id,(layer.Kind==LayerKind.Fill?"[Fill] ":"")+layer.Name,"Button")) selectedLayer=layer.Id;
+                    if(GUILayout.Toggle(selectedLayer==layer.Id,(layer.Kind==LayerKind.Fill?"[Fill] ":layer.Kind==LayerKind.Adjustment?"[Adj] ":"")+layer.Name,"Button")) selectedLayer=layer.Id;
                     GUILayout.EndHorizontal();
                 }
                 GUILayout.EndScrollView();
@@ -227,14 +237,15 @@ namespace Yozolab.YoluPainter.Editor
                 if(active!=null)
                 {
                     string name=EditorGUILayout.DelayedTextField("Name",active.Name);if(name!=active.Name)document.SetLayerName(active.Id,name);
-                    float opacity=EditorGUILayout.Slider("Opacity",(float)active.Opacity,0,1);if(Math.Abs(opacity-active.Opacity)>.00001)document.SetLayerOpacity(active.Id,opacity);
+                    float opacity=EditorGUILayout.Slider("Opacity",(float)active.Opacity,0,1);if(Math.Abs(opacity-active.Opacity)>.00001)document.SetLayerOpacity(active.Id,opacity,coalesce:true);
                     var blend=(LayerBlendMode)EditorGUILayout.EnumPopup("Blend",active.BlendMode);if(blend!=active.BlendMode)document.SetLayerBlendMode(active.Id,blend);
-                    bool enabled=EditorGUILayout.Toggle("Channel enabled",active.IsChannelEnabled(channel));if(enabled!=active.IsChannelEnabled(channel))document.SetChannelEnabled(active.Id,channel,enabled);
+                    bool enabled=EditorGUILayout.Toggle("Channel enabled",active.IsChannelEnabled(channel));if(enabled!=active.IsChannelEnabled(channel))TryAction(()=>document.SetChannelEnabled(active.Id,channel,enabled));
                     GUILayout.BeginHorizontal();int index=document.Layers.ToList().FindIndex(l=>l.Id==active.Id);
                     using(new EditorGUI.DisabledScope(index>=document.Layers.Count-1)) if(GUILayout.Button("Up"))document.MoveLayer(active.Id,index+1);
                     using(new EditorGUI.DisabledScope(index<=0)) if(GUILayout.Button("Down"))document.MoveLayer(active.Id,index-1);
                     GUILayout.EndHorizontal();
                     if(active.Kind==LayerKind.Fill) DrawFill(active);
+                    if(active.Kind==LayerKind.Adjustment) DrawAdjustment(active);
                     DrawMask(active);
                 }
             }
@@ -250,11 +261,40 @@ namespace Yozolab.YoluPainter.Editor
                 if(channel==PaintChannel.Roughness||channel==PaintChannel.Metallic||channel==PaintChannel.Height)
                 {byte v=(byte)Mathf.RoundToInt(EditorGUILayout.Slider("Value",value.R/255f,0,1)*255);next=new Rgba32(v,v,v,value.A);}
                 else{var c=EditorGUILayout.ColorField("Value",new Color32(value.R,value.G,value.B,value.A));var c32=(Color32)c;next=new Rgba32(c32.r,c32.g,c32.b,c32.a);}
-                if(next!=value) document.SetFillValue(active.Id,channel,next);
+                if(next!=value) document.SetFillValue(active.Id,channel,next,coalesce:true);
                 if(GUILayout.Button("Remove value for "+channel)) document.SetFillValue(active.Id,channel,null);
             }
             else if(GUILayout.Button("Add value for "+channel)) document.SetFillValue(active.Id,channel,GetBrush().Color);
             EditorGUILayout.HelpBox("A fill covers the whole canvas. Paint its mask to choose where it shows.",MessageType.None);
+        }
+        void DrawAdjustment(PaintLayer active)
+        {
+            GUILayout.Space(6);
+            var a=active.Adjustment;
+            GUILayout.Label("Adjustment: "+a.Type+" (applies to the layers below)",EditorStyles.miniBoldLabel);
+            AdjustmentSettings next=a;
+            switch(a.Type)
+            {
+                case AdjustmentType.Levels:
+                {
+                    float ib=EditorGUILayout.Slider("Input black",(float)a.InputBlack,0,(float)a.InputWhite-.004f);
+                    float iw=EditorGUILayout.Slider("Input white",(float)a.InputWhite,ib+.004f,1);
+                    float gamma=EditorGUILayout.Slider("Gamma",(float)a.Gamma,.1f,9.99f);
+                    float ob=EditorGUILayout.Slider("Output black",(float)a.OutputBlack,0,1);
+                    float ow=EditorGUILayout.Slider("Output white",(float)a.OutputWhite,0,1);
+                    next=AdjustmentSettings.Levels(ib,iw,gamma,ob,ow); break;
+                }
+                case AdjustmentType.HueSaturation:
+                {
+                    float hue=EditorGUILayout.Slider("Hue",(float)a.Hue,-180,180);
+                    float sat=EditorGUILayout.Slider("Saturation",(float)a.Saturation,-1,1);
+                    float light=EditorGUILayout.Slider("Lightness",(float)a.Lightness,-1,1);
+                    next=AdjustmentSettings.HueSaturation(hue,sat,light); break;
+                }
+                default: EditorGUILayout.LabelField("Inverts the colour of everything below."); break;
+            }
+            if(!next.Equals(a)) TryAction(()=>document.SetAdjustment(active.Id,next,coalesce:true));
+            if(!a.AppliesTo(channel)) EditorGUILayout.HelpBox(a.Type+" does not apply to the "+channel+" channel.",MessageType.None);
         }
         bool EditingMask => editMask && document.Layers.Any(l => l.Id == selectedLayer && l.Mask != null);
         void DrawMask(PaintLayer active)
@@ -270,7 +310,7 @@ namespace Yozolab.YoluPainter.Editor
             editMask=GUILayout.Toggle(editMask,"Paint on mask (paint hides, erase reveals)");
             bool maskEnabled=EditorGUILayout.Toggle("Mask enabled",mask.Enabled);if(maskEnabled!=mask.Enabled)document.SetLayerMaskEnabled(active.Id,maskEnabled);
             bool inverted=EditorGUILayout.Toggle("Invert mask",mask.Inverted);if(inverted!=mask.Inverted)document.SetLayerMaskInverted(active.Id,inverted);
-            float density=EditorGUILayout.Slider("Mask density",(float)mask.Density,0,1);if(Math.Abs(density-mask.Density)>.00001)document.SetLayerMaskDensity(active.Id,density);
+            float density=EditorGUILayout.Slider("Mask density",(float)mask.Density,0,1);if(Math.Abs(density-mask.Density)>.00001)document.SetLayerMaskDensity(active.Id,density,coalesce:true);
             if(GUILayout.Button("Remove mask")){document.RemoveLayerMask(active.Id);editMask=false;}
         }
         Rect ImageRect()

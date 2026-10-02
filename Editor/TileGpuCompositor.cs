@@ -79,25 +79,45 @@ namespace Yozolab.YoluPainter.Editor
             foreach (var layer in doc.Layers)
             {
                 if (!layer.Visible || layer.Opacity <= 0 || !layer.IsChannelEnabled(channel) || !layer.HasContent(channel)) continue;
-                // A layer without this tile contributes transparent pixels; skipping it is exact and saves a pass.
-                if (!layer.CopyTile(channel, coord, uploadPixels)) continue;
-                upload.LoadRawTextureData(uploadPixels); upload.Apply(false, false);
-                material.SetTexture("_LayerTex", upload); material.SetFloat("_Opacity", (float)layer.Opacity); material.SetInt("_BlendMode", (int)layer.BlendMode);
-                var mask = layer.Mask;
-                if (mask != null && !mask.IsNeutral)
+                int pass;
+                if (layer.Kind == LayerKind.Adjustment)
                 {
-                    mask.Surface.CopyTile(coord, maskPixels); // absent tile = nothing hidden (zeros)
-                    uploadMask.LoadRawTextureData(maskPixels); uploadMask.Apply(false, false);
-                    material.SetTexture("_MaskTex", uploadMask);
-                    material.SetVector("_Mask", new Vector4(1, mask.Inverted ? 1 : 0, (float)mask.Density, 0));
+                    // 自分の画素は無く、ping（下の合成結果）に調整をかける。透明な画素はシェーダーがそのまま返す。
+                    SetAdjustment(layer.Adjustment); pass = 2;
                 }
-                else material.SetVector("_Mask", Vector4.zero);
-                Graphics.Blit(ping, pong, material, 0);
+                else
+                {
+                    // A layer without this tile contributes transparent pixels; skipping it is exact and saves a pass.
+                    if (!layer.CopyTile(channel, coord, uploadPixels)) continue;
+                    upload.LoadRawTextureData(uploadPixels); upload.Apply(false, false);
+                    material.SetTexture("_LayerTex", upload); pass = 0;
+                }
+                material.SetFloat("_Opacity", (float)layer.Opacity); material.SetInt("_BlendMode", (int)layer.BlendMode);
+                SetMask(layer.Mask, coord);
+                Graphics.Blit(ping, pong, material, pass);
                 var swap = ping; ping = pong; pong = swap;
             }
             int tw = Math.Min(tileSize, width - coord.X * tileSize), th = Math.Min(tileSize, height - coord.Y * tileSize);
             if (useCopyTexture) Graphics.CopyTexture(ping, 0, 0, 0, 0, tw, th, composite, 0, 0, coord.X * tileSize, coord.Y * tileSize);
             else DrawCopy(ping, coord.X * tileSize, coord.Y * tileSize, tw, th);
+        }
+        void SetMask(RasterMask mask, TileCoord coord)
+        {
+            if (mask != null && !mask.IsNeutral)
+            {
+                mask.Surface.CopyTile(coord, maskPixels); // absent tile = nothing hidden (zeros)
+                uploadMask.LoadRawTextureData(maskPixels); uploadMask.Apply(false, false);
+                material.SetTexture("_MaskTex", uploadMask);
+                material.SetVector("_Mask", new Vector4(1, mask.Inverted ? 1 : 0, (float)mask.Density, 0));
+            }
+            else material.SetVector("_Mask", Vector4.zero);
+        }
+        void SetAdjustment(AdjustmentSettings a)
+        {
+            material.SetFloat("_AdjType", (int)a.Type);
+            material.SetVector("_AdjLevels", new Vector4((float)a.InputBlack, (float)a.InputWhite, (float)a.Gamma, 0));
+            material.SetVector("_AdjOutput", new Vector4((float)a.OutputBlack, (float)a.OutputWhite, 0, 0));
+            material.SetVector("_AdjHsl", new Vector4((float)a.Hue, (float)a.Saturation, (float)a.Lightness, 0));
         }
         /// <summary>CopyTexture の代わりに、作業タイルの左下 w×h を composite の (x, y) へ描き込む。
         /// Unity は OpenGL 4.3 未満（ARB_copy_image を持っていても）や一部の GLES で CopyTexture を無効にする。</summary>

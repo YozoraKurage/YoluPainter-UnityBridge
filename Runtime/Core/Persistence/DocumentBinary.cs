@@ -7,10 +7,10 @@ namespace Yozolab.YoluPainter.Core.Persistence
 {
     /// <summary>Versioned, bounded, lossless native sparse source archive. No GPU cache is persisted.
     /// Version 2 adds an optional raster mask block after each layer's channels. Version 3 adds the layer kind and fill
-    /// values after the layer attributes. Older archives still load.</summary>
+    /// values after the layer attributes. Version 4 adds adjustment parameters after the fill values. Older archives still load.</summary>
     public static class DocumentBinary
     {
-        const int Version = 3;
+        const int Version = 4;
         const long MaxArchiveBytes = 512L * 1024 * 1024;
         static readonly byte[] Magic = Encoding.ASCII.GetBytes("DOTPAINT");
 
@@ -37,6 +37,13 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         var value = layer.FillValues[channel];
                         writer.Write((int)channel); writer.Write(layer.IsChannelEnabled(channel));
                         writer.Write(value.R); writer.Write(value.G); writer.Write(value.B); writer.Write(value.A);
+                    }
+                    if (layer.Kind == LayerKind.Adjustment)
+                    {
+                        var a = layer.Adjustment;
+                        writer.Write((int)a.Type); writer.Write(AdjustmentSettings.AlgorithmVersion);
+                        foreach (double v in new[] { a.InputBlack, a.InputWhite, a.Gamma, a.OutputBlack, a.OutputWhite, a.Hue, a.Saturation, a.Lightness }) writer.Write(v);
+                        var enabled = layer.EnabledChannels; writer.Write(enabled.Count); foreach (var c in enabled) writer.Write((int)c);
                     }
                     var channels = layer.Channels.Keys.OrderBy(c => c).ToArray();
                     writer.Write(channels.Length);
@@ -102,13 +109,40 @@ namespace Yozolab.YoluPainter.Core.Persistence
                                 values.Add((PaintChannel)channelValue, new Rgba32(reader.ReadByte(), reader.ReadByte(), reader.ReadByte(), reader.ReadByte()));
                                 if (!channelEnabled) disabled.Add((PaintChannel)channelValue);
                             }
-                            layer = kind == (int)LayerKind.Fill ? doc.AddFillLayer(layerName, values, layerId) : doc.AddLayer(layerName, layerId);
+                            if (kind == (int)LayerKind.Adjustment)
+                            {
+                                if (version < 4) throw new InvalidDataException("Adjustment layers require archive version 4.");
+                                int type = reader.ReadInt32(), algorithm = reader.ReadInt32();
+                                if (!Enum.IsDefined(typeof(AdjustmentType), type)) throw new InvalidDataException("Unknown adjustment type; a newer reader is required.");
+                                if (algorithm != AdjustmentSettings.AlgorithmVersion) throw new InvalidDataException("Adjustment algorithm version " + algorithm + " is not supported by this reader; source retained unchanged.");
+                                var p = new double[8]; for (int i = 0; i < 8; i++) p[i] = reader.ReadDouble();
+                                AdjustmentSettings settings;
+                                try
+                                {
+                                    switch ((AdjustmentType)type)
+                                    {
+                                        case AdjustmentType.Invert: settings = AdjustmentSettings.Invert(); break;
+                                        case AdjustmentType.Levels: settings = AdjustmentSettings.Levels(p[0], p[1], p[2], p[3], p[4]); break;
+                                        default: settings = AdjustmentSettings.HueSaturation(p[5], p[6], p[7]); break;
+                                    }
+                                }
+                                catch (ArgumentException ex) { throw new InvalidDataException("Invalid adjustment parameters.", ex); }
+                                int enabledCount = ReadCount(reader, 6, "adjustment channels"); var targets = new System.Collections.Generic.List<PaintChannel>();
+                                for (int e = 0; e < enabledCount; e++)
+                                {
+                                    int c = reader.ReadInt32();
+                                    if (!Enum.IsDefined(typeof(PaintChannel), c) || targets.Contains((PaintChannel)c) || !settings.AppliesTo((PaintChannel)c)) throw new InvalidDataException("Invalid adjustment channel.");
+                                    targets.Add((PaintChannel)c);
+                                }
+                                layer = doc.AddAdjustmentLayer(layerName, settings, targets, layerId);
+                            }
+                            else layer = kind == (int)LayerKind.Fill ? doc.AddFillLayer(layerName, values, layerId) : doc.AddLayer(layerName, layerId);
                             foreach (var channel in disabled) doc.SetChannelEnabled(layer.Id, channel, false);
                         }
                         else layer = doc.AddLayer(layerName, layerId);
                         doc.SetLayerVisibility(layer.Id, visible); doc.SetLayerOpacity(layer.Id, opacity); doc.SetLayerBlendMode(layer.Id, (LayerBlendMode)blend);
                         int channelCount = ReadCount(reader, 6, "channels");
-                        if (layer.Kind == LayerKind.Fill && channelCount != 0) throw new InvalidDataException("Fill layers have no pixel channels.");
+                        if (layer.Kind != LayerKind.Raster && channelCount != 0) throw new InvalidDataException("Only raster layers have pixel channels.");
                         var seenChannels = new System.Collections.Generic.HashSet<int>();
                         for (int c = 0; c < channelCount; c++)
                         {

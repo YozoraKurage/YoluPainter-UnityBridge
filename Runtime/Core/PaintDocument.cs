@@ -7,13 +7,13 @@ namespace Yozolab.YoluPainter.Core
     /// <summary>Raster mask of one layer, shared by all of its channels. The surface stores the amount to HIDE in each
     /// pixel's alpha (RGB stays zero), so an absent tile reveals everything and an untouched mask costs no memory.
     /// Painting hides, erasing reveals. Enabled, Inverted and Density are non-destructive parameters.</summary>
-    public sealed class LayerMask
+    public sealed class RasterMask
     {
         public SparseTileSurface Surface { get; private set; }
         public bool Enabled { get; internal set; }
         public bool Inverted { get; internal set; }
         public double Density { get; internal set; }
-        internal LayerMask(SparseTileSurface surface) { Surface = surface; Enabled = true; Density = 1; }
+        internal RasterMask(SparseTileSurface surface) { Surface = surface; Enabled = true; Density = 1; }
         /// <summary>Multiplier applied to the layer's source alpha for a stored hide amount (0..255).</summary>
         public double Factor(byte hide)
         {
@@ -27,8 +27,9 @@ namespace Yozolab.YoluPainter.Core
     }
 
     /// <summary>Raster layers own pixels. Fill layers own one value per channel and generate their tiles on demand
-    /// (the value is the source; nothing is allocated per pixel).</summary>
-    public enum LayerKind { Raster = 0, Fill = 1 }
+    /// (the value is the source; nothing is allocated per pixel).
+    /// Adjustment layers own no pixels either: they change the composite of the layers below them.</summary>
+    public enum LayerKind { Raster = 0, Fill = 1, Adjustment = 2 }
 
     public sealed class PaintLayer
     {
@@ -44,10 +45,12 @@ namespace Yozolab.YoluPainter.Core
         public LayerKind Kind { get; private set; }
         /// <summary>Raster layers' pixel surfaces. Always empty for fill layers.</summary>
         public IReadOnlyDictionary<PaintChannel, SparseTileSurface> Channels { get; private set; }
-        /// <summary>Fill layers' value per channel. Always empty for raster layers.</summary>
+        /// <summary>Fill layers' value per channel. Always empty for other kinds.</summary>
         public IReadOnlyDictionary<PaintChannel, Rgba32> FillValues { get; private set; }
+        /// <summary>Adjustment layers' parameters; null for other kinds.</summary>
+        public AdjustmentSettings Adjustment { get; internal set; }
         /// <summary>The layer's raster mask, or null when it has none.</summary>
-        public LayerMask Mask { get; internal set; }
+        public RasterMask Mask { get; internal set; }
         public IReadOnlyList<PaintChannel> EnabledChannels
         {
             get { var values = new List<PaintChannel>(enabled); values.Sort(); return values.AsReadOnly(); }
@@ -68,6 +71,7 @@ namespace Yozolab.YoluPainter.Core
         {
             ValidateChannel(channel);
             if (Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers have no pixel surface. Change the fill value, or paint on the layer's mask.");
+            if (Kind == LayerKind.Adjustment) throw new InvalidOperationException("Adjustment layers have no pixel surface. Change the adjustment, or paint on the layer's mask.");
             SparseTileSurface surface;
             if (!channels.TryGetValue(channel, out surface))
             {
@@ -88,12 +92,34 @@ namespace Yozolab.YoluPainter.Core
         internal void SetFillValueInternal(PaintChannel channel, Rgba32? value)
         { if (value.HasValue) fillValues[channel] = value.Value; else fillValues.Remove(channel); }
 
-        /// <summary>True when the layer has its own pixels in the channel (a surface, or a fill value).</summary>
+        /// <summary>True when the layer can contribute to the channel: a raster surface, a fill value, or an adjustment that
+        /// applies to the channel (adjustments are only active in enabled channels).</summary>
         public bool HasContent(PaintChannel channel)
-        { return Kind == LayerKind.Fill ? fillValues.ContainsKey(channel) : channels.ContainsKey(channel); }
+        {
+            switch (Kind)
+            {
+                case LayerKind.Fill: return fillValues.ContainsKey(channel);
+                case LayerKind.Adjustment: return Adjustment != null && Adjustment.AppliesTo(channel) && enabled.Contains(channel);
+                default: return channels.ContainsKey(channel);
+            }
+        }
+        /// <summary>Channels whose composite this layer can change (used to fan out mask edits).</summary>
+        internal IEnumerable<PaintChannel> CoveredChannels
+        {
+            get
+            {
+                switch (Kind)
+                {
+                    case LayerKind.Fill: return new List<PaintChannel>(fillValues.Keys);
+                    case LayerKind.Adjustment: return new List<PaintChannel>(enabled);
+                    default: return new List<PaintChannel>(channels.Keys);
+                }
+            }
+        }
         /// <summary>The layer's own pixel (before mask, opacity and blending). Transparent where it has no content.</summary>
         public Rgba32 GetPixel(PaintChannel channel, int x, int y)
         {
+            if (Kind == LayerKind.Adjustment) return Rgba32.Transparent; // owns no pixels; see AdjustmentSettings.Composite
             if (Kind == LayerKind.Fill)
             {
                 if (x < 0 || y < 0 || x >= document.Width || y >= document.Height) throw new ArgumentOutOfRangeException("pixel");
@@ -105,9 +131,10 @@ namespace Yozolab.YoluPainter.Core
         /// Returns false (and writes zeros) where the layer has nothing. Fill tiles are generated, never stored.</summary>
         public bool CopyTile(PaintChannel channel, TileCoord coord, byte[] destination)
         {
-            if (Kind == LayerKind.Raster)
+            if (Kind != LayerKind.Fill)
             {
-                if (channels.TryGetValue(channel, out var surface)) return surface.CopyTile(coord, destination);
+                // Adjustment layers own no pixels (the compositors apply them to the result below instead).
+                if (Kind == LayerKind.Raster && channels.TryGetValue(channel, out var surface)) return surface.CopyTile(coord, destination);
                 if (destination == null) throw new ArgumentNullException(nameof(destination));
                 Array.Clear(destination, 0, destination.Length); return false;
             }
@@ -128,7 +155,7 @@ namespace Yozolab.YoluPainter.Core
         {
             if (Kind == LayerKind.Raster)
                 return channels.TryGetValue(channel, out var surface) ? surface.EnumerateTileCoordinates() : new TileCoord[0];
-            return fillValues.ContainsKey(channel) ? document.EnumerateCanvasTiles() : new TileCoord[0];
+            return HasContent(channel) ? document.EnumerateCanvasTiles() : new TileCoord[0];
         }
         internal static void ValidateChannel(PaintChannel channel)
         { if (!Enum.IsDefined(typeof(PaintChannel), channel)) throw new ArgumentOutOfRangeException(nameof(channel)); }
@@ -224,7 +251,7 @@ namespace Yozolab.YoluPainter.Core
             return layer;
         }
         /// <summary>Sets (or with null removes) a fill layer's value for one channel. Setting a value enables the channel.</summary>
-        public void SetFillValue(Guid id, PaintChannel channel, Rgba32? value)
+        public void SetFillValue(Guid id, PaintChannel channel, Rgba32? value, bool coalesce = false)
         {
             EnsureNoStroke(); PaintLayer.ValidateChannel(channel); var layer = GetLayer(id);
             if (layer.Kind != LayerKind.Fill) throw new InvalidOperationException("Only fill layers have fill values.");
@@ -233,7 +260,37 @@ namespace Yozolab.YoluPainter.Core
             if (Nullable.Equals(old, value) && (value == null || wasEnabled)) return;
             Execute(LayerScoped(layer, channel,
                 () => { layer.SetFillValueInternal(channel, value); if (value.HasValue) layer.Enable(channel, true); },
-                () => { layer.SetFillValueInternal(channel, old); layer.Enable(channel, wasEnabled); }, 64));
+                () => { layer.SetFillValueInternal(channel, old); layer.Enable(channel, wasEnabled); }, 64), coalesce ? (object)("fill", id, channel) : null);
+        }
+        /// <summary>Adds an adjustment layer on top that changes the composite below it in the given channels (all channels
+        /// the adjustment applies to when null). Hue/saturation can only target Color and Emission.</summary>
+        public PaintLayer AddAdjustmentLayer(string name, AdjustmentSettings settings, IEnumerable<PaintChannel> channels = null, Guid? id = null)
+        {
+            EnsureNoStroke(); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
+            Guid layerId = id ?? Guid.NewGuid();
+            if (layerId == Guid.Empty) throw new ArgumentException("Layer ID must not be empty.", nameof(id));
+            foreach (var existing in layers) if (existing.Id == layerId) throw new ArgumentException("Duplicate layer ID.", nameof(id));
+            var layer = new PaintLayer(this, name ?? settings.Type.ToString(), layerId, LayerKind.Adjustment) { Adjustment = settings };
+            foreach (PaintChannel channel in channels ?? (PaintChannel[])Enum.GetValues(typeof(PaintChannel)))
+            {
+                PaintLayer.ValidateChannel(channel);
+                if (!settings.AppliesTo(channel)) { if (channels == null) continue; throw new InvalidOperationException(settings.Type + " cannot be applied to the " + channel + " channel."); }
+                layer.Enable(channel, true);
+            }
+            int index = layers.Count;
+            Execute(LayerScoped(layer, null, () => layers.Insert(index, layer), () => layers.Remove(layer), 128));
+            return layer;
+        }
+        /// <summary>Replaces an adjustment layer's parameters (the type may change if every enabled channel still applies).</summary>
+        public void SetAdjustment(Guid id, AdjustmentSettings settings, bool coalesce = false)
+        {
+            EnsureNoStroke(); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
+            var layer = GetLayer(id);
+            if (layer.Kind != LayerKind.Adjustment) throw new InvalidOperationException("Only adjustment layers have adjustment settings.");
+            foreach (var channel in layer.EnabledChannels)
+                if (!settings.AppliesTo(channel)) throw new InvalidOperationException(settings.Type + " cannot be applied to the enabled " + channel + " channel. Disable it first.");
+            var old = layer.Adjustment; if (old.Equals(settings)) return;
+            Execute(LayerScoped(layer, null, () => layer.Adjustment = settings, () => layer.Adjustment = old, 128), coalesce ? (object)("adjustment", id) : null);
         }
         /// <summary>Every tile coordinate of the canvas, Y then X.</summary>
         public IEnumerable<TileCoord> EnumerateCanvasTiles()
@@ -270,12 +327,12 @@ namespace Yozolab.YoluPainter.Core
             EnsureNoStroke(); var layer = GetLayer(id); bool old = layer.Visible; if (old == visible) return;
             Execute(LayerScoped(layer, null, () => layer.Visible = visible, () => layer.Visible = old, 64));
         }
-        public void SetLayerOpacity(Guid id, double opacity)
+        public void SetLayerOpacity(Guid id, double opacity, bool coalesce = false)
         {
             EnsureNoStroke(); MathUtil.RequireFinite(opacity, nameof(opacity));
             if (opacity < 0 || opacity > 1) throw new ArgumentOutOfRangeException(nameof(opacity));
             var layer = GetLayer(id); double old = layer.Opacity; if (old == opacity) return;
-            Execute(LayerScoped(layer, null, () => layer.Opacity = opacity, () => layer.Opacity = old, 64));
+            Execute(LayerScoped(layer, null, () => layer.Opacity = opacity, () => layer.Opacity = old, 64), coalesce ? (object)("opacity", id) : null);
         }
         public void SetLayerBlendMode(Guid id, LayerBlendMode mode)
         {
@@ -287,10 +344,12 @@ namespace Yozolab.YoluPainter.Core
         {
             EnsureNoStroke(); PaintLayer.ValidateChannel(channel); var layer = GetLayer(id);
             bool old = layer.IsChannelEnabled(channel); if (old == enabled) return;
+            if (enabled && layer.Kind == LayerKind.Adjustment && !layer.Adjustment.AppliesTo(channel))
+                throw new InvalidOperationException(layer.Adjustment.Type + " cannot be applied to the " + channel + " channel.");
             Execute(LayerScoped(layer, channel, () => layer.Enable(channel, enabled), () => layer.Enable(channel, old), 64));
         }
         /// <summary>Adds an empty raster mask (reveals everything) to a layer. Undoable.</summary>
-        public LayerMask AddLayerMask(Guid id)
+        public RasterMask AddLayerMask(Guid id)
         {
             EnsureNoStroke(); var layer = GetLayer(id);
             if (layer.Mask != null) throw new InvalidOperationException("The layer already has a mask.");
@@ -299,7 +358,7 @@ namespace Yozolab.YoluPainter.Core
             surface.AfterExternalMutation = AfterExternalMutation;
             surface.BeforeSourceGrowth = EnsureSourceGrowth;
             surface.TileChanged = coord => MarkMaskTileChanged(layer, coord);
-            var mask = new LayerMask(surface);
+            var mask = new RasterMask(surface);
             Execute(LayerScoped(layer, null, () => layer.Mask = mask, () => layer.Mask = null, 64));
             return mask;
         }
@@ -320,12 +379,12 @@ namespace Yozolab.YoluPainter.Core
             EnsureNoStroke(); var mask = RequireMask(id, out var layer); bool old = mask.Inverted; if (old == inverted) return;
             Execute(LayerScoped(layer, null, () => mask.Inverted = inverted, () => mask.Inverted = old, 64));
         }
-        public void SetLayerMaskDensity(Guid id, double density)
+        public void SetLayerMaskDensity(Guid id, double density, bool coalesce = false)
         {
             EnsureNoStroke(); MathUtil.RequireFinite(density, nameof(density));
             if (density < 0 || density > 1) throw new ArgumentOutOfRangeException(nameof(density));
             var mask = RequireMask(id, out var layer); double old = mask.Density; if (old == density) return;
-            Execute(LayerScoped(layer, null, () => mask.Density = density, () => mask.Density = old, 64));
+            Execute(LayerScoped(layer, null, () => mask.Density = density, () => mask.Density = old, 64), coalesce ? (object)("maskDensity", id) : null);
         }
         /// <summary>Starts a stroke on a layer's mask: painting hides, Erase reveals. The brush colour is ignored
         /// (the mask stores only a hide amount); opacity, flow, hardness and pressure apply as usual.</summary>
@@ -336,7 +395,7 @@ namespace Yozolab.YoluPainter.Core
             var maskSettings = settings.Clone(); maskSettings.Color = new Rgba32(0, 0, 0, 255);
             activeStroke = new BrushStroke(this, mask.Surface, maskSettings); return activeStroke;
         }
-        private LayerMask RequireMask(Guid id, out PaintLayer layer)
+        private RasterMask RequireMask(Guid id, out PaintLayer layer)
         {
             layer = GetLayer(id);
             if (layer.Mask == null) throw new InvalidOperationException("The layer has no mask.");
@@ -356,11 +415,13 @@ namespace Yozolab.YoluPainter.Core
         public bool Undo()
         {
             EnsureNoStroke(); if (undo.Count == 0) return false;
+            EndCoalescing();
             var command = undo[undo.Count - 1]; command.Revert(); undo.RemoveAt(undo.Count - 1); redo.Add(command); Revision++; return true;
         }
         public bool Redo()
         {
             EnsureNoStroke(); if (redo.Count == 0) return false;
+            EndCoalescing();
             var command = redo[redo.Count - 1]; command.Apply(); redo.RemoveAt(redo.Count - 1); undo.Add(command); Revision++; return true;
         }
         public void ClearHistory() { EnsureNoStroke(); undo.Clear(); redo.Clear(); historyBytes = 0; }
@@ -395,16 +456,13 @@ namespace Yozolab.YoluPainter.Core
         }
         /// <summary>A mask tile can change the composite of every channel the layer has.</summary>
         internal void MarkMaskTileChanged(PaintLayer layer, TileCoord coord)
-        {
-            foreach (var channel in layer.Channels.Keys) MarkTileChanged(channel, coord);
-            foreach (var channel in layer.FillValues.Keys) MarkTileChanged(channel, coord);
-        }
+        { foreach (var channel in layer.CoveredChannels) MarkTileChanged(channel, coord); }
         /// <summary>Marks every tile the layer holds (in one channel, or all when channel is null) as changed.</summary>
         private void MarkLayerChanged(PaintLayer layer, PaintChannel? channel)
         {
-            if (layer.Kind == LayerKind.Fill)
+            if (layer.Kind != LayerKind.Raster)
             {
-                // A fill covers the whole canvas. Mark every tile for the channel (or all channels): the value may just
+                // A fill or adjustment covers the whole canvas. Mark every tile for the channel (or all channels): the value may just
                 // have been removed, so the layer's current content cannot tell which channels it used to cover.
                 var targets = channel.HasValue ? new[] { channel.Value } : (PaintChannel[])Enum.GetValues(typeof(PaintChannel));
                 foreach (var target in targets) foreach (var coord in EnumerateCanvasTiles()) MarkTileChanged(target, coord);
@@ -433,8 +491,29 @@ namespace Yozolab.YoluPainter.Core
             if (command != null) Push(command); activeStroke = null;
         }
         private void Execute(IHistoryCommand command) { command.Apply(); Revision++; Push(command); }
+        // 連続した同じ対象への変更（スライダーのドラッグ）を 1 つの Undo にまとめるための状態。
+        private object coalesceKey; private IHistoryCommand lastCoalesced;
+        /// <summary>With a key, an edit merges into the previous edit that used the same key, as long as nothing else
+        /// happened in between (no other edit, stroke, undo or redo) and EndCoalescing was not called. The merged entry
+        /// undoes back to the value before the first edit of the run.</summary>
+        private void Execute(IHistoryCommand command, object key)
+        {
+            if (key != null && Equals(key, coalesceKey) && redo.Count == 0 && undo.Count > 0 && ReferenceEquals(undo[undo.Count - 1], lastCoalesced))
+            {
+                var top = undo[undo.Count - 1];
+                command.Apply(); Revision++;
+                var merged = new DelegateCommand(command.Apply, top.Revert, top.ByteCost);
+                undo[undo.Count - 1] = merged; lastCoalesced = merged; return;
+            }
+            Execute(command);
+            if (key != null && undo.Count > 0) { coalesceKey = key; lastCoalesced = undo[undo.Count - 1]; }
+        }
+        /// <summary>Ends the current run of coalesced edits (the UI calls this when a slider drag ends), so the next edit
+        /// becomes its own undo step.</summary>
+        public void EndCoalescing() { coalesceKey = null; lastCoalesced = null; }
         private void Push(IHistoryCommand command)
         {
+            coalesceKey = null; lastCoalesced = null; // any new history entry ends a coalescing run
             foreach (var old in redo) historyBytes -= old.ByteCost;
             redo.Clear(); undo.Add(command); historyBytes += command.ByteCost; TrimHistory();
         }

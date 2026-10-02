@@ -42,6 +42,10 @@ namespace Yozolab.YoluPainter.Tests
             doc.AddLayerMask(fill.Id); doc.SetLayerMaskInverted(fill.Id, true); Step("fill hidden by an inverted mask", null);
             using (var s = doc.BeginMaskStroke(fill.Id, brush)) { s.Add(new BrushSample(60, 20)); s.Commit(); }
             Step("reveal the fill with the mask", 2);
+            doc.AddAdjustmentLayer("Levels", AdjustmentSettings.Levels(.1, .9, 1.6, .05, .95)); Step("levels adjustment", null);
+            var hsl = doc.AddAdjustmentLayer("HSL", AdjustmentSettings.HueSaturation(60, -.3, .1));
+            doc.SetLayerOpacity(hsl.Id, .7); doc.SetLayerBlendMode(hsl.Id, LayerBlendMode.Screen); Step("hue/saturation adjustment", null);
+            doc.AddAdjustmentLayer("Invert", AdjustmentSettings.Invert()); Step("invert adjustment", null);
             using (var s = doc.BeginStroke(a.Id, PaintChannel.Color, brush)) { s.Add(new BrushSample(40, 24)); Step("mid-stroke preview", 2); s.Cancel(); }
             Step("after cancel", 2);
             compositor.Update(doc, PaintChannel.Roughness); assertMatches(doc.Composite(PaintChannel.Roughness), read(), "channel switch");
