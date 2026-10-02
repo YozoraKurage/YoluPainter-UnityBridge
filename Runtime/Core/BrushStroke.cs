@@ -7,7 +7,11 @@ namespace Yozolab.YoluPainter.Core
     /// frozen at start. Input order/time and every arc-length stamp are retained; there is no final-endpoint double dab.
     /// Paint builds up per pixel during the stroke like Photoshop / CLIP STUDIO: each dab moves the pixel's stroke coverage
     /// toward the dab's ceiling (Opacity × pressure) by its flow (Flow × coverage × pressure), and the pixel is recomputed
-    /// from its colour before the stroke. Overlapping dabs therefore never exceed the stroke's opacity.</summary>
+    /// from its colour before the stroke. Overlapping dabs therefore never exceed the stroke's opacity.
+    /// Dynamics (BrushDynamics.cs): per-tip colours keep a per-pixel stroke colour that each dab pulls toward its own colour by
+    /// its flow; the dual brush lays its own dabs along the same path and a main dab at arc length s uses those up to s; fade and
+    /// tilt multiply size / ceiling / flow. Colour and dual randomness use their own streams, so they never move the main dabs.
+    /// ApplyPixel (mesh dabs) uses one colour per stroke and no dual brush, fade or tilt.</summary>
     public sealed class BrushStroke : IDisposable
     {
         private readonly PaintDocument document;
@@ -26,9 +30,24 @@ namespace Yozolab.YoluPainter.Core
         // 手ぶれ補正: 糸の先（実際に描く点）。入り抜き: ここまでの線の長さと、抜きのために待たせているダブ
         private bool hasPen; private BrushSample pen, lastInput;
         private double strokeLength;
-        private struct PendingDab { public double X, Y, Pressure, Arc, Direction; }
+        private struct PendingDab { public double X, Y, Pressure, Arc, Direction, TiltX, TiltY; }
         private readonly Queue<PendingDab> pending = new Queue<PendingDab>();
         private readonly Random random;
+        // カラーダイナミクス: 乱数は位置のゆらぎと別の列（色を足してもダブの位置は動かない）。tipColors ではダブごとに色が変わるので、
+        // 画素ごとにストロークの色（straight RGBA 0〜1）を持ち、ダブの色へ流量の割合で寄せる。
+        private const int ColorStream = 0x2545F491, DualStream = 0x5DEECE6;
+        private readonly Random colorRandom;
+        private readonly bool tipColors;
+        private readonly Rgba32 strokeColor;
+        private Rgba32 dabColor;
+        private readonly Dictionary<TileCoord, float[]> paints;
+        // デュアルブラシ: 2 つ目の筆先のダブ（道筋の上の位置と線の長さ）と、画素ごとの最大の被覆率
+        private struct DualDab { public double X, Y, Arc; }
+        private readonly DualBrush dual;
+        private readonly Random dualRandom;
+        private readonly Queue<DualDab> dualPending;
+        private readonly Dictionary<TileCoord, float[]> dualCoverage;
+        private double dualSinceStamp;
         private int tipIndex; // next tip for TipSelection.Sequential
         private long rollbackBytes;
         public Guid TransactionId { get; private set; }
@@ -39,7 +58,18 @@ namespace Yozolab.YoluPainter.Core
         public long RollbackBytes { get { return rollbackBytes; } }
         internal BrushStroke(PaintDocument document, SparseTileSurface surface, BrushSettings settings)
         {
-            selection = document.Selection; this.document = document; this.surface = surface; this.settings = settings; TransactionId = Guid.NewGuid(); random = new Random(settings.Seed); }
+            selection = document.Selection; this.document = document; this.surface = surface; this.settings = settings; TransactionId = Guid.NewGuid(); random = new Random(settings.Seed);
+            strokeColor = settings.Color;
+            if (settings.HasColorDynamics && !settings.Erase)
+            {
+                // ストロークの色を最初に 1 回引く（ダブごとでないとき、また 3D の面のブラシ（ダブを持たない）はこの色で塗る）。
+                colorRandom = new Random(settings.Seed ^ ColorStream); strokeColor = ColorDynamics.Next(settings, colorRandom);
+                if (settings.ColorPerTip) { tipColors = true; paints = new Dictionary<TileCoord, float[]>(); }
+            }
+            dabColor = strokeColor;
+            if (settings.Dual != null)
+            { dual = settings.Dual; dualRandom = new Random(settings.Seed ^ DualStream); dualPending = new Queue<DualDab>(); dualCoverage = new Dictionary<TileCoord, float[]>(); }
+        }
 
         public void Add(BrushSample sample)
         {
@@ -54,7 +84,7 @@ namespace Yozolab.YoluPainter.Core
                 double dx = sample.X - pen.X, dy = sample.Y - pen.Y, d = Math.Sqrt(dx * dx + dy * dy);
                 if (d <= settings.Stabilizer) return; // 糸がたるんでいる間は筆は動かない
                 double k = (d - settings.Stabilizer) / d;
-                pen = new BrushSample(pen.X + dx * k, pen.Y + dy * k, sample.Pressure, sample.Time);
+                pen = new BrushSample(pen.X + dx * k, pen.Y + dy * k, sample.Pressure, sample.Time, sample.TiltX, sample.TiltY);
                 AddPathPoint(pen);
             }
             catch { Cancel(); throw; }
@@ -63,7 +93,7 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>The path the brush actually follows (after the stabilizer): dabs at every spacing step along it.</summary>
         private void AddPathPoint(BrushSample sample)
         {
-            if (!hasSample) { Emit(sample.X, sample.Y, sample.Pressure, 0); hasSample = true; }
+            if (!hasSample) { if (dual != null) dualPending.Enqueue(new DualDab { X = sample.X, Y = sample.Y, Arc = 0 }); Emit(sample.X, sample.Y, sample.Pressure, 0, sample.TiltX, sample.TiltY); hasSample = true; }
             else
             {
                 double dx = sample.X - previous.X, dy = sample.Y - previous.Y;
@@ -71,6 +101,22 @@ namespace Yozolab.YoluPainter.Core
                 if (length > 0) direction = Math.Atan2(dy, dx);
                 double spacing = Math.Max(0.01, settings.Radius * 2 * settings.Spacing);
                 if (length / spacing > 1000000) throw new InvalidOperationException("Input segment exceeds the one-million-stamp safety limit; split or cancel the stroke.");
+                if (length > 0 && dual != null)
+                {
+                    // 2 つ目の筆先のダブは自分の間隔で先に並べておき、主のダブが自分の線の長さまでのものを使う（入力の区切り方によらない）。
+                    double dualSpacing = Math.Max(0.01, dual.Radius * 2 * dual.Spacing);
+                    if (length / dualSpacing > 1000000) throw new InvalidOperationException("Input segment exceeds the one-million-stamp safety limit for the dual brush; split or cancel the stroke.");
+                    double at = dualSpacing - dualSinceStamp;
+                    while (at <= length + 1e-9)
+                    {
+                        double t = Math.Min(1, at / length);
+                        dualPending.Enqueue(new DualDab { X = previous.X + dx * t, Y = previous.Y + dy * t, Arc = strokeLength + at });
+                        at += dualSpacing;
+                    }
+                    dualSinceStamp = length - (at - dualSpacing);
+                    if (dualSinceStamp < 1e-9) dualSinceStamp = 0;
+                    if (dualSinceStamp >= dualSpacing) dualSinceStamp %= dualSpacing;
+                }
                 if (length > 0)
                 {
                     double position = spacing - distanceSinceStamp;
@@ -78,7 +124,8 @@ namespace Yozolab.YoluPainter.Core
                     while (position <= length + 1e-9)
                     {
                         double t = Math.Min(1, position / length);
-                        Emit(previous.X + dx * t, previous.Y + dy * t, previous.Pressure + (sample.Pressure - previous.Pressure) * t, strokeLength + position);
+                        Emit(previous.X + dx * t, previous.Y + dy * t, previous.Pressure + (sample.Pressure - previous.Pressure) * t, strokeLength + position,
+                            previous.TiltX + (sample.TiltX - previous.TiltX) * t, previous.TiltY + (sample.TiltY - previous.TiltY) * t);
                         position += spacing;
                     }
                     strokeLength += length;
@@ -92,10 +139,11 @@ namespace Yozolab.YoluPainter.Core
         }
 
         /// <summary>A dab at arc length arc along the path: stamped now, or held back while it is within TaperOut of the end.</summary>
-        private void Emit(double x, double y, double pressure, double arc)
+        private void Emit(double x, double y, double pressure, double arc, double tiltX, double tiltY)
         {
-            if (settings.TaperOut > 0) { pending.Enqueue(new PendingDab { X = x, Y = y, Pressure = pressure, Arc = arc, Direction = direction }); return; }
-            Stamp(x, y, pressure, Taper(arc, double.PositiveInfinity));
+            var dab = new PendingDab { X = x, Y = y, Pressure = pressure, Arc = arc, Direction = direction, TiltX = tiltX, TiltY = tiltY };
+            if (settings.TaperOut > 0) { pending.Enqueue(dab); return; }
+            Stamp(dab, Taper(arc, double.PositiveInfinity));
         }
         /// <summary>Stamps the held-back dabs up to arc length limit. With end (the final stroke length) they shrink toward it.</summary>
         private void FlushPending(double limit, double? end)
@@ -104,7 +152,7 @@ namespace Yozolab.YoluPainter.Core
             while (pending.Count > 0 && pending.Peek().Arc <= limit)
             {
                 var dab = pending.Dequeue(); direction = dab.Direction;
-                Stamp(dab.X, dab.Y, dab.Pressure, Taper(dab.Arc, end ?? double.PositiveInfinity));
+                Stamp(dab, Taper(dab.Arc, end ?? double.PositiveInfinity));
             }
             direction = saved;
         }
@@ -137,13 +185,23 @@ namespace Yozolab.YoluPainter.Core
             }
             catch { Cancel(); throw; }
         }
-        private void Stamp(double x, double y, double pressure, double sizeFactor)
+        private void Stamp(PendingDab dab, double sizeFactor)
         {
-            StampCount++;
+            double x = dab.X, y = dab.Y, pressure = dab.Pressure;
+            long index = StampCount++;
+            if (dual != null) StampDual(dab.Arc);
+            // フェード（ストロークの何番目の描点か）と傾きは、筆圧と掛け合わせる。どれも使わなければ 1 のまま（結果は以前と同じ）。
+            double tilt = settings.TiltSize || settings.TiltOpacity || settings.TiltFlow || settings.TiltAngle ? PenTilt.Amount(dab.TiltX, dab.TiltY) : 0;
+            double sizeControl = Fade(settings.FadeSize, index) * (settings.TiltSize ? 1 - tilt : 1);
+            double opacityControl = Fade(settings.FadeOpacity, index) * (settings.TiltOpacity ? 1 - tilt : 1);
+            double flowControl = Fade(settings.FadeFlow, index) * (settings.TiltFlow ? 1 - tilt : 1);
+            double tiltTurn = settings.TiltAngle && tilt > 0 ? PenTilt.Azimuth(dab.TiltX, dab.TiltY) : 0;
             bool changed = false;
             for (int n = 0; n < settings.Count; n++)
             {
+                if (tipColors) dabColor = ColorDynamics.Next(settings, colorRandom);
                 double radius = settings.Radius * (settings.PressureSize ? pressure : 1) * sizeFactor;
+                if (sizeControl != 1) radius *= sizeControl;
                 if (settings.SizeJitter > 0) radius *= 1 - settings.SizeJitter * random.NextDouble();
                 if (radius <= 0) continue;
                 double cx = x, cy = y;
@@ -153,11 +211,14 @@ namespace Yozolab.YoluPainter.Core
                     cx += (random.NextDouble() * 2 - 1) * reach; cy += (random.NextDouble() * 2 - 1) * reach;
                 }
                 double angle = settings.Angle * Math.PI / 180 + (settings.FollowDirection ? direction : 0);
+                if (tiltTurn != 0) angle += tiltTurn;
                 if (settings.AngleJitter > 0) angle += (random.NextDouble() * 2 - 1) * Math.PI * settings.AngleJitter;
                 double roundness = settings.Roundness;
                 if (settings.RoundnessJitter > 0) roundness = Math.Max(0.01, roundness * (1 - settings.RoundnessJitter * random.NextDouble()));
                 double opacityScale = settings.OpacityJitter > 0 ? 1 - settings.OpacityJitter * random.NextDouble() : 1;
                 double flowScale = settings.FlowJitter > 0 ? 1 - settings.FlowJitter * random.NextDouble() : 1;
+                if (opacityControl != 1) opacityScale *= opacityControl;
+                if (flowControl != 1) flowScale *= flowControl;
                 BrushTip tip = settings.Tip;
                 var tips = settings.Tips;
                 if (tips != null && tips.Length > 0)
@@ -165,6 +226,68 @@ namespace Yozolab.YoluPainter.Core
                 changed |= Dab(cx, cy, radius, angle, roundness, pressure, opacityScale, flowScale, tip);
             }
             if (changed) document.PixelsChanged();
+        }
+        /// <summary>Fade factor of the stamp at index (0-based): falls linearly from 1 to 0 over length stamps; 1 when off.</summary>
+        internal static double Fade(int length, long index) { return length <= 0 ? 1 : Math.Max(0, 1 - index / (double)length); }
+        /// <summary>Lays the dual tip's dabs up to arc length limit into the per-pixel dual coverage (maximum).</summary>
+        private void StampDual(double limit)
+        {
+            while (dualPending.Count > 0 && dualPending.Peek().Arc <= limit)
+            {
+                var d = dualPending.Dequeue();
+                for (int n = 0; n < dual.Count; n++)
+                {
+                    double cx = d.X, cy = d.Y;
+                    if (dual.Scatter > 0)
+                    {
+                        double reach = dual.Radius * 2 * dual.Scatter;
+                        cx += (dualRandom.NextDouble() * 2 - 1) * reach; cy += (dualRandom.NextDouble() * 2 - 1) * reach;
+                    }
+                    DualDabAt(cx, cy);
+                }
+            }
+        }
+        private void DualDabAt(double x, double y)
+        {
+            double radius = dual.Radius, extent = dual.Tip == null ? radius : radius * 1.4142135623730951;
+            int minX = Math.Max(0, (int)Math.Ceiling(x - extent - 0.5)), maxX = Math.Min(surface.Width - 1, (int)Math.Floor(x + extent - 0.5));
+            int minY = Math.Max(0, (int)Math.Ceiling(y - extent - 0.5)), maxY = Math.Min(surface.Height - 1, (int)Math.Floor(y + extent - 0.5));
+            double angle = dual.Angle * Math.PI / 180, cos = Math.Cos(angle), sin = Math.Sin(angle);
+            double aspectX = 1, aspectY = 1;
+            if (dual.Tip != null) { if (dual.Tip.Width >= dual.Tip.Height) aspectY = dual.Tip.Height / (double)dual.Tip.Width; else aspectX = dual.Tip.Width / (double)dual.Tip.Height; }
+            int tile = surface.TileSize;
+            for (int py = minY; py <= maxY; py++) for (int px = minX; px <= maxX; px++)
+            {
+                double dx = px + 0.5 - x, dy = py + 0.5 - y;
+                double u = (cos * dx + sin * dy) / radius, v = (-sin * dx + cos * dy) / (radius * dual.Roundness);
+                double coverage;
+                if (dual.Tip == null)
+                {
+                    double dist = Math.Sqrt(u * u + v * v);
+                    if (dist > 1) continue;
+                    coverage = 1;
+                    if (dist > dual.Hardness) { double t = (1 - dist) / (1 - dual.Hardness); coverage = t * t * (3 - 2 * t); }
+                }
+                else coverage = dual.Tip.Sample((u / aspectX + 1) * 0.5, (v / aspectY + 1) * 0.5);
+                if (coverage <= 0) continue;
+                TileCoord coord = surface.CoordAt(px, py);
+                float[] cells;
+                if (!dualCoverage.TryGetValue(coord, out cells))
+                {
+                    long nextBytes = rollbackBytes + 64 + (long)tile * tile * 4;
+                    document.EnsureStrokeBudget(nextBytes);
+                    cells = new float[tile * tile]; dualCoverage.Add(coord, cells); rollbackBytes = nextBytes;
+                }
+                int local = (py % tile) * tile + px % tile;
+                if (coverage > cells[local]) cells[local] = (float)coverage;
+            }
+        }
+        private double DualAt(int x, int y)
+        {
+            float[] cells;
+            if (!dualCoverage.TryGetValue(surface.CoordAt(x, y), out cells)) return 0;
+            int tile = surface.TileSize;
+            return cells[(y % tile) * tile + x % tile];
         }
         /// <summary>One dab. With the round tip, no rotation and roundness 1 this is exactly the original circular dab.</summary>
         private bool Dab(double x, double y, double radius, double angle, double roundness, double pressure, double opacityScale, double flowScale, BrushTip tip)
@@ -202,6 +325,7 @@ namespace Yozolab.YoluPainter.Core
                     coverage = tip.Sample((u / aspectX + 1) * 0.5, (v / aspectY + 1) * 0.5);
                     if (coverage <= 0) continue;
                 }
+                if (dual != null) { coverage = DualBrush.Combine(dual.Mode, coverage, DualAt(px, py)); if (coverage <= 0) continue; }
                 double ceilingScale = opacityScale;
                 if (textured)
                 {
@@ -226,16 +350,31 @@ namespace Yozolab.YoluPainter.Core
             TileCoord coord = surface.CoordAt(x, y);
             int tile = surface.TileSize, local = (y % tile) * tile + x % tile;
             float[] wash;
-            if (washes.TryGetValue(coord, out wash) && wash[local] >= ceiling) return false;
+            if (washes.TryGetValue(coord, out wash) && wash[local] >= ceiling && !tipColors) return false;
             if (!before.ContainsKey(coord))
             {
-                long nextBytes = rollbackBytes + 64 + surface.TileBytesAt(coord) + (long)tile * tile * 4;
+                long nextBytes = rollbackBytes + 64 + surface.TileBytesAt(coord) + (long)tile * tile * (tipColors ? 20 : 4);
                 document.EnsureStrokeBudget(nextBytes);
                 before.Add(coord, surface.Capture(coord)); rollbackBytes = nextBytes;
             }
-            if (wash == null) { wash = new float[tile * tile]; washes.Add(coord, wash); }
-            double accumulated = wash[local] + (ceiling - wash[local]) * Math.Min(1, flow);
+            if (wash == null) { wash = new float[tile * tile]; washes.Add(coord, wash); if (tipColors) paints.Add(coord, new float[tile * tile * 4]); }
+            double previousWash = wash[local];
+            // 天井に届いた画素も、ダブごとの色ならその色へは寄せる（濃さは天井のまま）。
+            double accumulated = previousWash >= ceiling ? previousWash : wash[local] + (ceiling - wash[local]) * Math.Min(1, flow);
             wash[local] = (float)accumulated;
+            Rgba32 paint = strokeColor;
+            if (tipColors)
+            {
+                float[] p = paints[coord]; int o = local * 4; double w = Math.Min(1, flow);
+                Rgba32 k = dabColor;
+                if (previousWash <= 0) { p[o] = k.R / 255f; p[o + 1] = k.G / 255f; p[o + 2] = k.B / 255f; p[o + 3] = k.A / 255f; }
+                else
+                {
+                    p[o] += (float)((k.R / 255.0 - p[o]) * w); p[o + 1] += (float)((k.G / 255.0 - p[o + 1]) * w);
+                    p[o + 2] += (float)((k.B / 255.0 - p[o + 2]) * w); p[o + 3] += (float)((k.A / 255.0 - p[o + 3]) * w);
+                }
+                paint = new Rgba32(MathUtil.ToByte(p[o]), MathUtil.ToByte(p[o + 1]), MathUtil.ToByte(p[o + 2]), MathUtil.ToByte(p[o + 3]));
+            }
             TileStorage original = before[coord];
             Rgba32 start = original == null ? Rgba32.Transparent : original.Get(local * 4), next;
             if (settings.Erase)
@@ -243,7 +382,7 @@ namespace Yozolab.YoluPainter.Core
                 byte alpha = MathUtil.ToByte(start.A / 255.0 * (1 - accumulated * settings.Color.A / 255.0));
                 next = alpha == 0 ? Rgba32.Transparent : new Rgba32(start.R, start.G, start.B, alpha);
             }
-            else next = CpuCompositor.Blend(start, settings.Color, Math.Min(1, accumulated));
+            else next = CpuCompositor.Blend(start, paint, Math.Min(1, accumulated));
             if (selected < 1) next = CpuCompositor.Fade(start, next, selected);
             if (next == surface.GetPixel(x, y)) return false;
             return surface.SetPixelInternal(x, y, next);
@@ -263,7 +402,7 @@ namespace Yozolab.YoluPainter.Core
                     if (!TileStorage.Same(before[coord], after)) changes.Add(new TileChange(coord, before[coord], after));
                 }
                 var command = changes.Count > 0 ? new TileStrokeCommand(surface, changes, TransactionId) : null;
-                document.FinishStroke(this, command); finished = true; before.Clear(); washes.Clear(); rollbackBytes = 0;
+                document.FinishStroke(this, command); finished = true; ReleaseScratch();
                 return changes.Count > 0;
             }
             catch { if (!finished) Cancel(); throw; }
@@ -273,7 +412,13 @@ namespace Yozolab.YoluPainter.Core
             if (finished) return;
             foreach (var snapshot in before) surface.Restore(snapshot.Key, snapshot.Value);
             if (before.Count > 0) document.PixelsChanged();
-            document.FinishStroke(this, null); finished = true; before.Clear(); washes.Clear(); rollbackBytes = 0;
+            document.FinishStroke(this, null); finished = true; ReleaseScratch();
+        }
+        private void ReleaseScratch()
+        {
+            before.Clear(); washes.Clear(); rollbackBytes = 0;
+            if (paints != null) paints.Clear();
+            if (dual != null) { dualCoverage.Clear(); dualPending.Clear(); }
         }
         public void Dispose() { Cancel(); }
         private void CheckOpen() { if (finished) throw new InvalidOperationException("Stroke is already finished."); }

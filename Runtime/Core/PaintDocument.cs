@@ -605,7 +605,7 @@ namespace Yozolab.YoluPainter.Core
         {
             EnsureNoStroke(); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
             var mask = RequireMask(layerId, out _);
-            var maskSettings = settings.Clone(); maskSettings.Color = new Rgba32(0, 0, 0, 255);
+            var maskSettings = settings.ForChannel(null); maskSettings.Color = new Rgba32(0, 0, 0, 255);
             activeStroke = new BrushStroke(this, mask.Surface, maskSettings); return activeStroke;
         }
         private RasterMask RequireMask(Guid id, out PaintLayer layer)
@@ -622,7 +622,7 @@ namespace Yozolab.YoluPainter.Core
             RefusePathLayer(layer);
             var surface = layer.GetChannel(channel);
             if (!layer.IsChannelEnabled(channel)) throw new InvalidOperationException("Enable the target channel before painting.");
-            activeStroke = new BrushStroke(this, surface, settings.Clone()); return activeStroke;
+            activeStroke = new BrushStroke(this, surface, settings.ForChannel(channel)); return activeStroke;
         }
         public byte[] Composite(PaintChannel channel) { return CpuCompositor.Composite(this, channel); }
         public Rgba32 CompositePixel(PaintChannel channel, int x, int y) { return CpuCompositor.CompositePixel(this, channel, x, y); }

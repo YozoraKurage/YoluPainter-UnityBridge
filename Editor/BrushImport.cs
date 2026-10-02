@@ -12,7 +12,7 @@ namespace Yozolab.YoluPainter.Editor
     internal static class BrushImport
     {
         /// <summary>ファイル選択で示す拡張子。</summary>
-        public const string Extensions = "abr,gbr,gih,vbr,png";
+        public const string Extensions = "abr,pat,gbr,gih,vbr,png";
         /// <summary>これより大きいファイルは読み込む前に断る。市販の .abr の大きいもの（数十 MB）が入る大きさ。</summary>
         public const long MaxFileBytes = 256L * 1024 * 1024;
 
@@ -25,6 +25,7 @@ namespace Yozolab.YoluPainter.Editor
             switch (info.Extension.ToLowerInvariant())
             {
                 case ".abr": return PhotoshopBrushReader.Read(File.ReadAllBytes(path), name);
+                case ".pat": return PhotoshopPatternReader.ReadPatBrushes(File.ReadAllBytes(path));
                 case ".gbr": return new[] { GimpBrushReader.ReadGbr(File.ReadAllBytes(path), name) };
                 case ".gih": return new[] { GimpBrushReader.ReadGih(File.ReadAllBytes(path), name) };
                 case ".vbr": return new[] { GimpBrushReader.ReadVbr(File.ReadAllText(path, Encoding.UTF8), name) };

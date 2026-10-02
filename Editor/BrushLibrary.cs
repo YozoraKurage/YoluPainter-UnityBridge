@@ -9,7 +9,8 @@ using Yozolab.YoluPainter.Core.Brushes;
 namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>取り込んだブラシの置き場。ブラシごとに &lt;key&gt;.json（設定）と &lt;key&gt;.tip.png / &lt;key&gt;.texture.png
-    /// （筆先と紙の質感、白黒）を書く。置き場は 2 つ:
+    /// （筆先と紙の質感、白黒）を書く（デュアルブラシの筆先は &lt;key&gt;.dual.png）。schema 2 でカラーダイナミクス・デュアルブラシ・
+    /// フェード・傾きを足した（schema 1 のファイルも読める。足した項目は既定値で、以前と同じに描く）。置き場は 2 つ:
     /// <list type="bullet">
     /// <item>個人（<see cref="Personal"/>、ID は "library:"）: 既定は Unity プロジェクトの UserSettings/YoluPainter/Brushes。
     /// UserSettings はユーザーごとの置き場で、パッケージにも Assets にもバージョン管理にも入らない。</item>
@@ -21,7 +22,7 @@ namespace Yozolab.YoluPainter.Editor
     {
         [Serializable] sealed class Entry
         {
-            public int schema = 1;
+            public int schema = 2;
             public string name = "", category = "", source = "", tipFile = "", textureFile = "";
             public string[] tipFiles = new string[0]; // 筆先が複数あるとき（GIMP のホースなど）。tipFile より優先
             public int tipSelection;
@@ -30,6 +31,14 @@ namespace Yozolab.YoluPainter.Editor
             public double sizeJitter, angleJitter, roundnessJitter, opacityJitter, flowJitter, scatter, textureDepth, textureScale = 1;
             public int count = 1;
             public bool pressureSize = true, pressureOpacity = true, pressureFlow, erase, followDirection;
+            // schema 2
+            public double fgBgJitter, hueJitter, saturationJitter, brightnessJitter, purity;
+            public bool colorPerTip = true;
+            public bool dual; public string dualTipFile = "";
+            public double dualRadius = 8, dualHardness = 1, dualSpacing = .25, dualAngle, dualRoundness = 1, dualScatter;
+            public int dualCount = 1, dualMode;
+            public int fadeSize, fadeOpacity, fadeFlow;
+            public bool tiltSize, tiltOpacity, tiltFlow, tiltAngle;
         }
 
         public static readonly BrushLibrary Personal = new BrushLibrary("library:", "Imported", () => PainterSettings.BrushFolder);
@@ -87,7 +96,16 @@ namespace Yozolab.YoluPainter.Editor
                     sizeJitter = s.SizeJitter, angleJitter = s.AngleJitter, roundnessJitter = s.RoundnessJitter, opacityJitter = s.OpacityJitter, flowJitter = s.FlowJitter,
                     scatter = s.Scatter, textureDepth = s.TextureDepth, textureScale = s.TextureScale, count = s.Count,
                     pressureSize = s.PressureSize, pressureOpacity = s.PressureOpacity, pressureFlow = s.PressureFlow, erase = s.Erase, followDirection = s.FollowDirection,
+                    fgBgJitter = s.ForegroundBackgroundJitter, hueJitter = s.HueJitter, saturationJitter = s.SaturationJitter, brightnessJitter = s.BrightnessJitter, purity = s.Purity,
+                    colorPerTip = s.ColorPerTip, fadeSize = s.FadeSize, fadeOpacity = s.FadeOpacity, fadeFlow = s.FadeFlow,
+                    tiltSize = s.TiltSize, tiltOpacity = s.TiltOpacity, tiltFlow = s.TiltFlow, tiltAngle = s.TiltAngle,
                 };
+                if (s.Dual != null)
+                {
+                    var d = s.Dual; entry.dual = true; entry.dualRadius = d.Radius; entry.dualHardness = d.Hardness; entry.dualSpacing = d.Spacing; entry.dualAngle = d.Angle;
+                    entry.dualRoundness = d.Roundness; entry.dualScatter = d.Scatter; entry.dualCount = d.Count; entry.dualMode = (int)d.Mode;
+                    if (d.Tip != null) { entry.dualTipFile = key + ".dual.png"; WritePng(Path.Combine(folder, entry.dualTipFile), d.Tip); }
+                }
                 if (s.Tips != null && s.Tips.Length > 0)
                 {
                     entry.tipFiles = new string[s.Tips.Length]; entry.tipSelection = (int)s.TipSelection;
@@ -140,14 +158,23 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     string key = Path.GetFileNameWithoutExtension(path);
                     var e = JsonUtility.FromJson<Entry>(File.ReadAllText(path));
-                    if (e == null || e.schema != 1) continue;
+                    if (e == null || e.schema < 1 || e.schema > 2) continue;
                     var settings = new BrushSettings
                     {
                         Radius = e.radius, Hardness = e.hardness, Spacing = e.spacing, Opacity = e.opacity, Flow = e.flow, Angle = e.angle, Roundness = e.roundness,
                         SizeJitter = e.sizeJitter, AngleJitter = e.angleJitter, RoundnessJitter = e.roundnessJitter, OpacityJitter = e.opacityJitter, FlowJitter = e.flowJitter,
                         Scatter = e.scatter, TextureDepth = e.textureDepth, TextureScale = e.textureScale, Count = e.count,
                         PressureSize = e.pressureSize, PressureOpacity = e.pressureOpacity, PressureFlow = e.pressureFlow, Erase = e.erase, FollowDirection = e.followDirection,
+                        ForegroundBackgroundJitter = e.fgBgJitter, HueJitter = e.hueJitter, SaturationJitter = e.saturationJitter, BrightnessJitter = e.brightnessJitter, Purity = e.purity,
+                        ColorPerTip = e.colorPerTip, FadeSize = e.fadeSize, FadeOpacity = e.fadeOpacity, FadeFlow = e.fadeFlow,
+                        TiltSize = e.tiltSize, TiltOpacity = e.tiltOpacity, TiltFlow = e.tiltFlow, TiltAngle = e.tiltAngle,
                     };
+                    if (e.dual)
+                    {
+                        settings.Dual = new DualBrush { Radius = e.dualRadius, Hardness = e.dualHardness, Spacing = e.dualSpacing, Angle = e.dualAngle, Roundness = e.dualRoundness,
+                            Scatter = e.dualScatter, Count = e.dualCount, Mode = (DualBrushMode)e.dualMode };
+                        if (!string.IsNullOrEmpty(e.dualTipFile)) { settings.Dual.Tip = ReadPng(Path.Combine(folder, e.dualTipFile), e.name + " dual"); tips[prefix + key + ":dual"] = new BrushTips.TipRef(settings.Dual.Tip, null, TipSelection.Random); }
+                    }
                     if (e.tipFiles != null && e.tipFiles.Length > 0)
                     {
                         settings.Tips = e.tipFiles.Select(f => ReadPng(Path.Combine(folder, f), e.name)).ToArray(); settings.TipSelection = (TipSelection)e.tipSelection;

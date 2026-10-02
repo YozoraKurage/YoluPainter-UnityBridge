@@ -46,22 +46,27 @@ namespace Yozolab.YoluPainter.Core
         public TileData(TileCoord coord, byte[] bytes) { Coord = coord; Bytes = bytes ?? throw new ArgumentNullException(nameof(bytes)); }
     }
 
-    /// <summary>Pixel-space sample: origin bottom-left, integer pixel centers are at n + 0.5. Time must not decrease.</summary>
+    /// <summary>Pixel-space sample: origin bottom-left, integer pixel centers are at n + 0.5. Time must not decrease.
+    /// TiltX / TiltY are the pen's tilt in radians from upright along the canvas X and Y axes (0 = upright or no tilt data,
+    /// clamped to ±π/2); see <see cref="PenTilt"/>.</summary>
     public readonly struct BrushSample
     {
-        public readonly double X, Y, Pressure, Time;
-        public BrushSample(double x, double y, double pressure = 1, double time = 0)
+        public readonly double X, Y, Pressure, Time, TiltX, TiltY;
+        public BrushSample(double x, double y, double pressure = 1, double time = 0) : this(x, y, pressure, time, 0, 0) { }
+        public BrushSample(double x, double y, double pressure, double time, double tiltX, double tiltY)
         {
             MathUtil.RequireFinite(x, nameof(x)); MathUtil.RequireFinite(y, nameof(y));
             MathUtil.RequireFinite(pressure, nameof(pressure)); MathUtil.RequireFinite(time, nameof(time));
+            MathUtil.RequireFinite(tiltX, nameof(tiltX)); MathUtil.RequireFinite(tiltY, nameof(tiltY));
             X = x; Y = y; Pressure = MathUtil.Clamp01(pressure); Time = time;
+            TiltX = Math.Max(-PenTilt.MaxAngle, Math.Min(PenTilt.MaxAngle, tiltX)); TiltY = Math.Max(-PenTilt.MaxAngle, Math.Min(PenTilt.MaxAngle, tiltY));
         }
     }
 
     /// <summary>How a brush with several tips picks one for each dab.</summary>
     public enum TipSelection { Random = 0, Sequential = 1 }
 
-    public sealed class BrushSettings
+    public sealed partial class BrushSettings
     {
         public const double MaxStrokeAssist = 10000;
         public double Radius = 16;
@@ -118,7 +123,7 @@ namespace Yozolab.YoluPainter.Core
                 Tip = Tip, Tips = Tips == null ? null : (BrushTip[])Tips.Clone(), TipSelection = TipSelection, Angle = Angle, Roundness = Roundness, FollowDirection = FollowDirection,
                 SizeJitter = SizeJitter, AngleJitter = AngleJitter, RoundnessJitter = RoundnessJitter, OpacityJitter = OpacityJitter, FlowJitter = FlowJitter,
                 Scatter = Scatter, Count = Count, Seed = Seed, Texture = Texture, TextureDepth = TextureDepth, TextureScale = TextureScale,
-                Stabilizer = Stabilizer, TaperIn = TaperIn, TaperOut = TaperOut };
+                Stabilizer = Stabilizer, TaperIn = TaperIn, TaperOut = TaperOut }.WithDynamicsOf(this);
         }
         public void Validate()
         {
@@ -141,6 +146,7 @@ namespace Yozolab.YoluPainter.Core
             if (TextureScale < 0.05 || TextureScale > 64) throw new ArgumentOutOfRangeException(nameof(TextureScale));
             if (Tips != null && (Tips.Length > 256 || Array.IndexOf(Tips, null) >= 0)) throw new ArgumentException("Tips must hold 1..256 non-null tips.", nameof(Tips));
             if (!Enum.IsDefined(typeof(TipSelection), TipSelection)) throw new ArgumentOutOfRangeException(nameof(TipSelection));
+            ValidateDynamics();
         }
     }
 

@@ -13,7 +13,7 @@ namespace Yozolab.YoluPainter.Tests
     public sealed class PhotoshopBrushTests
     {
         /// <summary>ビッグエンディアンの書き出し器（ABR と ActionDescriptor の組み立て用）。</summary>
-        sealed class W
+        internal sealed class W
         {
             public readonly MemoryStream S = new MemoryStream();
             public W I16(int v) { S.WriteByte((byte)(v >> 8)); S.WriteByte((byte)v); return this; }
@@ -27,21 +27,21 @@ namespace Yozolab.YoluPainter.Tests
             public byte[] ToArray() => S.ToArray();
         }
         /// <summary>ActionDescriptor の値。(key, type, writer) の並びで組む。</summary>
-        static void Descriptor(W w, string classId, params (string key, Action<W> value)[] items)
+        internal static void Descriptor(W w, string classId, params (string key, Action<W> value)[] items)
         {
             w.Unicode("").Key(classId).I32(items.Length);
             foreach (var (key, value) in items) { w.Key(key); value(w); }
         }
-        static Action<W> Unit(string unit, double v) => w => w.Ascii("UntF").Ascii(unit).Double(v);
-        static Action<W> Bool(bool v) => w => w.Ascii("bool").U8(v ? 1 : 0);
-        static Action<W> Long(int v) => w => w.Ascii("long").I32(v);
-        static Action<W> Text(string t) => w => w.Ascii("TEXT").Unicode(t);
-        static Action<W> Obj(string classId, params (string, Action<W>)[] items) => w => { w.Ascii("Objc"); Descriptor(w, classId, items); };
-        static Action<W> Dynamics(int control, double jitter) => Obj("brVr", ("bVTy", Long(control)), ("fStp", Long(25)), ("jitter", Unit("#Prc", jitter)));
+        internal static Action<W> Unit(string unit, double v) => w => w.Ascii("UntF").Ascii(unit).Double(v);
+        internal static Action<W> Bool(bool v) => w => w.Ascii("bool").U8(v ? 1 : 0);
+        internal static Action<W> Long(int v) => w => w.Ascii("long").I32(v);
+        internal static Action<W> Text(string t) => w => w.Ascii("TEXT").Unicode(t);
+        internal static Action<W> Obj(string classId, params (string, Action<W>)[] items) => w => { w.Ascii("Objc"); Descriptor(w, classId, items); };
+        internal static Action<W> Dynamics(int control, double jitter) => Obj("brVr", ("bVTy", Long(control)), ("fStp", Long(25)), ("jitter", Unit("#Prc", jitter)));
 
         /// <summary>上の行から並んだ 8 bit の筆先（3x2: 上 = 255,0,0 / 下 = 0,0,128）。</summary>
-        static readonly byte[] TipRows = { 255, 0, 0, 0, 0, 128 };
-        static void RawBitmap(W w) { w.U8(0).Bytes(TipRows); }
+        internal static readonly byte[] TipRows = { 255, 0, 0, 0, 0, 128 };
+        internal static void RawBitmap(W w) { w.U8(0).Bytes(TipRows); }
         static void RleBitmap(W w)
         {
             // 行ごとの PackBits: 上の行 = 「255 を 1 個、0 を 2 個」、下の行 = 「0 を 2 個、128 を 1 個」
@@ -77,13 +77,13 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(brushes.Single().Name, Is.EqualTo("Grass 草")); AssertTip(brushes[0].Settings.Tip);
         }
 
-        static byte[] Section(string key, byte[] data)
+        internal static byte[] Section(string key, byte[] data)
         {
             var w = new W().Ascii("8BIM").Ascii(key).I32(data.Length).Bytes(data);
             while (w.S.Length % 4 != 0) w.U8(0);
             return w.ToArray();
         }
-        static byte[] Samp(int subversion, string id, bool rle)
+        internal static byte[] Samp(int subversion, string id, bool rle)
         {
             var record = new W().U8(id.Length).Ascii(id).Bytes(new byte[subversion == 1 ? 10 : 264]).I32(0).I32(0).I32(2).I32(3).I16(8);
             if (rle) RleBitmap(record); else RawBitmap(record);
@@ -117,8 +117,9 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(s.Scatter, Is.EqualTo(1.5)); Assert.That(s.Count, Is.EqualTo(3));
             Assert.That(s.OpacityJitter, Is.EqualTo(.1)); Assert.That(s.PressureOpacity, Is.True);
             Assert.That(s.FlowJitter, Is.EqualTo(.3)); Assert.That(s.PressureFlow, Is.False, "fade control is not pressure");
+            Assert.That(s.FadeFlow, Is.EqualTo(25), "control 1 is fade over fStp steps");
             Assert.That(brush.Warnings, Has.Some.Contains("Texture")); Assert.That(brush.Warnings, Has.Some.Contains("Wet edges"));
-            Assert.That(brush.Warnings, Has.Some.Contains("Flow control 1")); Assert.That(brush.Warnings, Has.Some.Contains("patterns"));
+            Assert.That(brush.Warnings, Has.None.Contains("Flow")); Assert.That(brush.Warnings, Has.Some.Contains("patterns"));
         }
 
         [Test] public void Version6Subversion2TipsWithoutPresetsStillImport()
