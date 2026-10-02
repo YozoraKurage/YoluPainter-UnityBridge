@@ -29,6 +29,17 @@ readonly SCRIPT_DIR
 # パッケージ本体（= このリポジトリ）
 readonly PACKAGE_ROOT="/workspace"
 
+# WSL2 の GPU（/dev/dxg）が見えていれば、Mesa の d3d12 ドライバで OpenGL を実 GPU に通す
+# （Unity → OpenGL → Mesa d3d12 → D3D12 → Windows の GPU ドライバ）。Linux 版 Unity は D3D11 を
+# 使えないので API は OpenGL のままだが、llvmpipe（CPU 描画）よりずっと実機に近い。
+# /dev/dxg が無い環境で d3d12 を強制すると OpenGL ごと起動しなくなるので、あるときだけ有効にする。
+# YOLUPAINTER_GPU=0 で llvmpipe に戻せる。
+if [[ "${YOLUPAINTER_GPU:-1}" != 0 && -e /dev/dxg && -d /usr/lib/wsl/lib ]]; then
+  export GALLIUM_DRIVER=d3d12
+  export LD_LIBRARY_PATH="/usr/lib/wsl/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  # 複数の GPU があるときは MESA_D3D12_DEFAULT_ADAPTER_NAME（部分一致）で選べる。
+fi
+
 info()  { printf '\033[36m==>\033[0m %s\n' "$*"; }
 warn()  { printf '\033[33m警告:\033[0m %s\n' "$*" >&2; }
 die()   { printf '\033[31mエラー:\033[0m %s\n' "$*" >&2; exit 1; }

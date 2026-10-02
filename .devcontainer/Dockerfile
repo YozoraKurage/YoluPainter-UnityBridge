@@ -47,6 +47,8 @@ RUN apt-get -q update \
   # xwd (x11-apps) を使う。test-daemon.sh 参照。
   xdotool \
   x11-apps \
+  # GPU が通っているかの確認（gpu-check.sh の glxinfo）。
+  mesa-utils \
   # VS Code / Claude Code が LANG=en_US.UTF-8 を送ってくるのに、ベースイメージには
   # C.UTF-8 しか無くて毎コマンド setlocale 警告が出る。生成しておく。
   && sed -i 's/^# *\(en_US.UTF-8\)/\1/' /etc/locale.gen && locale-gen \

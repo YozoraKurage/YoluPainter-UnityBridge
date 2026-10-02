@@ -13,7 +13,11 @@
   },
   "runArgs": [
     "--cap-add=NET_ADMIN",
-    "--cap-add=NET_RAW"
+    "--cap-add=NET_RAW",
+    // WSL2 の GPU（D3D12 の仮想デバイス）。Mesa の d3d12 ドライバ経由で Unity の OpenGL を
+    // 実 GPU に通す（common.sh が /dev/dxg を見て GALLIUM_DRIVER=d3d12 を立てる）。
+    // WSL2 + Docker Desktop 前提。/dev/dxg が無いホストではこの行があるとコンテナが起動しない。
+    "--device=/dev/dxg"
   ],
   "init": true,
   "customizations": {
@@ -55,7 +59,10 @@
     // Personal ライセンス (.ulf) の保管場所。再ビルドで消えないようにする。
     "source=yolupainter-unity-license-${devcontainerId},target=/home/node/.unity-license,type=volume",
     // Unity のパッケージキャッシュ・エディタ設定
-    "source=yolupainter-unity-config-${devcontainerId},target=/home/node/.config/unity3d,type=volume"
+    "source=yolupainter-unity-config-${devcontainerId},target=/home/node/.config/unity3d,type=volume",
+    // D3D12 のユーザーモードドライバ（libd3d12 / libdxcore と GPU ベンダーのドライバ）。
+    // Docker Desktop の VM（WSL2 ディストリ）側の /usr/lib/wsl を読み取り専用で借りる。
+    "source=/usr/lib/wsl,target=/usr/lib/wsl,type=bind,readonly"
   ],
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",
