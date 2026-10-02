@@ -103,7 +103,11 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(imported.Composite(PaintChannel.Color), Is.EqualTo(d.Composite(PaintChannel.Color)));
             Assert.That(imported.Layers[1].GetChannel(PaintChannel.Color).GetPixel(1, 9), Is.EqualTo(new Rgba32(11, 12, 13, 0)));
             d.SetLayerBlendMode(b.Id, LayerBlendMode.Multiply);
-            Assert.That(() => PsdBridge.Export(d, PaintChannel.Color), Throws.Exception, "non-Normal blend must not be flattened into PSD");
+            imported = PsdBridge.Import(PsdCodec.Read(PsdCodec.Write(PsdBridge.Export(d, PaintChannel.Color))));
+            Assert.That(imported.Layers[1].BlendMode, Is.EqualTo(LayerBlendMode.Multiply), "non-Normal blend is written as a mode, not flattened");
+            Assert.That(imported.Composite(PaintChannel.Color), Is.EqualTo(d.Composite(PaintChannel.Color)));
+            d.AddFillLayer("fill", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(1, 2, 3) } });
+            Assert.That(() => PsdBridge.Export(d, PaintChannel.Color), Throws.InvalidOperationException, "a fill layer must not be baked into pixels");
         }
 
         [Test] public void SaveAndPsdExportRefuseProvisionalStroke()

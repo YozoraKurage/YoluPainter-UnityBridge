@@ -172,14 +172,22 @@ namespace Yozolab.YoluPainter.Tests
             Assert.Throws<InvalidDataException>(() => DocumentBinary.Read(bytes));
         }
 
-        [Test] public void PsdProjectionRefusesAMaskThatWouldChangePixels()
+        [Test] public void PsdProjectionRoundTripsMasksAndRefusesInversion()
         {
             var doc = FullRedLayer(out var layer); doc.AddLayerMask(layer);
-            Assert.DoesNotThrow(() => PsdBridge.Export(doc, PaintChannel.Color), "an empty, non-inverted mask changes nothing");
-            MaskPixel(doc, layer, 1, 1);
-            Assert.Throws<InvalidOperationException>(() => PsdBridge.Export(doc, PaintChannel.Color));
-            doc.SetLayerMaskEnabled(layer, false);
-            Assert.DoesNotThrow(() => PsdBridge.Export(doc, PaintChannel.Color), "a disabled mask changes nothing");
+            MaskPixel(doc, layer, 1, 1); doc.SetLayerMaskDensity(layer, 128 / 255.0);
+            foreach (bool enabled in new[] { true, false })
+            {
+                doc.SetLayerMaskEnabled(layer, enabled);
+                var read = Yozolab.YoluPainter.Core.Psd.PsdCodec.Read(Yozolab.YoluPainter.Core.Psd.PsdCodec.Write(PsdBridge.Export(doc, PaintChannel.Color)));
+                Assert.That(read.Mode, Is.EqualTo(Yozolab.YoluPainter.Core.Psd.PsdCompatibilityMode.EditableRaster));
+                var imported = PsdBridge.Import(read); var mask = imported.Layers[0].Mask;
+                Assert.That(mask.Enabled, Is.EqualTo(enabled)); Assert.That(mask.Density, Is.EqualTo(128 / 255.0));
+                Assert.That(mask.Surface.GetPixel(1, 1).A, Is.EqualTo(255)); Assert.That(mask.Surface.GetPixel(2, 2).A, Is.EqualTo(0));
+                Assert.That(imported.Composite(PaintChannel.Color), Is.EqualTo(doc.Composite(PaintChannel.Color)));
+            }
+            doc.SetLayerMaskInverted(layer, true);
+            Assert.Throws<InvalidOperationException>(() => PsdBridge.Export(doc, PaintChannel.Color), "PSD has no non-destructive inversion; it is not baked into the pixels");
         }
     }
 }

@@ -18,12 +18,14 @@ namespace Yozolab.YoluPainter.Core.Psd
         public int MaxMetadataBytes = 4 * 1024 * 1024;
         public int MaxNameCodeUnits = 4096;
         public int MaxDiagnostics = 128;
+        /// <summary>Folder nesting depth. Photoshop itself allows about ten levels; deeper files are refused as malformed.</summary>
+        public int MaxGroupDepth = 32;
 
         internal void Validate()
         {
             if (MaxSourceBytes < 26 || MaxOutputBytes < 26 || MaxDimension < 1 || MaxDimension > 30000 ||
                 MaxCanvasPixels < 1 || MaxLayers < 1 || MaxLayers > 32767 || MaxDecodedBytes < 4 ||
-                MaxMetadataBytes < 0 || MaxNameCodeUnits < 1 || MaxDiagnostics < 1)
+                MaxMetadataBytes < 0 || MaxNameCodeUnits < 1 || MaxDiagnostics < 1 || MaxGroupDepth < 0 || MaxGroupDepth > 1000)
                 throw new ArgumentOutOfRangeException("limits", "PSD limits must be positive and within PSD version 1 bounds.");
         }
     }
@@ -36,8 +38,14 @@ namespace Yozolab.YoluPainter.Core.Psd
         public int Width;
         public int Height;
         public List<PsdRasterLayer> Layers = new List<PsdRasterLayer>();
+        /// <summary>Merged image the writer stores (Width x Height, top-down straight RGBA8; the writer mattes it on white).
+        /// Null: the writer composites the layers with the same reference arithmetic as <see cref="CpuCompositor"/>.
+        /// The reader leaves it null; the stored merged image is only compared, never exposed as layer data.</summary>
+        public byte[] CompositeRgba;
     }
 
+    /// <summary>A raster layer, or a group (folder) when <see cref="Children"/> is not null. A group has no pixels and no
+    /// rectangle; its Opacity, Visible, BlendMode (PassThrough or an isolated mode), Clipping and Mask apply to its contents.</summary>
     public sealed class PsdRasterLayer
     {
         public int Id;
@@ -48,7 +56,43 @@ namespace Yozolab.YoluPainter.Core.Psd
         public int Height;
         public byte Opacity = 255;
         public bool Visible = true;
+        /// <summary>One of the 26 modes with a PSD key (see PsdCodec.BlendKey), or PassThrough on a group (written as "pass" in its section divider).</summary>
+        public LayerBlendMode BlendMode = LayerBlendMode.Normal;
+        /// <summary>PSD clipping "non-base": clipped to the nearest unclipped layer below, blended with it as a group.</summary>
+        public bool Clipping;
+        /// <summary>Raster user mask, or null.</summary>
+        public PsdLayerMask Mask;
         public byte[] PixelsRgba;
+        /// <summary>Contents of a group, top to bottom; null for a raster layer.</summary>
+        public List<PsdRasterLayer> Children;
+        /// <summary>Layer ID of the group's bounding section divider record ("&lt;/Layer group&gt;"); 0 = the record has none.</summary>
+        public int DividerId;
+        public bool IsGroup { get { return Children != null; } }
+    }
+
+    /// <summary>Raster layer mask in Photoshop's sense: 255 shows, 0 hides. The rectangle is in canvas coordinates and may
+    /// be smaller than the layer or the canvas; outside it every sample is <see cref="DefaultColor"/>.</summary>
+    public sealed class PsdLayerMask
+    {
+        public int Left;
+        public int Top;
+        public int Width;
+        public int Height;
+        /// <summary>0 or 255.</summary>
+        public byte DefaultColor = 255;
+        /// <summary>False when the mask is disabled (kept, but does not affect rendering).</summary>
+        public bool Enabled = true;
+        /// <summary>User mask density (255 = full). The mask hides (255 - value) x Density / 255.</summary>
+        public byte Density = 255;
+        /// <summary>Width x Height samples, top-down.</summary>
+        public byte[] Pixels;
+
+        /// <summary>Mask sample at a canvas position (the default colour outside the rectangle).</summary>
+        public byte ValueAt(int x, int y)
+        {
+            long mx = (long)x - Left, my = (long)y - Top;
+            return mx < 0 || my < 0 || mx >= Width || my >= Height ? DefaultColor : Pixels[my * Width + mx];
+        }
     }
 
     public sealed class PsdDiagnostic

@@ -69,12 +69,15 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(result.CopyOriginalBytes(), Is.EqualTo(expected));
         }
 
-        [Test] public void NonNormalBlendClippingAndLocksFailClosed()
+        [Test] public void UnknownBlendClippingValueAndIrrelevantPixelFlagFailClosed()
         {
+            // Known blend modes and clipping (value 1) are editable now (PsdLayerFeatureTests), and the transparency lock
+            // is accepted as non-rendering (PsdMetadataTests); an unknown blend key, a clipping value other than 0/1 and
+            // the "pixel data irrelevant" flag on a raster layer are not.
             byte[] original = PsdCodec.Write(Document()); int norm = Find(original, "norm");
             foreach (int offset in new[] { norm, norm + 5, norm + 6 })
             {
-                byte[] bytes = (byte[])original.Clone(); bytes[offset] = 1;
+                byte[] bytes = (byte[])original.Clone(); bytes[offset] = (byte)(offset == norm + 5 ? 2 : offset == norm + 6 ? 16 : 1);
                 Assert.That(PsdCodec.Read(bytes).Mode, Is.EqualTo(PsdCompatibilityMode.PreserveOnly));
             }
         }
@@ -226,7 +229,9 @@ namespace Yozolab.YoluPainter.Tests
                     Put32(bytes, field, n + 4);
                 }
                 var read = PsdCodec.Read(bytes);
-                Assert.That(read.Mode, Is.EqualTo(PsdCompatibilityMode.PreserveOnly), Diagnostics(read));
+                // A 4-byte layer mask record cannot hold its fixed fields: malformed, so refused. Non-neutral blend ranges
+                // are well formed but unsupported. Either way the original is retained and nothing is editable.
+                Assert.That(read.Mode, Is.EqualTo(relative == 0 ? PsdCompatibilityMode.Rejected : PsdCompatibilityMode.PreserveOnly), Diagnostics(read));
                 Assert.That(read.CopyOriginalBytes(), Is.EqualTo(bytes));
             }
         }

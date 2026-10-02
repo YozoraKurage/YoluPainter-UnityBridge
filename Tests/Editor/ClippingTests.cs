@@ -148,10 +148,14 @@ namespace Yozolab.YoluPainter.Tests
                 Assert.That(DocumentBinary.Read(ArchiveTestUtil.AsVersion(current, "p", version)).Composite(PaintChannel.Color), Is.EqualTo(plain.Composite(PaintChannel.Color)), "version " + version);
         }
 
-        [Test] public void PsdProjectionRefusesClipping()
+        [Test] public void PsdProjectionRoundTripsClipping()
         {
-            var doc = Stack(Red, Green, out _, out _, out _);
-            Assert.Throws<InvalidOperationException>(() => PsdBridge.Export(doc, PaintChannel.Color));
+            var doc = Stack(Red, Green, out _, out _, out var clipped);
+            var read = Yozolab.YoluPainter.Core.Psd.PsdCodec.Read(Yozolab.YoluPainter.Core.Psd.PsdCodec.Write(PsdBridge.Export(doc, PaintChannel.Color)));
+            Assert.That(read.Mode, Is.EqualTo(Yozolab.YoluPainter.Core.Psd.PsdCompatibilityMode.EditableRaster));
+            var imported = PsdBridge.Import(read);
+            Assert.That(imported.Layers.Select(l => l.Clipping), Is.EqualTo(new[] { false, false, true }));
+            Assert.That(imported.Composite(PaintChannel.Color), Is.EqualTo(doc.Composite(PaintChannel.Color)), "the clipped pixel at 9,9 stays outside the base");
         }
     }
 }

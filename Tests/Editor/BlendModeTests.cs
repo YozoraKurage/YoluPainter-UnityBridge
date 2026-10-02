@@ -165,7 +165,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That((int)LayerBlendMode.LighterColor, Is.EqualTo(25)); Assert.That((int)LayerBlendMode.PassThrough, Is.EqualTo(26));
         }
 
-        [Test] public void ChangingTheModeIsOneUndoStepAndPsdProjectionStillRefusesIt()
+        [Test] public void ChangingTheModeIsOneUndoStepAndPsdProjectionKeepsIt()
         {
             var doc = new PaintDocument(16, 16, 8); var layer = doc.AddLayer("A");
             layer.GetChannel(PaintChannel.Color).SetPixel(1, 1, new Rgba32(10, 20, 30)); doc.ClearHistory();
@@ -174,7 +174,9 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(doc.Redo(), Is.True); Assert.That(doc.Layers[0].BlendMode, Is.EqualTo(LayerBlendMode.SoftLight));
             Assert.That(() => doc.SetLayerBlendMode(layer.Id, (LayerBlendMode)27), Throws.TypeOf<ArgumentOutOfRangeException>());
             Assert.That(() => doc.SetLayerBlendMode(layer.Id, LayerBlendMode.PassThrough), Throws.ArgumentException, "pass through is for groups only");
-            Assert.That(() => PsdBridge.Export(doc, PaintChannel.Color), Throws.InvalidOperationException, "the PSD writer does not map blend modes yet; it must not flatten them");
+            var read = Yozolab.YoluPainter.Core.Psd.PsdCodec.Read(Yozolab.YoluPainter.Core.Psd.PsdCodec.Write(PsdBridge.Export(doc, PaintChannel.Color)));
+            Assert.That(read.Mode, Is.EqualTo(Yozolab.YoluPainter.Core.Psd.PsdCompatibilityMode.EditableRaster));
+            Assert.That(PsdBridge.Import(read).Layers[0].BlendMode, Is.EqualTo(LayerBlendMode.SoftLight), "the PSD keeps the mode instead of flattening it");
         }
     }
 }
