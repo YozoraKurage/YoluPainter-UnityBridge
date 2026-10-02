@@ -64,6 +64,34 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.StatusMessage, Does.Contain("Nothing to move")); Assert.That(d.UndoCount, Is.EqualTo(0));
         }
 
+        [Test] public void CornerHandlesScaleAndDraggingOutsideACornerRotates()
+        {
+            var red = new Rgba32(250, 0, 0); var grey = new Rgba32(90, 90, 90);
+            var layer = PaintBlock(300, 300, 500, 500, grey); var d = window.Document;
+            layer.GetChannel(PaintChannel.Color).SetPixel(300, 300, red); d.ClearHistory();
+            window.Tool = TexturePaintWindow.PaintTool.Move; window.MoveResampling = Resampling.Nearest;
+            Drag(500, 500, 700, 700); // 右上の角のハンドル（左下が軸）
+            Assert.That(window.StatusMessage, Does.Contain("Scaled"));
+            var b = d.TransformBounds(layer.Id).Value;
+            Assert.That(b.x0, Is.EqualTo(300)); Assert.That(b.y0, Is.EqualTo(300));
+            Assert.That(b.x1, Is.InRange(699, 702)); Assert.That(b.y1, Is.InRange(699, 702), "twice as large about the opposite corner");
+            Assert.That(layer.GetPixel(PaintChannel.Color, 301, 301), Is.EqualTo(red), "nearest keeps hard pixels");
+            Assert.That(d.UndoCount, Is.EqualTo(1));
+            d.Undo();
+            Drag(500, 400, 600, 400); // 右の辺の中点: 横だけ
+            b = d.TransformBounds(layer.Id).Value;
+            Assert.That(b.x1, Is.InRange(599, 602)); Assert.That((b.y0, b.y1), Is.EqualTo((300, 500)), "an edge handle scales one axis");
+            d.Undo();
+            // 右上の角の少し外を掴み、中心のまわりに 90° 回す（Shift で 15° 刻み）
+            Drag(512, 512, 288, 512, EventModifiers.Shift);
+            Assert.That(window.StatusMessage, Does.Contain("Rotated 90"));
+            Assert.That(layer.GetPixel(PaintChannel.Color, 499, 300), Is.EqualTo(red), "bottom-left goes to bottom-right, pixel-exact");
+            Assert.That(d.TransformBounds(layer.Id).Value, Is.EqualTo((300, 300, 500, 500)));
+            d.Undo();
+            Drag(400, 400, 450, 420);
+            Assert.That(window.StatusMessage, Does.Contain("Moved by (50, 20)"), "inside the box moves");
+        }
+
         [Test] public void NumericTransformsRotateFlipAndScaleAboutTheContent()
         {
             var layer = PaintBlock(100, 100, 104, 102, new Rgba32(10, 20, 30)); var d = window.Document;

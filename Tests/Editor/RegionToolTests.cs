@@ -110,6 +110,28 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(() => r.Gradient(radial.Id, PaintChannel.Color, new GradientSettings { Opacity = 2 }), Throws.TypeOf<ArgumentOutOfRangeException>());
         }
 
+        /// <summary>全体のマジックワンドは、タイルを覚える読み手を使うので並列に計算しない（並列にしたら GUI モードで時々壊れた、2026-10-02）。
+        /// 合成結果を基準にして（タイルごとの合成が重く、スレッドが重なりやすい）タイルの多い文書で 20 回回し、画素ごとの直接の判定と
+        /// 一致することを確かめる。並列に戻すと 20 回中 4 回壊れた（2 台目、32 スレッド）。</summary>
+        [Test] public void TheGlobalMagicWandIsStableOnManyTiles()
+        {
+            var d = new PaintDocument(512, 512, 16); var layer = d.AddLayer("L"); var s = layer.GetChannel(PaintChannel.Color);
+            var buf = new byte[16 * 16 * 4];
+            for (int ty = 0; ty < 32; ty++) for (int tx = 0; tx < 32; tx++)
+            {
+                for (int i = 0; i < 256; i++) { byte v = (byte)((i * 7 + tx * 3 + ty * 5) % 3 == 0 ? 100 : 40); buf[i * 4] = v; buf[i * 4 + 1] = v; buf[i * 4 + 2] = v; buf[i * 4 + 3] = 255; }
+                s.ImportTile(new TileCoord(tx, ty), buf);
+            }
+            d.ClearHistory();
+            for (int run = 0; run < 20; run++)
+            {
+                var global = SelectionMask.MagicWand(d, null, PaintChannel.Color, 0, 0, 0, contiguous: false);
+                byte seed = layer.GetPixel(PaintChannel.Color, 0, 0).R;
+                for (int y = 0; y < 512; y += 7) for (int x = 0; x < 512; x += 7)
+                    Assert.That(global[x, y], Is.EqualTo(layer.GetPixel(PaintChannel.Color, x, y).R == seed ? 255 : 0), run + ": " + x + "," + y);
+            }
+        }
+
         [Test] public void TheMagicWandFindsConnectedOrAllMatchingPixels()
         {
             var d = Doc(out var layer);

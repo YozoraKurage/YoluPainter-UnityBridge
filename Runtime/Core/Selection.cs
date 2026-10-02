@@ -34,12 +34,14 @@ namespace Yozolab.YoluPainter.Core
             return true;
         }
 
-        static SelectionMask Build(int width, int height, int tileSize, Func<int, int, byte> amount, int x0 = 0, int y0 = 0, int x1 = int.MaxValue, int y1 = int.MaxValue)
+        /// <summary>A mask from amount(x, y) inside [x0, x1) × [y0, y1). With parallel, tiles are computed on several threads, so
+        /// amount must be pure (no caches or other shared state; the magic wand's tile reader is not).</summary>
+        static SelectionMask Build(int width, int height, int tileSize, Func<int, int, byte> amount, int x0 = 0, int y0 = 0, int x1 = int.MaxValue, int y1 = int.MaxValue, bool parallel = false)
         {
             var mask = new SelectionMask(width, height, tileSize);
             x0 = Math.Max(0, x0); y0 = Math.Max(0, y0); x1 = Math.Min(width, x1); y1 = Math.Min(height, y1);
             if (x0 >= x1 || y0 >= y1) return mask;
-            // タイルごとに独立なので並列に計算し、取り込みは順に行う（一度に持つのは Batch 枚まで）。amount は純粋な関数であること
+            // タイルごとに独立なので（parallel なら）並列に計算し、取り込みは順に行う（一度に持つのは Batch 枚まで）
             var coords = new List<TileCoord>();
             for (int ty = y0 / tileSize; ty <= (y1 - 1) / tileSize; ty++)
                 for (int tx = x0 / tileSize; tx <= (x1 - 1) / tileSize; tx++) coords.Add(new TileCoord(tx, ty));
@@ -48,7 +50,7 @@ namespace Yozolab.YoluPainter.Core
             for (int start = 0; start < coords.Count; start += Batch)
             {
                 int count = Math.Min(Batch, coords.Count - start);
-                System.Threading.Tasks.Parallel.For(0, count, k =>
+                Action<int> compute = k =>
                 {
                     var c = coords[start + k]; int tx = c.X, ty = c.Y;
                     var bytes = new byte[tileSize * tileSize * 4]; bool any = false;
@@ -60,7 +62,8 @@ namespace Yozolab.YoluPainter.Core
                         bytes[((y - ty * tileSize) * tileSize + (x - tx * tileSize)) * 4 + 3] = a; any = true;
                     }
                     results[k] = any ? bytes : null;
-                });
+                };
+                if (parallel) System.Threading.Tasks.Parallel.For(0, count, compute); else for (int k = 0; k < count; k++) compute(k);
                 for (int k = 0; k < count; k++) if (results[k] != null) mask.surface.ImportTile(coords[start + k], results[k]);
             }
             return mask;
@@ -68,7 +71,7 @@ namespace Yozolab.YoluPainter.Core
         static void Require(PaintDocument document) { if (document == null) throw new ArgumentNullException(nameof(document)); }
 
         public static SelectionMask None(PaintDocument document) { Require(document); return new SelectionMask(document.Width, document.Height, document.TileSize); }
-        public static SelectionMask All(PaintDocument document) { Require(document); return Build(document.Width, document.Height, document.TileSize, (x, y) => 255); }
+        public static SelectionMask All(PaintDocument document) { Require(document); return Build(document.Width, document.Height, document.TileSize, (x, y) => 255, parallel: true); }
 
         /// <summary>Pixels with centres inside [x0, x1) × [y0, y1) (canvas pixel coordinates, bottom-left origin).</summary>
         public static SelectionMask Rectangle(PaintDocument document, int x0, int y0, int x1, int y1)
@@ -76,7 +79,7 @@ namespace Yozolab.YoluPainter.Core
             Require(document);
             if (x1 < x0) { int t = x0; x0 = x1; x1 = t; }
             if (y1 < y0) { int t = y0; y0 = y1; y1 = t; }
-            return Build(document.Width, document.Height, document.TileSize, (x, y) => 255, x0, y0, x1, y1);
+            return Build(document.Width, document.Height, document.TileSize, (x, y) => 255, x0, y0, x1, y1, parallel: true);
         }
 
         const int Supersample = 4;
@@ -96,7 +99,7 @@ namespace Yozolab.YoluPainter.Core
                     if (u * u + v * v <= 1) inside++;
                 }
                 return (byte)((inside * 255 + Supersample * Supersample / 2) / (Supersample * Supersample));
-            }, (int)Math.Floor(cx - rx), (int)Math.Floor(cy - ry), (int)Math.Ceiling(cx + rx) + 1, (int)Math.Ceiling(cy + ry) + 1);
+            }, (int)Math.Floor(cx - rx), (int)Math.Floor(cy - ry), (int)Math.Ceiling(cx + rx) + 1, (int)Math.Ceiling(cy + ry) + 1, parallel: true);
         }
 
         /// <summary>Anti-aliased polygon (lasso), even-odd rule, 4×4 samples per pixel. Points are canvas coordinates.</summary>
@@ -123,7 +126,7 @@ namespace Yozolab.YoluPainter.Core
                 for (int sy = 0; sy < Supersample; sy++) for (int sx = 0; sx < Supersample; sx++)
                     if (Inside(x + (sx + .5) / Supersample, y + (sy + .5) / Supersample)) count++;
                 return (byte)((count * 255 + Supersample * Supersample / 2) / (Supersample * Supersample));
-            }, (int)Math.Floor(minX), (int)Math.Floor(minY), (int)Math.Ceiling(maxX) + 1, (int)Math.Ceiling(maxY) + 1);
+            }, (int)Math.Floor(minX), (int)Math.Floor(minY), (int)Math.Ceiling(maxX) + 1, (int)Math.Ceiling(maxY) + 1, parallel: true);
         }
 
         /// <summary>Magic wand / bucket fill region: pixels whose colour (RGBA, largest channel difference) is within
@@ -156,7 +159,7 @@ namespace Yozolab.YoluPainter.Core
                 }
                 Visit(x + 1, y); Visit(x - 1, y); Visit(x, y + 1); Visit(x, y - 1);
             }
-            return Build(w, h, document.TileSize, (x, y) => selected[y * w + x] ? (byte)255 : (byte)0, minX, minY, maxX + 1, maxY + 1);
+            return Build(w, h, document.TileSize, (x, y) => selected[y * w + x] ? (byte)255 : (byte)0, minX, minY, maxX + 1, maxY + 1, parallel: true);
         }
 
         /// <summary>Reads pixels tile by tile (a layer's own pixels, or the composite) with a small tile cache.</summary>
