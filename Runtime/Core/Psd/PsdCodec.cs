@@ -69,7 +69,7 @@ namespace Yozolab.YoluPainter.Core.Psd
 
         /// <summary>Section divider kind of a layer record (lsct / lsdk type): 0 any other layer, 1 open folder, 2 closed folder,
         /// 3 bounding divider ("&lt;/Layer group&gt;", the bottom of a folder's contents).</summary>
-        private enum RecordKind { Raster, Folder, Divider }
+        private enum RecordKind { Raster, Folder, Divider, Adjustment }
         private sealed class Record
         {
             internal PsdRasterLayer Layer;
@@ -85,6 +85,8 @@ namespace Yozolab.YoluPainter.Core.Psd
             internal string SectionKey;
             /// <summary>The record has a section divider setting this codec cannot interpret, so the folder structure is unknown.</summary>
             internal bool UnknownSection;
+            /// <summary>The record carries an adjustment block (nvrt / levl / hue2), mapped or not.</summary>
+            internal bool AdjustmentSeen;
         }
         private sealed class ParseState
         {
@@ -499,7 +501,10 @@ namespace Yozolab.YoluPainter.Core.Psd
             bool hasUnicode = ParseTags(extra, record, state);
             if (layer.Name.Length > state.Limits.MaxNameCodeUnits) throw new PsdFormatException("Layer name limit exceeded.", start);
 
-            record.Kind = record.SectionType == 3 ? RecordKind.Divider : record.SectionType == 1 || record.SectionType == 2 ? RecordKind.Folder : RecordKind.Raster;
+            record.Kind = record.SectionType == 3 ? RecordKind.Divider : record.SectionType == 1 || record.SectionType == 2 ? RecordKind.Folder
+                : record.AdjustmentSeen ? RecordKind.Adjustment : RecordKind.Raster;
+            if (record.AdjustmentSeen && record.Kind != RecordKind.Adjustment)
+                state.Preserve("Adjustment", "A folder or divider record that also carries an adjustment is not represented.", start);
             if (record.Kind == RecordKind.Divider)
             {
                 // The divider only marks where a folder's contents begin. Its blend mode, opacity, visibility, clipping
@@ -535,6 +540,16 @@ namespace Yozolab.YoluPainter.Core.Psd
                 else state.Preserve("BlendMode", "Unsupported folder blend mode: " + key, blendOffset, 4);
                 if (record.SectionKey != null && record.BlendKey != record.SectionKey && !(record.SectionKey == "pass" && record.BlendKey == "norm"))
                     state.Preserve("GroupBlend", "Folder record blend '" + record.BlendKey + "' contradicts its section divider blend '" + record.SectionKey + "'.", blendOffset, 4);
+                return record;
+            }
+            if (record.Kind == RecordKind.Adjustment)
+            {
+                layer.PixelsRgba = new byte[0];
+                if (width != 0 || height != 0) state.Preserve("AdjustmentPixels", "An adjustment layer with its own pixels is not represented.", start, 16);
+                // Bit 4 (pixel data irrelevant) is what an adjustment layer is.
+                if ((record.Flags & ~(1 | 2 | 8 | 16)) != 0) state.Preserve("LayerFlags", "Unknown adjustment layer flags are not editable.", flagsOffset, 1);
+                if (TryGetBlendMode(record.BlendKey, out mode)) layer.BlendMode = mode;
+                else state.Preserve("BlendMode", "Unsupported adjustment layer blend mode: " + record.BlendKey, blendOffset, 4);
                 return record;
             }
             if (width == 0 || height == 0) state.Preserve("EmptyLayer", "Empty or non-raster layer is retained without editing.", start, 16);
@@ -728,6 +743,17 @@ namespace Yozolab.YoluPainter.Core.Psd
                     case "brst":
                         if (size != 0) state.Preserve("ChannelRestrictions", "Channel blending restrictions (brst) are not represented.", start, blockLength);
                         break;
+                    case "nvrt": case "levl": case "hue2":
+                        if (record.AdjustmentSeen) { layer.Adjustment = null; state.Preserve("Adjustment", "More than one adjustment block (" + key + ") on one layer.", start, blockLength); break; }
+                        record.AdjustmentSeen = true;
+                        if (key == "nvrt")
+                        {
+                            if (size != 0) throw new PsdFormatException("Invert adjustment (nvrt) carries data; it has none.", start);
+                            layer.Adjustment = AdjustmentSettings.Invert();
+                        }
+                        else if (key == "levl") layer.Adjustment = ParseLevels(body, start, blockLength, state);
+                        else layer.Adjustment = ParseHueSaturation(body, start, blockLength, state);
+                        break;
                     case "lsct": case "lsdk":
                         // Section divider setting: type, then optionally "8BIM" + blend key, then optionally a sub type.
                         // lsdk is the same structure under another key; rewrites use lsct.
@@ -761,6 +787,150 @@ namespace Yozolab.YoluPainter.Core.Psd
                 case "Txt2": return "Text engine data (Txt2)";
                 case "FMsk": return "Smart filter mask defaults (FMsk)";
                 default: return null;
+            }
+        }
+
+        /// <summary>Levels (levl): version 2, then 29 records of input floor, input ceiling, output floor, output ceiling and
+        /// gamma ×100 (record 0 = composite RGB, 1-3 = R, G, B, the rest unused), optionally "Lvls" version 3 with more records.
+        /// Only the composite record maps onto the native Levels; the others must be neutral (or all zero where unused).</summary>
+        private static AdjustmentSettings ParseLevels(PsdReader body, int start, int length, ParseState state)
+        {
+            if (body.Remaining < 2 + 29 * 10) throw new PsdFormatException("Levels adjustment (levl) is shorter than its 29 records.", start);
+            int version = body.U16();
+            if (version != 2) { state.Preserve("Levels", "Levels (levl) version " + version + " is not represented.", start, length); return null; }
+            var records = new List<int[]>();
+            for (int i = 0; i < 29; i++) records.Add(new[] { body.U16(), body.U16(), body.U16(), body.U16(), body.U16() });
+            if (body.Remaining >= 6)
+            {
+                string signature = body.Key(); int extension = body.U16();
+                if (signature != "Lvls" || extension != 3) { state.Preserve("Levels", "Unrecognized Levels (levl) extension '" + signature + "' version " + extension + ".", start, length); return null; }
+                int count = body.U16();
+                if (count < 29 || (count - 29) * 10 > body.Remaining) throw new PsdFormatException("Levels (levl) extension record count does not fit the block.", start);
+                for (int i = 29; i < count; i++) records.Add(new[] { body.U16(), body.U16(), body.U16(), body.U16(), body.U16() });
+            }
+            for (int i = body.Remaining; i > 0; i--)
+                if (body.U8() != 0) { state.Preserve("Levels", "Unrecognized data after the Levels (levl) records.", start, length); return null; }
+            for (int i = 1; i < records.Count; i++)
+            {
+                var r = records[i];
+                bool neutral = r[0] == 0 && r[1] == 255 && r[2] == 0 && r[3] == 255 && r[4] == 100, unused = r[0] == 0 && r[1] == 0 && r[2] == 0 && r[3] == 0 && r[4] == 0;
+                if (neutral || i > 3 && unused) continue;
+                state.Preserve("Levels", i <= 3 ? "Per-channel Levels (the R, G or B record) is not represented: the native Levels applies one curve to all channels." : "Levels records for extra channels are not represented.", start, length);
+                return null;
+            }
+            var c = records[0];
+            if (c[0] > 253 || c[1] < 2 || c[1] > 255 || c[1] <= c[0] || c[2] > 255 || c[3] > 255 || c[4] < 10 || c[4] > 999)
+            { state.Preserve("Levels", "Levels (levl) values outside the documented ranges are not represented.", start, length); return null; }
+            return AdjustmentSettings.Levels(c[0] / 255.0, c[1] / 255.0, c[4] / 100.0, c[2] / 255.0, c[3] / 255.0);
+        }
+
+        /// <summary>Photoshop's default Hue/Saturation colour ranges (reds, yellows, greens, cyans, blues, magentas).</summary>
+        private static readonly int[][] HueRanges =
+        {
+            new[] { 315, 345, 15, 45 }, new[] { 15, 45, 75, 105 }, new[] { 75, 105, 135, 165 },
+            new[] { 135, 165, 195, 225 }, new[] { 195, 225, 255, 285 }, new[] { 255, 285, 315, 345 },
+        };
+
+        /// <summary>Hue/Saturation (hue2): version 2, colorize flag, padding, colorize hue/saturation/lightness, master
+        /// hue/saturation/lightness, then six colour ranges (4 range values + hue/saturation/lightness). Photoshop appends six
+        /// (hue, 100, 50) triples (the pure colour of each range; 136 bytes in all). Only the master values map onto the native
+        /// Hue/Saturation: hue in degrees, saturation and lightness ÷ 100.</summary>
+        private static AdjustmentSettings ParseHueSaturation(PsdReader body, int start, int length, ParseState state)
+        {
+            if (body.Remaining < 100) throw new PsdFormatException("Hue/Saturation adjustment (hue2) is shorter than its fields.", start);
+            int version = body.U16();
+            if (version != 2) { state.Preserve("HueSaturation", "Hue/Saturation (hue2) version " + version + " is not represented.", start, length); return null; }
+            int colorize = body.U8(), padding = body.U8();
+            int ch = body.I16(), cs = body.I16(), cl = body.I16();
+            int hue = body.I16(), saturation = body.I16(), lightness = body.I16();
+            bool rangeEdits = false, defaultRanges = true;
+            for (int i = 0; i < 6; i++)
+            {
+                for (int k = 0; k < 4; k++) if (body.I16() != HueRanges[i][k]) defaultRanges = false;
+                for (int k = 0; k < 3; k++) if (body.I16() != 0) rangeEdits = true;
+            }
+            // What follows is either nothing, padding, or Photoshop's six (hue, 100, 50) triples; anything else is unknown.
+            int tail = body.Remaining, at = body.Position;
+            bool known = padding == 0;
+            if (tail == 36) for (int i = 0; i < 6; i++) { int p = at + i * 6; known &= body.Data[p + 2] == 0 && body.Data[p + 3] == 100 && body.Data[p + 4] == 0 && body.Data[p + 5] == 50; }
+            else if (tail > 3) known = false;
+            else for (int i = 0; i < tail; i++) known &= body.Data[at + i] == 0;
+            body.Skip(tail);
+            if (!known) { state.Preserve("HueSaturation", "Unrecognized Hue/Saturation (hue2) data.", start, length); return null; }
+            if (colorize == 1) { state.Preserve("HueSaturation", "Colorize Hue/Saturation is not represented.", start, length); return null; }
+            if (colorize != 0) { state.Preserve("HueSaturation", "Unknown Hue/Saturation (hue2) mode " + colorize + ".", start, length); return null; }
+            if (rangeEdits) { state.Preserve("HueSaturation", "Hue/Saturation edits limited to a colour range (reds, yellows, greens, cyans, blues, magentas) are not represented.", start, length); return null; }
+            if (hue < -180 || hue > 180 || saturation < -100 || saturation > 100 || lightness < -100 || lightness > 100)
+            { state.Preserve("HueSaturation", "Hue/Saturation (hue2) values outside the documented ranges are not represented.", start, length); return null; }
+            // Unused while Colorize is off and while no range is edited: the dialog's remembered slider positions.
+            if (!(ch == 0 && cs == 25 && cl == 0) && !(ch == 0 && cs == 0 && cl == 0)) state.NotCarried("Hue/Saturation colorize values kept while Colorize is off (hue2)", start, length);
+            if (!defaultRanges) state.NotCarried("Hue/Saturation colour range sliders (hue2)", start, length);
+            return AdjustmentSettings.HueSaturation(hue, saturation / 100.0, lightness / 100.0);
+        }
+
+        /// <summary>Why an adjustment cannot be written exactly as nvrt / levl / hue2, or null when it can. Levels need whole
+        /// 0..255 steps inside the documented ranges and gamma in hundredths; Hue/Saturation needs whole degrees and whole
+        /// percents.</summary>
+        public static string AdjustmentRefusal(AdjustmentSettings settings)
+        {
+            if (settings == null) return "No adjustment settings.";
+            switch (settings.Type)
+            {
+                case AdjustmentType.Invert: return null;
+                case AdjustmentType.Levels:
+                {
+                    int f, c, of, oc, g;
+                    if (!Whole(settings.InputBlack * 255, out f) || !Whole(settings.InputWhite * 255, out c) || !Whole(settings.OutputBlack * 255, out of)
+                        || !Whole(settings.OutputWhite * 255, out oc) || !Whole(settings.Gamma * 100, out g))
+                        return "PSD Levels stores whole 0-255 steps and gamma in hundredths; this Levels setting is between them.";
+                    if (f > 253 || c < 2 || c <= f) return "PSD Levels needs an input black of 0-253 and an input white of 2-255 above it.";
+                    return null;
+                }
+                case AdjustmentType.HueSaturation:
+                {
+                    int h, s, l;
+                    if (!Whole(settings.Hue, out h) || !Whole(settings.Saturation * 100, out s) || !Whole(settings.Lightness * 100, out l))
+                        return "PSD Hue/Saturation stores whole degrees and whole percents; this setting is between them.";
+                    return null;
+                }
+                default: return settings.Type + " has no PSD adjustment layer equivalent.";
+            }
+        }
+        private static bool Whole(double value, out int result)
+        {
+            double rounded = Math.Round(value);
+            result = (int)rounded;
+            return Math.Abs(value - rounded) < 1e-9;
+        }
+
+        /// <summary>The tagged block (key and body) of a writable adjustment.</summary>
+        private static byte[] AdjustmentBlock(AdjustmentSettings settings, out string key)
+        {
+            switch (settings.Type)
+            {
+                case AdjustmentType.Invert: key = "nvrt"; return new byte[0];
+                case AdjustmentType.Levels:
+                {
+                    key = "levl";
+                    var w = new PsdWriter(2 + 29 * 10);
+                    w.U16(2);
+                    w.U16((int)Math.Round(settings.InputBlack * 255)); w.U16((int)Math.Round(settings.InputWhite * 255));
+                    w.U16((int)Math.Round(settings.OutputBlack * 255)); w.U16((int)Math.Round(settings.OutputWhite * 255));
+                    w.U16((int)Math.Round(settings.Gamma * 100));
+                    for (int i = 1; i < 29; i++) { w.U16(0); w.U16(255); w.U16(0); w.U16(255); w.U16(100); }
+                    return w.Data;
+                }
+                default:
+                {
+                    key = "hue2";
+                    var w = new PsdWriter(136);
+                    w.U16(2); w.U8(0); w.U8(0);
+                    w.U16(0); w.U16(25); w.U16(0); // Colorize values Photoshop shows when Colorize is ticked; unused here.
+                    w.U16((int)Math.Round(settings.Hue)); w.U16((int)Math.Round(settings.Saturation * 100)); w.U16((int)Math.Round(settings.Lightness * 100));
+                    for (int i = 0; i < 6; i++) { foreach (int v in HueRanges[i]) w.U16(v); w.Zeros(6); }
+                    for (int i = 0; i < 6; i++) { w.U16(i * 60); w.U16(100); w.U16(50); }
+                    return w.Data;
+                }
             }
         }
 
@@ -856,6 +1026,7 @@ namespace Yozolab.YoluPainter.Core.Psd
             for (int i = topDown.Count - 1; i >= 0; i--)
             {
                 var layer = topDown[i];
+                if (layer.IsAdjustment) { output.Add(new Emit(layer, RecordKind.Adjustment)); continue; }
                 if (!layer.IsGroup) { output.Add(new Emit(layer, RecordKind.Raster)); continue; }
                 output.Add(new Emit(layer, RecordKind.Divider));
                 Flatten(layer.Children, output);
@@ -892,7 +1063,8 @@ namespace Yozolab.YoluPainter.Core.Psd
                 {
                     // A pass-through folder has "norm" in its record and "pass" in its section divider setting, as Photoshop writes it.
                     w.Key(layer.BlendMode == LayerBlendMode.PassThrough ? "norm" : BlendKey(layer.BlendMode));
-                    w.U8(layer.Opacity); w.U8(layer.Clipping ? 1 : 0); w.U8(layer.Visible ? 0 : 2);
+                    // Adjustment layers carry Photoshop's "pixel data irrelevant" flag (bit 4, with bit 3 saying it is meaningful).
+                    w.U8(layer.Opacity); w.U8(layer.Clipping ? 1 : 0); w.U8((layer.Visible ? 0 : 2) | (record.Kind == RecordKind.Adjustment ? 8 | 16 : 0));
                 }
                 w.U8(0);
                 int extraLength = w.Position; w.U32(0);
@@ -908,6 +1080,11 @@ namespace Yozolab.YoluPainter.Core.Psd
                 int id = divider ? layer.DividerId : layer.Id;
                 if (id != 0) { w.Key("8BIM"); w.Key("lyid"); w.U32(4); w.U32(id); }
                 if (divider) { w.Key("8BIM"); w.Key("lsct"); w.U32(4); w.U32(3); }
+                else if (record.Kind == RecordKind.Adjustment)
+                {
+                    string adjustmentKey; byte[] block = AdjustmentBlock(layer.Adjustment, out adjustmentKey);
+                    w.Key("8BIM"); w.Key(adjustmentKey); w.U32(block.Length); w.Bytes(block);
+                }
                 else if (!raster)
                 {
                     w.Key("8BIM"); w.Key("lsct"); w.U32(12); w.U32(1); w.Key("8BIM");
@@ -978,6 +1155,7 @@ namespace Yozolab.YoluPainter.Core.Psd
                 pascal += (4 - pascal % 4) % 4;
                 long id = (divider ? layer.DividerId : layer.Id) != 0 ? 16 : 0;
                 long section = divider ? 16 : raster ? 0 : 24;
+                if (record.Kind == RecordKind.Adjustment) { string adjustmentKey; section = 12 + AdjustmentBlock(layer.Adjustment, out adjustmentKey).Length; }
                 long extra = 8 + pascal + 16 + name.Length * 2L + id + section;
                 long layerBytes = raster ? (long)layer.Width * layer.Height * 4 : 0;
                 long recordBytes = 58, channelData = 8 + layerBytes;
@@ -1005,6 +1183,14 @@ namespace Yozolab.YoluPainter.Core.Psd
                     throw new ArgumentException("Invalid or over-budget Unicode layer name.");
                 Utf16.GetByteCount(layer.Name); // Reject unpaired surrogate; never silently replace it.
                 CheckMask(layer.Mask, limits);
+                if (layer.IsGroup && layer.IsAdjustment) throw new ArgumentException("A layer cannot be both a group and an adjustment layer.");
+                if (layer.IsAdjustment)
+                {
+                    string refusal = AdjustmentRefusal(layer.Adjustment);
+                    if (refusal != null) throw new ArgumentException(refusal);
+                    if (BlendKey(layer.BlendMode) == null) throw new ArgumentException("Blend mode " + layer.BlendMode + " has no PSD adjustment layer equivalent.");
+                    continue;
+                }
                 if (layer.IsGroup)
                 {
                     if (layer.BlendMode != LayerBlendMode.PassThrough && BlendKey(layer.BlendMode) == null) throw new ArgumentException("Blend mode " + layer.BlendMode + " has no PSD folder equivalent.");
@@ -1033,11 +1219,12 @@ namespace Yozolab.YoluPainter.Core.Psd
             if (mask.DefaultColor != 0 && mask.DefaultColor != 255) throw new ArgumentException("Layer mask default color must be 0 or 255.");
         }
 
-        /// <summary>True when the stack uses anything beyond plain normal source-over: another blend mode, clipping, a mask or a group.</summary>
+        /// <summary>True when the stack uses anything beyond plain normal source-over: another blend mode, clipping, a mask, a group
+        /// or an adjustment layer.</summary>
         private static bool UsesCompositingFeatures(List<PsdRasterLayer> layers)
         {
             foreach (var layer in layers)
-                if (layer.IsGroup || layer.BlendMode != LayerBlendMode.Normal || layer.Clipping || layer.Mask != null) return true;
+                if (layer.IsGroup || layer.IsAdjustment || layer.BlendMode != LayerBlendMode.Normal || layer.Clipping || layer.Mask != null) return true;
             return false;
         }
 
@@ -1061,7 +1248,9 @@ namespace Yozolab.YoluPainter.Core.Psd
             {
                 if (k > 0 && siblings[k].Clipping) continue;
                 var entry = MakeEntry(siblings[k]); if (entry == null) continue;
-                for (int m = k + 1; m < siblings.Count && siblings[m].Clipping; m++) { var clip = MakeEntry(siblings[m]); if (clip != null) entry.Clips.Add(clip); }
+                // An adjustment base has no pixels to clip to: what is clipped to it is dropped (as CpuCompositor does).
+                if (!siblings[k].IsAdjustment)
+                    for (int m = k + 1; m < siblings.Count && siblings[m].Clipping; m++) { var clip = MakeEntry(siblings[m]); if (clip != null) entry.Clips.Add(clip); }
                 plan.Add(entry);
             }
             return plan;
@@ -1104,12 +1293,14 @@ namespace Yozolab.YoluPainter.Core.Psd
             {
                 var layer = entry.Base;
                 double amount = AmountAt(layer, x, y);
+                if (layer.IsAdjustment) { result = layer.Adjustment.Composite(result, amount, layer.BlendMode); continue; }
                 if (entry.PassesThrough) { result = CpuCompositor.Fade(result, Evaluate(entry.Children, result, x, y), amount); continue; }
                 Rgba32 group = layer.IsGroup ? Evaluate(entry.Children, Rgba32.Transparent, x, y) : PixelAt(layer, x, y);
                 foreach (var clip in entry.Clips)
                 {
                     var c = clip.Base;
-                    group = CpuCompositor.ClipOnto(group, c.IsGroup ? Evaluate(clip.Children, Rgba32.Transparent, x, y) : PixelAt(c, x, y), AmountAt(c, x, y), ModeOf(c));
+                    if (c.IsAdjustment) group = c.Adjustment.Composite(group, AmountAt(c, x, y), c.BlendMode);
+                    else group = CpuCompositor.ClipOnto(group, c.IsGroup ? Evaluate(clip.Children, Rgba32.Transparent, x, y) : PixelAt(c, x, y), AmountAt(c, x, y), ModeOf(c));
                 }
                 result = CpuCompositor.Blend(result, group, amount, ModeOf(layer));
             }

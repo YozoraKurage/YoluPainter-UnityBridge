@@ -76,10 +76,11 @@ Shader "Hidden/YoluPainter/TileComposite"
             float _Opacity;
             int _BlendMode;
             float4 _Mask; // x: 有効(1)/無効(0), y: 反転, z: 濃度。CpuCompositor の RasterMask.Factor と同じ式
+            float _LayerConst; float4 _LayerColor; // 塗りつぶしレイヤー: テクスチャの代わりに一定の色（k/255）
             float4 frag(v2f_img i) : SV_Target
             {
                 float4 b = tex2D(_MainTex, i.uv);
-                float4 s = tex2D(_LayerTex, i.uv);
+                float4 s = _LayerConst > 0.5 ? _LayerColor : tex2D(_LayerTex, i.uv);
                 float factor = 1;
                 if (_Mask.x > 0.5)
                 {
@@ -185,10 +186,11 @@ Shader "Hidden/YoluPainter/TileComposite"
             float _Opacity;
             int _BlendMode;
             float4 _Mask;
+            float _LayerConst; float4 _LayerColor;
             float4 fragClip(v2f_img i) : SV_Target
             {
                 float4 g = tex2D(_MainTex, i.uv);
-                float4 s = tex2D(_LayerTex, i.uv);
+                float4 s = _LayerConst > 0.5 ? _LayerColor : tex2D(_LayerTex, i.uv);
                 float factor = 1;
                 if (_Mask.x > 0.5)
                 {

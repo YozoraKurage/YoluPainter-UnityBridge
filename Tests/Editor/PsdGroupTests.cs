@@ -170,7 +170,7 @@ namespace Yozolab.YoluPainter.Tests
             return imported;
         }
 
-        [Test] public void NestedPassThroughAndIsolatedGroupsWithMasksAndClippingRoundTrip()
+        [Test] public void NestedPassThroughAndIsolatedGroupsWithMasksAndClippingOntoGroupsRoundTrip()
         {
             var d = new PaintDocument(24, 16, 8);
             Raster(d, "bg", Gradient);
@@ -182,7 +182,7 @@ namespace Yozolab.YoluPainter.Tests
             d.SetLayerOpacity(outer.Id, 200 / 255.0); HideRow(d, outer.Id, 3, 255); HideRow(d, outer.Id, 4, 128);
             var c1 = Raster(d, "c1", Soft); var baseGroup = Group(d, "clip base", LayerBlendMode.Overlay, c1);
             var clipped = Raster(d, "clipped onto group", (x, y) => new Rgba32(10, 240, 10, 255)); d.SetLayerClipping(clipped.Id, true); d.SetLayerBlendMode(clipped.Id, LayerBlendMode.Color);
-            var e1 = Raster(d, "e1", Spots); var clippedGroup = Group(d, "clipped group", LayerBlendMode.PassThrough, e1); d.SetLayerClipping(clippedGroup.Id, true);
+            var e1 = Raster(d, "e1", Spots); Group(d, "pass group", LayerBlendMode.PassThrough, e1); // クリッピングしたグループは書き出さない（下のテスト）
             var h1 = Raster(d, "h1", (x, y) => new Rgba32(255, 255, 0, 255)); var hidden = Group(d, "hidden", LayerBlendMode.Normal, h1); d.SetLayerVisibility(hidden.Id, false);
             d.AddGroup("empty");
             Raster(d, "top", (x, y) => x == y ? new Rgba32(255, 255, 255, 255) : Rgba32.Transparent);
@@ -190,13 +190,13 @@ namespace Yozolab.YoluPainter.Tests
 
             var imported = RoundTrip(d, out var read, out _);
             var top = read.Document.Layers;
-            Assert.That(top.Select(l => l.Name), Is.EqualTo(new[] { "top", "empty", "hidden", "clipped group", "clipped onto group", "clip base", "outer", "bg" }));
+            Assert.That(top.Select(l => l.Name), Is.EqualTo(new[] { "top", "empty", "hidden", "pass group", "clipped onto group", "clip base", "outer", "bg" }));
             var o = top[6]; Assert.That(o.IsGroup && o.BlendMode == LayerBlendMode.PassThrough && o.Opacity == 200 && o.Mask != null, Is.True);
             Assert.That(o.Children.Select(l => l.Name), Is.EqualTo(new[] { "a2", "inner", "a1" }));
             Assert.That(o.Children[1].Children.Select(l => l.Name), Is.EqualTo(new[] { "b2", "b1" }));
             Assert.That(o.Children[1].BlendMode, Is.EqualTo(LayerBlendMode.Screen));
             Assert.That(top[1].Children, Is.Empty, "an empty group stays a group");
-            Assert.That(top[3].Clipping && top[3].IsGroup, Is.True);
+            Assert.That(top[4].Clipping && !top[5].Clipping && top[5].IsGroup, Is.True, "a layer clipped onto a group");
             var again = PsdCodec.Read(PsdCodec.Write(PsdBridge.Export(imported, PaintChannel.Color)));
             Assert.That(Ids(again.Document.Layers), Is.EqualTo(Ids(read.Document.Layers)), "layer and divider IDs survive native import and re-export");
         }
@@ -240,18 +240,33 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(() => PsdCodec.Write(PsdBridge.Export(d, PaintChannel.Color), new PsdLimits { MaxGroupDepth = 11 }), Throws.ArgumentException);
         }
 
-        [Test] public void ExportStillRefusesFillAndAdjustmentLayersInsideGroups()
+        [Test] public void ExportStillRefusesFillLayersAndInexactAdjustmentsInsideGroups()
         {
             var d = new PaintDocument(8, 8, 8); var a = Raster(d, "a", Gradient);
             var fill = d.AddFillLayer("fill", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(1, 2, 3) } });
             Group(d, "g", LayerBlendMode.PassThrough, a, fill);
             Assert.That(() => PsdBridge.Export(d, PaintChannel.Color), Throws.InvalidOperationException.With.Message.Contains("fill layers"));
-            var e = new PaintDocument(8, 8, 8); var b = Raster(e, "b", Gradient); var adj = e.AddAdjustmentLayer("inv", AdjustmentSettings.Invert());
+            var e = new PaintDocument(8, 8, 8); var b = Raster(e, "b", Gradient); var adj = e.AddAdjustmentLayer("levels", AdjustmentSettings.Levels(0.3));
             Group(e, "g", LayerBlendMode.Normal, b, adj);
-            Assert.That(() => PsdBridge.Export(e, PaintChannel.Color), Throws.InvalidOperationException.With.Message.Contains("adjustment layers"));
+            Assert.That(() => PsdBridge.Export(e, PaintChannel.Color), Throws.InvalidOperationException.With.Message.Contains("between them"), "Levels between PSD's whole steps are not rounded silently");
             var f = new PaintDocument(8, 8, 8); var c = Raster(f, "c", Gradient); var g2 = Group(f, "g", LayerBlendMode.PassThrough, c);
             f.AddLayerMask(g2.Id); f.SetLayerMaskInverted(g2.Id, true);
             Assert.That(() => PsdBridge.Export(f, PaintChannel.Color), Throws.InvalidOperationException.With.Message.Contains("inversion"));
+        }
+
+        [Test] public void ClippedGroupsAreReadButNotExported()
+        {
+            var d = new PaintDocument(8, 8, 8); Raster(d, "base", Gradient);
+            var e1 = Raster(d, "e1", Spots); var g = Group(d, "clipped group", LayerBlendMode.PassThrough, e1); d.SetLayerClipping(g.Id, true);
+            Assert.That(() => PsdBridge.Export(d, PaintChannel.Color), Throws.InvalidOperationException.With.Message.Contains("clipped"), "Photoshop's handling of a clipped folder is unverified");
+            // CLIP STUDIO PAINT はフォルダーのクリッピングを使う。読み込みは受け入れる
+            var records = Folders(); records[6].Clipping = 1;
+            var read = PsdCodec.Read(PsdFixture.Build(2, 1, records, FoldersComposite));
+            Assert.That(read.Mode, Is.EqualTo(PsdCompatibilityMode.EditableRaster), PsdFixture.Show(read));
+            Assert.That(read.Document.Layers[1].Clipping, Is.True);
+            var native = PsdBridge.Import(read);
+            Assert.That(native.Layers.Single(l => l.Name == "outer").Clipping, Is.True);
+            Assert.That(read.Diagnostics.All(PsdCodec.IsInformational), Is.True, PsdFixture.Show(read));
         }
 
         // ---- 書き出し側を使わずに組み立てたフォルダー ----
