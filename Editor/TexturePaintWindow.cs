@@ -248,6 +248,7 @@ namespace Yozolab.YoluPainter.Editor
                     gradientTo=EditorGUILayout.ColorField(new GUIContent("To","The colour at the end (the start is the brush value)"),gradientTo);
                 }
                 if(tool==PaintTool.Move) DrawMoveSettings();
+                if(tool==PaintTool.Fill||(tool>=PaintTool.SelectRectangle&&tool<=PaintTool.MagicWand)) DrawSurfacePick();
                 if(tool>=PaintTool.SelectRectangle&&tool<=PaintTool.MagicWand) EditorGUILayout.LabelField("Shift: add · Ctrl: subtract · Shift+Ctrl: intersect",EditorStyles.miniLabel);
                 GUILayout.BeginHorizontal();
                 if(GUILayout.Button(new GUIContent("All","Select all (Ctrl+A)"),EditorStyles.miniButtonLeft))document.SetSelection(SelectionMask.All(document));
@@ -807,7 +808,8 @@ namespace Yozolab.YoluPainter.Editor
                 if(e.type==EventType.MouseDrag && e.button==2){canvasPan+=e.delta;e.Use();Repaint();return;}
             }
             if(stroke==null&&HandleToolInput(e))return;
-            if(tool!=PaintTool.Brush&&e.type==EventType.MouseDown&&surfaceRect.Contains(e.mousePosition)&&e.button==0&&!e.alt){message=tool+" works on the 2D canvas. Use the brush on the 3D view.";e.Use();return;}
+            if(stroke==null&&HandleSurfaceTool(e))return;
+            if(tool!=PaintTool.Brush&&e.type==EventType.MouseDown&&surfaceRect.Contains(e.mousePosition)&&e.button==0&&!e.alt){message=tool+" works on the 2D canvas. Use the brush, a selection tool or the bucket on the 3D view.";e.Use();return;}
             if(e.type==EventType.MouseDown && e.button==0 && !e.alt && (canvasRect.Contains(e.mousePosition)||surfaceRect.Contains(e.mousePosition)))
             {
                 surfaceStroke=surfaceRect.Contains(e.mousePosition);
