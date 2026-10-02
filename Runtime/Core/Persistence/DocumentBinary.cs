@@ -9,10 +9,12 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// Version 2 adds an optional raster mask block after each layer's channels. Version 3 adds the layer kind and fill
     /// values after the layer attributes. Version 4 adds adjustment parameters after the fill values. Version 5 adds the
     /// clipping flag after the blend mode. Version 6 adds groups: layer kind 3, the PassThrough blend mode, and each layer's
-    /// parent group id after the layer kind. Older archives still load.</summary>
+    /// parent group id after the layer kind. Version 7 adds the document's Normal-output settings (algorithm version, Height →
+    /// Normal on/off, strength, edges, file Y direction; 21 bytes) after the tile size; older archives read as
+    /// <see cref="NormalSettings.Default"/>. Older archives still load.</summary>
     public static class DocumentBinary
     {
-        const int Version = 6;
+        const int Version = 7;
         const long MaxArchiveBytes = 512L * 1024 * 1024;
         static readonly byte[] Magic = Encoding.ASCII.GetBytes("DOTPAINT");
 
@@ -26,6 +28,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 writer.Write(Magic); writer.Write(Version);
                 writer.Write(document.Id.ToByteArray());
                 writer.Write(document.Width); writer.Write(document.Height); writer.Write(document.TileSize);
+                var normal = document.NormalSettings;
+                writer.Write(NormalSettings.AlgorithmVersion); writer.Write(normal.DeriveFromHeight); writer.Write(normal.Strength);
+                writer.Write((int)normal.Edges); writer.Write((int)normal.FileDirection);
                 writer.Write(document.Layers.Count);
                 foreach (var layer in document.Layers)
                 {
@@ -90,6 +95,14 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     if (width < 1 || height < 1 || width > 4096 || height > 4096 || tileSize < 8 || tileSize > 512 || (tileSize & (tileSize - 1)) != 0)
                         throw new InvalidDataException("Unsupported native canvas dimensions or tile size.");
                     var doc = new PaintDocument(width, height, tileSize, 64L * 1024 * 1024, id);
+                    if (version >= 7)
+                    {
+                        int algorithm = reader.ReadInt32();
+                        if (algorithm != NormalSettings.AlgorithmVersion) throw new InvalidDataException("Normal algorithm version " + algorithm + " is not supported by this reader; source retained unchanged.");
+                        bool derive = reader.ReadBoolean(); double strength = reader.ReadDouble(); int edges = reader.ReadInt32(), direction = reader.ReadInt32();
+                        try { doc.SetNormalSettings(new NormalSettings(derive, strength, (HeightEdgeMode)edges, (NormalYDirection)direction)); }
+                        catch (ArgumentException ex) { throw new InvalidDataException("Invalid Normal output settings.", ex); }
+                    }
                     int layers = ReadCount(reader, 2048, "layers");
                     for (int l = 0; l < layers; l++)
                     {

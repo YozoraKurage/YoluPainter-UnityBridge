@@ -140,7 +140,7 @@ namespace Yozolab.YoluPainter.Editor
             var channels = YlpContent.UsedChannels(document);
             // どのチャンネルも使っていない（レイヤーが無いなど）ドキュメントも、透明な Color を 1 枚出してテクスチャとして扱えるようにする
             if (channels.Count == 0) channels.Add(PaintChannel.Color);
-            return channels.Select(c => new ChannelImage { Channel = c, Width = document.Width, Height = document.Height, Rgba = document.Composite(c) }).ToList();
+            return channels.Select(c => new ChannelImage { Channel = c, Width = document.Width, Height = document.Height, Rgba = YlpContent.Image(document, c) }).ToList();
         }
 
         static List<ChannelImage> DecodeComposites(Dictionary<string, byte[]> composites)

@@ -12,7 +12,11 @@ namespace Yozolab.YoluPainter.Core.Persistence
     public static class PsdBridge
     {
         /// <summary>Export a native channel. The merged image is the CPU composite of that channel. Opacity and mask density are
-        /// rounded to the nearest 1/255 (PSD stores bytes).</summary>
+        /// rounded to the nearest 1/255 (PSD stores bytes). For the Normal channel the merged image is the evaluated Normal
+        /// output (<see cref="NormalMaps.FileOutput"/>: vector composite flattened onto flat, opaque, with Height → Normal when
+        /// it is on), which Photoshop does not reproduce when it recomposites the layers; the derived normal is not written as
+        /// a layer (it is regenerated from Height, not painted pixels). With a DirectX file direction the green byte of the
+        /// Normal layers' pixels is inverted too, so the layers and the merged image share one convention.</summary>
         public static PsdDocument Export(PaintDocument source, PaintChannel channel)
         {
             if (source == null) throw new ArgumentNullException(nameof(source));
@@ -20,7 +24,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             var result = new PsdDocument { Width = source.Width, Height = source.Height };
             var usedIds = new HashSet<int>(); long byteBudget = 0;
             result.Layers = ExportLevel(source, channel, Guid.Empty, usedIds, ref byteBudget);
-            result.CompositeRgba = FlipRows(source.Composite(channel), source.Width, source.Height);
+            result.CompositeRgba = FlipRows(channel == PaintChannel.Normal ? NormalMaps.FileOutput(source) : source.Composite(channel), source.Width, source.Height);
             return result;
         }
 
@@ -92,11 +96,12 @@ namespace Yozolab.YoluPainter.Core.Persistence
             byteBudget = checked(byteBudget + (long)width*height*4);
             if (byteBudget > 128L * 1024 * 1024) throw new InvalidOperationException("PSD projection exceeds the prototype's 128 MiB decoded-layer budget. Save the native project instead.");
             var pixels = new byte[checked(width*height*4)];
+            bool flipGreen = channel == PaintChannel.Normal && source.NormalSettings.FileDirection == NormalYDirection.DirectX;
             if (surface != null)
                 for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
                 {
                     var p = surface.GetPixel(left+x, top-1-y); int n=(y*width+x)*4;
-                    pixels[n]=p.R; pixels[n+1]=p.G; pixels[n+2]=p.B; pixels[n+3]=p.A;
+                    pixels[n]=p.R; pixels[n+1]=flipGreen?(byte)(255-p.G):p.G; pixels[n+2]=p.B; pixels[n+3]=p.A;
                 }
             return new PsdRasterLayer { Id=UniqueId(guid, 0, usedIds), Name=layer.Name, Left=left, Top=source.Height-top,
                 Width=width, Height=height, Opacity=opacity, Visible=layer.Visible && layer.IsChannelEnabled(channel),

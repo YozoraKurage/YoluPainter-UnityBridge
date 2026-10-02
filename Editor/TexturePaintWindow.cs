@@ -152,7 +152,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             FinishStroke(false); preview?.CancelNavigation(); SaveRecovery();
             EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
-            compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
+            DisposeNormalOutput(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
             if(selectionOverlay!=null){DestroyImmediate(selectionOverlay);selectionOverlay=null;overlayFor=null;}
         }
         void Tick()
@@ -181,7 +181,7 @@ namespace Yozolab.YoluPainter.Editor
             using(new EditorGUI.DisabledScope(stroke!=null)) DrawToolbar();
             if(repaintPixels || renderedRevision!=document.Revision)
             {
-                TryAction(()=> { compositor.Update(document,channel); preview.SetPaintTexture(compositor.Texture, materialSlot); });
+                TryAction(()=> { compositor.Update(document,channel); UpdateNormalOutput(); preview.SetPaintTexture(DisplayTexture, materialSlot); });
                 lastComposite=EditorApplication.timeSinceStartup;
                 renderedRevision=document.Revision; repaintPixels=false;
             }
@@ -226,7 +226,7 @@ namespace Yozolab.YoluPainter.Editor
             int slot=EditorGUILayout.IntField("Material slot",materialSlot,GUILayout.Width(210));
             if(slot!=materialSlot){materialSlot=Mathf.Clamp(slot,0,Mathf.Max(0,preview.MaterialSlotCount-1)); repaintPixels=true;}
             var nextChannel=(PaintChannel)EditorGUILayout.EnumPopup(channel,GUILayout.Width(105));
-            if(nextChannel!=channel){channel=nextChannel; repaintPixels=true; message=channel==PaintChannel.Normal?"Normal channel stores RGBA values; specialized tangent-normal composition is not implemented.":"Painting only the selected channel; other channels remain unchanged.";}
+            if(nextChannel!=channel){channel=nextChannel; repaintPixels=true; message=channel==PaintChannel.Normal?"Normal channel: layers composite as unit normals (Overlay adds detail, other modes replace). Height → Normal is in the left panel.":"Painting only the selected channel; other channels remain unchanged.";}
             GUILayout.EndHorizontal();
         }
         void DrawBrush(Rect rect)
@@ -325,6 +325,7 @@ namespace Yozolab.YoluPainter.Editor
                 if(GUILayout.Button(new GUIContent("Import brushes…","Photoshop .abr, GIMP .gbr / .gih / .vbr, or a PNG tip (dark = paint). Stored in this project's UserSettings."))) ImportBrushes();
                 if(BrushLibrary.IsLibraryPreset(brush.presetId)&&GUILayout.Button("Delete imported brush")) DeleteImportedBrush();
             }
+            DrawNormalPanel();
             GUILayout.Space(12);
             GUILayout.Label("Input",EditorStyles.boldLabel);
             GUILayout.Label("LMB: use the tool (brush also on 3D)\nAlt / RMB: orbit 3D\nMMB: pan 2D / 3D\nWheel: zoom\nEsc: cancel stroke or drag\nCtrl/Cmd Z: undo · Shift: redo\nCtrl/Cmd A: select all · D: deselect\nCtrl/Cmd Shift I: invert selection\nFocus loss: cancel active stroke",EditorStyles.wordWrappedMiniLabel);
@@ -477,7 +478,7 @@ namespace Yozolab.YoluPainter.Editor
             EditorGUI.DrawRect(canvasRect,new Color(.16f,.16f,.16f));
             GUI.BeginClip(canvasRect);
             var image=ImageRect(); image.position-=canvasRect.position;
-            if(compositor.Texture!=null) EditorGUI.DrawTextureTransparent(image,compositor.Texture,ScaleMode.StretchToFill);
+            if(DisplayTexture!=null) EditorGUI.DrawTextureTransparent(image,DisplayTexture,ScaleMode.StretchToFill);
             if(document.Selection!=null){EnsureSelectionOverlay(); GUI.DrawTexture(image,selectionOverlay,ScaleMode.StretchToFill,true);}
             if(toolDragging&&Event.current.type==EventType.Repaint) DrawToolPreview(image);
             else if(tool==PaintTool.Move&&!toolDragging&&Event.current.type==EventType.Repaint) DrawTransformHandles(image);
@@ -1049,7 +1050,7 @@ namespace Yozolab.YoluPainter.Editor
             string path=Dialogs.SaveFile("Export selected channel PSD",source!=null?Path.GetDirectoryName(source):Application.dataPath,channel==PaintChannel.Color?stem:stem+"_"+channel,"psd");if(String.IsNullOrEmpty(path))return;
             // 取り込み元の PSD を上書きするときは確かめる（原本のバイト列は .ylp に残るが、外の PSD そのものは置き換わる）
             if(importedPsdPath!=null&&String.Equals(Path.GetFullPath(path),importedPsdPath,PainterSettings.PathComparison)&&!Dialogs.Confirm("Overwrite the imported PSD?",Path.GetFileName(path)+" is the PSD this document was imported from. Replace it with the exported PSD?"+(importedOriginal!=null?" Its original bytes stay inside the .ylp once you save.":""),"Replace","Cancel"))return;
-            TryAction(()=>{File.WriteAllBytes(path,bytes);message="Exported "+channel+" PSD. No material was changed.";});
+            TryAction(()=>{File.WriteAllBytes(path,bytes);message="Exported "+channel+" PSD. No material was changed."+NormalExportNote(channel==PaintChannel.Normal,psd:true);});
         }
         /// <summary>使っている全チャンネルを &lt;名前&gt;_&lt;チャンネル&gt;.png としてフォルダに書き出す。既存のファイルを置き換えるときは
         /// 確かめる。Assets の中なら取り込み直し、新しく作ったテクスチャにだけ色空間（Color/Emission は sRGB、他はリニア）を設定する。
@@ -1069,7 +1070,7 @@ namespace Yozolab.YoluPainter.Editor
                 foreach(var t in targets)
                 {
                     bool isNew=!File.Exists(t.path);
-                    File.WriteAllBytes(t.path,YlpContent.EncodePng(document.Composite(t.channel),document.Width,document.Height));
+                    File.WriteAllBytes(t.path,YlpContent.EncodePng(YlpContent.FileImage(document,t.channel),document.Width,document.Height));
                     string asset=AssetPathOf(Path.GetFullPath(t.path));
                     if(asset==null)continue;
                     AssetDatabase.ImportAsset(asset,ImportAssetOptions.ForceUpdate);
@@ -1078,7 +1079,7 @@ namespace Yozolab.YoluPainter.Editor
                     if(isNew){importer.sRGBTexture=srgb;importer.alphaIsTransparency=t.channel==PaintChannel.Color;importer.SaveAndReimport();created.Add((t.channel,asset));}
                     else if(importer.sRGBTexture!=srgb)notes.Add(Path.GetFileName(t.path)+" is imported as "+(importer.sRGBTexture?"sRGB":"linear")+" but "+t.channel+" is "+(srgb?"colour (sRGB)":"data (linear)")+"; its import settings were left as they are.");
                 }
-                message="Exported "+targets.Count+" image(s) to "+folder+"."+(notes.Count>0?" "+String.Join(" ",notes):"")+" No material was changed.";
+                message="Exported "+targets.Count+" image(s) to "+folder+"."+(notes.Count>0?" "+String.Join(" ",notes):"")+" No material was changed."+NormalExportNote(channels.Contains(PaintChannel.Normal));
             });
         }
         internal void ExportPng()
@@ -1087,7 +1088,7 @@ namespace Yozolab.YoluPainter.Editor
             TryAction(()=>
             {
                 var texture=new Texture2D(document.Width,document.Height,TextureFormat.RGBA32,false,true);
-                try{texture.LoadRawTextureData(document.Composite(channel));texture.Apply();File.WriteAllBytes(path,texture.EncodeToPNG());message="Exported "+channel+" PNG. No material was changed; ICC and normal-map packing are not applied.";}
+                try{texture.LoadRawTextureData(YlpContent.FileImage(document,channel));texture.Apply();File.WriteAllBytes(path,texture.EncodeToPNG());message="Exported "+channel+" PNG. No material was changed; ICC is not applied."+NormalExportNote(channel==PaintChannel.Normal);}
                 finally{DestroyImmediate(texture);}
             });
         }

@@ -54,6 +54,19 @@ Shader "Hidden/YoluPainter/TileComposite"
         // 書き込みの変換は最近接への丸めだが、ちょうど半分のときの向きが実装次第（D3D 系は偶数へ）で、グループのように合成を
         // 重ねると、そのずれが次の段に入って 1 を超える差になる。k/255 を書けば変換は k に落ちる。
         float4 ToBytes(float4 c) { return floor(saturate(c) * 255 + 0.5) / 255; }
+        // Normal チャンネル: 接空間の単位ベクトルとして合成する（NormalMaps と同じ式・同じ順）。c / 255 × 2 − 1 で戻して正規化し、
+        // 長さが 1e-6 未満なら平ら (0, 0, 1)。Overlay（3）は RNM（Barré-Brisebois & Hill 2012）で下に細部を載せ、他のモードは置き換え。
+        float _NormalChannel;
+        float3 SafeNormalize(float3 v) { float l2 = dot(v, v); return l2 < 1e-12 ? float3(0, 0, 1) : v / sqrt(l2); }
+        float3 DecodeNormal(float3 c) { return SafeNormalize(c * 2 - 1); }
+        float3 EncodeNormal(float3 v) { return SafeNormalize(v) * 0.5 + 0.5; }
+        float3 Rnm(float3 b, float3 d)
+        {
+            float3 t = b + float3(0, 0, 1), u = d * float3(-1, -1, 1);
+            if (t.z <= 1e-6) return b;
+            return t * (dot(t, u) / t.z) - u;
+        }
+        float3 CombineNormal(int mode, float3 nb, float3 ns) { return mode == 3 ? Rnm(nb, ns) : ns; }
         float3 BlendRgb(int mode, float3 d, float3 s)
         {
             if (mode == 0) return s;
@@ -88,6 +101,13 @@ Shader "Hidden/YoluPainter/TileComposite"
                     factor = _Mask.y > 0.5 ? 1 - _Mask.z * (1 - h) : 1 - _Mask.z * h;
                 }
                 float sa = saturate(s.a * _Opacity * factor), a = sa + b.a * (1-sa);
+                if (_NormalChannel > 0.5)
+                {
+                    if (sa <= 0) return b;
+                    float3 nb = DecodeNormal(b.rgb), ns = DecodeNormal(s.rgb);
+                    float3 v = (1 - sa) * b.a * nb + (1 - b.a) * sa * ns + b.a * sa * CombineNormal(_BlendMode, nb, ns);
+                    return ToBytes(float4(EncodeNormal(v), a));
+                }
                 float3 blend = BlendRgb(_BlendMode, b.rgb, s.rgb);
                 float3 premult = (1-sa)*b.a*b.rgb + (1-b.a)*sa*s.rgb + b.a*sa*blend;
                 return ToBytes(a > 0 ? float4(premult/a, a) : float4(b.rgb, 0));
@@ -199,6 +219,11 @@ Shader "Hidden/YoluPainter/TileComposite"
                 }
                 float t = s.a * _Opacity * factor;
                 if (t <= 0 || g.a <= 0) return g;
+                if (_NormalChannel > 0.5)
+                {
+                    float3 ng = DecodeNormal(g.rgb);
+                    return ToBytes(float4(EncodeNormal((1 - t) * ng + t * CombineNormal(_BlendMode, ng, DecodeNormal(s.rgb))), g.a));
+                }
                 float3 m = BlendRgb(_BlendMode, g.rgb, s.rgb);
                 return ToBytes(float4(g.rgb + (m - g.rgb) * t, g.a));
             }
@@ -231,6 +256,7 @@ Shader "Hidden/YoluPainter/TileComposite"
                 if (amount <= 0) return b;
                 float ba = b.a * (1 - amount), ia = s.a * amount, a = ba + ia;
                 if (a <= 0) return float4(0, 0, 0, 0);
+                if (_NormalChannel > 0.5) return ToBytes(float4(EncodeNormal(DecodeNormal(b.rgb) * ba + DecodeNormal(s.rgb) * ia), a));
                 return ToBytes(float4((b.rgb * ba + s.rgb * ia) / a, a));
             }
             ENDCG

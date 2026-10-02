@@ -3,7 +3,8 @@ using System;
 namespace Yozolab.YoluPainter.Core
 {
     /// <summary>Deterministic RGBA8 reference blend in stored RGB space. This does not claim ICC-managed PSD
-    /// equivalence or tangent-space normal-vector composition. Alpha is always linear coverage.</summary>
+    /// equivalence. Alpha is always linear coverage. The Normal channel composites as tangent-space unit vectors with the
+    /// same structure (<see cref="NormalMaps"/>).</summary>
     public static class CpuCompositor
     {
         public static Rgba32 Blend(Rgba32 destination, Rgba32 source, double opacity = 1, LayerBlendMode mode = LayerBlendMode.Normal)
@@ -173,6 +174,13 @@ namespace Yozolab.YoluPainter.Core
             return Active(layer, channel) ? new StackEntry { Base = layer } : null;
         }
         static LayerBlendMode ModeOf(PaintLayer layer) { return layer.BlendMode == LayerBlendMode.PassThrough ? LayerBlendMode.Normal : layer.BlendMode; }
+        // Normal チャンネルはベクトルとして合成する（同じ構造の NormalMaps の式）。他のチャンネルは色の式。
+        static Rgba32 StackBlend(bool normal, Rgba32 below, Rgba32 over, double amount, LayerBlendMode mode)
+        { return normal ? NormalMaps.BlendUnchecked(below, over, amount, mode) : BlendUnchecked(below, over, amount, mode); }
+        static Rgba32 StackClip(bool normal, Rgba32 group, Rgba32 clipped, double amount, LayerBlendMode mode)
+        { return normal ? NormalMaps.ClipOnto(group, clipped, amount, mode) : ClipOnto(group, clipped, amount, mode); }
+        static Rgba32 StackFade(bool normal, Rgba32 backdrop, Rgba32 inner, double amount)
+        { return normal ? NormalMaps.Fade(backdrop, inner, amount) : Fade(backdrop, inner, amount); }
         /// <summary>Fades between the backdrop and a pass-through group's result by amount (premultiplied interpolation, so a
         /// transparent side does not darken the other).</summary>
         internal static Rgba32 Fade(Rgba32 backdrop, Rgba32 inner, double amount)
@@ -190,22 +198,22 @@ namespace Yozolab.YoluPainter.Core
         /// fade by the group's opacity × mask. A group with clipped layers is treated as isolated (Normal for pass-through).</summary>
         static Rgba32 EvaluatePixel(System.Collections.Generic.IReadOnlyList<StackEntry> plan, Rgba32 backdrop, PaintChannel channel, int x, int y)
         {
-            Rgba32 result = backdrop;
+            Rgba32 result = backdrop; bool normal = channel == PaintChannel.Normal;
             foreach (var entry in plan)
             {
                 var layer = entry.Base;
                 double amount = layer.Opacity * (layer.Mask == null ? 1 : layer.Mask.FactorAt(x, y));
                 if (layer.Kind == LayerKind.Adjustment) { result = layer.Adjustment.Composite(result, amount, layer.BlendMode); continue; }
-                if (entry.PassesThrough) { result = Fade(result, EvaluatePixel(entry.Children, result, channel, x, y), amount); continue; }
+                if (entry.PassesThrough) { result = StackFade(normal, result, EvaluatePixel(entry.Children, result, channel, x, y), amount); continue; }
                 Rgba32 group = layer.IsGroup ? EvaluatePixel(entry.Children, Rgba32.Transparent, channel, x, y) : layer.GetPixel(channel, x, y);
                 foreach (var clip in entry.ClipEntries)
                 {
                     var c = clip.Base;
                     double clipAmount = c.Opacity * (c.Mask == null ? 1 : c.Mask.FactorAt(x, y));
                     if (c.Kind == LayerKind.Adjustment) group = c.Adjustment.Composite(group, clipAmount, c.BlendMode);
-                    else group = ClipOnto(group, c.IsGroup ? EvaluatePixel(clip.Children, Rgba32.Transparent, channel, x, y) : c.GetPixel(channel, x, y), clipAmount, ModeOf(c));
+                    else group = StackClip(normal, group, c.IsGroup ? EvaluatePixel(clip.Children, Rgba32.Transparent, channel, x, y) : c.GetPixel(channel, x, y), clipAmount, ModeOf(c));
                 }
-                result = Blend(result, group, amount, ModeOf(layer));
+                result = StackBlend(normal, result, group, amount, ModeOf(layer));
             }
             return result;
         }
@@ -275,7 +283,7 @@ namespace Yozolab.YoluPainter.Core
             static bool HasAdjustment(Node[] nodes) { foreach (var n in nodes) if (n.Tile.Present && n.Entry.Base.Kind == LayerKind.Adjustment || n.Entry.Base.IsGroup && n.Tile.Present) return true; return false; }
         }
         /// <summary>Tile variant of EvaluatePixel (the same arithmetic in the same order).</summary>
-        static Rgba32 EvaluateTile(Node[] nodes, Rgba32 backdrop, int offset)
+        static Rgba32 EvaluateTile(Node[] nodes, Rgba32 backdrop, int offset, bool normal)
         {
             Rgba32 result = backdrop;
             foreach (var n in nodes)
@@ -283,16 +291,16 @@ namespace Yozolab.YoluPainter.Core
                 var b = n.Tile; if (!b.Present) continue;
                 var layer = b.Layer; double amount = b.Amount(offset);
                 if (layer.Kind == LayerKind.Adjustment) { result = layer.Adjustment.Composite(result, amount, layer.BlendMode); continue; }
-                if (n.Entry.PassesThrough) { result = Fade(result, EvaluateTile(n.Children, result, offset), amount); continue; }
-                Rgba32 group = layer.IsGroup ? EvaluateTile(n.Children, Rgba32.Transparent, offset) : b.Pixel(offset);
+                if (n.Entry.PassesThrough) { result = StackFade(normal, result, EvaluateTile(n.Children, result, offset, normal), amount); continue; }
+                Rgba32 group = layer.IsGroup ? EvaluateTile(n.Children, Rgba32.Transparent, offset, normal) : b.Pixel(offset);
                 foreach (var clip in n.Clips)
                 {
                     if (!clip.Tile.Present) continue;
                     var c = clip.Tile.Layer; double clipAmount = clip.Tile.Amount(offset);
                     if (c.Kind == LayerKind.Adjustment) group = c.Adjustment.Composite(group, clipAmount, c.BlendMode);
-                    else group = ClipOnto(group, c.IsGroup ? EvaluateTile(clip.Children, Rgba32.Transparent, offset) : clip.Tile.Pixel(offset), clipAmount, ModeOf(c));
+                    else group = StackClip(normal, group, c.IsGroup ? EvaluateTile(clip.Children, Rgba32.Transparent, offset, normal) : clip.Tile.Pixel(offset), clipAmount, ModeOf(c));
                 }
-                result = BlendUnchecked(result, group, amount, ModeOf(layer));
+                result = StackBlend(normal, result, group, amount, ModeOf(layer));
             }
             return result;
         }
@@ -319,7 +327,7 @@ namespace Yozolab.YoluPainter.Core
                     for (int py = y0; py < y1; py++) for (int px = x0; px < x1; px++)
                     {
                         int source = ((py - ty * tile) * tile + (px - tx * tile)) * 4;
-                        var result = EvaluateTile(nodes, Rgba32.Transparent, source);
+                        var result = EvaluateTile(nodes, Rgba32.Transparent, source, channel == PaintChannel.Normal);
                         int offset = ((py - y) * width + (px - x)) * 4;
                         bytes[offset] = result.R; bytes[offset + 1] = result.G; bytes[offset + 2] = result.B; bytes[offset + 3] = result.A;
                     }

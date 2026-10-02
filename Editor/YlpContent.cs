@@ -11,7 +11,7 @@ namespace Yozolab.YoluPainter.Editor
     /// <list type="bullet">
     /// <item>document.utpaint: ネイティブ正本（唯一の正本）</item>
     /// <item>composite/&lt;チャンネル&gt;.png: そのチャンネルを使うレイヤーがあるときの合成結果。straight RGBA8、PNG なので外から見ても
-    /// 上下は正しい。正本から作った派生物で、読み込み時の正本にはしない</item>
+    /// 上下は正しい。正本から作った派生物で、読み込み時の正本にはしない。Normal は Unity 向けの出力（<see cref="Image"/>）</item>
     /// <item>thumbnail.png: Color（無ければ最初のチャンネル）の合成を長辺 256px 以下に縮めたもの</item>
     /// <item>view.json / brush.json / imported-original.psd（PSD から取り込んだときの原本のバイト列）</item>
     /// </list></summary>
@@ -31,22 +31,29 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>色として扱うチャンネル（sRGB）。他はデータ（リニア）。</summary>
         public static bool IsColor(PaintChannel channel) => channel == PaintChannel.Color || channel == PaintChannel.Emission;
 
-        /// <summary>どれかのレイヤーが使っているチャンネル（列挙の順）。</summary>
+        /// <summary>どれかのレイヤーが使っているチャンネル（列挙の順）。Height → Normal が有効で Height を使っていれば Normal も。</summary>
         public static List<PaintChannel> UsedChannels(PaintDocument document)
         {
-            return Enum.GetValues(typeof(PaintChannel)).Cast<PaintChannel>().Where(c => document.Layers.Any(l => l.IsChannelEnabled(c))).ToList();
+            return Enum.GetValues(typeof(PaintChannel)).Cast<PaintChannel>().Where(c => document.Layers.Any(l => l.IsChannelEnabled(c)) || c == PaintChannel.Normal && NormalMaps.DerivesNormal(document)).ToList();
         }
+        /// <summary>Unity に渡すチャンネルの画像（左下原点の straight RGBA8）。Normal は <see cref="NormalMaps.Output"/>（OpenGL の向き・
+        /// 不透明・塗っていない所は平ら・Height → Normal 込み）、他はレイヤーの合成。</summary>
+        public static byte[] Image(PaintDocument document, PaintChannel channel)
+        { return channel == PaintChannel.Normal ? NormalMaps.Output(document) : document.Composite(channel); }
+        /// <summary>ほかのツール向けのファイルに書く画像。Normal は文書の設定の Y の向き（<see cref="NormalMaps.FileOutput"/>）。</summary>
+        public static byte[] FileImage(PaintDocument document, PaintChannel channel)
+        { return channel == PaintChannel.Normal ? NormalMaps.FileOutput(document) : document.Composite(channel); }
 
         /// <summary>合成済み PNG とサムネイル。</summary>
         public static Dictionary<string, byte[]> Composites(PaintDocument document)
         {
             var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
             var channels = UsedChannels(document);
-            foreach (var channel in channels) files.Add(CompositeName(channel), EncodePng(document.Composite(channel), document.Width, document.Height));
+            foreach (var channel in channels) files.Add(CompositeName(channel), EncodePng(Image(document, channel), document.Width, document.Height));
             if (channels.Count > 0)
             {
                 var main = channels.Contains(PaintChannel.Color) ? PaintChannel.Color : channels[0];
-                files.Add(ThumbnailName, Thumbnail(document.Composite(main), document.Width, document.Height));
+                files.Add(ThumbnailName, Thumbnail(Image(document, main), document.Width, document.Height));
             }
             return files;
         }

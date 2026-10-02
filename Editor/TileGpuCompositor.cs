@@ -142,6 +142,8 @@ namespace Yozolab.YoluPainter.Editor
             else
             {
                 updateIndex++;
+                // Normal チャンネルはシェーダーがベクトルとして合成する（CpuCompositor → NormalMaps と同じ式）
+                material.SetFloat("_NormalChannel", channel == PaintChannel.Normal ? 1 : 0);
                 // 別の文書・チャンネルの署名と下の写しは使えない（アップロードしたブロックは面ごとなので、そのまま使える）
                 if (!ReferenceEquals(doc, lastDocument) || channel != lastChannel) ClearBlockStates();
                 var plan = CpuCompositor.Plan(doc, channel);
