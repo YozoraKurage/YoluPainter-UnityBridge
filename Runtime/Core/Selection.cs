@@ -8,7 +8,7 @@ namespace Yozolab.YoluPainter.Core
     /// <summary>A selection: how much of each pixel is selected (0..255), document-sized and sparse like a layer (an absent
     /// tile is unselected). Strokes, fills and gradients only change pixels in proportion to it. Builders return new
     /// masks; a mask is never changed after it is built, so the document can keep one for undo.</summary>
-    public sealed class SelectionMask
+    public sealed partial class SelectionMask
     {
         readonly SparseTileSurface surface;
         public int Width => surface.Width;
@@ -39,11 +39,19 @@ namespace Yozolab.YoluPainter.Core
             var mask = new SelectionMask(width, height, tileSize);
             x0 = Math.Max(0, x0); y0 = Math.Max(0, y0); x1 = Math.Min(width, x1); y1 = Math.Min(height, y1);
             if (x0 >= x1 || y0 >= y1) return mask;
-            var bytes = new byte[tileSize * tileSize * 4];
+            // タイルごとに独立なので並列に計算し、取り込みは順に行う（一度に持つのは Batch 枚まで）。amount は純粋な関数であること
+            var coords = new List<TileCoord>();
             for (int ty = y0 / tileSize; ty <= (y1 - 1) / tileSize; ty++)
-                for (int tx = x0 / tileSize; tx <= (x1 - 1) / tileSize; tx++)
+                for (int tx = x0 / tileSize; tx <= (x1 - 1) / tileSize; tx++) coords.Add(new TileCoord(tx, ty));
+            const int Batch = 64;
+            var results = new byte[Math.Min(Batch, coords.Count)][];
+            for (int start = 0; start < coords.Count; start += Batch)
+            {
+                int count = Math.Min(Batch, coords.Count - start);
+                System.Threading.Tasks.Parallel.For(0, count, k =>
                 {
-                    Array.Clear(bytes, 0, bytes.Length); bool any = false;
+                    var c = coords[start + k]; int tx = c.X, ty = c.Y;
+                    var bytes = new byte[tileSize * tileSize * 4]; bool any = false;
                     int px0 = Math.Max(x0, tx * tileSize), px1 = Math.Min(x1, (tx + 1) * tileSize);
                     int py0 = Math.Max(y0, ty * tileSize), py1 = Math.Min(y1, (ty + 1) * tileSize);
                     for (int y = py0; y < py1; y++) for (int x = px0; x < px1; x++)
@@ -51,8 +59,10 @@ namespace Yozolab.YoluPainter.Core
                         byte a = amount(x, y); if (a == 0) continue;
                         bytes[((y - ty * tileSize) * tileSize + (x - tx * tileSize)) * 4 + 3] = a; any = true;
                     }
-                    if (any) mask.surface.ImportTile(new TileCoord(tx, ty), bytes);
-                }
+                    results[k] = any ? bytes : null;
+                });
+                for (int k = 0; k < count; k++) if (results[k] != null) mask.surface.ImportTile(coords[start + k], results[k]);
+            }
             return mask;
         }
         static void Require(PaintDocument document) { if (document == null) throw new ArgumentNullException(nameof(document)); }

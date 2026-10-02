@@ -256,6 +256,7 @@ namespace Yozolab.YoluPainter.Editor
                     if(GUILayout.Button(new GUIContent("Invert","Invert the selection (Ctrl+Shift+I)"),EditorStyles.miniButtonRight))document.SetSelection(document.Selection.Invert());
                 }
                 GUILayout.EndHorizontal();
+                DrawSelectionModify();
             }
             GUILayout.Space(6);
             GUILayout.Label("Brush",EditorStyles.boldLabel);
@@ -650,6 +651,45 @@ namespace Yozolab.YoluPainter.Editor
             if(moveScale.x==0||moveScale.y==0)throw new InvalidOperationException("Scale must not be 0%.");
             TransformSelected(moveOffset.x,moveOffset.y,moveAngle,moveScale.x/100.0,moveScale.y/100.0,"Transformed.");
             moveAngle=0;moveScale=new Vector2(100,100);moveOffset=Vector2.zero;
+        }
+        internal enum SelectionModifyKind { Grow, Shrink, Border, Feather, Sharpen }
+        int selectionRadius = 5; bool selectionEdgeLock;
+        internal int SelectionRadius { get => selectionRadius; set => selectionRadius = Mathf.Clamp(value, 0, SelectionMask.MaxModifyRadius); }
+        internal bool SelectionEdgeLock { get => selectionEdgeLock; set => selectionEdgeLock = value; }
+        /// <summary>選択範囲を変える（GIMP の Select メニューと同じ考え方）。1 回の Undo。</summary>
+        internal void ModifySelection(SelectionModifyKind kind)
+        {
+            var current=document.Selection;
+            if(current==null){message="Nothing is selected.";return;}
+            int r=selectionRadius;
+            SelectionMask next;
+            switch(kind)
+            {
+                case SelectionModifyKind.Grow: next=current.Grow(r); break;
+                case SelectionModifyKind.Shrink: next=current.Shrink(r,selectionEdgeLock); break;
+                case SelectionModifyKind.Border: next=current.Border(r,selectionEdgeLock); break;
+                case SelectionModifyKind.Feather: next=current.Feather(r,selectionEdgeLock); break;
+                default: next=current.Sharpen(); break;
+            }
+            document.SetSelection(next);
+            message=document.Selection==null?kind+": nothing is left selected.":kind==SelectionModifyKind.Sharpen?"Selection sharpened.":kind+" by "+r+" px.";
+        }
+        void DrawSelectionModify()
+        {
+            using(new EditorGUI.DisabledScope(document.Selection==null))
+            {
+                GUILayout.BeginHorizontal();
+                selectionRadius=Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Modify (px)","Radius for Grow, Shrink, Border and Feather (as GIMP's Select menu)"),selectionRadius),0,SelectionMask.MaxModifyRadius);
+                selectionEdgeLock=GUILayout.Toggle(selectionEdgeLock,new GUIContent("Edge lock","Selected areas continue outside the canvas (Shrink, Border and Feather do not pull away from the canvas edge)"),EditorStyles.miniButton,GUILayout.Width(70));
+                GUILayout.EndHorizontal();
+                GUILayout.BeginHorizontal();
+                if(GUILayout.Button(new GUIContent("Grow","Largest amount within a circle of the radius"),EditorStyles.miniButtonLeft))TryAction(()=>ModifySelection(SelectionModifyKind.Grow));
+                if(GUILayout.Button(new GUIContent("Shrink","Smallest amount within a circle of the radius"),EditorStyles.miniButtonMid))TryAction(()=>ModifySelection(SelectionModifyKind.Shrink));
+                if(GUILayout.Button(new GUIContent("Border","A band around the edge: Grow minus Shrink"),EditorStyles.miniButtonMid))TryAction(()=>ModifySelection(SelectionModifyKind.Border));
+                if(GUILayout.Button(new GUIContent("Feather","Soften the edge (Gaussian blur, σ = radius / 3.5)"),EditorStyles.miniButtonMid))TryAction(()=>ModifySelection(SelectionModifyKind.Feather));
+                if(GUILayout.Button(new GUIContent("Sharpen","Hard edge: at least half selected becomes fully selected"),EditorStyles.miniButtonRight))TryAction(()=>ModifySelection(SelectionModifyKind.Sharpen));
+                GUILayout.EndHorizontal();
+            }
         }
         void DrawMoveSettings()
         {
