@@ -100,6 +100,20 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(PainterSettings.Warnings.Count, Is.EqualTo(2)); Assert.That(PainterSettings.Warnings, Has.All.Contains("The default is used"));
         }
 
+        [Test] public void BackupsToKeepDefaultsToAllAndIsRangeChecked()
+        {
+            Assert.That(PainterSettings.BackupsToKeep, Is.EqualTo(-1), "by default no backup is ever deleted");
+            var personal = PainterSettings.PersonalSettings;
+            foreach (int bad in new[] { -2, PainterSettings.MaxBackups + 1 })
+            {
+                personal.backupsToKeep = bad;
+                Assert.That(() => PainterSettings.Save(null, personal), Throws.ArgumentException.With.Message.Contains("Backups to keep"));
+            }
+            personal.backupsToKeep = 0; PainterSettings.Save(null, personal);
+            PainterSettings.ProjectRoot = project;
+            Assert.That(PainterSettings.BackupsToKeep, Is.EqualTo(0));
+        }
+
         [Test] public void ABrokenFileIsKeptAsideWhenSettingsAreSaved()
         {
             Directory.CreateDirectory(Path.GetDirectoryName(PainterSettings.SharedPath));

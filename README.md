@@ -22,20 +22,28 @@ Unity Editor 内の専用ウィンドウで、同じレイヤーへ 2D と 3D �
 
 1. Package Manager → `+` → Add package from disk で、このリポジトリの `package.json` を選ぶ（または Add package from git URL）
 2. メニュー `YozoLab → YoluPainter (Prototype)` を開く
-3. まず 256 または 512 の新規文書で 2D 描画、Undo、Save As、Open を試す
+3. まず 256 または 512 の新規文書で 2D 描画、Undo、Save As（.ylp）、Open を試す
 4. Demo cube ボタンで 6 つの UV 島を持つ検証用キューブを読み込める。自分のモデルでは readable な静的 MeshRenderer のモデルを Preview model に割り当てる。SkinnedMeshRenderer や非対応・省略された遮蔽物を含むモデルは、安全のため描画を止める
 5. material slot を選び、同じレイヤー/チャンネルで描く
 
 モデルの Read/Write 設定を自動で変えたり、シーンのマテリアルへテクスチャを適用したりはしません。プレビューは自分で作ったメッシュとマテリアルだけを使います。
 
-## 保存
+## 保存（.ylp）
 
-Save As は新しい専用フォルダーを指定します。保存内容は `generations/<id>/` にまとまり、検証後に小さな `current` ポインターを置き換えます。`document.utpaint` が編集可能なネイティブ正本です。対応可能なチャンネルは同じ世代に PSD を生成します。
+YoluPainter のファイルは `.ylp` です（CLIP STUDIO の .clip、Photoshop の .psd に当たる 1 ファイル）。中身は zip で、拡張子を .zip に変えれば普通のツールでも中を確認できます。
 
-- 未対応の合成モードや PSD のメモリ予算超過は、黙ってラスタライズしません。確認後に「ネイティブ保存済み・PSD 未更新」と分けます
-- 古い世代は消しません。世代の自動整理はまだ無いので、長時間の作業ではディスク使用量に注意してください
-- 開いた保存世代に外部改変を検出すると通常保存を拒否します。PSD 変更の差分表示・三者マージは未実装です
-- 取り込んだ PSD を直接上書きしません。元のバイト列も保存時に保持します
+- `document.utpaint`: 編集可能なネイティブ正本（マスク・Fill・調整・クリッピングを含めてロスなし）
+- `composite/<チャンネル>.png`・`thumbnail.png`: 合成済みの画像（正本から作った派生物）
+- `view.json`・`brush.json`・`imported-original.psd`（PSD から取り込んだときの原本）
+- 先頭の `mimetype`（無圧縮）と、全エントリーの SHA-256 を並べた `manifest.sha256`。読むときに全部確かめ、合わなければ開きません
+
+保存は、作って読み直して確かめた一時ファイル（名前が `~` で終わるので Unity は取り込まない）から最後に 1 回だけ置き換えます。途中で失敗しても元のファイルはそのままです。
+
+- 上書き保存すると、直前の版を隣の `<名前>.ylp-backups~/` に退避します。何世代残すかは設定で選べ、既定はすべて残します（バージョン管理に入れたくなければ `*.ylp-backups~/` を ignore してください）
+- 開いた/保存した時点から外でファイルが変わっていると、通常の保存を拒否します（Save As は可）。差分表示・マージは未実装です
+- `.ylp` を Assets に置くと、Unity のインポーターが中の合成済み画像をテクスチャとして出します（Color がメインなので、そのままマテリアルに割り当てられる）。ダブルクリックで YoluPainter が開きます。保存のたびに取り込み直されます
+- PSD は「Export PSD」で選んだチャンネルを書き出します。PSD で表せないもの（通常以外の合成モード・マスク・Fill・調整・クリッピング）があると、平らにせず理由を示して書き出しません
+- 取り込んだ PSD を直接上書きしません。元のバイト列を `.ylp` の中に保持します
 - 未保存の文書の復旧 checkpoint は Unity プロジェクトの `Library/YoluPainter` 配下へ 15 秒ごと（設定で 5〜600 秒）、フォーカス喪失・リロード時にも保存します。突然のプロセス停止では最後の正常 checkpoint までです
 
 ## 設定
@@ -43,7 +51,7 @@ Save As は新しい専用フォルダーを指定します。保存内容は `g
 ウィンドウの Settings ボタン、または Project Settings > YoluPainter で開きます。
 
 - **プロジェクトで共有**（`ProjectSettings/Packages/net.yozolab.yolupainter/Settings.json`、バージョン管理に入る）: 新規ドキュメントの既定の大きさ、共有のブラシ置き場（プロジェクト内のフォルダ。ここへ取り込んだブラシはバージョン管理で全員に渡る）
-- **自分だけ**（`UserSettings/YoluPainter/Settings.json`）: 取り込んだブラシの置き場（プロジェクトの外も可。変えるときは今のブラシを複写するか尋ね、元は残す）、同梱ブラシの表示、復旧 checkpoint の間隔、メモリ予算（Undo 履歴・レイヤーの画素・1 ストローク）
+- **自分だけ**（`UserSettings/YoluPainter/Settings.json`）: 取り込んだブラシの置き場（プロジェクトの外も可。変えるときは今のブラシを複写するか尋ね、元は残す）、同梱ブラシの表示、`.ylp` のバックアップを残す数、復旧 checkpoint の間隔、メモリ予算（Undo 履歴・レイヤーの画素・1 ストローク）
 
 ブラシ置き場は Unity に取り込まれないよう、Assets / Packages の下（名前が `~` で終わるフォルダの中を除く）は指定できません。
 
@@ -59,4 +67,4 @@ Save As は新しい専用フォルダーを指定します。保存内容は `g
 
 ## まだ無い主要機能
 
-グループ、合成モードの拡充、トーンカーブ等の調整、PSD のマスク/調整/クリッピング、塗りつぶし/選択/変形、1 ファイル形式 .ylp と Unity のインポーター、Generator/Filter の実行と UI、mesh map ベイク、編集可能な 3D パス、スキン/ポーズ/BlendShape、lilToon 専用出力、ICC/高 bit PSD、GPU 正本ブラシ、Jobs/Burst、ディスク退避、4K の実測性能保証。どれも最終スコープから外していません。
+グループ、合成モードの拡充、トーンカーブ等の調整、PSD のマスク/調整/クリッピング/グループの読み書き、塗りつぶし/選択/変形、Generator/Filter の実行と UI、mesh map ベイク、編集可能な 3D パス、スキン/ポーズ/BlendShape、lilToon 専用出力、ICC/高 bit PSD、GPU 正本ブラシ、Jobs/Burst、ディスク退避、4K の実測性能保証。どれも最終スコープから外していません。

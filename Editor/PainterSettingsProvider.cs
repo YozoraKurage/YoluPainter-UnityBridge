@@ -71,6 +71,7 @@ namespace Yozolab.YoluPainter.Editor
 
                 EditorGUI.BeginChangeCheck();
                 personal.showBundledBrushes = EditorGUILayout.Toggle(new GUIContent("Show bundled brushes", "The Krita 4 default tips shipped with the package. Hiding them does not break brushes that already use them."), personal.showBundledBrushes);
+                personal.backupsToKeep = BackupsPopup(personal.backupsToKeep);
                 personal.recoveryIntervalSeconds = EditorGUILayout.IntSlider(new GUIContent("Recovery checkpoint every (s)", "How often unsaved work is written to Library/YoluPainter for crash recovery. It is also written on focus loss, reload and Play."), personal.recoveryIntervalSeconds, PainterSettings.MinRecoverySeconds, PainterSettings.MaxRecoverySeconds);
                 EditorGUILayout.LabelField("Memory budgets (MiB)", EditorStyles.miniBoldLabel);
                 personal.undoBudgetMiB = EditorGUILayout.DelayedIntField(new GUIContent("Undo history", "Oldest undo steps are dropped beyond this. 0 keeps no history."), personal.undoBudgetMiB);
@@ -78,6 +79,14 @@ namespace Yozolab.YoluPainter.Editor
                 personal.strokeBudgetMiB = EditorGUILayout.DelayedIntField(new GUIContent("One stroke", "Undo data kept while a stroke is drawn. A longer stroke is cancelled safely."), personal.strokeBudgetMiB);
                 if (EditorGUI.EndChangeCheck()) SavePersonal();
             }
+        }
+
+        static readonly int[] BackupChoices = { -1, 0, 1, 3, 5, 10, 20 };
+        static int BackupsPopup(int value)
+        {
+            var values = BackupChoices.Contains(value) ? BackupChoices : BackupChoices.Concat(new[] { value }).ToArray();
+            var names = values.Select(v => new GUIContent(v < 0 ? "All (never delete)" : v == 0 ? "None (no backup)" : v.ToString())).ToArray();
+            return EditorGUILayout.IntPopup(new GUIContent(".ylp backups to keep", "When a .ylp is saved over, the previous version is moved to <name>.ylp-backups~ next to it (Unity does not import folders ending in ~). Older backups beyond this number are deleted."), value, names, values);
         }
 
         static void Header(string title, string file, string help)

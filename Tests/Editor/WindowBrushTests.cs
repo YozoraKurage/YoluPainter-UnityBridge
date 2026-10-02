@@ -67,14 +67,14 @@ namespace Yozolab.YoluPainter.Tests
             var bundled = BundledBrushSets.Presets.First(p => p.CreateSettings().Tips != null);
             window.ApplyPreset(bundled);
             var b = window.Brush; b.sizeJitter = .25f; b.count = 4; b.angle = 33; b.textureId = "builtin:" + BuiltInBrushes.TipIds.First(); b.textureDepth = .5f;
-            var fake = UseFakeDialogs(window); fake.Folder = NewTempPath();
+            var fake = UseFakeDialogs(window); fake.File = NewYlpPath();
             PaintDot(window, 200, 200);
             window.SaveProject(true);
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
             var other = Open();
             try
             {
-                UseFakeDialogs(other).Folder = fake.Folder;
+                UseFakeDialogs(other).File = fake.File;
                 other.OpenProject();
                 var r = other.Brush;
                 Assert.That(r.presetId, Is.EqualTo(bundled.Id)); Assert.That(r.tipId, Is.EqualTo(bundled.Id));
@@ -90,16 +90,16 @@ namespace Yozolab.YoluPainter.Tests
         {
             UseTemporaryBrushLibrary();
             var b = window.Brush; b.tipId = "library:from-another-project-0000"; b.textureId = "";
-            var fake = UseFakeDialogs(window); fake.Folder = NewTempPath();
+            var fake = UseFakeDialogs(window); fake.File = NewYlpPath();
             PaintDot(window, 120, 120);
             window.SaveProject(true);
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
             var other = Open();
             try
             {
-                UseFakeDialogs(other).Folder = fake.Folder;
+                UseFakeDialogs(other).File = fake.File;
                 other.OpenProject();
-                Assert.That(other.StatusMessage, Does.Contain("Verified generation loaded").And.Contain("library:from-another-project-0000").And.Contain("not available"));
+                Assert.That(other.StatusMessage, Does.Contain("Opened").And.Contain("library:from-another-project-0000").And.Contain("not available"));
                 Assert.That(other.Brush.tipId, Is.EqualTo("library:from-another-project-0000"), "the reference is kept, not rewritten");
                 Assert.That(other.GetBrush().Tip, Is.Null); Assert.That(other.GetBrush().Tips, Is.Null);
             }

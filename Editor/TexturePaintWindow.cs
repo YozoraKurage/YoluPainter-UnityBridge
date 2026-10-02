@@ -40,7 +40,7 @@ namespace Yozolab.YoluPainter.Editor
         BrushStroke stroke;
         TileGpuCompositor compositor;
         IsolatedModelPreview preview;
-        string projectRoot, projectToken, recoveryToken, message = "G0/G1 prototype: CPU source brush, GPU compositor; no production validation yet";
+        string projectPath, projectToken, recoveryToken, message = "G0/G1 prototype: CPU source brush, GPU compositor; no production validation yet";
         long renderedRevision = -1, savedRevision = -1, recoveredRevision = -1;
         bool repaintPixels = true, surfaceStroke, externalConflict, editMask;
         Vector2 previousPointer, layerScroll, brushScroll, canvasPan;
@@ -49,6 +49,8 @@ namespace Yozolab.YoluPainter.Editor
         bool showDynamics;
         double lastRecovery, lastExternalCheck;
         byte[] importedOriginal;
+        /// <summary>このドキュメントを取り込んだ PSD のパス（取り込んでからまだ .ylp に保存していなければ保存先の提案に使う）。</summary>
+        string importedPsdPath;
         Rect canvasRect, surfaceRect;
 
         [MenuItem("YozoLab/YoluPainter (Prototype)")]
@@ -61,7 +63,8 @@ namespace Yozolab.YoluPainter.Editor
         internal Rect SurfaceRect => surfaceRect;
         internal string StatusMessage => message;
         internal string RecoveryRoot => recoveryRoot;
-        internal string ProjectRoot => projectRoot;
+        /// <summary>開いている .ylp の絶対パス。まだ保存していなければ null。</summary>
+        internal string ProjectPath => projectPath;
         internal bool IsSaved => document != null && document.Revision == savedRevision;
         internal bool HasExternalConflict => externalConflict;
         internal PaintChannel Channel { get => channel; set { channel = value; repaintPixels = true; } }
@@ -124,8 +127,8 @@ namespace Yozolab.YoluPainter.Editor
         {
             document=new PaintDocument(size,size,128,PainterSettings.UndoBudgetBytes);
             ApplyBudgets();
-            selectedLayer=document.AddLayer("Paint 1").Id; document.ClearHistory();
-            projectRoot=null; projectToken=null; savedRevision=-1; importedOriginal=null; externalConflict=false; canvasZoom=1; canvasPan=Vector2.zero;
+            selectedLayer=document.AddLayer("Paint 1").Id; document.ClearHistory(); pristineRevision=document.Revision;
+            projectPath=null; projectToken=null; savedRevision=-1; importedOriginal=null; importedPsdPath=null; externalConflict=false; canvasZoom=1; canvasPan=Vector2.zero;
         }
         void OnLostFocus() { FinishStroke(false); preview?.CancelNavigation(); SaveRecovery(); }
         void BeforeReload() { FinishStroke(false); preview?.CancelNavigation(); SaveRecovery(); }
@@ -140,14 +143,14 @@ namespace Yozolab.YoluPainter.Editor
         {
             if(document==null) return;
             if(stroke==null && document.Revision!=recoveredRevision && EditorApplication.timeSinceStartup-lastRecovery>PainterSettings.RecoveryIntervalSeconds) SaveRecovery();
-            if(!String.IsNullOrEmpty(projectRoot) && EditorApplication.timeSinceStartup-lastExternalCheck>3) CheckExternalChange();
+            if(!String.IsNullOrEmpty(projectPath) && EditorApplication.timeSinceStartup-lastExternalCheck>3) CheckExternalChange();
         }
         internal void CheckExternalChange()
         {
-            if(String.IsNullOrEmpty(projectRoot)) return;
+            if(String.IsNullOrEmpty(projectPath)) return;
             lastExternalCheck=EditorApplication.timeSinceStartup;
-            externalConflict=GenerationStore.HasExternalChange(projectRoot,projectToken);
-            if(externalConflict) message="Saved files changed externally. Normal save is blocked; use Save As or explicitly reopen after reviewing local edits.";
+            externalConflict=YlpStore.HasExternalChange(projectPath,projectToken);
+            if(externalConflict) message="The saved file changed outside this window. Normal save is blocked; use Save As or explicitly reopen after reviewing local edits.";
         }
         void OnGUI()
         {
@@ -185,7 +188,9 @@ namespace Yozolab.YoluPainter.Editor
             if(GUILayout.Button("Save",EditorStyles.toolbarButton,GUILayout.Width(42))) SaveProject(false);
             if(GUILayout.Button("Save As",EditorStyles.toolbarButton,GUILayout.Width(55))) SaveProject(true);
             if(GUILayout.Button("Import PSD",EditorStyles.toolbarButton,GUILayout.Width(78))) ImportPsd();
-            if(GUILayout.Button("Export PNG",EditorStyles.toolbarButton,GUILayout.Width(78))) ExportPng();
+            if(GUILayout.Button(new GUIContent("Export Images","Write every channel in use as PNG into a folder"),EditorStyles.toolbarButton,GUILayout.Width(90))) ExportImages();
+            if(GUILayout.Button(new GUIContent("Export PNG","Write the selected channel as one PNG"),EditorStyles.toolbarButton,GUILayout.Width(78))) ExportPng();
+            if(GUILayout.Button("Export PSD",EditorStyles.toolbarButton,GUILayout.Width(78))) ExportPsd();
             GUILayout.Space(8);
             using(new EditorGUI.DisabledScope(!document.CanUndo)) if(GUILayout.Button("Undo",EditorStyles.toolbarButton,GUILayout.Width(45))) document.Undo();
             using(new EditorGUI.DisabledScope(!document.CanRedo)) if(GUILayout.Button("Redo",EditorStyles.toolbarButton,GUILayout.Width(45))) document.Redo();
@@ -281,24 +286,29 @@ namespace Yozolab.YoluPainter.Editor
             using(new EditorGUI.DisabledScope(stroke!=null))
             {
                 GUILayout.BeginHorizontal();
-                if(GUILayout.Button("+")) selectedLayer=document.AddLayer("Paint "+(document.Layers.Count+1)).Id;
-                if(GUILayout.Button("+ Fill")) selectedLayer=document.AddFillLayer("Fill "+(document.Layers.Count+1),new Dictionary<PaintChannel,Rgba32>{{channel,GetBrush().Color}}).Id;
+                // 新しいレイヤーは選択中のレイヤーのすぐ上（同じグループの中）に作る
+                Guid? above=document.Layers.Any(l=>l.Id==selectedLayer)?selectedLayer:(Guid?)null;
+                if(GUILayout.Button("+")) selectedLayer=document.AddLayer("Paint "+(document.Layers.Count+1),above:above).Id;
+                if(GUILayout.Button("+ Fill")) selectedLayer=document.AddFillLayer("Fill "+(document.Layers.Count+1),new Dictionary<PaintChannel,Rgba32>{{channel,GetBrush().Color}},above:above).Id;
                 if(GUILayout.Button("+ Adjust"))
                 {
                     var menu=new GenericMenu();
-                    menu.AddItem(new GUIContent("Invert"),false,()=>selectedLayer=document.AddAdjustmentLayer("Invert",AdjustmentSettings.Invert()).Id);
-                    menu.AddItem(new GUIContent("Levels"),false,()=>selectedLayer=document.AddAdjustmentLayer("Levels",AdjustmentSettings.Levels()).Id);
-                    menu.AddItem(new GUIContent("Hue / Saturation"),false,()=>selectedLayer=document.AddAdjustmentLayer("Hue / Saturation",AdjustmentSettings.HueSaturation()).Id);
+                    menu.AddItem(new GUIContent("Invert"),false,()=>selectedLayer=document.AddAdjustmentLayer("Invert",AdjustmentSettings.Invert(),above:above).Id);
+                    menu.AddItem(new GUIContent("Levels"),false,()=>selectedLayer=document.AddAdjustmentLayer("Levels",AdjustmentSettings.Levels(),above:above).Id);
+                    menu.AddItem(new GUIContent("Hue / Saturation"),false,()=>selectedLayer=document.AddAdjustmentLayer("Hue / Saturation",AdjustmentSettings.HueSaturation(),above:above).Id);
                     menu.ShowAsContext();
                 }
-                using(new EditorGUI.DisabledScope(document.Layers.Count<2)) if(GUILayout.Button("−")){document.RemoveLayer(selectedLayer);selectedLayer=document.Layers[document.Layers.Count-1].Id;}
+                if(GUILayout.Button(new GUIContent("+ Group","Put the selected layer into a new group"))) TryAction(()=>selectedLayer=document.GroupLayers(new[]{selectedLayer},"Group "+(document.Layers.Count(l=>l.IsGroup)+1)).Id);
+                using(new EditorGUI.DisabledScope(document.Layers.Count<2)) if(GUILayout.Button(new GUIContent("−","Delete the selected layer (a group is deleted with its contents)"))){document.RemoveLayer(selectedLayer);selectedLayer=document.Layers.Count>0?document.Layers[document.Layers.Count-1].Id:Guid.Empty;}
                 GUILayout.EndHorizontal();
                 layerScroll=GUILayout.BeginScrollView(layerScroll);
                 for(int i=document.Layers.Count-1;i>=0;i--)
                 {
                     var layer=document.Layers[i]; GUILayout.BeginHorizontal();
+                    GUILayout.Space(12*document.DepthOf(layer.Id));
                     bool visible=GUILayout.Toggle(layer.Visible,"",GUILayout.Width(18)); if(visible!=layer.Visible) document.SetLayerVisibility(layer.Id,visible);
-                    if(GUILayout.Toggle(selectedLayer==layer.Id,(document.IsEffectivelyClipped(i)?"↳ ":"")+(layer.Kind==LayerKind.Fill?"[Fill] ":layer.Kind==LayerKind.Adjustment?"[Adj] ":"")+layer.Name,"Button")) selectedLayer=layer.Id;
+                    string kind=layer.IsGroup?"▾ ":layer.Kind==LayerKind.Fill?"[Fill] ":layer.Kind==LayerKind.Adjustment?"[Adj] ":"";
+                    if(GUILayout.Toggle(selectedLayer==layer.Id,(document.IsEffectivelyClipped(i)?"↳ ":"")+kind+layer.Name,"Button")) selectedLayer=layer.Id;
                     GUILayout.EndHorizontal();
                 }
                 GUILayout.EndScrollView();
@@ -307,13 +317,31 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     string name=EditorGUILayout.DelayedTextField("Name",active.Name);if(name!=active.Name)document.SetLayerName(active.Id,name);
                     float opacity=EditorGUILayout.Slider("Opacity",(float)active.Opacity,0,1);if(Math.Abs(opacity-active.Opacity)>.00001)document.SetLayerOpacity(active.Id,opacity,coalesce:true);
-                    var blend=(LayerBlendMode)EditorGUILayout.EnumPopup("Blend",active.BlendMode);if(blend!=active.BlendMode)document.SetLayerBlendMode(active.Id,blend);
+                    var blend=(LayerBlendMode)EditorGUILayout.EnumPopup(new GUIContent("Blend"),active.BlendMode,e=>active.IsGroup||(LayerBlendMode)e!=LayerBlendMode.PassThrough,false);if(blend!=active.BlendMode)TryAction(()=>document.SetLayerBlendMode(active.Id,blend));
                     bool clipping=EditorGUILayout.Toggle("Clip to layer below",active.Clipping);if(clipping!=active.Clipping)document.SetLayerClipping(active.Id,clipping);
-                    bool enabled=EditorGUILayout.Toggle("Channel enabled",active.IsChannelEnabled(channel));if(enabled!=active.IsChannelEnabled(channel))TryAction(()=>document.SetChannelEnabled(active.Id,channel,enabled));
-                    GUILayout.BeginHorizontal();int index=document.Layers.ToList().FindIndex(l=>l.Id==active.Id);
-                    using(new EditorGUI.DisabledScope(index>=document.Layers.Count-1)) if(GUILayout.Button("Up"))document.MoveLayer(active.Id,index+1);
-                    using(new EditorGUI.DisabledScope(index<=0)) if(GUILayout.Button("Down"))document.MoveLayer(active.Id,index-1);
+                    if(!active.IsGroup){bool enabled=EditorGUILayout.Toggle("Channel enabled",active.IsChannelEnabled(channel));if(enabled!=active.IsChannelEnabled(channel))TryAction(()=>document.SetChannelEnabled(active.Id,channel,enabled));}
+                    var siblings=document.ChildrenOf(active.ParentId);int position=siblings.ToList().IndexOf(active);
+                    GUILayout.BeginHorizontal();
+                    using(new EditorGUI.DisabledScope(position>=siblings.Count-1)) if(GUILayout.Button("Up"))document.MoveLayer(active.Id,position+1);
+                    using(new EditorGUI.DisabledScope(position<=0)) if(GUILayout.Button("Down"))document.MoveLayer(active.Id,position-1);
+                    var groupBelow=position>0&&siblings[position-1].IsGroup?siblings[position-1]:null;
+                    using(new EditorGUI.DisabledScope(groupBelow==null)) if(GUILayout.Button(new GUIContent("Into ▾","Move into the group below (on top of its contents)")))document.MoveLayerTo(active.Id,groupBelow.Id,document.ChildrenOf(groupBelow.Id).Count);
+                    using(new EditorGUI.DisabledScope(active.ParentId==Guid.Empty)) if(GUILayout.Button(new GUIContent("Out","Move out of the group, just above it")))
+                    {
+                        var parent=document.GetLayer(active.ParentId);var outer=document.ChildrenOf(parent.ParentId).ToList();
+                        document.MoveLayerTo(active.Id,parent.ParentId,outer.IndexOf(parent)+1);
+                    }
                     GUILayout.EndHorizontal();
+                    if(active.IsGroup)
+                    {
+                        EditorGUILayout.HelpBox(active.BlendMode==LayerBlendMode.PassThrough?"Pass through: the contents blend with the layers below as if they were not grouped.":"Isolated: the contents are composited together first, then blended with "+active.BlendMode+".",MessageType.None);
+                        if(GUILayout.Button("Ungroup (keep contents)"))
+                        {
+                            var first=document.ChildrenOf(active.Id).LastOrDefault();
+                            document.Ungroup(active.Id); selectedLayer=first!=null?first.Id:(document.Layers.Count>0?document.Layers[document.Layers.Count-1].Id:Guid.Empty);
+                            GUIUtility.ExitGUI(); // 消えたグループのまま下の欄を描かない
+                        }
+                    }
                     if(active.Kind==LayerKind.Fill) DrawFill(active);
                     if(active.Kind==LayerKind.Adjustment) DrawAdjustment(active);
                     DrawMask(active);
@@ -414,6 +442,7 @@ namespace Yozolab.YoluPainter.Editor
                     if(EditingMask) stroke=document.BeginMaskStroke(selectedLayer,GetBrush());
                     else
                     {
+                        if(document.GetLayer(selectedLayer).IsGroup) throw new InvalidOperationException("A group has no pixels. Select a layer inside it to paint, or paint the group's mask.");
                         if(!document.GetLayer(selectedLayer).IsChannelEnabled(channel)) document.SetChannelEnabled(selectedLayer,channel,true);
                         stroke=document.BeginStroke(selectedLayer,channel,GetBrush());
                     }
@@ -503,7 +532,9 @@ namespace Yozolab.YoluPainter.Editor
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.Z){if(e.shift)document.Redo();else document.Undo();e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.S){SaveProject(e.shift);e.Use();}
         }
-        bool ConfirmDiscard() => document.Revision==savedRevision || Dialogs.Confirm("Keep current work?","Current work has unsaved changes. A native recovery checkpoint will be kept before opening another document.","Continue","Cancel") && SaveRecovery();
+        /// <summary>作った直後で何も手を加えていないドキュメントの版（New / 最初に開いたとき）。捨てても失うものが無いので確かめない。</summary>
+        long pristineRevision=-1;
+        bool ConfirmDiscard() => document.Revision==savedRevision || document.Revision==pristineRevision || Dialogs.Confirm("Keep current work?","Current work has unsaved changes. A native recovery checkpoint will be kept before opening another document.","Continue","Cancel") && SaveRecovery();
         bool SaveRecovery()
         {
             if(document==null||stroke!=null||document.Revision==recoveredRevision)return true;
@@ -515,57 +546,80 @@ namespace Yozolab.YoluPainter.Editor
             }
             catch(Exception ex){message="Recovery checkpoint failed: "+ex.Message;return false;}
         }
+        /// <summary>.ylp に保存する。上書きは開いた/保存した時点から外で変わっていないときだけで、直前の版は
+        /// &lt;名前&gt;.ylp-backups~ に退避する（保持数は設定）。Assets の中のファイルなら保存後に取り込み直してテクスチャを更新する。</summary>
         internal void SaveProject(bool saveAs)
         {
             if(stroke!=null)return;
-            string target=projectRoot;
-            if(saveAs||String.IsNullOrEmpty(target)){target=Dialogs.SaveFolder("Choose a NEW project folder",String.IsNullOrEmpty(projectRoot)?Application.dataPath:projectRoot,"TexturePaint");if(String.IsNullOrEmpty(target))return;}
-            string expected=target==projectRoot?projectToken:null;
+            string target=projectPath;
+            if(saveAs||String.IsNullOrEmpty(target))
+            {
+                string suggestFolder=projectPath!=null?Path.GetDirectoryName(projectPath):importedPsdPath!=null?Path.GetDirectoryName(importedPsdPath):Application.dataPath;
+                string suggestName=projectPath!=null?Path.GetFileNameWithoutExtension(projectPath):importedPsdPath!=null?Path.GetFileNameWithoutExtension(importedPsdPath):"Texture";
+                target=Dialogs.SaveFile("Save YoluPainter file",suggestFolder,suggestName,"ylp");
+                if(String.IsNullOrEmpty(target))return;
+                if(!target.EndsWith(YlpArchive.Extension,StringComparison.OrdinalIgnoreCase))target+=YlpArchive.Extension;
+                target=Path.GetFullPath(target);
+            }
+            bool sameFile=projectPath!=null&&String.Equals(target,projectPath,PainterSettings.PathComparison);
+            int keep=PainterSettings.BackupsToKeep;
+            // 別のファイルを上書きするとき: 退避するなら元の版は残るので尋ねない。退避しない設定なら元の版が消えるので確かめる。
+            if(!sameFile&&File.Exists(target)&&keep==0&&!Dialogs.Confirm("Replace file?",Path.GetFileName(target)+" already exists and backups are turned off in Project Settings > YoluPainter. Replace it? The old file will be gone.","Replace","Cancel"))return;
             TryAction(()=>
             {
-                Dialogs.Progress("Texture Painter","Freezing native source and preparing validated save generation. Input is paused.",.1f);
-                var files=new Dictionary<string,byte[]>{{"document.utpaint",DocumentBinary.Write(document)}};
+                Dialogs.Progress("YoluPainter","Freezing native source and writing a verified .ylp. Input is paused.",.1f);
+                var files=YlpContent.Composites(document);
+                files.Add(YlpArchive.NativeName,DocumentBinary.Write(document));
                 var state=new ViewState{modelAssetGuid=model==null?"":AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(model)),materialSlot=materialSlot,selectedChannel=(int)channel};
-                files.Add("view.json",System.Text.Encoding.UTF8.GetBytes(JsonUtility.ToJson(state,true)));
-                files.Add("brush.json",System.Text.Encoding.UTF8.GetBytes(JsonUtility.ToJson(brush,true)));
-                if(importedOriginal!=null)files.Add("imported-original.psd",importedOriginal);
-                string psdStatus="PSD channels saved";
-                try
-                {
-                    foreach(PaintChannel c in Enum.GetValues(typeof(PaintChannel)))
-                        if(document.Layers.Any(l=>l.IsChannelEnabled(c))) files.Add(c+".psd",PsdCodec.Write(PsdBridge.Export(document,c)));
-                }
-                catch(Exception ex)
-                {
-                    foreach(var key in files.Keys.Where(k=>k.EndsWith(".psd")&&k!="imported-original.psd").ToArray())files.Remove(key);
-                    psdStatus="Native project saved; PSD NOT updated: "+ex.Message;
-                    if(!Dialogs.Confirm("PSD projection unavailable",ex.Message+"\nSave the lossless native project only? Existing saved generations remain intact.","Save native only","Cancel"))return;
-                }
-                files.Add("save-status.txt",System.Text.Encoding.UTF8.GetBytes(psdStatus));
-                var saved=GenerationStore.Commit(target,files,expected);
-                projectRoot=target;projectToken=saved.Token;savedRevision=document.Revision;externalConflict=false;message=psdStatus+" / "+saved.Generation;
+                files.Add(YlpContent.ViewName,System.Text.Encoding.UTF8.GetBytes(JsonUtility.ToJson(state,true)));
+                files.Add(YlpContent.BrushName,System.Text.Encoding.UTF8.GetBytes(JsonUtility.ToJson(brush,true)));
+                if(importedOriginal!=null)files.Add(YlpContent.ImportedOriginalName,importedOriginal);
+                var saved=YlpStore.Save(target,files,sameFile?projectToken:null,!sameFile,keep);
+                projectPath=saved.Path;projectToken=saved.Token;savedRevision=document.Revision;externalConflict=false;
+                message="Saved "+Path.GetFileName(saved.Path)+(saved.Backup!=null?"; the previous version is kept in "+Path.GetFileName(Path.GetDirectoryName(saved.Backup))+".":".");
+                string asset=AssetPathOf(saved.Path);
+                if(asset!=null)AssetDatabase.ImportAsset(asset,ImportAssetOptions.ForceUpdate);
             });
             Dialogs.ClearProgress();
         }
+        /// <summary>Unity プロジェクトの Assets の中なら "Assets/..." の形、外なら null。</summary>
+        static string AssetPathOf(string fullPath)
+        {
+            string assets=Path.GetFullPath(Application.dataPath).TrimEnd('/','\\')+Path.DirectorySeparatorChar;
+            return fullPath.StartsWith(assets,PainterSettings.PathComparison)?"Assets/"+fullPath.Substring(assets.Length).Replace('\\','/'):null;
+        }
         internal void OpenProject()
         {
-            string path=Dialogs.OpenFolder("Open YoluPainter project folder",projectRoot??Application.dataPath);if(String.IsNullOrEmpty(path)||!ConfirmDiscard())return;
+            string path=Dialogs.OpenFile("Open YoluPainter file",projectPath!=null?Path.GetDirectoryName(projectPath):Application.dataPath,"ylp");
+            OpenProjectAt(path);
+        }
+        /// <summary>.ylp を YoluPainter のウィンドウで開く（ダブルクリックなど）。未保存の作業があれば確認する。</summary>
+        internal static TexturePaintWindow OpenFileInWindow(string path)
+        {
+            var w=GetWindow<TexturePaintWindow>("Texture Painter"); w.Show(); w.Focus(); w.OpenProjectAt(path); return w;
+        }
+        internal void OpenProjectAt(string path)
+        {
+            if(String.IsNullOrEmpty(path))return;
+            path=Path.GetFullPath(path);
+            if(projectPath!=null&&String.Equals(path,projectPath,PainterSettings.PathComparison)&&document.Revision==savedRevision&&!externalConflict){message="Already open: "+Path.GetFileName(path);return;}
+            if(!ConfirmDiscard())return;
             TryAction(()=>
             {
-                var snapshot=GenerationStore.Load(path);var next=DocumentBinary.Read(snapshot.Files["document.utpaint"]);
+                var snapshot=YlpStore.Load(path);var next=DocumentBinary.Read(snapshot.Files[YlpArchive.NativeName]);
                 document=next;BindDocument();selectedLayer=document.Layers.Count>0?document.Layers[document.Layers.Count-1].Id:Guid.Empty;
-                projectRoot=path;projectToken=snapshot.Token;savedRevision=document.Revision;externalConflict=false;
-                importedOriginal=snapshot.Files.TryGetValue("imported-original.psd",out var original)?original:null;
+                projectPath=snapshot.Path;projectToken=snapshot.Token;savedRevision=document.Revision;externalConflict=false;
+                importedOriginal=snapshot.Files.TryGetValue(YlpContent.ImportedOriginalName,out var original)?original:null;
                 var notes=new List<string>();
                 var budgetNote=ApplyBudgets(); if(budgetNote!=null)notes.Add(budgetNote);
-                if(snapshot.Files.TryGetValue("brush.json",out var preset)){brush=ReadBrushState(System.Text.Encoding.UTF8.GetString(preset));var missing=MissingTipNote();if(missing!=null)notes.Add(missing);}
-                if(snapshot.Files.TryGetValue("view.json",out var view))
+                if(snapshot.Files.TryGetValue(YlpContent.BrushName,out var preset)){brush=ReadBrushState(System.Text.Encoding.UTF8.GetString(preset));var missing=MissingTipNote();if(missing!=null)notes.Add(missing);}
+                if(snapshot.Files.TryGetValue(YlpContent.ViewName,out var view))
                 {
                     var state=JsonUtility.FromJson<ViewState>(System.Text.Encoding.UTF8.GetString(view));materialSlot=state.materialSlot;channel=(PaintChannel)state.selectedChannel;
                     var loaded=AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(state.modelAssetGuid));
-                    if(loaded!=null){model=loaded;preview.Load(model);materialSlot=Mathf.Clamp(materialSlot,0,Mathf.Max(0,preview.MaterialSlotCount-1));}else notes.Add("Model asset is unavailable; assign it explicitly.");
+                    if(loaded!=null){model=loaded;preview.Load(model);materialSlot=Mathf.Clamp(materialSlot,0,Mathf.Max(0,preview.MaterialSlotCount-1));}else if(!String.IsNullOrEmpty(state.modelAssetGuid))notes.Add("Model asset is unavailable; assign it explicitly.");
                 }
-                message="Verified generation loaded: "+snapshot.Generation+(notes.Count>0?". "+String.Join(" ",notes):"");
+                message="Opened "+Path.GetFileName(path)+" (verified)"+(notes.Count>0?". "+String.Join(" ",notes):"");
             });
         }
         internal void ImportPsd()
@@ -577,8 +631,56 @@ namespace Yozolab.YoluPainter.Editor
                 var result=PsdCodec.Read(File.ReadAllBytes(path));
                 if(result.Mode!=PsdCompatibilityMode.EditableRaster){Dialogs.Inform("PSD protected: "+result.Mode,String.Join("\n",result.Diagnostics.Select(d=>d.ToString()))+"\nOriginal file was not modified. Unsupported features cannot be edited here.");return;}
                 var next=PsdBridge.Import(result);if(!ConfirmDiscard())return;
-                document=next;if(document.Layers.Count==0)document.AddLayer("Paint 1");BindDocument();selectedLayer=document.Layers.Last().Id;projectRoot=null;projectToken=null;savedRevision=-1;
-                importedOriginal=result.CopyOriginalBytes();channel=PaintChannel.Color;message="Imported supported RGB8 raster subset. Original bytes retained; saves go to a separate native project folder.";
+                document=next;if(document.Layers.Count==0)document.AddLayer("Paint 1");BindDocument();selectedLayer=document.Layers.Last().Id;projectPath=null;projectToken=null;savedRevision=-1;
+                importedOriginal=result.CopyOriginalBytes();importedPsdPath=Path.GetFullPath(path);channel=PaintChannel.Color;
+                message="Imported "+Path.GetFileName(path)+". Save keeps it as a .ylp (with the original PSD inside); Export PSD writes a PSD. The PSD itself is never rewritten.";
+                // 編集できる取り込みでも、書き出す PSD に含まれない情報や合成結果の差などの注意があれば一覧で見せる（黙って捨てない）
+                var notes=result.Diagnostics.Select(d=>d.ToString()).ToList();
+                if(notes.Count>0)Dialogs.Inform("PSD imported with notes",String.Join("\n",notes.Take(40))+(notes.Count>40?"\n… and "+(notes.Count-40)+" more.":"")+"\n\nThe original PSD bytes are kept inside the .ylp when you save.");
+            });
+        }
+        /// <summary>選んだチャンネルを PSD に書き出す。PSD で表せないもの（通常以外の合成・マスク・Fill・調整・クリッピングなど）が
+        /// あれば、平らにせずに理由を示して書かない。</summary>
+        internal void ExportPsd()
+        {
+            byte[] bytes;
+            try{bytes=PsdCodec.Write(PsdBridge.Export(document,channel));}
+            catch(Exception ex){message="PSD export unavailable: "+ex.Message;Dialogs.Inform("PSD export unavailable",ex.Message+"\n\nNothing was written. The .ylp keeps everything losslessly.");return;}
+            string source=projectPath??importedPsdPath;
+            string stem=source!=null?Path.GetFileNameWithoutExtension(source):"Texture";
+            string path=Dialogs.SaveFile("Export selected channel PSD",source!=null?Path.GetDirectoryName(source):Application.dataPath,channel==PaintChannel.Color?stem:stem+"_"+channel,"psd");if(String.IsNullOrEmpty(path))return;
+            // 取り込み元の PSD を上書きするときは確かめる（原本のバイト列は .ylp に残るが、外の PSD そのものは置き換わる）
+            if(importedPsdPath!=null&&String.Equals(Path.GetFullPath(path),importedPsdPath,PainterSettings.PathComparison)&&!Dialogs.Confirm("Overwrite the imported PSD?",Path.GetFileName(path)+" is the PSD this document was imported from. Replace it with the exported PSD?"+(importedOriginal!=null?" Its original bytes stay inside the .ylp once you save.":""),"Replace","Cancel"))return;
+            TryAction(()=>{File.WriteAllBytes(path,bytes);message="Exported "+channel+" PSD. No material was changed.";});
+        }
+        /// <summary>使っている全チャンネルを &lt;名前&gt;_&lt;チャンネル&gt;.png としてフォルダに書き出す。既存のファイルを置き換えるときは
+        /// 確かめる。Assets の中なら取り込み直し、新しく作ったテクスチャにだけ色空間（Color/Emission は sRGB、他はリニア）を設定する。
+        /// 既にあるテクスチャの取り込み設定は変えず、合っていなければ知らせる。マテリアルには割り当てない。</summary>
+        internal void ExportImages()
+        {
+            var channels=YlpContent.UsedChannels(document);
+            if(channels.Count==0){message="Nothing to export: no layer uses any channel.";return;}
+            string folder=Dialogs.OpenFolder("Export images into folder",projectPath!=null?Path.GetDirectoryName(projectPath):Application.dataPath);if(String.IsNullOrEmpty(folder))return;
+            string stem=projectPath!=null?Path.GetFileNameWithoutExtension(projectPath):"Texture";
+            var targets=channels.Select(c=>(channel:c,path:Path.Combine(folder,stem+"_"+c+".png"))).ToList();
+            var existing=targets.Where(t=>File.Exists(t.path)).Select(t=>Path.GetFileName(t.path)).ToList();
+            if(existing.Count>0&&!Dialogs.Confirm("Replace images?","These files will be replaced:\n"+String.Join("\n",existing),"Replace","Cancel"))return;
+            TryAction(()=>
+            {
+                var created=new List<(PaintChannel channel,string asset)>(); var notes=new List<string>();
+                foreach(var t in targets)
+                {
+                    bool isNew=!File.Exists(t.path);
+                    File.WriteAllBytes(t.path,YlpContent.EncodePng(document.Composite(t.channel),document.Width,document.Height));
+                    string asset=AssetPathOf(Path.GetFullPath(t.path));
+                    if(asset==null)continue;
+                    AssetDatabase.ImportAsset(asset,ImportAssetOptions.ForceUpdate);
+                    var importer=AssetImporter.GetAtPath(asset) as TextureImporter; if(importer==null)continue;
+                    bool srgb=YlpContent.IsColor(t.channel);
+                    if(isNew){importer.sRGBTexture=srgb;importer.alphaIsTransparency=t.channel==PaintChannel.Color;importer.SaveAndReimport();created.Add((t.channel,asset));}
+                    else if(importer.sRGBTexture!=srgb)notes.Add(Path.GetFileName(t.path)+" is imported as "+(importer.sRGBTexture?"sRGB":"linear")+" but "+t.channel+" is "+(srgb?"colour (sRGB)":"data (linear)")+"; its import settings were left as they are.");
+                }
+                message="Exported "+targets.Count+" image(s) to "+folder+"."+(notes.Count>0?" "+String.Join(" ",notes):"")+" No material was changed.";
             });
         }
         internal void ExportPng()

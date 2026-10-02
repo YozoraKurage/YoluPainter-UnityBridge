@@ -23,7 +23,8 @@ namespace Yozolab.YoluPainter.Tests
             public string SaveFolder(string title, string folder, string defaultName) { Asked.Add("SaveFolder"); return Folder; }
             public string OpenFolder(string title, string folder) { Asked.Add("OpenFolder"); return Folder; }
             public string OpenFile(string title, string folder, string extension) { Asked.Add("OpenFile"); return File; }
-            public string SaveFile(string title, string folder, string defaultName, string extension) { Asked.Add("SaveFile"); return File; }
+            public string LastFolder, LastName;
+            public string SaveFile(string title, string folder, string defaultName, string extension) { Asked.Add("SaveFile"); LastFolder = folder; LastName = defaultName; return File; }
             public bool Confirm(string title, string message, string ok, string cancel) { Asked.Add("Confirm: " + title); return ConfirmAnswer; }
             public void Inform(string title, string message) { Asked.Add("Inform: " + title); }
             public void Progress(string title, string info, float progress) { }
@@ -54,101 +55,158 @@ namespace Yozolab.YoluPainter.Tests
         void PaintDot(TexturePaintWindow w, int x, int y)
         { var at = At(w, x, y); Mouse(w, EventType.MouseDown, at); Mouse(w, EventType.MouseUp, at); Assert.That(w.Document.CanUndo, Is.True); }
 
-        static int GenerationCount(string root) => Directory.GetDirectories(Path.Combine(root, "generations")).Length;
+        /// <summary>保存先の .ylp のパス（一時フォルダの中。フォルダごと後片付けする）。</summary>
+        string NewYlpPath(string name = "Art.ylp")
+        { string folder = NewTempPath(); Directory.CreateDirectory(folder); return Path.Combine(folder, name); }
 
-        [Test] public void SaveAsWritesAVerifiedGenerationWithChannelPsd()
+        [Test] public void SaveAsWritesAVerifiedYlpWithComposites()
         {
-            var fake = UseFakeDialogs(window); fake.Folder = NewTempPath();
+            var fake = UseFakeDialogs(window); fake.File = NewYlpPath();
             PaintDot(window, 200, 300);
             window.SaveProject(true);
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
-            Assert.That(window.ProjectRoot, Is.EqualTo(fake.Folder));
-            var snapshot = GenerationStore.Load(fake.Folder);
-            CollectionAssert.AreEquivalent(new[] { "document.utpaint", "view.json", "brush.json", "save-status.txt", "Color.psd" }, snapshot.Files.Keys);
+            Assert.That(window.ProjectPath, Is.EqualTo(fake.File));
+            var snapshot = YlpStore.Load(fake.File);
+            CollectionAssert.AreEquivalent(new[] { "document.utpaint", "view.json", "brush.json", "composite/Color.png", "thumbnail.png" }, snapshot.Files.Keys);
             Assert.That(snapshot.Files["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
-            Assert.That(System.Text.Encoding.UTF8.GetString(snapshot.Files["save-status.txt"]), Is.EqualTo("PSD channels saved"));
-            var psd = PsdCodec.Read(snapshot.Files["Color.psd"]);
-            Assert.That(psd.Mode, Is.EqualTo(PsdCompatibilityMode.EditableRaster));
-            Assert.That(PsdBridge.Import(psd).Composite(PaintChannel.Color), Is.EqualTo(window.Document.Composite(PaintChannel.Color)));
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false, true);
+            try
+            {
+                Assert.That(texture.LoadImage(snapshot.Files["composite/Color.png"]), Is.True);
+                Assert.That(texture.GetPixels32().SelectMany(c => new[] { c.r, c.g, c.b, c.a }).ToArray(), Is.EqualTo(window.Document.Composite(PaintChannel.Color)), "the composite is the exact straight RGBA8 result");
+                Assert.That(texture.LoadImage(snapshot.Files["thumbnail.png"]), Is.True); Assert.That(Math.Max(texture.width, texture.height), Is.LessThanOrEqualTo(256));
+            }
+            finally { Object.DestroyImmediate(texture); }
+            Assert.That(Directory.GetFileSystemEntries(Path.GetDirectoryName(fake.File)).Select(Path.GetFileName), Is.EqualTo(new[] { "Art.ylp" }), "no temporary, lock or backup files for a new file");
         }
 
-        [Test] public void CtrlSSavesANewGenerationAndKeepsTheOldOne()
+        [Test] public void SaveAsAddsTheExtensionWhenItIsMissing()
         {
-            var fake = UseFakeDialogs(window); fake.Folder = NewTempPath();
+            var fake = UseFakeDialogs(window); fake.File = NewYlpPath("NoExtension");
+            window.SaveProject(true);
+            Assert.That(window.ProjectPath, Is.EqualTo(fake.File + ".ylp"), window.StatusMessage);
+            Assert.That(System.IO.File.Exists(fake.File + ".ylp"), Is.True);
+        }
+
+        [Test] public void CtrlSSavesAgainAndKeepsThePreviousVersionAsABackup()
+        {
+            var fake = UseFakeDialogs(window); fake.File = NewYlpPath();
             PaintDot(window, 100, 100);
-            Key(window, KeyCode.S, EventModifiers.Control); // 保存先が無いので Save As と同じくフォルダを尋ねる
+            Key(window, KeyCode.S, EventModifiers.Control); // 保存先が無いので Save As と同じく尋ねる
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
-            string first = GenerationStore.Load(fake.Folder).Generation;
+            byte[] first = DocumentBinary.Write(window.Document);
             PaintDot(window, 600, 600);
             Assert.That(window.IsSaved, Is.False);
             fake.Asked.Clear();
             Key(window, KeyCode.S, EventModifiers.Control);
-            Assert.That(fake.Asked, Does.Not.Contain("SaveFolder"), "a project that has a folder saves without asking again");
+            Assert.That(fake.Asked, Does.Not.Contain("SaveFile"), "a document that has a file saves without asking again");
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
-            Assert.That(GenerationCount(fake.Folder), Is.EqualTo(2));
-            Assert.That(GenerationStore.Load(fake.Folder).Generation, Is.Not.EqualTo(first));
-            Assert.That(Directory.Exists(Path.Combine(fake.Folder, "generations", first)), Is.True, "old generations are kept");
+            Assert.That(window.StatusMessage, Does.Contain("previous version is kept"));
+            var backups = YlpStore.Backups(fake.File);
+            Assert.That(backups.Count, Is.EqualTo(1));
+            Assert.That(YlpStore.Load(backups[0]).Files["document.utpaint"], Is.EqualTo(first), "the backup is the previous version");
+            Assert.That(YlpStore.Load(fake.File).Files["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
         }
 
         [Test] public void OpenRestoresTheSavedDocumentInAnotherWindow()
         {
-            var fake = UseFakeDialogs(window); fake.Folder = NewTempPath();
+            var fake = UseFakeDialogs(window); fake.File = NewYlpPath();
             PaintDot(window, 321, 654); window.Document.SetLayerOpacity(window.Document.Layers[0].Id, .4);
             window.SaveProject(true);
             byte[] saved = DocumentBinary.Write(window.Document);
             var other = Open();
             try
             {
-                var otherFake = UseFakeDialogs(other); otherFake.Folder = fake.Folder;
+                var otherFake = UseFakeDialogs(other); otherFake.File = fake.File;
                 other.OpenProject();
                 Assert.That(DocumentBinary.Write(other.Document), Is.EqualTo(saved), other.StatusMessage);
                 Assert.That(other.IsSaved, Is.True);
-                Assert.That(other.ProjectRoot, Is.EqualTo(fake.Folder));
+                Assert.That(other.ProjectPath, Is.EqualTo(fake.File));
+                Assert.That(other.StatusMessage, Does.StartWith("Opened Art.ylp"));
+                var before = other.Document; other.OpenProjectAt(fake.File);
+                Assert.That(other.Document, Is.SameAs(before), "opening the file that is already open and unchanged does nothing");
             }
             finally { Close(other); }
         }
 
+        [Test] public void OpenFileInWindowLoadsTheFile()
+        {
+            var fake = UseFakeDialogs(window); fake.File = NewYlpPath();
+            PaintDot(window, 500, 500); window.SaveProject(true);
+            byte[] saved = DocumentBinary.Write(window.Document);
+            CreateDocumentForTest(window);
+            var opened = TexturePaintWindow.OpenFileInWindow(fake.File);
+            Assert.That(DocumentBinary.Write(opened.Document), Is.EqualTo(saved), opened.StatusMessage);
+            if (opened != window) Close(opened);
+        }
+
         [Test] public void ExternalChangeBlocksNormalSaveButSaveAsStillWorks()
         {
-            var fake = UseFakeDialogs(window); fake.Folder = NewTempPath();
+            var fake = UseFakeDialogs(window); fake.File = NewYlpPath();
             PaintDot(window, 50, 50); window.SaveProject(true);
-            string generation = GenerationStore.Load(fake.Folder).Generation;
-            System.IO.File.AppendAllText(Path.Combine(fake.Folder, "generations", generation, "Color.psd"), "edited elsewhere");
+            var other = new PaintDocument(16, 16, 16); other.AddLayer("x");
+            byte[] outside = YlpArchive.Write(new Dictionary<string, byte[]> { { "document.utpaint", DocumentBinary.Write(other) } });
+            System.IO.File.WriteAllBytes(fake.File, outside); // 外のアプリやバージョン管理が書き換えた
             window.CheckExternalChange();
             Assert.That(window.HasExternalConflict, Is.True);
             PaintDot(window, 900, 900);
             window.SaveProject(false);
-            Assert.That(window.IsSaved, Is.False, "normal save must refuse to replace an externally changed project");
-            Assert.That(GenerationCount(fake.Folder), Is.EqualTo(1));
+            Assert.That(window.IsSaved, Is.False, "normal save must refuse to replace an externally changed file");
+            Assert.That(System.IO.File.ReadAllBytes(fake.File), Is.EqualTo(outside));
             Assert.That(window.StatusMessage, Does.Contain("outside"));
-            fake.Folder = NewTempPath();
+            fake.File = NewYlpPath("Copy.ylp");
             window.SaveProject(true);
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
-            Assert.That(GenerationStore.Load(fake.Folder).Files["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
+            Assert.That(YlpStore.Load(fake.File).Files["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
         }
 
-        [Test] public void NonNormalBlendAsksBeforeSavingNativeOnly()
+        [Test] public void SavingOverAnotherFileKeepsItAsABackupOrAsksWhenBackupsAreOff()
         {
-            var fake = UseFakeDialogs(window); fake.Folder = NewTempPath();
-            PaintDot(window, 70, 70);
-            window.Document.SetLayerBlendMode(window.Document.Layers[0].Id, LayerBlendMode.Multiply);
+            var fake = UseFakeDialogs(window); fake.File = NewYlpPath("Other.ylp");
+            window.SaveProject(true);
+            byte[] otherBytes = System.IO.File.ReadAllBytes(fake.File);
+            CreateDocumentForTest(window); PaintDot(window, 10, 10);
+            window.SaveProject(true); // 同じ名前を選んだ（OS のダイアログが置き換えを確認済み）
+            Assert.That(window.IsSaved, Is.True, window.StatusMessage);
+            Assert.That(System.IO.File.ReadAllBytes(YlpStore.Backups(fake.File).Single()), Is.EqualTo(otherBytes), "the replaced file is kept");
+
+            var personal = PainterSettings.PersonalSettings; personal.backupsToKeep = 0; PainterSettings.Save(null, personal);
+            byte[] current = System.IO.File.ReadAllBytes(fake.File);
+            CreateDocumentForTest(window); PaintDot(window, 20, 20);
             fake.ConfirmAnswer = false;
             window.SaveProject(true);
-            Assert.That(fake.Asked, Does.Contain("Confirm: PSD projection unavailable"));
-            Assert.That(System.IO.File.Exists(Path.Combine(fake.Folder, "current")), Is.False, "declining must not save anything");
+            Assert.That(fake.Asked, Does.Contain("Confirm: Replace file?"));
+            Assert.That(System.IO.File.ReadAllBytes(fake.File), Is.EqualTo(current), "declining leaves the file alone");
             Assert.That(window.IsSaved, Is.False);
-            fake.ConfirmAnswer = true;
+        }
+
+        [Test] public void ExportPsdWritesTheChannelOrExplainsWhyItCannot()
+        {
+            var fake = UseFakeDialogs(window); fake.File = NewTempPath(".psd");
+            PaintDot(window, 70, 70);
+            window.ExportPsd();
+            Assert.That(System.IO.File.Exists(fake.File), Is.True, window.StatusMessage);
+            var psd = PsdCodec.Read(System.IO.File.ReadAllBytes(fake.File));
+            Assert.That(psd.Mode, Is.EqualTo(PsdCompatibilityMode.EditableRaster));
+            Assert.That(PsdBridge.Import(psd).Composite(PaintChannel.Color), Is.EqualTo(window.Document.Composite(PaintChannel.Color)));
+
+            // Fill レイヤーは PSD では表せない。平らにせず、保存先も尋ねずに理由を示す（描画モードなどの対応範囲は PSD のテストが受け持つ）
+            window.Document.AddFillLayer("Fill", new System.Collections.Generic.Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(1, 2, 3) } });
+            fake.File = NewTempPath(".psd"); fake.Asked.Clear();
+            window.ExportPsd();
+            Assert.That(fake.Asked, Is.EqualTo(new[] { "Inform: PSD export unavailable" }), "a fill layer is not flattened, and no file is asked for");
+            Assert.That(System.IO.File.Exists(fake.File), Is.False);
+            // .ylp はそのまま保存でき、開き直しても同じ
+            fake.File = NewYlpPath();
             window.SaveProject(true);
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
-            var files = GenerationStore.Load(fake.Folder).Files;
-            Assert.That(files.ContainsKey("Color.psd"), Is.False, "a Multiply layer must not be flattened into the PSD");
-            Assert.That(System.Text.Encoding.UTF8.GetString(files["save-status.txt"]), Does.StartWith("Native project saved; PSD NOT updated"));
+            Assert.That(YlpStore.Load(fake.File).Files["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
         }
 
         [Test] public void OpeningAnotherProjectAsksAboutUnsavedWorkAndKeepsARecoveryCheckpoint()
         {
-            var fake = UseFakeDialogs(window); fake.Folder = NewTempPath();
-            window.SaveProject(true); // 空のプロジェクトを 1 つ作っておく
+            var fake = UseFakeDialogs(window); fake.File = NewYlpPath();
+            window.SaveProject(true); // 空のファイルを 1 つ作っておく
             PaintDot(window, 400, 400);
             var unsaved = window.Document;
             fake.ConfirmAnswer = false;
@@ -170,10 +228,39 @@ namespace Yozolab.YoluPainter.Tests
             var fake = UseFakeDialogs(window); fake.File = psdPath;
             window.ImportPsd();
             Assert.That(window.Document.Composite(PaintChannel.Color), Is.EqualTo(source.Composite(PaintChannel.Color)), window.StatusMessage);
-            fake.Folder = NewTempPath();
+            fake.File = NewYlpPath();
             window.SaveProject(true);
-            Assert.That(GenerationStore.Load(fake.Folder).Files["imported-original.psd"], Is.EqualTo(psdBytes));
+            Assert.That(YlpStore.Load(fake.File).Files["imported-original.psd"], Is.EqualTo(psdBytes));
             Assert.That(System.IO.File.ReadAllBytes(psdPath), Is.EqualTo(psdBytes), "the imported file itself is never rewritten");
+        }
+
+        static void CreateDocumentForTest(TexturePaintWindow w) { Invoke(w, "CreateDocument", 256); Invoke(w, "BindDocument"); Repaint(w); }
+
+        [Test] public void AnImportedPsdIsSavedAsAYlpNextToItAndExportedBackOnlyWhenConfirmed()
+        {
+            var source = new PaintDocument(32, 32, 16); source.AddLayer("Imported").GetChannel(PaintChannel.Color).SetPixel(3, 4, new Rgba32(40, 50, 60, 255));
+            string folder = NewTempPath(); Directory.CreateDirectory(folder);
+            string psdPath = Path.Combine(folder, "Chara.psd"); byte[] psdBytes = PsdCodec.Write(PsdBridge.Export(source, PaintChannel.Color));
+            System.IO.File.WriteAllBytes(psdPath, psdBytes);
+            var fake = UseFakeDialogs(window); fake.File = psdPath;
+            window.ImportPsd();
+            Assert.That(window.Document.Composite(PaintChannel.Color), Is.EqualTo(source.Composite(PaintChannel.Color)), window.StatusMessage);
+            fake.File = ""; // 保存先を尋ねられたところで取り消す
+            window.SaveProject(true);
+            Assert.That(fake.LastFolder, Is.EqualTo(folder), "the .ylp is suggested next to the PSD");
+            Assert.That(fake.LastName, Is.EqualTo("Chara"));
+            fake.File = Path.Combine(folder, "Chara.ylp");
+            window.SaveProject(true);
+            Assert.That(YlpStore.Load(fake.File).Files["imported-original.psd"], Is.EqualTo(psdBytes));
+            // PSD として書き出す。取り込み元を上書きしそうなら確かめる
+            fake.File = psdPath; fake.ConfirmAnswer = false; fake.Asked.Clear();
+            window.ExportPsd();
+            Assert.That(fake.Asked, Does.Contain("Confirm: Overwrite the imported PSD?"));
+            Assert.That(fake.LastName, Is.EqualTo("Chara"), "the PSD is named after the document");
+            Assert.That(System.IO.File.ReadAllBytes(psdPath), Is.EqualTo(psdBytes), "declining leaves the PSD alone");
+            fake.File = Path.Combine(folder, "Chara_edit.psd");
+            window.ExportPsd();
+            Assert.That(PsdCodec.Read(System.IO.File.ReadAllBytes(fake.File)).Mode, Is.EqualTo(PsdCompatibilityMode.EditableRaster), window.StatusMessage);
         }
 
         [Test] public void ImportingAProtectedPsdExplainsAndChangesNothing()

@@ -39,6 +39,8 @@ namespace Yozolab.YoluPainter.Editor
             /// <summary>ドキュメントのメモリ予算（MiB）: Undo 履歴、レイヤーの画素の合計、描いている 1 ストロークの巻き戻し用。</summary>
             public int undoBudgetMiB = 64, sourceBudgetMiB = 256, strokeBudgetMiB = 64;
             public string brushImportFolder = "";
+            /// <summary>.ylp を上書き保存するとき退避した直前の版をいくつ残すか。-1 ですべて、0 で退避しない。</summary>
+            public int backupsToKeep = -1;
         }
 
         public static readonly int[] Resolutions = { 256, 512, 1024, 2048, 4096 };
@@ -91,6 +93,8 @@ namespace Yozolab.YoluPainter.Editor
         public static long SourceBudgetBytes { get { Load(); return personal.sourceBudgetMiB * 1024L * 1024; } }
         public static long StrokeBudgetBytes { get { Load(); return personal.strokeBudgetMiB * 1024L * 1024; } }
         public static string BrushImportFolder { get { Load(); return personal.brushImportFolder; } }
+        public static int BackupsToKeep { get { Load(); return personal.backupsToKeep; } }
+        public const int MaxBackups = 1000;
 
         public static void Reload() { shared = null; personal = null; Changed?.Invoke(); }
 
@@ -150,6 +154,7 @@ namespace Yozolab.YoluPainter.Editor
             Range(ref p.undoBudgetMiB, 0, MaxUndoMiB, defaultsPersonal.undoBudgetMiB, "Undo budget (MiB)");
             Range(ref p.sourceBudgetMiB, MinSourceMiB, MaxSourceMiB, defaultsPersonal.sourceBudgetMiB, "Layer pixel budget (MiB)");
             Range(ref p.strokeBudgetMiB, MinStrokeMiB, MaxStrokeMiB, defaultsPersonal.strokeBudgetMiB, "Stroke budget (MiB)");
+            Range(ref p.backupsToKeep, -1, MaxBackups, defaultsPersonal.backupsToKeep, "Backups to keep");
             if (p.brushImportFolder == null && fix) p.brushImportFolder = "";
             if (s.projectBrushFolder == null && fix) s.projectBrushFolder = "";
             if (p.brushFolder == null && fix) p.brushFolder = "";
