@@ -4,12 +4,26 @@ using UnityEngine;
 
 namespace Yozolab.YoluPainter.Editor
 {
-    /// <summary>キーボードのショートカット。</summary>
-    public sealed partial class TexturePaintWindow
+    /// <summary>キーボードのショートカット。Unity のショートカットとの関係は ShortcutGuard（この窓が使ったキーと文字の入力中を知らせる）。</summary>
+    public sealed partial class TexturePaintWindow : IPainterShortcutScope
     {
+        bool editingText; KeyCode tookKey; EventModifiers tookModifiers;
+
+        bool IPainterShortcutScope.EditingText => editingText;
+        bool IPainterShortcutScope.TookKey(KeyCode key, EventModifiers modifiers)
+        {
+            bool took = tookKey != KeyCode.None && key == tookKey && Mods(modifiers) == Mods(tookModifiers);
+            tookKey = KeyCode.None; return took;
+        }
+        /// <summary>キーの比べ方: Ctrl/Cmd・Shift・Alt だけを見る（CapsLock・数字キーパッド・Fn の印は Unity の実装で付いたり付かなかったりする）。</summary>
+        static EventModifiers Mods(EventModifiers m) => m & (EventModifiers.Control | EventModifiers.Command | EventModifiers.Shift | EventModifiers.Alt);
+        void NoteTookKey(Event e) { tookKey = e.keyCode; tookModifiers = e.modifiers; }
+
         void HandleKeys(Event e)
         {
             if(e.type!=EventType.KeyDown)return;
+            // キーが届いた時点で文字の欄にフォーカスがあったか（Enter で確定して外れる前の状態を見る）
+            editingText=GUIUtility.keyboardControl!=0; tookKey=KeyCode.None;
             if(e.keyCode==KeyCode.Escape && toolDragging){CancelToolDrag();GUIUtility.hotControl=0;e.Use();Repaint();}
             else if(e.keyCode==KeyCode.Escape && stroke!=null){FinishStroke(false);e.Use();}
             else if(stroke==null && !toolDragging && tool==PaintTool.Move && GUIUtility.keyboardControl==0 && !(e.control||e.command) && ArrowDelta(e.keyCode)!=Vector2Int.zero)
@@ -19,10 +33,12 @@ namespace Yozolab.YoluPainter.Editor
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.D){document.ClearSelection();e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.shift && e.keyCode==KeyCode.I){if(document.Selection!=null)document.SetSelection(document.Selection.Invert());e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.Z){if(e.shift)document.Redo();else document.Undo();e.Use();Repaint();}
+            else if(stroke==null && (e.control||e.command) && !e.shift && e.keyCode==KeyCode.Y){document.Redo();e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.S){SaveProject(e.shift);e.Use();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.O){OpenProject();e.Use();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.N){NewProjectDialog();e.Use();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.Alpha0){canvasZoom=1;canvasPan=Vector2.zero;e.Use();Repaint();}
+            if(e.type==EventType.Used)NoteTookKey(e);
         }
         static Vector2Int ArrowDelta(KeyCode key)=>key==KeyCode.LeftArrow?Vector2Int.left:key==KeyCode.RightArrow?Vector2Int.right:key==KeyCode.UpArrow?Vector2Int.up:key==KeyCode.DownArrow?Vector2Int.down:Vector2Int.zero;
 
@@ -50,7 +66,7 @@ namespace Yozolab.YoluPainter.Editor
                 case KeyCode.F3: View = ViewMode.Split; break;
                 default: return false;
             }
-            e.Use(); Repaint(); return true;
+            NoteTookKey(e); e.Use(); Repaint(); return true;
         }
     }
 }

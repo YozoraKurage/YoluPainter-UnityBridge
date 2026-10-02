@@ -65,7 +65,7 @@ namespace Yozolab.YoluPainter.Editor
         void EditMenu(GenericMenu m)
         {
             Item(m, "Undo", () => document.Undo(), document.CanUndo, keys: "Ctrl+Z");
-            Item(m, "Redo", () => document.Redo(), document.CanRedo, keys: "Ctrl+Shift+Z");
+            Item(m, "Redo", () => document.Redo(), document.CanRedo, keys: "Ctrl+Shift+Z / Ctrl+Y");
             m.AddSeparator("");
             Item(m, "Free Transform", () => Tool = PaintTool.Move, keys: "V");
             Item(m, "Flip Horizontal", () => TransformSelected(0, 0, 0, -1, 1, L.Tr("Flipped horizontally.")));
@@ -166,7 +166,7 @@ namespace Yozolab.YoluPainter.Editor
             Item(m, "Implementation Limits", () => Dialogs.Inform(L.Tr("Implementation Limits"), L.Tr(LimitsHelp)));
         }
 
-        const string ShortcutHelp = "Tools: B brush · E eraser · G fill · Shift+G gradient · M rectangle select · Shift+M ellipse select · L lasso · W magic wand · V move · P path · I eyedropper\n[ / ] brush size · X swap colors · D default colors\nCtrl+Z undo · Ctrl+Shift+Z redo · Ctrl+S save · Ctrl+Shift+S save as · Ctrl+O open · Ctrl+N new\nCtrl+A select all · Ctrl+D deselect · Ctrl+Shift+I inverse\nF1 2D · F2 3D · F3 2D + 3D · Ctrl+0 fit · wheel zoom · middle drag pan\n3D: Alt or right drag orbits, middle drag pans, wheel zooms\nEsc cancels a stroke or a drag";
+        const string ShortcutHelp = "Tools: B brush · E eraser · G fill · Shift+G gradient · M rectangle select · Shift+M ellipse select · L lasso · W magic wand · V move · P path · I eyedropper\n[ / ] brush size · X swap colors · D default colors\nCtrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo · Ctrl+S save · Ctrl+Shift+S save as · Ctrl+O open · Ctrl+N new\nCtrl+A select all · Ctrl+D deselect · Ctrl+Shift+I inverse\nF1 2D · F2 3D · F3 2D + 3D · Ctrl+0 fit · wheel zoom · middle drag pan\n3D: Alt or right drag orbits, middle drag pans, wheel zooms\nEsc cancels a stroke or a drag\nBy default, Unity's own shortcuts do nothing while this window has focus (Project Settings ▸ YoluPainter ▸ Unity shortcuts while painting)";
         const string LimitsHelp = "Prototype: the CPU paints the source and the GPU composites tiles. Readable static and skinned meshes (posed on a copy). One channel is painted at a time. .ylp saves; PSD with 8-bit RGB layers, groups, masks, fills and three adjustment types. Generators and anchors are not finished, and the 3D preview does not reproduce lilToon exactly. See Documentation~/STATUS.md in the package.";
     }
 }

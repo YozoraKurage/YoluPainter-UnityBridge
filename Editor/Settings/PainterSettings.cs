@@ -47,6 +47,8 @@ namespace Yozolab.YoluPainter.Editor
             public string brushImportFolder = "";
             /// <summary>.ylp を上書き保存するとき退避した直前の版をいくつ残すか。-1 ですべて、0 で退避しない。</summary>
             public int backupsToKeep = -1;
+            /// <summary>YoluPainter の窓にフォーカスがあるとき、Unity と他の拡張のショートカットを止めるか（ShortcutGuard）。</summary>
+            public ShortcutGuardMode shortcutGuard = ShortcutGuardMode.BlockAll;
         }
 
         public static readonly int[] Resolutions = { 256, 512, 1024, 2048, 4096 };
@@ -130,6 +132,7 @@ namespace Yozolab.YoluPainter.Editor
         public static long GpuCacheBytes { get { Load(); return Bytes(personal.gpuCacheMiB, Budget.GpuCache); } }
         public static string BrushImportFolder { get { Load(); return personal.brushImportFolder; } }
         public static int BackupsToKeep { get { Load(); return personal.backupsToKeep; } }
+        public static ShortcutGuardMode ShortcutGuard { get { Load(); return personal.shortcutGuard; } }
         public const int MaxBackups = 1000;
 
         public static void Reload() { shared = null; personal = null; Changed?.Invoke(); }
@@ -194,6 +197,11 @@ namespace Yozolab.YoluPainter.Editor
             Range(ref p.minUndoSteps, 0, MaxMinUndoSteps, defaultsPersonal.minUndoSteps, "Minimum undo steps");
             Budget(ref p.gpuCacheMiB, 0, MaxGpuCacheMiB, "GPU cache (MiB)");
             Range(ref p.backupsToKeep, -1, MaxBackups, defaultsPersonal.backupsToKeep, "Backups to keep");
+            if (!Enum.IsDefined(typeof(ShortcutGuardMode), p.shortcutGuard))
+            {
+                problems.Add("Unity shortcuts while YoluPainter has focus " + (int)p.shortcutGuard + " is not a known choice.");
+                if (fix) p.shortcutGuard = defaultsPersonal.shortcutGuard;
+            }
             if (p.brushImportFolder == null && fix) p.brushImportFolder = "";
             if (s.projectBrushFolder == null && fix) s.projectBrushFolder = "";
             if (p.brushFolder == null && fix) p.brushFolder = "";

@@ -58,7 +58,7 @@ namespace Yozolab.YoluPainter.Editor
     /// マテリアルのスロットの名前と読み込みの注意を出す（スロットの番号がウィンドウと必ず一致する）。元のモデルは Instantiate しない。
     /// 決めたら accept を呼んで閉じる。モーダルにはしない（テストと、ほかのウィンドウの操作を止めないため）。
     /// </summary>
-    internal sealed class NewProjectWindow : EditorWindow
+    internal sealed class NewProjectWindow : EditorWindow, IPainterShortcutScope
     {
         internal NewProjectSettings Settings = new NewProjectSettings();
         /// <summary>開いているプロジェクトの設定を変える（解像度は変えられない）。</summary>
@@ -93,9 +93,14 @@ namespace Yozolab.YoluPainter.Editor
             Settings.MaterialSlot = Mathf.Clamp(Settings.MaterialSlot, 0, Mathf.Max(0, preview.MaterialSlotCount - 1));
         }
 
+        bool editingText;
+        bool IPainterShortcutScope.EditingText => editingText;
+        bool IPainterShortcutScope.TookKey(KeyCode key, EventModifiers modifiers) => false;
+
         void OnGUI()
         {
             var e = Event.current;
+            if (e.type == EventType.KeyDown) editingText = GUIUtility.keyboardControl != 0;
             if (e.type == EventType.MouseMove) Repaint();
             if (e.type == EventType.KeyDown && e.keyCode == KeyCode.Escape) { Close(); e.Use(); return; }
             if (e.type == EventType.KeyDown && (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter) && GUIUtility.keyboardControl == 0) { Accept(); e.Use(); return; }
