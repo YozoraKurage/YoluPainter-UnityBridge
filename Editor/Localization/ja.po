@@ -639,6 +639,24 @@ msgstr "ツールのアイコンを変更しました。ツールを右クリッ
 msgid "The tool icon is back to the bundled one."
 msgstr "ツールのアイコンを元に戻しました。"
 
+msgid "3D Pick"
+msgstr "3D での選択"
+
+msgid "Modify Selection"
+msgstr "選択範囲を変更"
+
+msgid "Transform"
+msgstr "変形"
+
+msgid "Mesh Maps"
+msgstr "メッシュマップ"
+
+msgid "Pose"
+msgstr "ポーズ"
+
+msgid "not converted yet; drawn with Unity's controls"
+msgstr "移行前のため Unity の部品で表示"
+
 # ---- blend modes (msgctxt "blend mode") ----
 
 msgctxt "blend mode"

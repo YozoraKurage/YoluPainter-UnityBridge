@@ -11,13 +11,30 @@ namespace Yozolab.YoluPainter.Editor
     /// ある項目のキーは gettext と同じく「文脈 + \u0004 + msgid」。複数形は使わないので読まない（あれば読み飛ばさずに失敗させる）。</summary>
     internal static class PoCatalog
     {
-        /// <summary>Editor/Localization/&lt;locale&gt;.po の表。無ければ空。</summary>
+        /// <summary>Editor/Localization/&lt;locale&gt;.po と、Editor/Localization/&lt;locale&gt;/*.po（画面の部分ごとに分けた表。名前の順）を
+        /// まとめた表。同じキーが二つの表にあれば読み込みを断る（どちらが効くか分からなくなるので）。無ければ空。</summary>
         public static Dictionary<string, string> Load(string locale)
         {
-            string folder = Folder();
-            string path = folder == null ? null : Path.Combine(folder, locale + ".po");
-            if (path == null || !File.Exists(path)) return new Dictionary<string, string>();
-            return Parse(File.ReadAllText(path, Encoding.UTF8), path);
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var path in Files(locale))
+                foreach (var entry in Parse(File.ReadAllText(path, Encoding.UTF8), path))
+                {
+                    if (result.ContainsKey(entry.Key)) throw new InvalidDataException(Path.GetFileName(path) + ": \"" + entry.Key.Replace("\u0004", " | ") + "\" is already in another " + locale + " catalog.");
+                    result.Add(entry.Key, entry.Value);
+                }
+            return result;
+        }
+
+        /// <summary>ある言語の .po のファイル（無ければ空）。</summary>
+        public static List<string> Files(string locale)
+        {
+            var files = new List<string>(); string folder = Folder();
+            if (folder == null) return files;
+            string main = Path.Combine(folder, locale + ".po");
+            if (File.Exists(main)) files.Add(main);
+            string parts = Path.Combine(folder, locale);
+            if (Directory.Exists(parts)) { var more = Directory.GetFiles(parts, "*.po"); Array.Sort(more, StringComparer.Ordinal); files.AddRange(more); }
+            return files;
         }
 
         /// <summary>.po のあるフォルダの絶対パス（見つからなければ null）。</summary>

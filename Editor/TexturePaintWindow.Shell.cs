@@ -21,7 +21,7 @@ namespace Yozolab.YoluPainter.Editor
         [SerializeField] ViewMode viewMode = ViewMode.Split;
         [SerializeField] bool dockTextureSetOpen = true, dockLayersOpen = true, dockPropertiesOpen = true;
         Rect menuRect, optionsRect, toolStripRect, viewAreaRect, dockRect, statusRect;
-        Vector2 propertiesScroll;
+
         Guid renamingLayer; double lastLayerClick; Guid lastLayerClicked;
         /// <summary>テストとオフスクリーンの描画用: position の代わりに使う大きさ。</summary>
         internal Rect? LayoutOverride;

@@ -199,68 +199,6 @@ namespace Yozolab.YoluPainter.Editor
             DrawShell();
             HandleCanvasInput(e);
         }
-        void DrawFill(PaintLayer active)
-        {
-            GUILayout.Space(6);
-            GUILayout.Label("Fill value ("+channel+")",EditorStyles.miniBoldLabel);
-            if(active.FillValues.TryGetValue(channel,out var value))
-            {
-                Rgba32 next;
-                if(channel==PaintChannel.Roughness||channel==PaintChannel.Metallic||channel==PaintChannel.Height)
-                {byte v=(byte)Mathf.RoundToInt(EditorGUILayout.Slider("Value",value.R/255f,0,1)*255);next=new Rgba32(v,v,v,value.A);}
-                else{var c=EditorGUILayout.ColorField("Value",new Color32(value.R,value.G,value.B,value.A));var c32=(Color32)c;next=new Rgba32(c32.r,c32.g,c32.b,c32.a);}
-                if(next!=value) document.SetFillValue(active.Id,channel,next,coalesce:true);
-                if(GUILayout.Button("Remove value for "+channel)) document.SetFillValue(active.Id,channel,null);
-            }
-            else if(GUILayout.Button("Add value for "+channel)) document.SetFillValue(active.Id,channel,GetBrush().Color);
-            EditorGUILayout.HelpBox("A fill covers the whole canvas. Paint its mask to choose where it shows.",MessageType.None);
-        }
-        void DrawAdjustment(PaintLayer active)
-        {
-            GUILayout.Space(6);
-            var a=active.Adjustment;
-            GUILayout.Label("Adjustment: "+a.Type+" (applies to the layers below)",EditorStyles.miniBoldLabel);
-            AdjustmentSettings next=a;
-            switch(a.Type)
-            {
-                case AdjustmentType.Levels:
-                {
-                    float ib=EditorGUILayout.Slider("Input black",(float)a.InputBlack,0,(float)a.InputWhite-.004f);
-                    float iw=EditorGUILayout.Slider("Input white",(float)a.InputWhite,ib+.004f,1);
-                    float gamma=EditorGUILayout.Slider("Gamma",(float)a.Gamma,.1f,9.99f);
-                    float ob=EditorGUILayout.Slider("Output black",(float)a.OutputBlack,0,1);
-                    float ow=EditorGUILayout.Slider("Output white",(float)a.OutputWhite,0,1);
-                    next=AdjustmentSettings.Levels(ib,iw,gamma,ob,ow); break;
-                }
-                case AdjustmentType.HueSaturation:
-                {
-                    float hue=EditorGUILayout.Slider("Hue",(float)a.Hue,-180,180);
-                    float sat=EditorGUILayout.Slider("Saturation",(float)a.Saturation,-1,1);
-                    float light=EditorGUILayout.Slider("Lightness",(float)a.Lightness,-1,1);
-                    next=AdjustmentSettings.HueSaturation(hue,sat,light); break;
-                }
-                default: EditorGUILayout.LabelField("Inverts the colour of everything below."); break;
-            }
-            if(!next.Equals(a)) TryAction(()=>document.SetAdjustment(active.Id,next,coalesce:true));
-            if(!a.AppliesTo(channel)) EditorGUILayout.HelpBox(a.Type+" does not apply to the "+channel+" channel.",MessageType.None);
-        }
-        bool EditingMask => editMask && document.Layers.Any(l => l.Id == selectedLayer && l.Mask != null);
-        void DrawMask(PaintLayer active)
-        {
-            GUILayout.Space(6);
-            GUILayout.Label("Mask (shared by all channels)",EditorStyles.miniBoldLabel);
-            var mask=active.Mask;
-            if(mask==null)
-            {
-                if(GUILayout.Button("Add mask")){document.AddLayerMask(active.Id);editMask=true;}
-                return;
-            }
-            editMask=GUILayout.Toggle(editMask,"Paint on mask (paint hides, erase reveals)");
-            bool maskEnabled=EditorGUILayout.Toggle("Mask enabled",mask.Enabled);if(maskEnabled!=mask.Enabled)document.SetLayerMaskEnabled(active.Id,maskEnabled);
-            bool inverted=EditorGUILayout.Toggle("Invert mask",mask.Inverted);if(inverted!=mask.Inverted)document.SetLayerMaskInverted(active.Id,inverted);
-            float density=EditorGUILayout.Slider("Mask density",(float)mask.Density,0,1);if(Math.Abs(density-mask.Density)>.00001)document.SetLayerMaskDensity(active.Id,density,coalesce:true);
-            if(GUILayout.Button("Remove mask")){document.RemoveLayerMask(active.Id);editMask=false;}
-        }
         Rect ImageRect()
         {
             float fit=Mathf.Min(canvasRect.width/document.Width,canvasRect.height/document.Height)*canvasZoom;
@@ -576,41 +514,6 @@ namespace Yozolab.YoluPainter.Editor
             }
             document.SetSelection(next);
             message=document.Selection==null?kind+": nothing is left selected.":kind==SelectionModifyKind.Sharpen?"Selection sharpened.":kind+" by "+r+" px.";
-        }
-        void DrawSelectionModify()
-        {
-            using(new EditorGUI.DisabledScope(document.Selection==null))
-            {
-                GUILayout.BeginHorizontal();
-                selectionRadius=Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Modify (px)","Radius for Grow, Shrink, Border and Feather (as GIMP's Select menu)"),selectionRadius),0,SelectionMask.MaxModifyRadius);
-                selectionEdgeLock=GUILayout.Toggle(selectionEdgeLock,new GUIContent("Edge lock","Selected areas continue outside the canvas (Shrink, Border and Feather do not pull away from the canvas edge)"),EditorStyles.miniButton,GUILayout.Width(70));
-                GUILayout.EndHorizontal();
-                GUILayout.BeginHorizontal();
-                if(GUILayout.Button(new GUIContent("Grow","Largest amount within a circle of the radius"),EditorStyles.miniButtonLeft))TryAction(()=>ModifySelection(SelectionModifyKind.Grow));
-                if(GUILayout.Button(new GUIContent("Shrink","Smallest amount within a circle of the radius"),EditorStyles.miniButtonMid))TryAction(()=>ModifySelection(SelectionModifyKind.Shrink));
-                if(GUILayout.Button(new GUIContent("Border","A band around the edge: Grow minus Shrink"),EditorStyles.miniButtonMid))TryAction(()=>ModifySelection(SelectionModifyKind.Border));
-                if(GUILayout.Button(new GUIContent("Feather","Soften the edge (Gaussian blur, σ = radius / 3.5)"),EditorStyles.miniButtonMid))TryAction(()=>ModifySelection(SelectionModifyKind.Feather));
-                if(GUILayout.Button(new GUIContent("Sharpen","Hard edge: at least half selected becomes fully selected"),EditorStyles.miniButtonRight))TryAction(()=>ModifySelection(SelectionModifyKind.Sharpen));
-                GUILayout.EndHorizontal();
-            }
-        }
-        void DrawMoveSettings()
-        {
-            EditorGUILayout.LabelField("Drag or arrow keys (Shift: 10 px) move the layer and its mask, or the selected pixels with the selection.",EditorStyles.wordWrappedMiniLabel);
-            GUILayout.BeginHorizontal();
-            if(GUILayout.Button(new GUIContent("Flip H","Mirror left-right about the centre"),EditorStyles.miniButtonLeft))TryAction(()=>TransformSelected(0,0,0,-1,1,"Flipped horizontally."));
-            if(GUILayout.Button(new GUIContent("Flip V","Mirror top-bottom about the centre"),EditorStyles.miniButtonMid))TryAction(()=>TransformSelected(0,0,0,1,-1,"Flipped vertically."));
-            if(GUILayout.Button(new GUIContent("+90°","Rotate 90° counter-clockwise"),EditorStyles.miniButtonMid))TryAction(()=>TransformSelected(0,0,90,1,1,"Rotated 90° counter-clockwise."));
-            if(GUILayout.Button(new GUIContent("-90°","Rotate 90° clockwise"),EditorStyles.miniButtonRight))TryAction(()=>TransformSelected(0,0,-90,1,1,"Rotated 90° clockwise."));
-            GUILayout.EndHorizontal();
-            moveAngle=EditorGUILayout.FloatField(new GUIContent("Rotate (°)","Counter-clockwise, about the centre of what moves"),moveAngle);
-            moveScale=EditorGUILayout.Vector2Field(new GUIContent("Scale (%)","Negative flips"),moveScale);
-            moveOffset=EditorGUILayout.Vector2Field("Offset (px)",moveOffset);
-            moveResampling=(Resampling)EditorGUILayout.EnumPopup(new GUIContent("Resampling","Bilinear smooths, Nearest keeps hard pixels. Whole-pixel moves, 90° turns and flips copy pixels exactly either way."),moveResampling);
-            GUILayout.BeginHorizontal();
-            if(GUILayout.Button("Apply"))TryAction(ApplyNumericTransform);
-            if(GUILayout.Button("Reset",GUILayout.Width(60))){moveAngle=0;moveScale=new Vector2(100,100);moveOffset=Vector2.zero;}
-            GUILayout.EndHorizontal();
         }
         void HandleCanvasInput(Event e)
         {

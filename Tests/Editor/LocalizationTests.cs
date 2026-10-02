@@ -65,10 +65,9 @@ namespace Yozolab.YoluPainter.Tests
 
         [Test] public void TheJapaneseCatalogHasNoDuplicateEntries()
         {
-            string path = Path.Combine(PoCatalog.Folder(), "ja.po");
-            // 原文は続きの行まで足して比べる（複数行の原文はどれも msgid "" で始まる）
+            // 原文は続きの行まで足して比べる（複数行の原文はどれも msgid "" で始まる）。分けた表どうしの重複も見る
             var keys = new List<string>(); string context = null, id = null;
-            foreach (var line in File.ReadAllLines(path))
+            foreach (var line in PoCatalog.Files("ja").SelectMany(File.ReadAllLines))
             {
                 if (line.StartsWith("msgctxt ", StringComparison.Ordinal)) context = line.Substring(8);
                 else if (line.StartsWith("msgid ", StringComparison.Ordinal)) id = line.Substring(6);
