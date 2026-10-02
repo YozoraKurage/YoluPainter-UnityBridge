@@ -63,6 +63,7 @@ namespace Yozolab.YoluPainter.Core
 
     public sealed class BrushSettings
     {
+        public const double MaxStrokeAssist = 10000;
         public double Radius = 16;
         public double Hardness = 0.8;
         /// <summary>Stamp interval as fraction of the nominal diameter. Independent of input packet size and pressure.</summary>
@@ -100,6 +101,15 @@ namespace Yozolab.YoluPainter.Core
         public double TextureDepth;
         /// <summary>Canvas pixels per texture pixel (2 = the texture is drawn twice as large).</summary>
         public double TextureScale = 1;
+        // --- Stroke assistance (canvas pixels; 0 = off). ---
+        /// <summary>Stabilizer string length: the brush follows the pointer only once it is farther than this, staying this far
+        /// behind (Krita's / Lazy Nezumi's "pulled string"). Jitter shorter than the string is smoothed out; on commit the line
+        /// is drawn on to the last input point. Independent of the input rate.</summary>
+        public double Stabilizer;
+        /// <summary>Taper in / out (入り・抜き): the brush size grows from 0 over the first TaperIn pixels of stroke length and
+        /// shrinks to 0 over the last TaperOut pixels. Dabs within TaperOut of the latest point wait until the stroke continues
+        /// or ends (the end is only known then).</summary>
+        public double TaperIn, TaperOut;
 
         public BrushSettings Clone()
         {
@@ -107,7 +117,8 @@ namespace Yozolab.YoluPainter.Core
                 Flow = Flow, Color = Color, PressureSize = PressureSize, PressureOpacity = PressureOpacity, PressureFlow = PressureFlow, Erase = Erase,
                 Tip = Tip, Tips = Tips == null ? null : (BrushTip[])Tips.Clone(), TipSelection = TipSelection, Angle = Angle, Roundness = Roundness, FollowDirection = FollowDirection,
                 SizeJitter = SizeJitter, AngleJitter = AngleJitter, RoundnessJitter = RoundnessJitter, OpacityJitter = OpacityJitter, FlowJitter = FlowJitter,
-                Scatter = Scatter, Count = Count, Seed = Seed, Texture = Texture, TextureDepth = TextureDepth, TextureScale = TextureScale };
+                Scatter = Scatter, Count = Count, Seed = Seed, Texture = Texture, TextureDepth = TextureDepth, TextureScale = TextureScale,
+                Stabilizer = Stabilizer, TaperIn = TaperIn, TaperOut = TaperOut };
         }
         public void Validate()
         {
@@ -120,6 +131,8 @@ namespace Yozolab.YoluPainter.Core
             if (Flow < 0 || Flow > 1) throw new ArgumentOutOfRangeException(nameof(Flow));
             foreach (double v in new[] { Angle, Roundness, SizeJitter, AngleJitter, RoundnessJitter, OpacityJitter, FlowJitter, Scatter, TextureDepth, TextureScale })
                 MathUtil.RequireFinite(v, "brush dynamics");
+            foreach (double v in new[] { Stabilizer, TaperIn, TaperOut })
+            { MathUtil.RequireFinite(v, "stroke assistance"); if (v < 0 || v > MaxStrokeAssist) throw new ArgumentOutOfRangeException("stroke assistance", "Stabilizer and tapers must be 0.." + MaxStrokeAssist + " pixels."); }
             if (Roundness < 0.01 || Roundness > 1) throw new ArgumentOutOfRangeException(nameof(Roundness));
             foreach (double v in new[] { SizeJitter, AngleJitter, RoundnessJitter, OpacityJitter, FlowJitter, TextureDepth })
                 if (v < 0 || v > 1) throw new ArgumentOutOfRangeException("jitter/texture depth", "Must be 0..1.");

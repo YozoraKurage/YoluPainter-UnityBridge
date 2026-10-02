@@ -29,6 +29,8 @@ namespace Yozolab.YoluPainter.Editor
             public float angle, roundness = 1, sizeJitter, angleJitter, roundnessJitter, opacityJitter, flowJitter, scatter, textureDepth, textureScale = 1;
             public int count = 1;
             public bool followDirection, randomSeedPerStroke = true;
+            // 手ぶれ補正と入り抜き（キャンバスの画素、0 で無し）。無い版のファイルは 0 として読む
+            public float stabilizer, taperIn, taperOut;
         }
         [Serializable] sealed class ViewState { public string modelAssetGuid; public int materialSlot; public int selectedChannel; }
         [SerializeField] string recoveryRoot;
@@ -296,6 +298,7 @@ namespace Yozolab.YoluPainter.Editor
                 brush.pressureOpacity=EditorGUILayout.Toggle("Pressure opacity",brush.pressureOpacity);
                 brush.pressureFlow=EditorGUILayout.Toggle("Pressure flow",brush.pressureFlow);
                 brush.pressureCurve=EditorGUILayout.CurveField("Pressure curve",brush.pressureCurve);
+                DrawStrokeAssist();
                 showDynamics=EditorGUILayout.Foldout(showDynamics,"Tip & dynamics",true);
                 if(showDynamics)
                 {
@@ -875,16 +878,17 @@ namespace Yozolab.YoluPainter.Editor
             Texture=BrushTips.Resolve(brush.textureId), Angle=brush.angle, Roundness=brush.roundness, FollowDirection=brush.followDirection,
             SizeJitter=brush.sizeJitter, AngleJitter=brush.angleJitter, RoundnessJitter=brush.roundnessJitter, OpacityJitter=brush.opacityJitter, FlowJitter=brush.flowJitter,
             Scatter=brush.scatter, Count=brush.count, TextureDepth=brush.textureDepth, TextureScale=brush.textureScale,
-            Seed=brush.randomSeedPerStroke ? seeds.Next() : 0 };
+            Seed=brush.randomSeedPerStroke ? seeds.Next() : 0, Stabilizer=brush.stabilizer, TaperIn=brush.taperIn, TaperOut=brush.taperOut };
         /// <summary>プリセットの設定を今のブラシに写す。色は今のまま残す（チャンネルの値として選んだものだから）。</summary>
         internal void ApplyPreset(Core.BrushPreset preset)
         {
-            var s=preset.CreateSettings(); var color=brush.color; var curve=brush.pressureCurve;
+            var s=preset.CreateSettings(); var color=brush.color; var curve=brush.pressureCurve; var assist=(brush.stabilizer,brush.taperIn,brush.taperOut);
             brush=new BrushState{ presetId=preset.Id, presetName=preset.Name, radius=(float)s.Radius, hardness=(float)s.Hardness, spacing=(float)s.Spacing, opacity=(float)s.Opacity, flow=(float)s.Flow,
                 color=color, pressureCurve=curve, pressureSize=s.PressureSize, pressureOpacity=s.PressureOpacity, pressureFlow=s.PressureFlow, erase=s.Erase,
                 tipId=BrushTips.IdOf(s), textureId=BrushTips.IdOf(s.Texture), angle=(float)s.Angle, roundness=(float)s.Roundness, followDirection=s.FollowDirection,
                 sizeJitter=(float)s.SizeJitter, angleJitter=(float)s.AngleJitter, roundnessJitter=(float)s.RoundnessJitter, opacityJitter=(float)s.OpacityJitter, flowJitter=(float)s.FlowJitter,
-                scatter=(float)s.Scatter, count=s.Count, textureDepth=(float)s.TextureDepth, textureScale=(float)s.TextureScale };
+                scatter=(float)s.Scatter, count=s.Count, textureDepth=(float)s.TextureDepth, textureScale=(float)s.TextureScale,
+                stabilizer=assist.Item1, taperIn=assist.Item2, taperOut=assist.Item3 }; // 補正と入り抜きは描き手の設定として残す
         }
         void PaintAt(Vector2 pointer,float pressure)
         {

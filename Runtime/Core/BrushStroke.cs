@@ -23,6 +23,11 @@ namespace Yozolab.YoluPainter.Core
         private BrushSample previous;
         private double distanceSinceStamp;
         private double direction; // radians of the current input segment, for FollowDirection
+        // 手ぶれ補正: 糸の先（実際に描く点）。入り抜き: ここまでの線の長さと、抜きのために待たせているダブ
+        private bool hasPen; private BrushSample pen, lastInput;
+        private double strokeLength;
+        private struct PendingDab { public double X, Y, Pressure, Arc, Direction; }
+        private readonly Queue<PendingDab> pending = new Queue<PendingDab>();
         private readonly Random random;
         private int tipIndex; // next tip for TipSelection.Sequential
         private long rollbackBytes;
@@ -41,35 +46,81 @@ namespace Yozolab.YoluPainter.Core
             CheckOpen();
             try
             {
-                if (hasSample && sample.Time < previous.Time) throw new ArgumentException("Input time must be nondecreasing.", nameof(sample));
+                if (hasPen && sample.Time < lastInput.Time) throw new ArgumentException("Input time must be nondecreasing.", nameof(sample));
                 if (Math.Abs(sample.X) > 10000000 || Math.Abs(sample.Y) > 10000000)
                     throw new ArgumentOutOfRangeException(nameof(sample), "Sample exceeds the guarded pixel-space range.");
-                if (!hasSample) { Stamp(sample.X, sample.Y, sample.Pressure); hasSample = true; }
-                else
-                {
-                    double dx = sample.X - previous.X, dy = sample.Y - previous.Y;
-                    double length = Math.Sqrt(dx * dx + dy * dy);
-                    if (length > 0) direction = Math.Atan2(dy, dx);
-                    double spacing = Math.Max(0.01, settings.Radius * 2 * settings.Spacing);
-                    if (length / spacing > 1000000) throw new InvalidOperationException("Input segment exceeds the one-million-stamp safety limit; split or cancel the stroke.");
-                    if (length > 0)
-                    {
-                        double position = spacing - distanceSinceStamp;
-                        // Tolerance only absorbs roundoff at a sample boundary; the stored accumulator is clamped below.
-                        while (position <= length + 1e-9)
-                        {
-                            double t = Math.Min(1, position / length);
-                            Stamp(previous.X + dx * t, previous.Y + dy * t, previous.Pressure + (sample.Pressure - previous.Pressure) * t);
-                            position += spacing;
-                        }
-                        distanceSinceStamp = length - (position - spacing);
-                        if (distanceSinceStamp < 1e-9) distanceSinceStamp = 0;
-                        if (distanceSinceStamp >= spacing) distanceSinceStamp %= spacing;
-                    }
-                }
-                previous = sample; SampleCount++;
+                lastInput = sample;
+                if (settings.Stabilizer <= 0 || !hasPen) { hasPen = true; pen = sample; AddPathPoint(sample); return; }
+                double dx = sample.X - pen.X, dy = sample.Y - pen.Y, d = Math.Sqrt(dx * dx + dy * dy);
+                if (d <= settings.Stabilizer) return; // 糸がたるんでいる間は筆は動かない
+                double k = (d - settings.Stabilizer) / d;
+                pen = new BrushSample(pen.X + dx * k, pen.Y + dy * k, sample.Pressure, sample.Time);
+                AddPathPoint(pen);
             }
             catch { Cancel(); throw; }
+        }
+
+        /// <summary>The path the brush actually follows (after the stabilizer): dabs at every spacing step along it.</summary>
+        private void AddPathPoint(BrushSample sample)
+        {
+            if (!hasSample) { Emit(sample.X, sample.Y, sample.Pressure, 0); hasSample = true; }
+            else
+            {
+                double dx = sample.X - previous.X, dy = sample.Y - previous.Y;
+                double length = Math.Sqrt(dx * dx + dy * dy);
+                if (length > 0) direction = Math.Atan2(dy, dx);
+                double spacing = Math.Max(0.01, settings.Radius * 2 * settings.Spacing);
+                if (length / spacing > 1000000) throw new InvalidOperationException("Input segment exceeds the one-million-stamp safety limit; split or cancel the stroke.");
+                if (length > 0)
+                {
+                    double position = spacing - distanceSinceStamp;
+                    // Tolerance only absorbs roundoff at a sample boundary; the stored accumulator is clamped below.
+                    while (position <= length + 1e-9)
+                    {
+                        double t = Math.Min(1, position / length);
+                        Emit(previous.X + dx * t, previous.Y + dy * t, previous.Pressure + (sample.Pressure - previous.Pressure) * t, strokeLength + position);
+                        position += spacing;
+                    }
+                    strokeLength += length;
+                    FlushPending(strokeLength - settings.TaperOut, null);
+                    distanceSinceStamp = length - (position - spacing);
+                    if (distanceSinceStamp < 1e-9) distanceSinceStamp = 0;
+                    if (distanceSinceStamp >= spacing) distanceSinceStamp %= spacing;
+                }
+            }
+            previous = sample; SampleCount++;
+        }
+
+        /// <summary>A dab at arc length arc along the path: stamped now, or held back while it is within TaperOut of the end.</summary>
+        private void Emit(double x, double y, double pressure, double arc)
+        {
+            if (settings.TaperOut > 0) { pending.Enqueue(new PendingDab { X = x, Y = y, Pressure = pressure, Arc = arc, Direction = direction }); return; }
+            Stamp(x, y, pressure, Taper(arc, double.PositiveInfinity));
+        }
+        /// <summary>Stamps the held-back dabs up to arc length limit. With end (the final stroke length) they shrink toward it.</summary>
+        private void FlushPending(double limit, double? end)
+        {
+            double saved = direction;
+            while (pending.Count > 0 && pending.Peek().Arc <= limit)
+            {
+                var dab = pending.Dequeue(); direction = dab.Direction;
+                Stamp(dab.X, dab.Y, dab.Pressure, Taper(dab.Arc, end ?? double.PositiveInfinity));
+            }
+            direction = saved;
+        }
+        /// <summary>Size factor of a dab at arc length arc on a stroke of length end: grows over TaperIn, shrinks over TaperOut.</summary>
+        private double Taper(double arc, double end)
+        {
+            double f = 1;
+            if (settings.TaperIn > 0) f = Math.Min(f, arc / settings.TaperIn);
+            if (settings.TaperOut > 0 && !double.IsInfinity(end)) f = Math.Min(f, (end - arc) / settings.TaperOut);
+            return Math.Max(0, Math.Min(1, f));
+        }
+        /// <summary>Ends the input: the stabilized pen is drawn on to the last input point, then held-back dabs are tapered out.</summary>
+        private void FinishInput()
+        {
+            if (hasPen && settings.Stabilizer > 0 && (pen.X != lastInput.X || pen.Y != lastInput.Y)) { pen = lastInput; AddPathPoint(lastInput); }
+            FlushPending(double.PositiveInfinity, strokeLength);
         }
         /// <summary>Paints a supplied geometric coverage (e.g. mesh-surface brush). Coordinates outside the canvas
         /// are clipped. Callers must union duplicate triangle/pixel coverage for each geometric dab before calling.</summary>
@@ -86,13 +137,13 @@ namespace Yozolab.YoluPainter.Core
             }
             catch { Cancel(); throw; }
         }
-        private void Stamp(double x, double y, double pressure)
+        private void Stamp(double x, double y, double pressure, double sizeFactor)
         {
             StampCount++;
             bool changed = false;
             for (int n = 0; n < settings.Count; n++)
             {
-                double radius = settings.Radius * (settings.PressureSize ? pressure : 1);
+                double radius = settings.Radius * (settings.PressureSize ? pressure : 1) * sizeFactor;
                 if (settings.SizeJitter > 0) radius *= 1 - settings.SizeJitter * random.NextDouble();
                 if (radius <= 0) continue;
                 double cx = x, cy = y;
@@ -204,6 +255,7 @@ namespace Yozolab.YoluPainter.Core
             var changes = new List<TileChange>();
             try
             {
+                FinishInput();
                 var coordinates = new List<TileCoord>(before.Keys); coordinates.Sort();
                 foreach (var coord in coordinates)
                 {
