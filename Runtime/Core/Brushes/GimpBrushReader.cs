@@ -42,6 +42,13 @@ namespace Yozolab.YoluPainter.Core.Brushes
             var tips = new List<BrushTip>(); double spacing = 25;
             for (int i = 0; i < count; i++)
             {
+                if (i > 0 && r.Remaining == 0)
+                {
+                    // ちょうどファイルの終わりでセルが尽きた（実在する配布物にある）。読めたセルで使い、そう伝える。
+                    // セルの途中で切れているものは ReadOneGbr が拒否する。
+                    warnings.Add("The hose declares " + count + " cells but the file holds only " + i + "; the " + i + " present are used.");
+                    break;
+                }
                 var tip = ReadOneGbr(r, name, out double cellSpacing, out var cellWarnings);
                 if (i == 0) spacing = cellSpacing;
                 foreach (var w in cellWarnings) if (!warnings.Contains(w)) warnings.Add(w);

@@ -80,7 +80,11 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(incremental.Settings.TipSelection, Is.EqualTo(TipSelection.Sequential), "an empty parameter list means incremental");
             var pressure = GimpBrushReader.ReadGih(Gih("Felt\n2 ncells:2 dim:3 rank0:2 sel0:pressure rank1:1 sel1:ytilt rank2:1 sel2:xtilt\n", cells.Take(2).ToArray()));
             Assert.That(pressure.Warnings.Count, Is.EqualTo(2), "pressure selection and the 3-D layout are both reported");
-            Assert.That(() => GimpBrushReader.ReadGih(Gih("Short\n3\n", cells.Take(2).ToArray())), Throws.TypeOf<BrushImportException>());
+            var short2 = GimpBrushReader.ReadGih(Gih("Short\n3\n", cells.Take(2).ToArray()));
+            Assert.That(short2.Settings.Tips.Length, Is.EqualTo(2), "a hose that simply ends early keeps the cells it has");
+            Assert.That(short2.Warnings.Single(), Does.Contain("declares 3 cells but the file holds only 2"));
+            var cut = Gih("Cut\n2\n", cells.Take(2).ToArray()); cut = cut.Take(cut.Length - 1).ToArray();
+            Assert.That(() => GimpBrushReader.ReadGih(cut), Throws.TypeOf<BrushImportException>(), "a cell cut in the middle is still refused");
         }
 
         [Test] public void VbrCircleMapsToTheRoundTipAndStarsAreRendered()
