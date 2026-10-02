@@ -1,4 +1,4 @@
-Shader "Hidden/DotTexturePainter/PreviewSurface"
+Shader "Hidden/YoluPainter/PreviewSurface"
 {
     Properties
     {

@@ -1,7 +1,7 @@
 using System;
 using System.Text;
 
-namespace Dot.TexturePainter.Core.Psd
+namespace Yozolab.YoluPainter.Core.Psd
 {
     internal sealed class PsdFormatException : Exception
     {

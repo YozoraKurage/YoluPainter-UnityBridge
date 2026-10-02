@@ -2,14 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Dot.TexturePainter.Core;
-using Dot.TexturePainter.Core.Persistence;
-using Dot.TexturePainter.Core.Psd;
-using Dot.TexturePainter.Editor.Preview;
+using Yozolab.YoluPainter.Core;
+using Yozolab.YoluPainter.Core.Persistence;
+using Yozolab.YoluPainter.Core.Psd;
+using Yozolab.YoluPainter.Editor.Preview;
 using UnityEditor;
 using UnityEngine;
 
-namespace Dot.TexturePainter.Editor
+namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>Single IMGUI input path: no duplicate pointer/mouse event subscription.</summary>
     public sealed class TexturePaintWindow : EditorWindow
@@ -42,14 +42,14 @@ namespace Dot.TexturePainter.Editor
         byte[] importedOriginal;
         Rect canvasRect, surfaceRect;
 
-        [MenuItem("Window/dot/Texture Painter (Prototype)")]
+        [MenuItem("YozoLab/YoluPainter (Prototype)")]
         public static void Open() => GetWindow<TexturePaintWindow>("Texture Painter");
 
         void OnEnable()
         {
             minSize = new Vector2(980,640);
             compositor = new TileGpuCompositor(); preview = new IsolatedModelPreview();
-            if (String.IsNullOrEmpty(recoveryRoot)) recoveryRoot=Path.GetFullPath(Path.Combine("Library","DotTexturePainter","recovery-"+Guid.NewGuid().ToString("N")));
+            if (String.IsNullOrEmpty(recoveryRoot)) recoveryRoot=Path.GetFullPath(Path.Combine("Library","YoluPainter","recovery-"+Guid.NewGuid().ToString("N")));
             try
             {
                 if (File.Exists(Path.Combine(recoveryRoot,"current")))

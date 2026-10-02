@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Dot.TexturePainter.Core
+namespace Yozolab.YoluPainter.Core
 {
     /// <summary>A transaction for exactly one layer/channel. Dispose cancels unless committed. Brush settings are
     /// frozen at start. Input order/time and every arc-length stamp are retained; there is no final-endpoint double dab.</summary>

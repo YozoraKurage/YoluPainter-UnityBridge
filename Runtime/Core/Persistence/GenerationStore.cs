@@ -5,7 +5,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Dot.TexturePainter.Core.Persistence
+namespace Yozolab.YoluPainter.Core.Persistence
 {
     public sealed class GenerationSnapshot
     {

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 
-namespace Dot.TexturePainter.Core.Psd
+namespace Yozolab.YoluPainter.Core.Psd
 {
     /// <summary>Conservative PSD v1 RGB8 raster exchange. No third-party dependencies or Unity objects.
     /// Unknown semantics fail closed to whole-file preservation, never a reconstructed partial export.</summary>

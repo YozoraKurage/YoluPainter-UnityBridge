@@ -1,6 +1,6 @@
 using System;
 
-namespace Dot.TexturePainter.Core
+namespace Yozolab.YoluPainter.Core
 {
     public enum PaintChannel { Color, Roughness, Metallic, Height, Normal, Emission }
     public enum LayerBlendMode { Normal, Multiply, Screen }

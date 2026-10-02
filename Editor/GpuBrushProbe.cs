@@ -1,18 +1,18 @@
 using System;
-using Dot.TexturePainter.Core;
+using Yozolab.YoluPainter.Core;
 using UnityEditor;
 using UnityEngine;
 
-namespace Dot.TexturePainter.Editor
+namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>Explicit G0 test probe, not the authoritative editor stroke path.
     /// Synchronous readback is deliberately confined to this user-invoked validation command.</summary>
     public static class GpuBrushProbe
     {
-        [MenuItem("Window/dot/Run GPU brush parity probe")]
+        [MenuItem("YozoLab/YoluPainter GPU Brush Parity Probe")]
         public static void Run()
         {
-            var shader=Shader.Find("Hidden/DotTexturePainter/OrderedBrush");
+            var shader=Shader.Find("Hidden/YoluPainter/OrderedBrush");
             if(shader==null||!shader.isSupported){Debug.LogWarning("GPU brush probe skipped: shader unavailable.");return;}
             const int size=32; Texture2D upload=null,readback=null;RenderTexture a=null,b=null;Material material=null;
             var previous=RenderTexture.active;

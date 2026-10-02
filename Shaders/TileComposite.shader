@@ -1,4 +1,4 @@
-Shader "Hidden/DotTexturePainter/TileComposite"
+Shader "Hidden/YoluPainter/TileComposite"
 {
     Properties { _MainTex ("Below", 2D) = "black" {} _LayerTex ("Layer", 2D) = "black" {} }
     SubShader

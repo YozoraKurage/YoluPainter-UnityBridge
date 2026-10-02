@@ -5,7 +5,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
 
-namespace Dot.TexturePainter.Editor.Preview
+namespace Yozolab.YoluPainter.Editor.Preview
 {
     public sealed class PreviewLoadReport
     {
@@ -58,7 +58,7 @@ namespace Dot.TexturePainter.Editor.Preview
             ClearModel(); revision++; report = new PreviewLoadReport();
             if (source == null) { report.Diagnostics.Add("Choose a model GameObject or Prefab to load."); return report; }
             EnsurePreview();
-            var shader = Shader.Find("Hidden/DotTexturePainter/PreviewSurface");
+            var shader = Shader.Find("Hidden/YoluPainter/PreviewSurface");
             if (shader == null) { report.Diagnostics.Add("The package's neutral preview shader could not be loaded."); return report; }
             var triangles = new List<SurfaceTriangle>();
             bool incomplete = false;
@@ -213,7 +213,7 @@ namespace Dot.TexturePainter.Editor.Preview
         public PreviewLoadReport LoadDemoMesh()
         {
             ThrowIfDisposed(); ClearModel(); revision++; report = new PreviewLoadReport(); EnsurePreview();
-            var shader = Shader.Find("Hidden/DotTexturePainter/PreviewSurface");
+            var shader = Shader.Find("Hidden/YoluPainter/PreviewSurface");
             if (shader == null) { report.Diagnostics.Add("The package's neutral preview shader could not be loaded."); return report; }
             try
             {
@@ -364,7 +364,7 @@ namespace Dot.TexturePainter.Editor.Preview
         public bool HandleNavigation(Rect rect, Event current)
         {
             if (current == null || !HasModel) return false;
-            int id = GUIUtility.GetControlID("DotTexturePainterPreviewNavigation".GetHashCode(), FocusType.Passive, rect);
+            int id = GUIUtility.GetControlID("YoluPainterPreviewNavigation".GetHashCode(), FocusType.Passive, rect);
             if (current.type == EventType.MouseDown && rect.Contains(current.mousePosition) && GUIUtility.hotControl == 0 &&
                 (current.button == 1 || current.button == 2 || (current.alt && current.button == 0)))
             {

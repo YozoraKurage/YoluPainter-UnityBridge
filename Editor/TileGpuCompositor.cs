@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using Dot.TexturePainter.Core;
+using Yozolab.YoluPainter.Core;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace Dot.TexturePainter.Editor
+namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>Bounded layer residency: one upload tile and two ping-pong working tiles.
     /// Prototype recomposites occupied tiles on revision changes; incremental dependency scheduling is pending.</summary>
@@ -69,7 +69,7 @@ namespace Dot.TexturePainter.Editor
         {
             if (width == doc.Width && height == doc.Height && tileSize == doc.TileSize && Texture != null) return;
             Dispose(); width = doc.Width; height = doc.Height; tileSize = doc.TileSize;
-            var shader = Shader.Find("Hidden/DotTexturePainter/TileComposite");
+            var shader = Shader.Find("Hidden/YoluPainter/TileComposite");
             bool supported = shader != null && shader.isSupported && SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGB32) && (SystemInfo.copyTextureSupport & CopyTextureSupport.Basic) != 0;
             if (supported)
             {

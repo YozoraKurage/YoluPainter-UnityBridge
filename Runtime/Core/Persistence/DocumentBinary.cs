@@ -3,7 +3,7 @@ using System.IO;
 using System.Text;
 using System.Linq;
 
-namespace Dot.TexturePainter.Core.Persistence
+namespace Yozolab.YoluPainter.Core.Persistence
 {
     /// <summary>Versioned, bounded, lossless native sparse source archive. No GPU cache is persisted.</summary>
     public static class DocumentBinary

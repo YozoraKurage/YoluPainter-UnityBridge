@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
-using Dot.TexturePainter.Core.Psd;
+using Yozolab.YoluPainter.Core.Psd;
 
-namespace Dot.TexturePainter.Core.Persistence
+namespace Yozolab.YoluPainter.Core.Persistence
 {
     public static class PsdBridge
     {

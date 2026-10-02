@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 
-namespace Dot.TexturePainter.Core
+namespace Yozolab.YoluPainter.Core
 {
     public sealed class PaintLayer
     {

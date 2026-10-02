@@ -2,10 +2,10 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
-using Dot.TexturePainter.Core.Psd;
+using Yozolab.YoluPainter.Core.Psd;
 using NUnit.Framework;
 
-namespace Dot.TexturePainter.Tests
+namespace Yozolab.YoluPainter.Tests
 {
     public sealed class PsdTests
     {

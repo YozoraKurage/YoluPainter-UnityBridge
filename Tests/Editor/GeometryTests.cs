@@ -1,11 +1,11 @@
 using System.Collections.Generic;
 using System.Linq;
-using Dot.TexturePainter.Editor.Preview;
+using Yozolab.YoluPainter.Editor.Preview;
 using NUnit.Framework;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
-namespace Dot.TexturePainter.Tests.Editor
+namespace Yozolab.YoluPainter.Tests.Editor
 {
     public sealed class GeometryTests
     {
@@ -214,7 +214,7 @@ namespace Dot.TexturePainter.Tests.Editor
             var source = new GameObject("Texture painter test source");
             var mesh = new Mesh { vertices = new[] { Vector3.zero, Vector3.up, Vector3.right }, uv = new[] { Vector2.zero, Vector2.up, Vector2.right }, triangles = new[] { 0, 1, 2 } };
             mesh.RecalculateNormals(); mesh.RecalculateBounds();
-            var shader = Shader.Find("Hidden/DotTexturePainter/PreviewSurface");
+            var shader = Shader.Find("Hidden/YoluPainter/PreviewSurface");
             Assert.That(shader, Is.Not.Null, "The package preview shader must be imported before running Unity tests.");
             var material = new Material(shader); material.SetColor("_Color", Color.magenta);
             try

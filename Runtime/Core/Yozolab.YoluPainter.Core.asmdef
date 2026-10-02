@@ -1,6 +1,6 @@
 {
-  "name": "Dot.TexturePainter.Core",
-  "rootNamespace": "Dot.TexturePainter.Core",
+  "name": "Yozolab.YoluPainter.Core",
+  "rootNamespace": "Yozolab.YoluPainter.Core",
   "references": [],
   "includePlatforms": ["Editor"],
   "noEngineReferences": true,

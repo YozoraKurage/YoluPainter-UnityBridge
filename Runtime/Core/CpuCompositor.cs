@@ -1,6 +1,6 @@
 using System;
 
-namespace Dot.TexturePainter.Core
+namespace Yozolab.YoluPainter.Core
 {
     /// <summary>Deterministic RGBA8 reference blend in stored RGB space. This does not claim ICC-managed PSD
     /// equivalence or tangent-space normal-vector composition. Alpha is always linear coverage.</summary>

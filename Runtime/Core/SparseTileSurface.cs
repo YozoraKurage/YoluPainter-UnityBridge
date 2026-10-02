@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Dot.TexturePainter.Core
+namespace Yozolab.YoluPainter.Core
 {
     /// <summary>Sparse, bottom-left-origin RGBA8 surface. Empty tiles have no allocation; uniform tiles hold four bytes.
     /// Detached export/import prevents a caller from modifying pixels behind the history manager. Not thread-safe.</summary>

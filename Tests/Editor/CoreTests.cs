@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
-using Dot.TexturePainter.Core;
+using Yozolab.YoluPainter.Core;
 
-namespace Dot.TexturePainter.Tests
+namespace Yozolab.YoluPainter.Tests
 {
     public sealed class CoreTests
     {

@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 
-namespace Dot.TexturePainter.Core
+namespace Yozolab.YoluPainter.Core
 {
     public enum GraphNodeKind { Paint, Fill, Path, Mask, Filter, Generator, Anchor, Adjustment, Composite, ChannelOutput }
     public enum GraphValueType { Color, Scalar, TangentNormal }

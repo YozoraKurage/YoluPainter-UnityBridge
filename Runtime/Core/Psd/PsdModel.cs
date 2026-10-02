@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 
-namespace Dot.TexturePainter.Core.Psd
+namespace Yozolab.YoluPainter.Core.Psd
 {
     public enum PsdCompatibilityMode { EditableRaster, PreserveOnly, Rejected }
 

@@ -1,4 +1,4 @@
-Shader "Hidden/DotTexturePainter/OrderedBrush"
+Shader "Hidden/YoluPainter/OrderedBrush"
 {
     Properties { _MainTex ("Source tile", 2D) = "black" {} }
     SubShader

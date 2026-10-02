@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace Dot.TexturePainter.Editor.Preview
+namespace Yozolab.YoluPainter.Editor.Preview
 {
     /// <summary>A hit on an immutable preview snapshot. Position is in preview world space.</summary>
     public struct SurfaceHit
