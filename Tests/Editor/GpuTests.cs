@@ -137,6 +137,32 @@ namespace Yozolab.YoluPainter.Tests
                 }
         }
 
+        /// <summary>グループを含むタイルも GPU で合成し（CPU に回すタイルは無い）、結果が CPU の正本と一致すること。
+        /// 入れ子・通過・マスクなどの細かい場合は GpuGroupTests。</summary>
+        [Test] public void TilesWithGroupsAreCompositedOnTheGpuAndMatch()
+        {
+            RequireWorkingShader("Hidden/YoluPainter/TileComposite");
+            var doc = new PaintDocument(48, 32, 16);
+            var baseLayer = doc.AddLayer("Base"); var a = doc.AddLayer("A"); var b = doc.AddLayer("B"); var outside = doc.AddLayer("Outside");
+            for (int y = 0; y < 32; y++) for (int x = 0; x < 48; x++)
+            {
+                baseLayer.GetChannel(PaintChannel.Color).SetPixel(x, y, new Rgba32((byte)(x * 5), (byte)(y * 7), 90, 255));
+                if (x < 30) a.GetChannel(PaintChannel.Color).SetPixel(x, y, new Rgba32(200, 40, (byte)(x * 8), (byte)(100 + y * 4)));
+                if (x > 8 && x < 30) b.GetChannel(PaintChannel.Color).SetPixel(x, y, new Rgba32(20, 220, 60, 180));
+                if (x >= 32) outside.GetChannel(PaintChannel.Color).SetPixel(x, y, new Rgba32(255, 255, 0, 128));
+            }
+            doc.SetLayerBlendMode(b.Id, LayerBlendMode.Overlay);
+            var inner = doc.GroupLayers(new[] { b.Id }, "Inner"); doc.SetLayerBlendMode(inner.Id, LayerBlendMode.Multiply);
+            var outer = doc.GroupLayers(new[] { a.Id, inner.Id }, "Outer"); doc.SetLayerOpacity(outer.Id, .7);
+            using (var compositor = new TileGpuCompositor())
+            {
+                compositor.Update(doc, PaintChannel.Color);
+                AssertMatches(doc.Composite(PaintChannel.Color), Read(compositor.Texture), "groups");
+                Assert.That(compositor.LastUpdatedTileCount, Is.GreaterThan(0));
+                Assert.That(compositor.LastCpuTileCount, Is.Zero, "tiles with groups go through the GPU too");
+            }
+        }
+
         [Test] public void TileCompositorIncrementalUpdatesMatchCpuReference()
         {
             RequireWorkingShader("Hidden/YoluPainter/TileComposite");

@@ -50,6 +50,10 @@ Shader "Hidden/YoluPainter/TileComposite"
             float3 r = (c - mn) * s / (mx - mn);
             return float3(c.r == mx ? s : (c.r == mn ? 0 : r.r), c.g == mx ? s : (c.g == mn ? 0 : r.g), c.b == mx ? s : (c.b == mn ? 0 : r.b));
         }
+        // CPU の MathUtil.ToByte と同じ丸め（floor(v × 255 + 0.5)、半分は切り上げ）で 8 bit の値にしてから書く。RenderTexture への
+        // 書き込みの変換は最近接への丸めだが、ちょうど半分のときの向きが実装次第（D3D 系は偶数へ）で、グループのように合成を
+        // 重ねると、そのずれが次の段に入って 1 を超える差になる。k/255 を書けば変換は k に落ちる。
+        float4 ToBytes(float4 c) { return floor(saturate(c) * 255 + 0.5) / 255; }
         float3 BlendRgb(int mode, float3 d, float3 s)
         {
             if (mode == 0) return s;
@@ -85,7 +89,7 @@ Shader "Hidden/YoluPainter/TileComposite"
                 float sa = saturate(s.a * _Opacity * factor), a = sa + b.a * (1-sa);
                 float3 blend = BlendRgb(_BlendMode, b.rgb, s.rgb);
                 float3 premult = (1-sa)*b.a*b.rgb + (1-b.a)*sa*s.rgb + b.a*sa*blend;
-                return a > 0 ? float4(premult/a, a) : float4(b.rgb, 0);
+                return ToBytes(a > 0 ? float4(premult/a, a) : float4(b.rgb, 0));
             }
             ENDCG
         }
@@ -164,7 +168,7 @@ Shader "Hidden/YoluPainter/TileComposite"
                 // CPU と同じく、調整結果をいったん 8 bit に丸めてから合成モードと混ぜ戻しにかける。
                 float3 a = round(saturate(Adjust(b.rgb)) * 255) / 255;
                 float3 m = BlendRgb(_BlendMode, b.rgb, a);
-                return float4(b.rgb + (m - b.rgb) * amount, b.a);
+                return ToBytes(float4(b.rgb + (m - b.rgb) * amount, b.a));
             }
             ENDCG
         }
@@ -194,7 +198,38 @@ Shader "Hidden/YoluPainter/TileComposite"
                 float t = s.a * _Opacity * factor;
                 if (t <= 0 || g.a <= 0) return g;
                 float3 m = BlendRgb(_BlendMode, g.rgb, s.rgb);
-                return float4(g.rgb + (m - g.rgb) * t, g.a);
+                return ToBytes(float4(g.rgb + (m - g.rgb) * t, g.a));
+            }
+            ENDCG
+        }
+        // Pass 4: 通過グループのフェード。_MainTex（グループの下の結果）と _LayerTex（その上にグループの中身を重ねた結果）を、
+        // グループの 不透明度×マスク で乗算済みアルファの線形補間で混ぜる。CpuCompositor.Fade と同じ式（amount ≥ 1 は中身そのまま、
+        // ≤ 0 は下のまま。片方が透明でももう片方を暗くしない）。
+        Pass
+        {
+            CGPROGRAM
+            #pragma vertex vert_img
+            #pragma fragment fragFade
+            #include "UnityCG.cginc"
+            sampler2D _MainTex, _LayerTex, _MaskTex;
+            float _Opacity;
+            float4 _Mask;
+            float4 fragFade(v2f_img i) : SV_Target
+            {
+                float4 b = tex2D(_MainTex, i.uv);
+                float4 s = tex2D(_LayerTex, i.uv);
+                float factor = 1;
+                if (_Mask.x > 0.5)
+                {
+                    float hide = tex2D(_MaskTex, i.uv).a;
+                    factor = _Mask.y > 0.5 ? 1 - _Mask.z * (1 - hide) : 1 - _Mask.z * hide;
+                }
+                float amount = _Opacity * factor;
+                if (amount >= 1) return s;
+                if (amount <= 0) return b;
+                float ba = b.a * (1 - amount), ia = s.a * amount, a = ba + ia;
+                if (a <= 0) return float4(0, 0, 0, 0);
+                return ToBytes(float4((b.rgb * ba + s.rgb * ia) / a, a));
             }
             ENDCG
         }
