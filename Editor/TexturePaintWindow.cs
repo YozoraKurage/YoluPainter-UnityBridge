@@ -52,6 +52,12 @@ namespace Yozolab.YoluPainter.Editor
         internal Rect SurfaceRect => surfaceRect;
         internal string StatusMessage => message;
         internal string RecoveryRoot => recoveryRoot;
+        internal string ProjectRoot => projectRoot;
+        internal bool IsSaved => document != null && document.Revision == savedRevision;
+        internal bool HasExternalConflict => externalConflict;
+        internal PaintChannel Channel { get => channel; set { channel = value; repaintPixels = true; } }
+        /// <summary>モーダルダイアログの差し替え口（テスト用）。</summary>
+        internal IPainterDialogs Dialogs { get; set; } = EditorPainterDialogs.Instance;
         /// <summary>PaintAt の 2D 写像の逆。ピクセル中心 (x+0.5, y+0.5) の GUI 座標を返す。</summary>
         internal Vector2 PixelToGui(int x, int y)
         {
@@ -105,12 +111,14 @@ namespace Yozolab.YoluPainter.Editor
         {
             if(document==null) return;
             if(stroke==null && document.Revision!=recoveredRevision && EditorApplication.timeSinceStartup-lastRecovery>15) SaveRecovery();
-            if(!String.IsNullOrEmpty(projectRoot) && EditorApplication.timeSinceStartup-lastExternalCheck>3)
-            {
-                lastExternalCheck=EditorApplication.timeSinceStartup;
-                externalConflict=GenerationStore.HasExternalChange(projectRoot,projectToken);
-                if(externalConflict) message="Saved files changed externally. Normal save is blocked; use Save As or explicitly reopen after reviewing local edits.";
-            }
+            if(!String.IsNullOrEmpty(projectRoot) && EditorApplication.timeSinceStartup-lastExternalCheck>3) CheckExternalChange();
+        }
+        internal void CheckExternalChange()
+        {
+            if(String.IsNullOrEmpty(projectRoot)) return;
+            lastExternalCheck=EditorApplication.timeSinceStartup;
+            externalConflict=GenerationStore.HasExternalChange(projectRoot,projectToken);
+            if(externalConflict) message="Saved files changed externally. Normal save is blocked; use Save As or explicitly reopen after reviewing local edits.";
         }
         void OnGUI()
         {
@@ -189,7 +197,7 @@ namespace Yozolab.YoluPainter.Editor
             GUILayout.Label("LMB: paint\nAlt / RMB: orbit 3D\nMMB: pan 2D / 3D\nWheel: zoom\nEsc: cancel stroke\nCtrl/Cmd Z: undo\nCtrl/Cmd Shift Z: redo\nFocus loss: cancel active stroke",EditorStyles.wordWrappedMiniLabel);
             GUILayout.Space(12);
             EditorGUILayout.HelpBox("Prototype uses one IMGUI pressure path. Tablet response, HiDPI and latency still require Unity/device tests. No-pressure input uses Unity's fixed fallback.",MessageType.Info);
-            if(GUILayout.Button("Show implementation limits")) EditorUtility.DisplayDialog("G0/G1 limits","CPU source brush; bounded GPU tile compositor. Static readable meshes. Selected channel only. Native generation save and restricted RGB8 PSD. Full adjustment layers, groups, masks, editable surface paths, pose/BlendShape, mesh-map generators and lilToon parity remain unfinished. See docs/STATUS.md.","OK");
+            if(GUILayout.Button("Show implementation limits")) Dialogs.Inform("G0/G1 limits","CPU source brush; bounded GPU tile compositor. Static readable meshes. Selected channel only. Native generation save and restricted RGB8 PSD. Full adjustment layers, groups, masks, editable surface paths, pose/BlendShape, mesh-map generators and lilToon parity remain unfinished. See Documentation~/STATUS.md in the package.");
             GUILayout.EndScrollView(); GUILayout.EndArea();
         }
         void DrawLayers(Rect rect)
@@ -318,7 +326,7 @@ namespace Yozolab.YoluPainter.Editor
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.Z){if(e.shift)document.Redo();else document.Undo();e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.S){SaveProject(e.shift);e.Use();}
         }
-        bool ConfirmDiscard() => document.Revision==savedRevision || EditorUtility.DisplayDialog("Keep current work?","Current work has unsaved changes. A native recovery checkpoint will be kept before opening another document.","Continue","Cancel") && SaveRecovery();
+        bool ConfirmDiscard() => document.Revision==savedRevision || Dialogs.Confirm("Keep current work?","Current work has unsaved changes. A native recovery checkpoint will be kept before opening another document.","Continue","Cancel") && SaveRecovery();
         bool SaveRecovery()
         {
             if(document==null||stroke!=null||document.Revision==recoveredRevision)return true;
@@ -330,15 +338,15 @@ namespace Yozolab.YoluPainter.Editor
             }
             catch(Exception ex){message="Recovery checkpoint failed: "+ex.Message;return false;}
         }
-        void SaveProject(bool saveAs)
+        internal void SaveProject(bool saveAs)
         {
             if(stroke!=null)return;
             string target=projectRoot;
-            if(saveAs||String.IsNullOrEmpty(target)){target=EditorUtility.SaveFolderPanel("Choose a NEW project folder",String.IsNullOrEmpty(projectRoot)?Application.dataPath:projectRoot,"TexturePaint");if(String.IsNullOrEmpty(target))return;}
+            if(saveAs||String.IsNullOrEmpty(target)){target=Dialogs.SaveFolder("Choose a NEW project folder",String.IsNullOrEmpty(projectRoot)?Application.dataPath:projectRoot,"TexturePaint");if(String.IsNullOrEmpty(target))return;}
             string expected=target==projectRoot?projectToken:null;
             TryAction(()=>
             {
-                EditorUtility.DisplayProgressBar("Texture Painter","Freezing native source and preparing validated save generation. Input is paused.",.1f);
+                Dialogs.Progress("Texture Painter","Freezing native source and preparing validated save generation. Input is paused.",.1f);
                 var files=new Dictionary<string,byte[]>{{"document.utpaint",DocumentBinary.Write(document)}};
                 var state=new ViewState{modelAssetGuid=model==null?"":AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(model)),materialSlot=materialSlot,selectedChannel=(int)channel};
                 files.Add("view.json",System.Text.Encoding.UTF8.GetBytes(JsonUtility.ToJson(state,true)));
@@ -354,17 +362,17 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     foreach(var key in files.Keys.Where(k=>k.EndsWith(".psd")&&k!="imported-original.psd").ToArray())files.Remove(key);
                     psdStatus="Native project saved; PSD NOT updated: "+ex.Message;
-                    if(!EditorUtility.DisplayDialog("PSD projection unavailable",ex.Message+"\nSave the lossless native project only? Existing saved generations remain intact.","Save native only","Cancel"))return;
+                    if(!Dialogs.Confirm("PSD projection unavailable",ex.Message+"\nSave the lossless native project only? Existing saved generations remain intact.","Save native only","Cancel"))return;
                 }
                 files.Add("save-status.txt",System.Text.Encoding.UTF8.GetBytes(psdStatus));
                 var saved=GenerationStore.Commit(target,files,expected);
                 projectRoot=target;projectToken=saved.Token;savedRevision=document.Revision;externalConflict=false;message=psdStatus+" / "+saved.Generation;
             });
-            EditorUtility.ClearProgressBar();
+            Dialogs.ClearProgress();
         }
-        void OpenProject()
+        internal void OpenProject()
         {
-            string path=EditorUtility.OpenFolderPanel("Open dot paint project folder",projectRoot??Application.dataPath,"");if(String.IsNullOrEmpty(path)||!ConfirmDiscard())return;
+            string path=Dialogs.OpenFolder("Open YoluPainter project folder",projectRoot??Application.dataPath);if(String.IsNullOrEmpty(path)||!ConfirmDiscard())return;
             TryAction(()=>
             {
                 var snapshot=GenerationStore.Load(path);var next=DocumentBinary.Read(snapshot.Files["document.utpaint"]);
@@ -381,22 +389,22 @@ namespace Yozolab.YoluPainter.Editor
                 message="Verified generation loaded: "+snapshot.Generation;
             });
         }
-        void ImportPsd()
+        internal void ImportPsd()
         {
-            string path=EditorUtility.OpenFilePanel("Inspect/import RGB8 PSD",Application.dataPath,"psd");if(String.IsNullOrEmpty(path))return;
+            string path=Dialogs.OpenFile("Inspect/import RGB8 PSD",Application.dataPath,"psd");if(String.IsNullOrEmpty(path))return;
             TryAction(()=>
             {
                 if(new FileInfo(path).Length>128L*1024*1024)throw new InvalidOperationException("PSD exceeds 128 MiB prototype input budget.");
                 var result=PsdCodec.Read(File.ReadAllBytes(path));
-                if(result.Mode!=PsdCompatibilityMode.EditableRaster){EditorUtility.DisplayDialog("PSD protected: "+result.Mode,String.Join("\n",result.Diagnostics.Select(d=>d.ToString()))+"\nOriginal file was not modified. Unsupported features cannot be edited here.","OK");return;}
+                if(result.Mode!=PsdCompatibilityMode.EditableRaster){Dialogs.Inform("PSD protected: "+result.Mode,String.Join("\n",result.Diagnostics.Select(d=>d.ToString()))+"\nOriginal file was not modified. Unsupported features cannot be edited here.");return;}
                 var next=PsdBridge.Import(result);if(!ConfirmDiscard())return;
                 document=next;if(document.Layers.Count==0)document.AddLayer("Paint 1");BindDocument();selectedLayer=document.Layers.Last().Id;projectRoot=null;projectToken=null;savedRevision=-1;
                 importedOriginal=result.CopyOriginalBytes();channel=PaintChannel.Color;message="Imported supported RGB8 raster subset. Original bytes retained; saves go to a separate native project folder.";
             });
         }
-        void ExportPng()
+        internal void ExportPng()
         {
-            string path=EditorUtility.SaveFilePanel("Export selected channel PNG",Application.dataPath,channel+".png","png");if(String.IsNullOrEmpty(path))return;
+            string path=Dialogs.SaveFile("Export selected channel PNG",Application.dataPath,channel+".png","png");if(String.IsNullOrEmpty(path))return;
             TryAction(()=>
             {
                 var texture=new Texture2D(document.Width,document.Height,TextureFormat.RGBA32,false,true);
@@ -404,8 +412,8 @@ namespace Yozolab.YoluPainter.Editor
                 finally{DestroyImmediate(texture);}
             });
         }
-        void SavePreset(){string p=EditorUtility.SaveFilePanel("Save brush",Application.dataPath,"brush","json");if(!String.IsNullOrEmpty(p))TryAction(()=>File.WriteAllText(p,JsonUtility.ToJson(brush,true)));}
-        void LoadPreset(){string p=EditorUtility.OpenFilePanel("Load brush",Application.dataPath,"json");if(!String.IsNullOrEmpty(p))TryAction(()=>{if(new FileInfo(p).Length>65536)throw new InvalidDataException("Preset too large");var b=JsonUtility.FromJson<BrushPreset>(File.ReadAllText(p));if(b==null||b.schema!=1||b.pressureCurve==null)throw new InvalidDataException("Unsupported preset");brush=b;GetBrush().Validate();});}
+        void SavePreset(){string p=Dialogs.SaveFile("Save brush",Application.dataPath,"brush","json");if(!String.IsNullOrEmpty(p))TryAction(()=>File.WriteAllText(p,JsonUtility.ToJson(brush,true)));}
+        void LoadPreset(){string p=Dialogs.OpenFile("Load brush",Application.dataPath,"json");if(!String.IsNullOrEmpty(p))TryAction(()=>{if(new FileInfo(p).Length>65536)throw new InvalidDataException("Preset too large");var b=JsonUtility.FromJson<BrushPreset>(File.ReadAllText(p));if(b==null||b.schema!=1||b.pressureCurve==null)throw new InvalidDataException("Unsupported preset");brush=b;GetBrush().Validate();});}
         void TryAction(Action action)
         {
             try{action();}catch(Exception ex){if(stroke!=null)FinishStroke(false);message=ex.Message;Debug.LogWarning("Texture Painter: "+ex.Message);}

@@ -13,7 +13,7 @@ namespace Yozolab.YoluPainter.Tests
     /// <summary>実際の EditorWindow に SendEvent でマウス・キー入力を流し、CPU 正本の中身で確かめる。
     /// ウィンドウは batchmode では動かないのでスキップする（devcontainer では GUI モードの常駐で回す）。</summary>
     [Category("Window")]
-    public sealed class WindowTests
+    public sealed partial class WindowTests
     {
         TexturePaintWindow window;
 
