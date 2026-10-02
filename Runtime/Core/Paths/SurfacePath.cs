@@ -45,20 +45,31 @@ namespace Yozolab.YoluPainter.Core.Paths
         public override int GetHashCode() => RadiusWorld.GetHashCode() ^ Color.GetHashCode();
     }
 
+    /// <summary>編集できるパス（3D の面の <see cref="SurfacePath"/> と 2D のキャンバスの <see cref="CanvasPath"/>）に共通のもの。
+    /// 層の 1 チャンネルの画素はパスから描いた結果で、作ったあとは変えない（Undo で持てる）。</summary>
+    public abstract class EditablePath
+    {
+        public const int MaxPointCount = 4096;
+        public Guid Id { get; protected set; }
+        public PaintChannel Channel { get; protected set; }
+        /// <summary>描く筆。半径は SurfacePath ではモデルの空間の長さ、CanvasPath では画素。</summary>
+        public PathBrush Brush { get; protected set; }
+        public abstract int PointCount { get; }
+        private protected EditablePath() { }
+    }
+
     /// <summary>
     /// 編集できる 3D の筆跡（仕様 13「3Dパスの編集契約」）。制御点は三角形と重心座標で面に結び付き、どのモデルのスナップショットに
     /// 結び付いているかを ModelFingerprint（三角形の並び・UV・スロット。ポーズでは変わらない）で持つ。層の画素はこのパスから描いた
     /// 結果で、制御点を変えると描き直す。作ったあとは変えない（変えるときは With… で新しいものを作る）ので、Undo で持てる。
     /// </summary>
-    public sealed class SurfacePath
+    public sealed class SurfacePath : EditablePath
     {
         public const int AlgorithmVersion = 1;
-        public const int MaxPoints = 4096;
-        public Guid Id { get; }
-        public PaintChannel Channel { get; }
+        public const int MaxPoints = EditablePath.MaxPointCount;
         public string ModelFingerprint { get; }
-        public PathBrush Brush { get; }
         public IReadOnlyList<PathPoint> Points { get; }
+        public override int PointCount => Points.Count;
 
         public SurfacePath(Guid id, PaintChannel channel, string modelFingerprint, PathBrush brush, IEnumerable<PathPoint> points)
         {

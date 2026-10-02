@@ -61,8 +61,8 @@ namespace Yozolab.YoluPainter.Core
         public AdjustmentSettings Adjustment { get; internal set; }
         /// <summary>The layer's raster mask, or null when it has none.</summary>
         public RasterMask Mask { get; internal set; }
-        /// <summary>The editable surface path the layer's pixels are drawn from (one channel), or null for ordinary pixels.</summary>
-        public Paths.SurfacePath Path { get; internal set; }
+        /// <summary>The editable path (on the model or on the canvas) the layer's pixels are drawn from (one channel), or null for ordinary pixels.</summary>
+        public Paths.EditablePath Path { get; internal set; }
         public IReadOnlyList<PaintChannel> EnabledChannels
         {
             get { var values = new List<PaintChannel>(enabled); values.Sort(); return values.AsReadOnly(); }

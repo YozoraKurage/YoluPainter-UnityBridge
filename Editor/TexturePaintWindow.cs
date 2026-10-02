@@ -493,6 +493,7 @@ namespace Yozolab.YoluPainter.Editor
             if(document.Selection!=null){EnsureSelectionOverlay(); GUI.DrawTexture(image,selectionOverlay,ScaleMode.StretchToFill,true);}
             if(toolDragging&&Event.current.type==EventType.Repaint) DrawToolPreview(image);
             else if(tool==PaintTool.Move&&!toolDragging&&Event.current.type==EventType.Repaint) DrawTransformHandles(image);
+            if(Event.current.type==EventType.Repaint) DrawCanvasPathMarkers(image);
             GUI.EndClip();
         }
         /// <summary>選ばれていない所を暗く覆う表示用のテクスチャ（選択範囲が変わったときだけ作り直す）。</summary>
@@ -556,7 +557,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>ブラシ以外のツールのキャンバス入力。2D キャンバスだけで働く。</summary>
         bool HandleToolInput(Event e)
         {
-            if(tool==PaintTool.Brush)return false;
+            if(tool==PaintTool.Brush||tool==PaintTool.Path)return false; // パスは HandlePathTool が受け持つ
             if(e.type==EventType.MouseDown&&e.button==0&&!e.alt&&canvasRect.Contains(e.mousePosition))
             {
                 var p=CanvasPoint(e.mousePosition);

@@ -16,10 +16,12 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// document opens without its model. Version 9 ends each layer (after the path) with a filter flag and, when set, the layer's
     /// content filter stack and, when the layer has a mask, the mask's filter stack (per filter: id, type, algorithm version,
     /// enabled, strength, content channels, parameters); an unknown filter type or algorithm version refuses the archive instead
-    /// of dropping the filter. Older archives still load.</summary>
+    /// of dropping the filter. Version 10 ends each layer (after the filters) with a canvas path flag and, when set, the 2D path
+    /// (algorithm version, id, channel, brush, points as x, y, pressure); the version 8 block holds only surface paths, and a
+    /// layer with both is refused. Older archives still load.</summary>
     public static class DocumentBinary
     {
-        const int Version = 9;
+        const int Version = 10;
         /// <summary>The version <see cref="Write"/> produces.</summary>
         public const int CurrentVersion = Version;
         const long MaxArchiveBytes = 512L * 1024 * 1024;
@@ -81,11 +83,15 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         writer.Write(layer.Mask.Enabled); writer.Write(layer.Mask.Inverted); writer.Write(layer.Mask.Density);
                         WriteTiles(writer, stream, layer.Mask.Surface);
                     }
-                    writer.Write(layer.Path != null);
-                    if (layer.Path != null) WritePath(writer, layer.Path);
+                    var surfacePath = layer.Path as Paths.SurfacePath;
+                    writer.Write(surfacePath != null);
+                    if (surfacePath != null) WritePath(writer, surfacePath);
                     bool filtered = layer.Filters.Count > 0 || layer.Mask != null && layer.Mask.Filters.Count > 0;
                     writer.Write(filtered);
                     if (filtered) { WriteFilters(writer, layer.Filters, true); if (layer.Mask != null) WriteFilters(writer, layer.Mask.Filters, false); }
+                    var canvasPath = layer.Path as Paths.CanvasPath;
+                    writer.Write(canvasPath != null);
+                    if (canvasPath != null) WriteCanvasPath(writer, canvasPath);
                 }
                 writer.Flush(); return stream.ToArray();
             }
@@ -216,6 +222,13 @@ namespace Yozolab.YoluPainter.Core.Persistence
                             ReadFilters(reader, doc, layer, FilterTarget.Content);
                             if (layer.Mask != null) ReadFilters(reader, doc, layer, FilterTarget.Mask);
                         }
+                        if (version >= 10 && reader.ReadBoolean())
+                        {
+                            var path = ReadCanvasPath(reader);
+                            if (layer.Path != null) throw new InvalidDataException("A layer has both a surface path and a canvas path.");
+                            if (layer.Kind != LayerKind.Raster || !layer.IsChannelEnabled(path.Channel)) throw new InvalidDataException("A canvas path needs a paint layer with its channel enabled.");
+                            layer.Path = path;
+                        }
                     }
                     if (stream.Position != stream.Length) throw new InvalidDataException("Trailing native data requires a newer reader.");
                     try { doc.ValidateStructure(); }
@@ -290,6 +303,37 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 return new Paths.SurfacePath(id, (PaintChannel)channel, fingerprint, brush, points);
             }
             catch (ArgumentException ex) { throw new InvalidDataException("Invalid surface path.", ex); }
+        }
+        static void WriteBrush(BinaryWriter writer, Paths.PathBrush b)
+        {
+            foreach (double v in new[] { b.RadiusWorld, b.Hardness, b.Spacing, b.Opacity, b.Flow }) writer.Write(v);
+            writer.Write(b.Color.R); writer.Write(b.Color.G); writer.Write(b.Color.B); writer.Write(b.Color.A);
+            writer.Write(b.Erase); writer.Write(b.PressureSize); writer.Write(b.PressureOpacity); writer.Write(b.PressureFlow);
+        }
+        static Paths.PathBrush ReadBrush(BinaryReader reader) => new Paths.PathBrush { RadiusWorld = reader.ReadDouble(), Hardness = reader.ReadDouble(), Spacing = reader.ReadDouble(), Opacity = reader.ReadDouble(), Flow = reader.ReadDouble(),
+            Color = new Rgba32(reader.ReadByte(), reader.ReadByte(), reader.ReadByte(), reader.ReadByte()), Erase = reader.ReadBoolean(), PressureSize = reader.ReadBoolean(), PressureOpacity = reader.ReadBoolean(), PressureFlow = reader.ReadBoolean() };
+        static void WriteCanvasPath(BinaryWriter writer, Paths.CanvasPath path)
+        {
+            writer.Write(Paths.CanvasPath.AlgorithmVersion); writer.Write(path.Id.ToByteArray()); writer.Write((int)path.Channel);
+            WriteBrush(writer, path.Brush);
+            writer.Write(path.Points.Count);
+            foreach (var point in path.Points) { writer.Write(point.X); writer.Write(point.Y); writer.Write(point.Pressure); }
+        }
+        static Paths.CanvasPath ReadCanvasPath(BinaryReader reader)
+        {
+            int algorithm = reader.ReadInt32();
+            if (algorithm != Paths.CanvasPath.AlgorithmVersion) throw new InvalidDataException("Canvas path algorithm version " + algorithm + " is not supported by this reader; source retained unchanged.");
+            var id = new Guid(ReadExact(reader, 16)); int channel = reader.ReadInt32();
+            var brush = ReadBrush(reader);
+            int count = ReadCount(reader, Paths.EditablePath.MaxPointCount, "path points");
+            var points = new Paths.CanvasPoint[count];
+            try
+            {
+                for (int i = 0; i < count; i++) points[i] = new Paths.CanvasPoint(reader.ReadDouble(), reader.ReadDouble(), reader.ReadDouble());
+                if (!Enum.IsDefined(typeof(PaintChannel), channel)) throw new ArgumentOutOfRangeException(nameof(channel));
+                return new Paths.CanvasPath(id, (PaintChannel)channel, brush, points);
+            }
+            catch (ArgumentException ex) { throw new InvalidDataException("Invalid canvas path.", ex); }
         }
         static void WriteTiles(BinaryWriter writer, Stream stream, SparseTileSurface surface)
         {

@@ -98,7 +98,7 @@ namespace Yozolab.YoluPainter.Tests
             d.SetPath(l.Id, path, SurfacePathRenderer.Render(d, g, path).Surface);
             var bytes = Yozolab.YoluPainter.Core.Persistence.DocumentBinary.Write(d);
             var restored = Yozolab.YoluPainter.Core.Persistence.DocumentBinary.Read(bytes);
-            var p = restored.Layers[0].Path;
+            var p = (SurfacePath)restored.Layers[0].Path;
             Assert.That(p, Is.Not.Null);
             Assert.That((p.Id, p.Channel, p.ModelFingerprint), Is.EqualTo((path.Id, path.Channel, path.ModelFingerprint)));
             Assert.That(p.Brush, Is.EqualTo(path.Brush)); Assert.That(p.Points, Is.EqualTo(path.Points));

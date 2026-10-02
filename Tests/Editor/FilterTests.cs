@@ -388,7 +388,7 @@ namespace Yozolab.YoluPainter.Tests
             d.AddFilter(l.Id, FilterTarget.Content, FilterSettings.Levels(.1, .9, 2, 0, .8), new[] { PaintChannel.Color });
             d.AddFilter(l.Id, FilterTarget.Mask, FilterSettings.GaussianBlur(5));
             var bytes = DocumentBinary.Write(d);
-            Assert.That(BitConverter.ToInt32(bytes, 8), Is.EqualTo(DocumentBinary.CurrentVersion)); Assert.That(DocumentBinary.CurrentVersion, Is.EqualTo(9));
+            Assert.That(BitConverter.ToInt32(bytes, 8), Is.EqualTo(DocumentBinary.CurrentVersion)); Assert.That(DocumentBinary.CurrentVersion, Is.GreaterThanOrEqualTo(9));
             var read = DocumentBinary.Read(bytes); var rl = read.GetLayer(l.Id);
             Assert.That(rl.Filters.Select(f => (f.Id, f.Settings, f.Enabled, f.Strength, string.Join(",", f.Channels))), Is.EqualTo(l.Filters.Select(f => (f.Id, f.Settings, f.Enabled, f.Strength, string.Join(",", f.Channels)))));
             Assert.That(rl.Mask.Filters.Single().Settings, Is.EqualTo(FilterSettings.GaussianBlur(5)));
