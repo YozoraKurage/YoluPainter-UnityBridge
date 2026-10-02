@@ -41,8 +41,8 @@ if [[ "${YOLUPAINTER_GPU:-1}" != 0 && -e /dev/dxg && -d /usr/lib/wsl/lib ]]; the
   # システムの Mesa 23.2 は 4.2 止まりで、Unity が CopyTexture と compute shader を無効にする。
   # YOLUPAINTER_MESA=system でシステムの Mesa に戻せる。
   if [[ "${YOLUPAINTER_MESA:-bundled}" != system && -f /opt/mesa-d3d12/lib/libGLX_mesa.so.0 ]]; then
+    # Mesa 24.2 の libGLX_mesa は libgallium を直接リンクするので、DRI ドライバの置き場は要らない。
     export LD_LIBRARY_PATH="/opt/mesa-d3d12/lib:$LD_LIBRARY_PATH"
-    export LIBGL_DRIVERS_PATH=/opt/mesa-d3d12/lib/dri
     export __GLX_VENDOR_LIBRARY_NAME=mesa
   fi
   # 複数の GPU があるときは MESA_D3D12_DEFAULT_ADAPTER_NAME（部分一致）で選べる。

@@ -12,7 +12,10 @@ if [[ -e /dev/dxg ]]; then info "/dev/dxg: あり"; else warn "/dev/dxg: 無い�
 if [[ -d /usr/lib/wsl/lib ]]; then info "/usr/lib/wsl/lib: あり ($(ls /usr/lib/wsl/lib | tr '\n' ' '))"; else warn "/usr/lib/wsl/lib: 無い（/usr/lib/wsl のマウントが要る）"; fi
 info "GALLIUM_DRIVER=${GALLIUM_DRIVER:-（未設定 = llvmpipe）}"
 if [[ -f /opt/mesa-d3d12/BUILD_FAILED ]]; then warn "同梱 Mesa のビルドは失敗している（/opt/mesa-d3d12/BUILD_FAILED）。システムの Mesa を使う"
-elif [[ -f /opt/mesa-d3d12/VERSION ]]; then info "同梱 Mesa: $(cat /opt/mesa-d3d12/VERSION)（LIBGL_DRIVERS_PATH=${LIBGL_DRIVERS_PATH:-未使用}）"
+elif [[ -f /opt/mesa-d3d12/lib/libGLX_mesa.so.0 ]]; then
+  if [[ "${LD_LIBRARY_PATH:-}" == */opt/mesa-d3d12/lib* ]]; then info "同梱 Mesa: $(cat /opt/mesa-d3d12/VERSION 2>/dev/null)（使用中）"
+  else info "同梱 Mesa: $(cat /opt/mesa-d3d12/VERSION 2>/dev/null)（未使用: GPU が無いか YOLUPAINTER_MESA=system）"; fi
+elif [[ -f /opt/mesa-d3d12/VERSION ]]; then warn "同梱 Mesa: VERSION だけあってライブラリが無い（ビルドが黙って失敗した古いイメージ。再ビルドで直る）"
 else info "同梱 Mesa: 無し（システムの Mesa を使う）"; fi
 
 if command -v glxinfo >/dev/null 2>&1; then
