@@ -17,7 +17,7 @@ namespace Yozolab.YoluPainter.Tests
     {
         const int MaxByteError = 1;
 
-        static Shader RequireWorkingShader(string name)
+        internal static Shader RequireWorkingShader(string name)
         {
             if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
                 Assert.Ignore("No graphics device (-nographics). Run with a GPU, e.g. test-daemon.sh start --batch-gl.");
@@ -31,7 +31,7 @@ namespace Yozolab.YoluPainter.Tests
             return shader;
         }
 
-        static byte[] Read(Texture texture)
+        internal static byte[] Read(Texture texture)
         {
             var rt = texture as RenderTexture;
             Assert.That(rt, Is.Not.Null, "GPU compositor must expose its RenderTexture, not the CPU fallback.");
@@ -44,7 +44,7 @@ namespace Yozolab.YoluPainter.Tests
             finally { RenderTexture.active = previous; Object.DestroyImmediate(readback); }
         }
 
-        static void AssertMatches(byte[] expected, byte[] actual, string context)
+        internal static void AssertMatches(byte[] expected, byte[] actual, string context)
         {
             Assert.That(actual.Length, Is.EqualTo(expected.Length), context);
             int worst = 0, at = -1;
@@ -90,6 +90,16 @@ namespace Yozolab.YoluPainter.Tests
                 compositor.Update(doc, PaintChannel.Color);
                 Assert.That(compositor.Backend, Does.StartWith("CPU source brush / GPU"), compositor.Backend);
                 AssertMatches(doc.Composite(PaintChannel.Color), Read(compositor.Texture), "composite");
+            }
+        }
+
+        [Test] public void TileCompositorIncrementalUpdatesMatchCpuReference()
+        {
+            RequireWorkingShader("Hidden/YoluPainter/TileComposite");
+            using (var compositor = new TileGpuCompositor())
+            {
+                CompositorTests.RunIncrementalScenario(compositor, () => Read(compositor.Texture), AssertMatches);
+                Assert.That(compositor.Backend, Does.StartWith("CPU source brush / GPU"), compositor.Backend);
             }
         }
 
