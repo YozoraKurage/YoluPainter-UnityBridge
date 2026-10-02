@@ -70,6 +70,30 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.RotateKeyHeld, Is.True); KeyUp(KeyCode.R); Assert.That(window.RotateKeyHeld, Is.False);
         }
 
+        /// <summary>Ctrl++ / Ctrl+- が表示の中心を軸に拡大・縮小する（前はメニューに書いてあるだけでキーとしては効かなかった）。+ は US の = のキー・
+        /// JIS の ; のキー（Shift で +）・テンキーで受け、Ctrl 付きの - と = は表示を回さない。ストロークの最中は効かない。</summary>
+        [Test] public void CtrlPlusAndCtrlMinusZoomAboutTheCentre()
+        {
+            CanvasOnly();
+            MiddleDrag(ViewCentre(), new Vector2(40, -25), EventModifiers.None);
+            var centre = ViewCanvas(ViewCentre());
+            Key(window, KeyCode.Equals, EventModifiers.Control);
+            Assert.That(window.CanvasZoom, Is.EqualTo(1.25f).Within(1e-5f), "Ctrl+=");
+            AssertCentreStays(centre, "Ctrl+=");
+            Key(window, KeyCode.Semicolon, EventModifiers.Control | EventModifiers.Shift);
+            Key(window, KeyCode.KeypadPlus, EventModifiers.Control);
+            Assert.That(window.CanvasZoom, Is.EqualTo(1.25f * 1.25f * 1.25f).Within(1e-4f), "Ctrl+; (JIS +) and the keypad +");
+            Key(window, KeyCode.Minus, EventModifiers.Control); Key(window, KeyCode.KeypadMinus, EventModifiers.Control);
+            Assert.That(window.CanvasZoom, Is.EqualTo(1.25f).Within(1e-4f), "Ctrl+- twice");
+            AssertCentreStays(centre, "Ctrl+-");
+            Assert.That(window.CanvasAngle, Is.EqualTo(0f), "Ctrl with - or = does not rotate the view");
+            Assert.That(window.Document.CanUndo, Is.False, "the view is not part of the document");
+            BeginLine(400, 400);
+            Key(window, KeyCode.Equals, EventModifiers.Control);
+            Assert.That(window.CanvasZoom, Is.EqualTo(1.25f).Within(1e-4f), "not during a stroke");
+            Mouse(window, EventType.MouseUp, At(window, 460, 400));
+        }
+
         [Test] public void TheViewDoesNotTurnDuringAStrokeOrADrag()
         {
             BeginLine(400, 400);

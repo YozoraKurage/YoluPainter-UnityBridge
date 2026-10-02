@@ -229,6 +229,7 @@ namespace Yozolab.YoluPainter.Editor
 
         // ───────── 表示域の見出し ─────────
 
+        internal Rect surfaceHeaderLabelForTests; internal float viewModeButtonsEndForTests;
         void DrawViewHeader()
         {
             var bar = new Rect(viewAreaRect.x, viewAreaRect.y, viewAreaRect.width, 26);
@@ -255,10 +256,12 @@ namespace Yozolab.YoluPainter.Editor
             }
             if (surfaceRect.width > 0)
             {
-                float right = DrawShadingSwitch(bar);
+                // 3D だけの表示では 3D ビューの左端が表示の切り替えのボタンの下なので、2D の見出しと同じくボタンの後から書く
+                float right = DrawShadingSwitch(bar), left = Mathf.Max(x + 8, surfaceRect.x + 8);
                 string label = "3D · " + (preview.HasModel ? (model != null ? model.name : L.Tr("Demo cube")) : L.Tr("No model"));
-                float width = Mathf.Max(0, Mathf.Min(300, right - surfaceRect.x - 12));
-                PaintGui.Text(new Rect(surfaceRect.x + 8, bar.y, width, bar.height), PaintGui.Fit(label, width, PaintTheme.LabelDim, false), PaintTheme.LabelDim);
+                float width = Mathf.Max(0, Mathf.Min(300, right - left - 4));
+                surfaceHeaderLabelForTests = new Rect(left, bar.y, width, bar.height); viewModeButtonsEndForTests = x;
+                PaintGui.Text(new Rect(left, bar.y, width, bar.height), PaintGui.Fit(label, width, PaintTheme.LabelDim, false), PaintTheme.LabelDim);
             }
             if (surfaceRect.width > 0 && !preview.HasModel)
                 PaintGui.Text(surfaceRect, L.Tr("Choose a model in Texture Set, or 3D ▸ Demo Cube.\nThe original prefab is never instantiated."), new GUIStyle(PaintTheme.LabelDim) { alignment = TextAnchor.MiddleCenter, wordWrap = true });

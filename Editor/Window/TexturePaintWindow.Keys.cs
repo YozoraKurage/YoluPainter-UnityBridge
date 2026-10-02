@@ -39,8 +39,12 @@ namespace Yozolab.YoluPainter.Editor
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.O){OpenProject();e.Use();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.N){NewProjectDialog();e.Use();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.Alpha0){FitCanvasView();e.Use();Repaint();}
+            else if(stroke==null && !toolDragging && (e.control||e.command) && ZoomKey(e.keyCode)!=0){ZoomCanvasView(ZoomKey(e.keyCode)>0?canvasZoom*1.25f:canvasZoom/1.25f);e.Use();Repaint();}
             if(e.type==EventType.Used)NoteTookKey(e);
         }
+        /// <summary>Ctrl++ / Ctrl+- の拡大・縮小（表示の中心が軸）。+ は配列で位置が違うので、US の = のキー（Shift の有無を問わない）・
+        /// JIS の ; のキー（Shift で +）・テンキーを受ける。</summary>
+        static int ZoomKey(KeyCode key)=>key==KeyCode.Equals||key==KeyCode.Plus||key==KeyCode.KeypadPlus||key==KeyCode.Semicolon?1:key==KeyCode.Minus||key==KeyCode.KeypadMinus?-1:0;
         static Vector2Int ArrowDelta(KeyCode key)=>key==KeyCode.LeftArrow?Vector2Int.left:key==KeyCode.RightArrow?Vector2Int.right:key==KeyCode.UpArrow?Vector2Int.up:key==KeyCode.DownArrow?Vector2Int.down:Vector2Int.zero;
         /// <summary>矢印キーの向き（画面の上で。上は +y）を、表示の回転・反転を戻して、いちばん近いキャンバスの軸の 1 画素に（画面で右を押せば
         /// 画面で右に動く。45° ちょうどのような斜めではどちらかの軸）。</summary>

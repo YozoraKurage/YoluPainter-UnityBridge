@@ -61,6 +61,29 @@ namespace Yozolab.YoluPainter.Tests
             finally { Object.DestroyImmediate(w); }
         }
 
+        /// <summary>3D ビューの見出しの「3D · モデル名」が、表示の切り替えのボタン（2D・3D・並べる）に重ならない（3D だけの表示では
+        /// 3D ビューの左端がボタンの下にあり、前は名前がボタンの上に書かれていた）。並べる表示でも 3D ビューの左端から書く。</summary>
+        [Test] public void TheModelNameInThe3DHeaderClearsTheViewButtons()
+        {
+            if (!Application.isBatchMode) Assert.Ignore("Offscreen drawing is checked on the batch-gl daemon.");
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null) Assert.Ignore("No graphics device (-nographics).");
+            var w = ScriptableObject.CreateInstance<TexturePaintWindow>();
+            try
+            {
+                w.Preview.LoadDemoMesh();
+                foreach (var view in new[] { TexturePaintWindow.ViewMode.Model, TexturePaintWindow.ViewMode.Split })
+                {
+                    w.View = view;
+                    OffscreenGui.RenderWindow(w, 1200, 800, Path.Combine(Folder, "header-" + view + ".png"));
+                    var label = w.surfaceHeaderLabelForTests;
+                    Assert.That(label.x, Is.GreaterThanOrEqualTo(w.viewModeButtonsEndForTests), view + ": the name starts after the view buttons");
+                    Assert.That(label.x, Is.GreaterThanOrEqualTo(w.SurfaceRect.x), view + ": the name is inside the 3D view");
+                    Assert.That(label.width, Is.GreaterThan(40), view + ": there is room for the name");
+                }
+            }
+            finally { Object.DestroyImmediate(w); }
+        }
+
         static void Render(TexturePaintWindow w, int width, int height, string name)
         {
             string path = Path.Combine(Folder, name + ".png");

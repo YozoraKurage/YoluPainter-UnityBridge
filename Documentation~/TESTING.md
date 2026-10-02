@@ -9,7 +9,11 @@
 .devcontainer/unity/test-daemon.sh restart            # EditorWindow の操作を確かめるとき（GUI モード）
 .devcontainer/unity/run-tests.sh                      # 全件
 .devcontainer/unity/run-tests.sh --filter 'Yozolab.YoluPainter.Tests.GpuTests'
+.devcontainer/unity/run-tests.sh --filter 'Yozolab.YoluPainter.Tests.(WindowTests|ShortcutGuardTests)[.]'   # 複数のクラス
 ```
+
+`--filter` はテストの完全名に対する正規表現（Unity の Test Framework の groupNames）。`;` で区切っても複数にはならず 0 件になる。
+依頼は JSON で送るので、`\.` のようなバックスラッシュは使えない（JSON の読み取りで落ちる）。点そのものは `[.]` と書く。
 
 この devcontainer の GUI モードではシェーダーのインクルードが解決できない（VALIDATION.md の「環境の既知の問題」）。そのため 2 つのモードで役割を分ける。
 
