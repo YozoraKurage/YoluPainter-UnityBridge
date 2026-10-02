@@ -27,6 +27,18 @@ Shader "Hidden/YoluPainter/TileComposite"
             }
             ENDCG
         }
+        // Pass 1: そのままのコピー。CopyTexture が使えない環境で、完成したタイルを composite の
+        // 該当領域へ描き込むのに使う（作業タイルはポイントサンプリングなので画素がそのまま移る）。
+        Pass
+        {
+            CGPROGRAM
+            #pragma vertex vert_img
+            #pragma fragment fragCopy
+            #include "UnityCG.cginc"
+            sampler2D _MainTex;
+            float4 fragCopy(v2f_img i) : SV_Target { return tex2D(_MainTex, i.uv); }
+            ENDCG
+        }
     }
     Fallback Off
 }

@@ -103,6 +103,17 @@ namespace Yozolab.YoluPainter.Tests
             }
         }
 
+        [Test] public void TileCompositorDrawCopyPathMatchesCpuReference()
+        {
+            // CopyTexture が使える GPU でも、使えない環境向けの描き込み経路を確かめる。
+            RequireWorkingShader("Hidden/YoluPainter/TileComposite");
+            using (var compositor = new TileGpuCompositor(allowCopyTexture: false))
+            {
+                CompositorTests.RunIncrementalScenario(compositor, () => Read(compositor.Texture), AssertMatches);
+                Assert.That(compositor.Backend, Does.Contain("draw copy"), compositor.Backend);
+            }
+        }
+
         [Test] public void TileCompositorClearsTilesThatBecameEmpty()
         {
             RequireWorkingShader("Hidden/YoluPainter/TileComposite");

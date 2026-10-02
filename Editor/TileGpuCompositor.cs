@@ -26,10 +26,12 @@ namespace Yozolab.YoluPainter.Editor
         PaintDocument lastDocument;
         PaintChannel lastChannel;
         long lastSerial = -1;
-        readonly bool allowGpu;
+        readonly bool allowGpu, allowCopyTexture;
+        bool useCopyTexture;
 
         /// <param name="allowGpu">false forces the CPU path (used by tests that must run without a graphics device).</param>
-        public TileGpuCompositor(bool allowGpu = true) { this.allowGpu = allowGpu; }
+        /// <param name="allowCopyTexture">false forces the draw-copy path even where Graphics.CopyTexture is supported (tests).</param>
+        public TileGpuCompositor(bool allowGpu = true, bool allowCopyTexture = true) { this.allowGpu = allowGpu; this.allowCopyTexture = allowCopyTexture; }
 
         public void Update(PaintDocument doc, PaintChannel channel)
         {
@@ -85,14 +87,44 @@ namespace Yozolab.YoluPainter.Editor
                 var swap = ping; ping = pong; pong = swap;
             }
             int tw = Math.Min(tileSize, width - coord.X * tileSize), th = Math.Min(tileSize, height - coord.Y * tileSize);
-            Graphics.CopyTexture(ping, 0, 0, 0, 0, tw, th, composite, 0, 0, coord.X * tileSize, coord.Y * tileSize);
+            if (useCopyTexture) Graphics.CopyTexture(ping, 0, 0, 0, 0, tw, th, composite, 0, 0, coord.X * tileSize, coord.Y * tileSize);
+            else DrawCopy(ping, coord.X * tileSize, coord.Y * tileSize, tw, th);
+        }
+        /// <summary>CopyTexture の代わりに、作業タイルの左下 w×h を composite の (x, y) へ描き込む。
+        /// Unity は OpenGL 4.3 未満（ARB_copy_image を持っていても）や一部の GLES で CopyTexture を無効にする。</summary>
+        void DrawCopy(RenderTexture source, int x, int y, int w, int h)
+        {
+            var old = RenderTexture.active;
+            try
+            {
+                RenderTexture.active = composite;
+                GL.PushMatrix();
+                GL.LoadPixelMatrix(0, width, 0, height);
+                material.SetTexture("_MainTex", source);
+                material.SetPass(1);
+                float u = w / (float)tileSize, v = h / (float)tileSize;
+                GL.Begin(GL.QUADS);
+                GL.TexCoord2(0, 0); GL.Vertex3(x, y, 0);
+                GL.TexCoord2(0, v); GL.Vertex3(x, y + h, 0);
+                GL.TexCoord2(u, v); GL.Vertex3(x + w, y + h, 0);
+                GL.TexCoord2(u, 0); GL.Vertex3(x + w, y, 0);
+                GL.End();
+                GL.PopMatrix();
+            }
+            finally
+            {
+                RenderTexture.active = old;
+                // 残すと、次の Blit がこの作業タイルを書き込み先にしたとき「入力と出力が同じ」と判定する。
+                material.SetTexture("_MainTex", null);
+            }
         }
         void Ensure(PaintDocument doc)
         {
             if (width == doc.Width && height == doc.Height && tileSize == doc.TileSize && Texture != null) return;
             Dispose(); width = doc.Width; height = doc.Height; tileSize = doc.TileSize;
             var shader = Shader.Find("Hidden/YoluPainter/TileComposite");
-            bool supported = allowGpu && ShaderHealth.IsUsable(shader) && SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGB32) && (SystemInfo.copyTextureSupport & CopyTextureSupport.Basic) != 0;
+            bool supported = allowGpu && ShaderHealth.IsUsable(shader) && SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGB32);
+            useCopyTexture = allowCopyTexture && (SystemInfo.copyTextureSupport & CopyTextureSupport.Basic) != 0;
             if (supported)
             {
                 try
@@ -101,11 +133,11 @@ namespace Yozolab.YoluPainter.Editor
                     material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
                     upload = new Texture2D(tileSize, tileSize, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point };
                     ping = MakeRt(tileSize, tileSize, FilterMode.Point); pong = MakeRt(tileSize, tileSize, FilterMode.Point); composite = MakeRt(width, height, FilterMode.Bilinear); Clear(composite);
-                    Backend = "CPU source brush / GPU tiled compositor (encoded-space prototype)"; return;
+                    Backend = "CPU source brush / GPU tiled compositor (encoded-space prototype" + (useCopyTexture ? ")" : ", draw copy)"); return;
                 }
                 catch (Exception ex) { Dispose(); Backend = "GPU allocation failed: " + ex.Message + "; CPU composite fallback"; }
             }
-            else Backend = "CPU composite fallback: GPU format, copy or shader unavailable (or the shader failed to compile)";
+            else Backend = "CPU composite fallback: GPU render texture format or shader unavailable (or the shader failed to compile)";
             width = doc.Width; height = doc.Height; tileSize = doc.TileSize;
             cpuFallback = new Texture2D(width, height, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Bilinear };
         }
