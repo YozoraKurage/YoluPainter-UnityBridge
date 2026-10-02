@@ -148,7 +148,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 AddDemoFace(vertices, uvs, indices, new Vector3(-.5f,.5f,-.5f), new Vector3(-.5f,.5f,.5f), new Vector3(.5f,.5f,-.5f), new Vector3(.5f,.5f,.5f));
                 AddDemoFace(vertices, uvs, indices, new Vector3(-.5f,-.5f,.5f), new Vector3(-.5f,-.5f,-.5f), new Vector3(.5f,-.5f,.5f), new Vector3(.5f,-.5f,-.5f));
                 var mesh = new Mesh { name = "Texture painter UV seam demo", hideFlags = HideFlags.HideAndDontSave };
-                meshes.Add(mesh); mesh.SetVertices(vertices); mesh.SetUVs(0, uvs); mesh.SetTriangles(indices, 0); mesh.RecalculateNormals(); mesh.RecalculateBounds();
+                meshes.Add(mesh); mesh.SetVertices(vertices); mesh.SetUVs(0, uvs); mesh.SetTriangles(indices, 0); mesh.RecalculateNormals(); mesh.RecalculateTangents(); mesh.RecalculateBounds();
                 var material = new Material(shader) { name = "Seam demo (preview only)", hideFlags = HideFlags.HideAndDontSave };
                 materials.Add(material); sourceTextures.Add(null); sourceColors.Add(Color.white); sourceMaterials.Add(null); slotNames.Add("Seam cube / 0 / Neutral");
                 var go = new GameObject("Texture painter seam cube (preview only)") { hideFlags = HideFlags.HideAndDontSave };
@@ -284,6 +284,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                     entry.Slots[sub] = slot; entry.Indices[sub] = indices;
                 }
                 if (normals.Length != vertices.Length) mesh.RecalculateNormals();
+                if (hasUv && tangents.Length != vertices.Length) mesh.RecalculateTangents(); // ノーマルマップの表示に要る
                 mesh.RecalculateBounds();
                 var go = new GameObject(renderer.name + " (isolated paint preview)") { hideFlags = HideFlags.HideAndDontSave };
                 objects.Add(go); preview.AddSingleGO(go);
@@ -399,6 +400,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 e.Vertices = vertices; e.Display.vertices = vertices;
                 if (normals.Length == vertices.Length) { for (int n = 0; n < normals.Length; n++) normals[n] = NormalizeNonzero(normalMatrix.MultiplyVector(normals[n])); e.Display.normals = normals; }
                 else e.Display.RecalculateNormals();
+                if (e.HasUv) e.Display.RecalculateTangents();
                 e.Display.RecalculateBounds();
             }
             revision++;
@@ -544,6 +546,28 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 materials[i].SetTexture("_MainTex", selected ? texture : sourceTextures[i] != null ? sourceTextures[i] : Texture2D.whiteTexture);
                 materials[i].SetColor("_Color", selected ? Color.white : sourceColors[i]);
             }
+        }
+        /// <summary>ノーマルマップ（接空間、リニアの RGB、OpenGL の Y+）をスロットの照明に使う。null で使わない。表示だけで、元のマテリアルには触れない。</summary>
+        public void SetNormalTexture(Texture normalMap, int materialSlot = -1)
+        {
+            ThrowIfDisposed();
+            for (int i = 0; i < materials.Count; i++)
+            {
+                bool selected = normalMap != null && (materialSlot < 0 || materialSlot == i);
+                materials[i].SetTexture("_NormalMap", selected ? normalMap : null);
+                materials[i].SetFloat("_UseNormalMap", selected ? 1 : 0);
+            }
+        }
+        /// <summary>今のカメラで width × height に描いた画像（試験用）。</summary>
+        internal Texture2D RenderStatic(int width, int height)
+        {
+            ThrowIfDisposed();
+            if (!HasModel) return null;
+            EnsurePreview(); var rect = new Rect(0, 0, width, height); UpdateCamera(rect);
+            bool previousPipelineFlag = Unsupported.useScriptableRenderPipeline;
+            preview.BeginStaticPreview(rect);
+            try { preview.Render(false, false); return preview.EndStaticPreview(); }
+            finally { Unsupported.useScriptableRenderPipeline = previousPipelineFlag; }
         }
         public bool HandleNavigation(Rect rect, Event current)
         {

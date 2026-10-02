@@ -5,6 +5,8 @@ Shader "Hidden/YoluPainter/PreviewSurface"
         _MainTex ("Texture", 2D) = "white" {}
         _Color ("Tint", Color) = (1,1,1,1)
         _PreviewLit ("Neutral lighting", Float) = 1
+        _NormalMap ("Normal map (tangent space, OpenGL Y+)", 2D) = "bump" {}
+        _UseNormalMap ("Use normal map", Float) = 0
     }
     SubShader
     {
@@ -21,14 +23,18 @@ Shader "Hidden/YoluPainter/PreviewSurface"
             sampler2D _MainTex;
             float4 _Color;
             float _PreviewLit;
-            struct appdata { float4 vertex : POSITION; float3 normal : NORMAL; float2 uv : TEXCOORD0; };
-            struct v2f { float4 position : SV_POSITION; float2 uv : TEXCOORD0; float3 normal : TEXCOORD1; };
+            sampler2D _NormalMap;
+            float _UseNormalMap;
+            struct appdata { float4 vertex : POSITION; float3 normal : NORMAL; float4 tangent : TANGENT; float2 uv : TEXCOORD0; };
+            struct v2f { float4 position : SV_POSITION; float2 uv : TEXCOORD0; float3 normal : TEXCOORD1; float3 tangent : TEXCOORD2; float3 bitangent : TEXCOORD3; };
             v2f vert(appdata input)
             {
                 v2f output;
                 output.position = UnityObjectToClipPos(input.vertex);
                 output.uv = input.uv;
                 output.normal = UnityObjectToWorldNormal(input.normal);
+                output.tangent = UnityObjectToWorldDir(input.tangent.xyz);
+                output.bitangent = cross(output.normal, output.tangent) * input.tangent.w * unity_WorldTransformParams.w;
                 return output;
             }
             fixed4 frag(v2f input) : SV_Target
@@ -36,7 +42,14 @@ Shader "Hidden/YoluPainter/PreviewSurface"
                 float4 color = tex2D(_MainTex, input.uv) * _Color;
                 float checker = fmod(floor(input.uv.x * 24) + floor(input.uv.y * 24), 2);
                 float3 background = lerp(float3(0.24, 0.24, 0.24), float3(0.34, 0.34, 0.34), checker);
-                float light = 0.35 + 0.65 * saturate(dot(normalize(input.normal), normalize(float3(-0.3, 0.65, -0.7))));
+                float3 n = normalize(input.normal);
+                if (_UseNormalMap > 0.5)
+                {
+                    // YoluPainter の Normal の出力: リニアの RGB に詰めた接空間の法線（OpenGL の Y+）
+                    float3 t = tex2D(_NormalMap, input.uv).xyz * 2 - 1;
+                    n = normalize(input.tangent * t.x + input.bitangent * t.y + n * t.z);
+                }
+                float light = 0.35 + 0.65 * saturate(dot(n, normalize(float3(-0.3, 0.65, -0.7))));
                 color.rgb = lerp(background, color.rgb, color.a);
                 return fixed4(color.rgb * lerp(1, light, _PreviewLit), 1);
             }
