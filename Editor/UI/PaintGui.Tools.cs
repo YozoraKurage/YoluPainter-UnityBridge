@@ -10,7 +10,8 @@ namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>
     /// プロパティの欄のツールの設定に使う部品（<see cref="PaintGui"/> の続き）: 小見出し、収まらない文字を … で詰める版の
-    /// スライダー・チェック・ボタン・ドロップダウン、数値の欄（ドラッグで増減・クリックで入力）、値の表示、カーブの欄、折り返す説明文。
+    /// スライダー・チェック・ボタン・ドロップダウン、数値の欄（ドラッグで増減・クリックで入力）、値の表示、折り返す説明文。
+    /// 筆圧のカーブの欄は PaintGui.Curve.cs（<see cref="CurveEditor"/>）。
     /// 文字を詰めたら <see cref="ShortenedTexts"/> を数える（テストが、英語でも日本語でも最小のウィンドウで 0 であることを確かめる）。
     /// </summary>
     internal static partial class PaintGui
@@ -152,47 +153,6 @@ namespace Yozolab.YoluPainter.Editor
         }
         public static int IntField(Rect r, string label, int value, int min, int max, string suffix = "", string tooltip = null, bool enabled = true)
             => Mathf.RoundToInt(NumberField(r, label, value, "0", suffix, 1, min, max, tooltip, enabled));
-
-        // ───────── カーブ ─────────
-
-        /// <summary>
-        /// カーブの欄（筆圧のカーブ）。枠と線はこの部品で描き、押すと Unity のカーブエディタが開く。カーブの編集そのものは
-        /// EditorGUI.CurveField に任せる（Unity のカーブエディタを開き、編集を "CurveChanged" のコマンドで返す仕組みは公開されて
-        /// いないので、自前では作らない）。CurveField は Repaint でも呼んで制御の ID の並びを揃え、その見本の上にこの見た目を重ねる。
-        /// Unity の標準のスタイルが無いとき（バッチモードのオフスクリーンの描画）は見た目だけを描く。
-        /// </summary>
-        public static AnimationCurve Curve(Rect r, AnimationCurve curve, string tooltip = null)
-        {
-            if (curve == null) return null;
-            if (EditorStylesAvailable) curve = EditorGUI.CurveField(r, curve) ?? curve;
-            if (Repainting)
-            {
-                bool hover = Hover(r);
-                Rounded(r, PaintTheme.ControlBg, 3);
-                var inner = new Rect(r.x + 5, r.y + 4, r.width - 10, r.height - 8);
-                var grid = new Color(1, 1, 1, .06f);
-                for (int i = 1; i < 4; i++)
-                {
-                    VLine(Mathf.Round(inner.x + inner.width * i / 4), inner.y, inner.yMax, grid);
-                    HLine(inner.x, inner.xMax, Mathf.Round(inner.y + inner.height * i / 4), grid);
-                }
-                // 列ごとに、前の列の高さから今の列の高さまでを細い縦の帯で塗る（GUI の切り抜きが効く描き方で、つながった線になる）
-                int columns = Mathf.Max(2, Mathf.RoundToInt(inner.width));
-                float previous = float.NaN;
-                for (int i = 0; i <= columns; i++)
-                {
-                    float t = i / (float)columns, y = inner.yMax - Mathf.Clamp01(curve.Evaluate(t)) * inner.height;
-                    float top = float.IsNaN(previous) ? y : Mathf.Min(previous, y), bottom = float.IsNaN(previous) ? y : Mathf.Max(previous, y);
-                    Fill(new Rect(inner.x + t * inner.width - .75f, top - .75f, 1.5f, bottom - top + 1.5f), PaintTheme.Accent);
-                    previous = y;
-                }
-                Outline(r, hover ? PaintTheme.AccentDim : PaintTheme.Border, 1, 3);
-            }
-            Tooltip(r, tooltip);
-            return curve;
-        }
-
-        static bool EditorStylesAvailable { get { try { return EditorStyles.colorField != null; } catch (NullReferenceException) { return false; } } }
 
         // ───────── 説明文 ─────────
 

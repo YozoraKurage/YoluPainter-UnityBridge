@@ -60,8 +60,27 @@ msgctxt "brush"
 msgid "Curve"
 msgstr "カーブ"
 
-msgid "Pen pressure (left to right) becomes the pressure the brush uses (bottom to top). Click to edit the curve."
-msgstr "ペンの筆圧（左から右）を、ブラシが使う筆圧（下から上）に変えます。クリックでカーブを編集。"
+msgid "Pen pressure (left to right) becomes the pressure the brush uses (bottom to top). Click to add a point and drag it; right-click or drag a point out of the box to remove it."
+msgstr "ペンの筆圧（左から右）を、ブラシが使う筆圧（下から上）に変えます。クリックで点を足してドラッグで動かし、右クリックか枠の外へドラッグして点を消します。"
+
+msgid "Common pressure curves"
+msgstr "よく使う筆圧のカーブ"
+
+msgctxt "pressure curve"
+msgid "Reset to linear"
+msgstr "線形に戻す"
+
+msgctxt "pressure curve"
+msgid "Soft"
+msgstr "柔らかい"
+
+msgctxt "pressure curve"
+msgid "Hard"
+msgstr "硬い"
+
+msgctxt "pressure curve"
+msgid "S-curve"
+msgstr "S 字"
 
 msgctxt "brush"
 msgid "Preset"

@@ -8,6 +8,9 @@ namespace Yozolab.YoluPainter.Editor
     /// <summary>2D キャンバス: 表示（拡大・パン）と、キャンバスと 3D ビューへの入力の振り分け。</summary>
     public sealed partial class TexturePaintWindow
     {
+        /// <summary>OnGUI が文書を表示のために合成した回数（Repaint のときだけ合成する。テストがそれを確かめる）。</summary>
+        internal int CompositeCount { get; private set; }
+
         Rect ImageRect()
         {
             float fit=Mathf.Min(canvasRect.width/document.Width,canvasRect.height/document.Height)*canvasZoom;

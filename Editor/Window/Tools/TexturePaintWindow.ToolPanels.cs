@@ -99,10 +99,7 @@ namespace Yozolab.YoluPainter.Editor
             brush.pressureSize = PaintGui.FitToggle(c[0], L.Tr("Size"), brush.pressureSize, L.Tr("Pressure controls size"));
             brush.pressureOpacity = PaintGui.FitToggle(c[1], L.Tr("Opacity"), brush.pressureOpacity, L.Tr("Pressure controls opacity"));
             brush.pressureFlow = PaintGui.FitToggle(c[2], L.Tr("Flow"), brush.pressureFlow, L.Tr("Pressure flow"));
-            var curve = rows.Row(44);
-            PaintGui.Text(new Rect(curve.x, curve.y, LabelColumn, PaintTheme.RowHeight), PaintGui.Fit(L.TrIn("brush", "Curve"), LabelColumn - 6, PaintTheme.Label), PaintTheme.Label);
-            brush.pressureCurve = PaintGui.Curve(new Rect(curve.x + LabelColumn, curve.y, curve.width - LabelColumn, curve.height), brush.pressureCurve,
-                L.Tr("Pressure curve") + "\n" + L.Tr("Pen pressure (left to right) becomes the pressure the brush uses (bottom to top). Click to edit the curve."));
+            PressureCurveRows(rows);
 
             rows.Space(2);
             var preset = rows.Row(24);
@@ -115,6 +112,42 @@ namespace Yozolab.YoluPainter.Editor
             if (PaintGui.IconButton(B(), "delete", L.Tr("Delete Imported Brush"), false, BrushLibrary.IsLibraryPreset(brush.presetId), 17)) DeleteImportedBrush();
             rows.Space(4);
         }
+
+        /// <summary>筆圧のカーブのグラフの高さ。</summary>
+        internal const float PressureCurveHeight = 84;
+
+        /// <summary>筆圧のカーブ: 名前・よく使う形のメニュー・線形に戻すボタンの行と、直接編集するグラフ（<see cref="PaintGui.CurveEditor"/>）。</summary>
+        void PressureCurveRows(UiRows rows)
+        {
+            var head = rows.Row();
+            PaintGui.Text(new Rect(head.x, head.y, LabelColumn, head.height), PaintGui.Fit(L.TrIn("brush", "Curve"), LabelColumn - 6, PaintTheme.Label), PaintTheme.Label);
+            int shape = Array.FindIndex(PressureCurve.Presets, p => PressureCurve.Matches(brush.pressureCurve, p.Points));
+            PaintGui.FitDropdown(Mark("pressure-curve-preset", new Rect(head.x + LabelColumn, head.y, head.width - LabelColumn - 30, head.height)), null,
+                shape >= 0 ? CurvePresetTitle(shape) : L.Tr("Custom"), at =>
+                {
+                    var menu = new GenericMenu();
+                    for (int i = 0; i < PressureCurve.Presets.Length; i++) { int k = i; menu.AddItem(new GUIContent(CurvePresetTitle(k)), k == shape, () => SetPressureCurve(PressureCurve.Presets[k].Points)); }
+                    menu.DropDown(at);
+                }, L.Tr("Common pressure curves"));
+            if (PaintGui.IconButton(Mark("pressure-curve-reset", new Rect(head.xMax - 26, head.y, 26, head.height)), "restart_alt", L.TrIn("pressure curve", "Reset to linear"), false, shape != 0, 17))
+                SetPressureCurve(PressureCurve.Presets[0].Points);
+            brush.pressureCurve = PaintGui.CurveEditor(Mark("pressure-curve", rows.Row(PressureCurveHeight)), brush.pressureCurve,
+                L.Tr("Pressure curve") + "\n" + L.Tr("Pen pressure (left to right) becomes the pressure the brush uses (bottom to top). Click to add a point and drag it; right-click or drag a point out of the box to remove it."));
+        }
+
+        static string CurvePresetTitle(int index)
+        {
+            switch (index)
+            {
+                case 0: return L.Tr("Linear");
+                case 1: return L.TrIn("pressure curve", "Soft");
+                case 2: return L.TrIn("pressure curve", "Hard");
+                default: return L.TrIn("pressure curve", "S-curve");
+            }
+        }
+
+        /// <summary>筆圧のカーブを points を通る形にする（よく使う形のメニューと、線形に戻すボタン）。</summary>
+        internal void SetPressureCurve(System.Collections.Generic.IList<Vector2> points) { brush.pressureCurve = PressureCurve.FromPoints(points); Repaint(); }
 
         void JitterSection(UiRows rows)
         {

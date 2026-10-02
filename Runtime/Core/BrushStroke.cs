@@ -11,7 +11,10 @@ namespace Yozolab.YoluPainter.Core
     /// Dynamics (BrushDynamics.cs): per-tip colours keep a per-pixel stroke colour that each dab pulls toward its own colour by
     /// its flow; the dual brush lays its own dabs along the same path and a main dab at arc length s uses those up to s; fade and
     /// tilt multiply size / ceiling / flow. Colour and dual randomness use their own streams, so they never move the main dabs.
-    /// ApplyPixel (mesh dabs) uses one colour per stroke and no dual brush, fade or tilt.</summary>
+    /// ApplyPixel (mesh dabs) uses one colour per stroke and no dual brush, fade or tilt.
+    /// With CurveInterpolation the path points (after the stabilizer) are joined by a centripetal Catmull-Rom curve, cut into
+    /// pieces of about <see cref="CurvePieceLength"/> px that go through the same straight-segment spacing, dual-brush and taper
+    /// steps; the segment to the newest point waits for the next point (or the commit).</summary>
     public sealed class BrushStroke : IDisposable
     {
         private readonly PaintDocument document;
@@ -49,6 +52,15 @@ namespace Yozolab.YoluPainter.Core
         private readonly Dictionary<TileCoord, float[]> dualCoverage;
         private double dualSinceStamp;
         private int tipIndex; // next tip for TipSelection.Sequential
+        // 曲線の補間（CurveInterpolation）: 描いた点（curveFrom）と、その前の点（curveBefore）、まだ描いていない最新の点（curveTo）
+        private int curvePoints; // 0: まだ無い / 1: curveFrom だけ / 2: curveTo を待たせている
+        private bool hasCurveBefore;
+        private BrushSample curveBefore, curveFrom, curveTo;
+        private readonly List<BrushSample> curvePieces = new List<BrushSample>();
+        /// <summary>曲線の区間を刻む折れ線の 1 本の長さ（画素）。弧と弦のずれは半径 R の曲がりで 1/(8R) px 以下。</summary>
+        public const double CurvePieceLength = 1;
+        /// <summary>曲線の 1 区間を刻む数の上限（これを超える長い区間は刻みを粗くする。ダブの数の上限は別に確かめる）。</summary>
+        public const int MaxCurvePieces = 65536;
         private long rollbackBytes;
         public Guid TransactionId { get; private set; }
         public bool IsFinished { get { return finished; } }
@@ -80,18 +92,66 @@ namespace Yozolab.YoluPainter.Core
                 if (Math.Abs(sample.X) > 10000000 || Math.Abs(sample.Y) > 10000000)
                     throw new ArgumentOutOfRangeException(nameof(sample), "Sample exceeds the guarded pixel-space range.");
                 lastInput = sample;
-                if (settings.Stabilizer <= 0 || !hasPen) { hasPen = true; pen = sample; AddPathPoint(sample); return; }
+                if (settings.Stabilizer <= 0 || !hasPen) { hasPen = true; pen = sample; AddPenPoint(sample); return; }
                 double dx = sample.X - pen.X, dy = sample.Y - pen.Y, d = Math.Sqrt(dx * dx + dy * dy);
                 if (d <= settings.Stabilizer) return; // 糸がたるんでいる間は筆は動かない
                 double k = (d - settings.Stabilizer) / d;
                 pen = new BrushSample(pen.X + dx * k, pen.Y + dy * k, sample.Pressure, sample.Time, sample.TiltX, sample.TiltY);
-                AddPathPoint(pen);
+                AddPenPoint(pen);
             }
             catch { Cancel(); throw; }
         }
 
-        /// <summary>The path the brush actually follows (after the stabilizer): dabs at every spacing step along it.</summary>
-        private void AddPathPoint(BrushSample sample)
+        /// <summary>A point of the pen (after the stabilizer): straight to the path, or held back until the curve to it is known.</summary>
+        private void AddPenPoint(BrushSample sample)
+        {
+            if (!settings.CurveInterpolation) { AddPathPoint(sample); return; }
+            if (curvePoints == 0) { AddPathPoint(sample); curveFrom = sample; curvePoints = 1; return; }
+            if (curvePoints == 1)
+            {
+                // 描いた点に重なる点は、直線のときと同じく筆圧などだけを次の区間の始まりに入れる
+                if (StrokeCurve.Coincident(curveFrom.X, curveFrom.Y, sample.X, sample.Y)) { AddPathPoint(sample); curveFrom = sample; }
+                else { curveTo = sample; curvePoints = 2; }
+                return;
+            }
+            // 待たせている点に重なる点は、その点の筆圧・傾き・時刻を新しくするだけ（長さ 0 の区間は作らない）
+            if (StrokeCurve.Coincident(curveTo.X, curveTo.Y, sample.X, sample.Y)) { curveTo = sample; return; }
+            DrawCurveSegment(sample.X, sample.Y);
+            curveTo = sample;
+        }
+        /// <summary>Draws the held segment curveFrom → curveTo, shaped by the point before it and (nextX, nextY) after it.</summary>
+        private void DrawCurveSegment(double nextX, double nextY)
+        {
+            BrushSample a = curveFrom, b = curveTo;
+            double beforeX, beforeY;
+            if (hasCurveBefore) { beforeX = curveBefore.X; beforeY = curveBefore.Y; }
+            else StrokeCurve.Reflect(b.X, b.Y, a.X, a.Y, out beforeX, out beforeY);
+            // 折れ線に刻む（弦の長さから数を決める）。ダブの数の上限は直線のときと同じく区間ごとに確かめる（刻んだ後では 1 本ずつは短い）。
+            double chord = Math.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y));
+            int count = (int)Math.Min(MaxCurvePieces, Math.Max(1, Math.Ceiling(chord / CurvePieceLength)));
+            curvePieces.Clear();
+            double length = 0, lastX = a.X, lastY = a.Y;
+            for (int i = 1; i <= count; i++)
+            {
+                double t = i / (double)count, x, y;
+                if (i == count) { x = b.X; y = b.Y; } // 端は制御点そのもの（丸めで揺らさない）
+                else StrokeCurve.Point(beforeX, beforeY, a.X, a.Y, b.X, b.Y, nextX, nextY, t, out x, out y);
+                length += Math.Sqrt((x - lastX) * (x - lastX) + (y - lastY) * (y - lastY)); lastX = x; lastY = y;
+                curvePieces.Add(new BrushSample(x, y, a.Pressure + (b.Pressure - a.Pressure) * t, a.Time + (b.Time - a.Time) * t,
+                    a.TiltX + (b.TiltX - a.TiltX) * t, a.TiltY + (b.TiltY - a.TiltY) * t));
+            }
+            double spacing = Math.Max(0.01, settings.Radius * 2 * settings.Spacing);
+            if (length / spacing > 1000000) throw new InvalidOperationException("Input segment exceeds the one-million-stamp safety limit; split or cancel the stroke.");
+            if (dual != null && length / Math.Max(0.01, dual.Radius * 2 * dual.Spacing) > 1000000)
+                throw new InvalidOperationException("Input segment exceeds the one-million-stamp safety limit for the dual brush; split or cancel the stroke.");
+            for (int i = 0; i < curvePieces.Count; i++) AddPathPoint(curvePieces[i], i == curvePieces.Count - 1);
+            curvePieces.Clear();
+            curveBefore = a; hasCurveBefore = true; curveFrom = b;
+        }
+
+        /// <summary>The path the brush actually follows (after the stabilizer): dabs at every spacing step along it. counted is
+        /// false for the in-between points of a curve (SampleCount counts the points the curve passes through).</summary>
+        private void AddPathPoint(BrushSample sample, bool counted = true)
         {
             if (!hasSample) { if (dual != null) dualPending.Enqueue(new DualDab { X = sample.X, Y = sample.Y, Arc = 0 }); Emit(sample.X, sample.Y, sample.Pressure, 0, sample.TiltX, sample.TiltY); hasSample = true; }
             else
@@ -135,7 +195,7 @@ namespace Yozolab.YoluPainter.Core
                     if (distanceSinceStamp >= spacing) distanceSinceStamp %= spacing;
                 }
             }
-            previous = sample; SampleCount++;
+            previous = sample; if (counted) SampleCount++;
         }
 
         /// <summary>A dab at arc length arc along the path: stamped now, or held back while it is within TaperOut of the end.</summary>
@@ -167,7 +227,13 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>Ends the input: the stabilized pen is drawn on to the last input point, then held-back dabs are tapered out.</summary>
         private void FinishInput()
         {
-            if (hasPen && settings.Stabilizer > 0 && (pen.X != lastInput.X || pen.Y != lastInput.Y)) { pen = lastInput; AddPathPoint(lastInput); }
+            if (hasPen && settings.Stabilizer > 0 && (pen.X != lastInput.X || pen.Y != lastInput.Y)) { pen = lastInput; AddPenPoint(lastInput); }
+            if (curvePoints == 2)
+            {
+                // 最後の区間: その先は無いので、終わりの点の向こうへ折り返した点で向きを決める
+                StrokeCurve.Reflect(curveFrom.X, curveFrom.Y, curveTo.X, curveTo.Y, out double endX, out double endY);
+                DrawCurveSegment(endX, endY); curvePoints = 1;
+            }
             FlushPending(double.PositiveInfinity, strokeLength);
         }
         /// <summary>Paints a supplied geometric coverage (e.g. mesh-surface brush). Coordinates outside the canvas
@@ -416,7 +482,7 @@ namespace Yozolab.YoluPainter.Core
         }
         private void ReleaseScratch()
         {
-            before.Clear(); washes.Clear(); rollbackBytes = 0;
+            before.Clear(); washes.Clear(); rollbackBytes = 0; curvePieces.Clear(); curvePoints = 0;
             if (paints != null) paints.Clear();
             if (dual != null) { dualCoverage.Clear(); dualPending.Clear(); }
         }

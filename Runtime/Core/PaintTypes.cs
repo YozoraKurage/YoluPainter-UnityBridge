@@ -115,6 +115,11 @@ namespace Yozolab.YoluPainter.Core
         /// shrinks to 0 over the last TaperOut pixels. Dabs within TaperOut of the latest point wait until the stroke continues
         /// or ends (the end is only known then).</summary>
         public double TaperIn, TaperOut;
+        /// <summary>Joins the path points (after the stabilizer) with a centripetal Catmull-Rom curve (<see cref="StrokeCurve"/>)
+        /// instead of straight segments, so sparse input (a fast hand, a busy editor) still draws a round line. A segment is drawn
+        /// once the point after it arrives, and the last one on commit; pressure and tilt change linearly along each segment.
+        /// Off by default (straight segments, byte-identical to before); the paint window turns it on.</summary>
+        public bool CurveInterpolation;
 
         public BrushSettings Clone()
         {
@@ -123,7 +128,7 @@ namespace Yozolab.YoluPainter.Core
                 Tip = Tip, Tips = Tips == null ? null : (BrushTip[])Tips.Clone(), TipSelection = TipSelection, Angle = Angle, Roundness = Roundness, FollowDirection = FollowDirection,
                 SizeJitter = SizeJitter, AngleJitter = AngleJitter, RoundnessJitter = RoundnessJitter, OpacityJitter = OpacityJitter, FlowJitter = FlowJitter,
                 Scatter = Scatter, Count = Count, Seed = Seed, Texture = Texture, TextureDepth = TextureDepth, TextureScale = TextureScale,
-                Stabilizer = Stabilizer, TaperIn = TaperIn, TaperOut = TaperOut }.WithDynamicsOf(this);
+                Stabilizer = Stabilizer, TaperIn = TaperIn, TaperOut = TaperOut, CurveInterpolation = CurveInterpolation }.WithDynamicsOf(this);
         }
         public void Validate()
         {

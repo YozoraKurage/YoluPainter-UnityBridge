@@ -154,11 +154,14 @@ namespace Yozolab.YoluPainter.Editor
             HandleModelPicker(e);
             HandleKeys(e);
             if(e.type==EventType.KeyDown&&HandleToolKeys(e))return;
-            if(repaintPixels || renderedRevision!=document.Revision)
+            // 合成（GPU への転送と合成、Normal の出力、3D のプレビューの更新）は描くときだけ。入力のイベント（ストローク中の MouseDrag
+            // など）のたびに合成すると 1 回の処理が重くなり、OS がマウスの移動をまとめて届く点がまばらになる。表示の前には必ず
+            // Repaint が来るので、その間の変更はまとめて 1 回で合成する。
+            if(e.type==EventType.Repaint && (repaintPixels || renderedRevision!=document.Revision))
             {
                 TryAction(()=> { compositor.Update(document,channel); UpdateNormalOutput(); preview.SetPaintTexture(DisplayTexture, materialSlot); });
                 TryAction(UpdatePreviewLighting);
-                lastComposite=EditorApplication.timeSinceStartup;
+                lastComposite=EditorApplication.timeSinceStartup; CompositeCount++;
                 renderedRevision=document.Revision; repaintPixels=false;
             }
             LayoutShell();
