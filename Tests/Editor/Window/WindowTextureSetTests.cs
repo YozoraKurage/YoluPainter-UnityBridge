@@ -660,6 +660,27 @@ namespace Yozolab.YoluPainter.Tests
             finally { AssetDatabase.DeleteAsset(folder); }
         }
 
+        [Test] public void DoubleClickingAnotherTextureSetsFaceSwitchesToItWithoutPainting()
+        {
+            string folder = TextureSetFolder();
+            try
+            {
+                var model = TextureSetModels.Prefab(folder, "Faces", "Body", "Hair");
+                window.CreateProject(new NewProjectSettings { Model = model, Resolution = 512, Template = ProjectTemplate.ColorOnly });
+                window.View = TexturePaintWindow.ViewMode.Model; Repaint(window);
+                var sets = window.TextureSets.ToList(); var hair = SurfacePointOnSlot(1);
+                var offset = window.rootVisualElement.worldBound.position;
+                window.SendEvent(new Event { type = EventType.MouseDown, mousePosition = hair + offset, button = 0, clickCount = 2 });
+                window.SendEvent(new Event { type = EventType.MouseUp, mousePosition = hair + offset, button = 0 });
+                Assert.That(window.CurrentTextureSet.Name, Is.EqualTo("Hair"), window.StatusMessage);
+                Assert.That(window.IsStroking, Is.False);
+                Assert.That(sets[0].Document.CanUndo || sets[1].Document.CanUndo, Is.False, "switching paints nothing");
+                Mouse(window, EventType.MouseDown, hair); Mouse(window, EventType.MouseUp, hair);
+                Assert.That(sets[1].Document.CanUndo, Is.True, "now the hair is painted with a single click");
+            }
+            finally { AssetDatabase.DeleteAsset(folder); }
+        }
+
         [Test] public void ClickingATextureSetInThePanelSwitchesAndCtrlZUndoesOnlyThatSet()
         {
             string folder = TextureSetFolder();

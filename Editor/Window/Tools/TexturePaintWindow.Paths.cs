@@ -60,7 +60,7 @@ namespace Yozolab.YoluPainter.Editor
                     if(preview.TryWorldToGui(surfaceRect,p,out var g)&&Vector2.Distance(g,pointer)<=PathGrabPoints){pathDrag=i;pathDragOnCanvas=false;pathDragGui=pointer;GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive);return;}
                 }
             if(!preview.TryPick(surfaceRect,pointer,out var hit)){message="Nothing of the model under the pointer.";return;}
-            if(hit.MaterialSlot!=materialSlot){message=OtherSlotNote(hit.MaterialSlot);return;}
+            if(hit.MaterialSlot!=materialSlot){OtherSlotPressed(hit.MaterialSlot);return;}
             var point=SurfacePathRenderer.PointOf(hit);
             SurfacePath path;
             if(existing==null)

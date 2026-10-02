@@ -283,8 +283,21 @@ namespace Yozolab.YoluPainter.Editor
         string OtherSlotNote(int slot)
         {
             var owner = SetOfSlot(slot);
-            return owner != null ? L.Tr("This face belongs to the texture set {0}. Switch to it in the Texture Set panel to paint it.", owner.Name)
+            return owner != null ? L.Tr("This face belongs to the texture set {0}. Double-click it, or switch in the Texture Set panel, to paint it.", owner.Name)
                 : L.Tr("This face uses material slot {0}, which has no texture set in this project (File ▸ Project Configuration adds one).", slot);
+        }
+
+        /// <summary>3D ビューで今のセットのスロットでない面を押したとき: ダブルクリックならその面のセットに切り替えて true（描きはしない）、
+        /// それ以外は知らせを出して false。</summary>
+        bool OtherSlotPressed(int slot)
+        {
+            var owner = SetOfSlot(slot); var e = Event.current;
+            if (owner != null && e != null && e.clickCount >= 2)
+            {
+                if (SwitchTextureSet(owner.Id)) message = L.Tr("Texture set: {0}.", owner.Name);
+                return true;
+            }
+            message = OtherSlotNote(slot); return false;
         }
 
         void RepaintPanelWindowsSoon() { foreach (var w in PanelWindows) if (w != null) w.Repaint(); RepaintMeshBakeWindow(); }

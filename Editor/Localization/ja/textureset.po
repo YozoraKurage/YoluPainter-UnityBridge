@@ -30,8 +30,8 @@ msgstr "テクスチャセット: {0}。"
 
 # ── 3D ビュー ──
 
-msgid "This face belongs to the texture set {0}. Switch to it in the Texture Set panel to paint it."
-msgstr "この面はテクスチャセット {0} のものです。描くにはテクスチャセットのパネルで切り替えてください。"
+msgid "This face belongs to the texture set {0}. Double-click it, or switch in the Texture Set panel, to paint it."
+msgstr "この面はテクスチャセット {0} のものです。描くには、面をダブルクリックするか、テクスチャセットのパネルで切り替えてください。"
 
 msgid "This face uses material slot {0}, which has no texture set in this project (File ▸ Project Configuration adds one)."
 msgstr "この面はマテリアルスロット {0} で、このプロジェクトにはそのテクスチャセットがありません（ファイル ▸ プロジェクト設定 で足せます）。"
