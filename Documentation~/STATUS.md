@@ -8,13 +8,13 @@
 |---|---|---|---|
 | 1 制作フロー・専用画面 | EditorWindow、2D/3D、ブラシ/レイヤー/保存UI、隔離スクリプト非生成プレビュー、デモキューブ | Unity で WindowTests 12 件（入力・取消・Undo・3D 描画・複数ウィンドウ・後片付け・元アセット非変更）、プレビュー所有権 3 件 | 実Unity UI、操作復帰、UV診断の拡大、マルチTexture Set |
 | 2 ブラシ・入力 | 円形/硬さ/間隔/Opacity/Flow/消去、サイズ・濃度・流量の圧力割当、UI圧力カーブ/JSONプリセット、2Dズーム/パン | 純C#サンプリング・圧力・Undo、入力UI未実行 | 実ペン、補正/入り抜き、画像筆先、混色、水彩、散布、定規、選択、塗潰し、勾配、変形、キャンバス回転 |
-| 3 レイヤー | 追加/削除/移動/名前/可視性/不透明度、Normal/Multiply/Screen、構造Undo、ラスターマスク（隠す/見せる・有効・反転・濃度、全チャンネル共有）、Fill レイヤー | Unity EditMode（MaskTests・FillTests・ウィンドウからのマスク描画） | グループ、複製/統合、マスクのぼかし/表示/選択から作成、クリッピング、各ロック、調整、複数選択、コピー貼付、PSD固有演算、PSD のマスク読み書き |
+| 3 レイヤー | 追加/削除/移動/名前/可視性/不透明度、Normal/Multiply/Screen、構造Undo（スライダー操作は 1 つにまとめる）、ラスターマスク（隠す/見せる・有効・反転・濃度、全チャンネル共有）、Fill レイヤー、調整レイヤー（反転・レベル補正・色相/彩度/明度、アルファは変えない）、クリッピング（Photoshop 既定のグループ合成と同じ考え方。調整・Fill もクリッピング可） | Unity EditMode（MaskTests・FillTests・AdjustmentTests・ClippingTests・ウィンドウからのマスク描画） | グループ、複製/統合、マスクのぼかし/表示/選択から作成、各ロック、トーンカーブ等の調整、合成モードの拡充（オーバーレイ等）、複数選択、コピー貼付、PSD固有演算、PSD のマスク読み書き |
 | 4 マルチチャンネル/lilToon | Color/Roughness/Metallic/Height/Normal/Emissionの分離ソース、選択チャンネル表示/描画、PNG/PSD出力 | 純C#分離、PSD橋渡し | 同時複数チャンネルの一筆、チャンネル別設定、専用Normal合成、Height派生、lilToon版固定/アダプター/適用。現在は中立シェーダー |
 | 5 手続き効果 | Fill レイヤー（チャンネルごとの一定値を正本に、タイルをその場で生成。マスクと組み合わせ）、型付きノード/依存検証の基盤 | Fill の合成・Undo・変更追跡・保存、DAG型・順序テスト | 画像/手続き入力の Fill と UV 変換、mask/content効果スタック、Filter実行、Generator実行、プリセット/版/シード |
 | 6 Anchor/mesh map | 同Texture Set・下位/先行・型・semantic・循環・移動・削除検証 | 純C#回帰 | 実評価段階、Anchor revision伝播、ベイク、mesh map来歴、stale、欠落解決、キャッシュ |
 | 7 PSD互換 | RGB8 normalラスタ限定の入出力。未知情報はPreserveOnlyへ。全原本バイト保護 | 実C# + independent raw/RLE fixture + 3外部デコーダ | 外部アプリ認証、広いPSD E/P/R/Tは別表。全調整・効果・smartobject互換ではない |
 | 8 PSD保持と再現 | 未知ブロック等の編集拒否、ガード付き書戻し、merged整合検査、RGBA/Unicode/IDs | 純C#/外部decoder、最大合成差1byteのfixture | 未編集ブロック単位パススルー・部分編集、高bit、色管理、検証済ネイティブ調整、Photoshop/CSP6工程 |
-| 9 データモデル | UUID、schema（ネイティブ版 3: レイヤー種類・Fill 値・マスク。版 1/2 も読める）、channel、layer、tile archive。view/brush補助JSON。チャンネル別PSD | 独自保存往復byte一致、版 1/2 の読み込み | path/model binding指紋、procedural graph/資産保存、複数Texture Set、複雑な正本選択 |
+| 9 データモデル | UUID、schema（ネイティブ版 5: レイヤー種類・Fill 値・マスク・調整・クリッピング。版 1〜4 も読める）、channel、layer、tile archive。view/brush補助JSON。チャンネル別PSD | 独自保存往復byte一致、版 1〜4 の読み込み | path/model binding指紋、procedural graph/資産保存、複数Texture Set、複雑な正本選択 |
 | 10 保存・外部変更 | 完全世代/manifest SHA256/current最後、再読検査、旧世代維持、checkpoint、hash外部改変拒否 | 中断4点/改変/破損/再読込を実行。ウィンドウの Save As/Ctrl+S/Open/外部改変時の拒否/確認付きネイティブ保存/復旧 checkpoint をダイアログ差し替えで自動テスト | OS電源断fsync、低ディスク/lock/全中断点、非同期UI保存、debounceウォッチ、PSD差分再読込と競合解決Undo。現在はSave As/Open |
 | 11 Unity責務 | CPU純C#ソース + GPUタイル合成（変わったタイルだけ再合成）、PreviewRenderUtility、リロード/閉じる処理、壊れたシェーダーでの CPU フォールバック | Unity で全アセンブリのコンパイル警告 0、GPU ブラシ誤差 0・GPU 合成誤差 1 以内（RTX 3070 / OpenGL 4.6 と llvmpipe）、CopyTexture の無い GPU 向けの描き込み経路 | D3D11 での整合、Jobs/Burst、AsyncGPUReadbackによるGPU正本、正確な色表示/各API |
 | 12 表面・UV | CPU triangle ray、隣接seam、material、連結、表向き/可視性、重複pixel合併、過予算全拒否 | 同じ実装を数学アダプターで実行、細小三角形/近接衣服回帰 | 実画面、BVH/JOB高速化、padding、dilation、3D対称、重複UV制作UI、複雑な非多様体実物 |
