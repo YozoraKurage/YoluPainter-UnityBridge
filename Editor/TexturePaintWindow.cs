@@ -46,10 +46,13 @@ namespace Yozolab.YoluPainter.Editor
         Vector2 previousPointer, layerScroll, brushScroll, canvasPan;
         float canvasZoom = 1, previousPressure = 1;
         /// <summary>キャンバスでの左ボタンの働き。</summary>
-        internal enum PaintTool { Brush, Fill, Gradient, SelectRectangle, SelectEllipse, Lasso, MagicWand }
+        internal enum PaintTool { Brush, Fill, Gradient, SelectRectangle, SelectEllipse, Lasso, MagicWand, Move }
         PaintTool tool;
         int wandTolerance = 32; bool wandContiguous = true, wandSampleAll;
         Color gradientTo = new Color(0, 0, 0, 0); GradientShape gradientShape;
+        // 移動ツール: ドラッグ開始時に動かすものの範囲（プレビューの枠）と、数値で変形する値
+        (int x0, int y0, int x1, int y1)? moveBounds;
+        float moveAngle; Vector2 moveScale = new Vector2(100, 100), moveOffset; Resampling moveResampling;
         // ドラッグで形を決めるツール（グラデーション・矩形/楕円/投げ縄選択）の途中の状態。キャンバスの画素座標（左下原点）
         bool toolDragging; Vector2 toolStart, toolCurrent; readonly List<Vector2> lassoPoints = new List<Vector2>();
         Texture2D selectionOverlay; SelectionMask overlayFor;
@@ -222,7 +225,7 @@ namespace Yozolab.YoluPainter.Editor
             GUILayout.Label("Tool",EditorStyles.boldLabel);
             using(new EditorGUI.DisabledScope(stroke!=null))
             {
-                var tools=new[]{new GUIContent("Brush"),new GUIContent("Fill","Bucket fill (B)"),new GUIContent("Grad","Gradient"),new GUIContent("Rect","Rectangle selection"),new GUIContent("Ellipse","Ellipse selection"),new GUIContent("Lasso","Lasso selection"),new GUIContent("Wand","Magic wand")};
+                var tools=new[]{new GUIContent("Brush"),new GUIContent("Fill","Bucket fill (B)"),new GUIContent("Grad","Gradient"),new GUIContent("Rect","Rectangle selection"),new GUIContent("Ellipse","Ellipse selection"),new GUIContent("Lasso","Lasso selection"),new GUIContent("Wand","Magic wand"),new GUIContent("Move","Move the layer, or the selected pixels (drag, arrow keys). Rotate, scale and flip below.")};
                 var nextTool=(PaintTool)GUILayout.SelectionGrid((int)tool,tools,4,EditorStyles.miniButton);
                 if(nextTool!=tool)Tool=nextTool;
                 if(tool==PaintTool.Fill||tool==PaintTool.MagicWand)
@@ -236,7 +239,8 @@ namespace Yozolab.YoluPainter.Editor
                     gradientShape=(GradientShape)EditorGUILayout.EnumPopup("Shape",gradientShape);
                     gradientTo=EditorGUILayout.ColorField(new GUIContent("To","The colour at the end (the start is the brush value)"),gradientTo);
                 }
-                if(tool>=PaintTool.SelectRectangle) EditorGUILayout.LabelField("Shift: add · Ctrl: subtract · Shift+Ctrl: intersect",EditorStyles.miniLabel);
+                if(tool==PaintTool.Move) DrawMoveSettings();
+                if(tool>=PaintTool.SelectRectangle&&tool<=PaintTool.MagicWand) EditorGUILayout.LabelField("Shift: add · Ctrl: subtract · Shift+Ctrl: intersect",EditorStyles.miniLabel);
                 GUILayout.BeginHorizontal();
                 if(GUILayout.Button(new GUIContent("All","Select all (Ctrl+A)"),EditorStyles.miniButtonLeft))document.SetSelection(SelectionMask.All(document));
                 using(new EditorGUI.DisabledScope(document.Selection==null))
@@ -500,6 +504,14 @@ namespace Yozolab.YoluPainter.Editor
                     Handles.DrawAAPolyLine(1.5f,points); break;
                 }
                 case PaintTool.Lasso: if(lassoPoints.Count>1)Handles.DrawAAPolyLine(1.5f,lassoPoints.Select(p=>(Vector3)ToGui(image,p)).ToArray()); break;
+                case PaintTool.Move:
+                {
+                    if(moveBounds==null)break;
+                    var m=moveBounds.Value; var d=MoveDelta();
+                    Vector2 p0=ToGui(image,new Vector2(m.x0+d.x,m.y0+d.y)),p1=ToGui(image,new Vector2(m.x1+d.x,m.y1+d.y));
+                    Handles.DrawAAPolyLine(1.5f,new Vector3(p0.x,p0.y),new Vector3(p1.x,p0.y),new Vector3(p1.x,p1.y),new Vector3(p0.x,p1.y),new Vector3(p0.x,p0.y));
+                    break;
+                }
             }
         }
         /// <summary>GUI の座標をキャンバスの画素座標（左下原点、範囲外も返す）に。</summary>
@@ -513,7 +525,7 @@ namespace Yozolab.YoluPainter.Editor
             document.SetSelection(next);
             message=document.Selection==null?"Nothing selected.":"Selection: "+mode+".";
         }
-        void CancelToolDrag(){toolDragging=false;lassoPoints.Clear();}
+        void CancelToolDrag(){toolDragging=false;lassoPoints.Clear();moveBounds=null;}
         /// <summary>ブラシ以外のツールのキャンバス入力。2D キャンバスだけで働く。</summary>
         bool HandleToolInput(Event e)
         {
@@ -525,6 +537,7 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     case PaintTool.Fill: TryAction(()=>BucketFill(p)); break;
                     case PaintTool.MagicWand: TryAction(()=>ApplySelection(Wand(p),CombineOf(e))); break;
+                    case PaintTool.Move: TryAction(()=>BeginMove(p)); break;
                     default: toolDragging=true;toolStart=toolCurrent=p;lassoPoints.Clear();lassoPoints.Add(p);GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive); break;
                 }
                 e.Use();Repaint();return true;
@@ -580,10 +593,74 @@ namespace Yozolab.YoluPainter.Editor
                 case PaintTool.SelectEllipse:
                     if(click&&mode==SelectionCombine.Replace){document.ClearSelection();message="Deselected.";break;}
                     ApplySelection(SelectionMask.Ellipse(document,(a.x+b.x)/2,(a.y+b.y)/2,Mathf.Abs(b.x-a.x)/2,Mathf.Abs(b.y-a.y)/2),mode);break;
+                case PaintTool.Move:
+                {
+                    var d=MoveDelta(); if(d==Vector2Int.zero)break;
+                    MoveBy(d.x,d.y);break;
+                }
                 case PaintTool.Lasso:
                     if(lassoPoints.Count<3){if(mode==SelectionCombine.Replace){document.ClearSelection();message="Deselected.";}break;}
                     ApplySelection(SelectionMask.Polygon(document,lassoPoints.Select(p=>((double)p.x,(double)p.y)).ToList()),mode);break;
             }
+        }
+        /// <summary>移動・変形できる層か確かめる（画素を持つのはペイントの層だけ）。</summary>
+        PaintLayer RequireMovableLayer()
+        {
+            var layer=document.GetLayer(selectedLayer);
+            if(layer.IsGroup)throw new InvalidOperationException("A group has no pixels to move. Select a layer inside it.");
+            if(layer.Kind!=LayerKind.Raster)throw new InvalidOperationException("Only paint layers can be moved or transformed ("+layer.Kind+" layers have no pixels).");
+            return layer;
+        }
+        void BeginMove(Vector2 p)
+        {
+            RequireMovableLayer();
+            moveBounds=document.TransformBounds(selectedLayer);
+            if(moveBounds==null){message=document.Selection!=null?"Nothing to move inside the selection on this layer.":"Nothing to move on this layer.";return;}
+            toolDragging=true;toolStart=toolCurrent=p;GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive);
+        }
+        Vector2Int MoveDelta()=>new Vector2Int(Mathf.RoundToInt(toolCurrent.x-toolStart.x),Mathf.RoundToInt(toolCurrent.y-toolStart.y));
+        /// <summary>選んだ層（選択範囲があればその画素と選択範囲）を整数画素だけ動かす。全チャンネルとマスクが一緒に動く。1 回の Undo。</summary>
+        internal void MoveBy(int dx,int dy)
+        {
+            RequireMovableLayer();
+            bool changed=document.Transform(selectedLayer,Affine2D.Translation(dx,dy));
+            message=changed?"Moved by ("+dx+", "+dy+") px.":"Nothing to move.";repaintPixels=true;
+        }
+        /// <summary>動かすもの（選択範囲があればその中）の中心を軸に、拡大縮小（負は反転）・回転してからずらす。1 回の Undo。
+        /// 90° の倍数の回転では軸を画素の格子に合わせ、画素がそのまま写るようにする。</summary>
+        internal void TransformSelected(double dx,double dy,double degrees,double sx,double sy,string done)
+        {
+            RequireMovableLayer();
+            var bounds=document.TransformBounds(selectedLayer);
+            if(bounds==null){message=document.Selection!=null?"Nothing to transform inside the selection on this layer.":"Nothing to transform on this layer.";return;}
+            var b=bounds.Value; double cx=(b.x0+b.x1)/2.0,cy=(b.y0+b.y1)/2.0;
+            if(Math.Abs(Math.IEEERemainder(degrees,90))<1e-9&&Math.Abs(Math.IEEERemainder(degrees,180))>1e-9){cx=Math.Round(cx);cy=Math.Round(cy);}
+            bool changed=document.Transform(selectedLayer,Affine2D.FromParts(cx,cy,dx,dy,degrees,sx,sy),resampling:moveResampling);
+            message=changed?done:"Nothing changed.";repaintPixels=true;
+        }
+        internal void ApplyNumericTransform()
+        {
+            if(moveScale.x==0||moveScale.y==0)throw new InvalidOperationException("Scale must not be 0%.");
+            TransformSelected(moveOffset.x,moveOffset.y,moveAngle,moveScale.x/100.0,moveScale.y/100.0,"Transformed.");
+            moveAngle=0;moveScale=new Vector2(100,100);moveOffset=Vector2.zero;
+        }
+        void DrawMoveSettings()
+        {
+            EditorGUILayout.LabelField("Drag or arrow keys (Shift: 10 px) move the layer and its mask, or the selected pixels with the selection.",EditorStyles.wordWrappedMiniLabel);
+            GUILayout.BeginHorizontal();
+            if(GUILayout.Button(new GUIContent("Flip H","Mirror left-right about the centre"),EditorStyles.miniButtonLeft))TryAction(()=>TransformSelected(0,0,0,-1,1,"Flipped horizontally."));
+            if(GUILayout.Button(new GUIContent("Flip V","Mirror top-bottom about the centre"),EditorStyles.miniButtonMid))TryAction(()=>TransformSelected(0,0,0,1,-1,"Flipped vertically."));
+            if(GUILayout.Button(new GUIContent("+90°","Rotate 90° counter-clockwise"),EditorStyles.miniButtonMid))TryAction(()=>TransformSelected(0,0,90,1,1,"Rotated 90° counter-clockwise."));
+            if(GUILayout.Button(new GUIContent("-90°","Rotate 90° clockwise"),EditorStyles.miniButtonRight))TryAction(()=>TransformSelected(0,0,-90,1,1,"Rotated 90° clockwise."));
+            GUILayout.EndHorizontal();
+            moveAngle=EditorGUILayout.FloatField(new GUIContent("Rotate (°)","Counter-clockwise, about the centre of what moves"),moveAngle);
+            moveScale=EditorGUILayout.Vector2Field(new GUIContent("Scale (%)","Negative flips"),moveScale);
+            moveOffset=EditorGUILayout.Vector2Field("Offset (px)",moveOffset);
+            moveResampling=(Resampling)EditorGUILayout.EnumPopup(new GUIContent("Resampling","Bilinear smooths, Nearest keeps hard pixels. Whole-pixel moves, 90° turns and flips copy pixels exactly either way."),moveResampling);
+            GUILayout.BeginHorizontal();
+            if(GUILayout.Button("Apply"))TryAction(ApplyNumericTransform);
+            if(GUILayout.Button("Reset",GUILayout.Width(60))){moveAngle=0;moveScale=new Vector2(100,100);moveOffset=Vector2.zero;}
+            GUILayout.EndHorizontal();
         }
         void HandleCanvasInput(Event e)
         {
@@ -642,6 +719,10 @@ namespace Yozolab.YoluPainter.Editor
         internal bool WandContiguous { get => wandContiguous; set => wandContiguous = value; }
         internal bool WandSampleAll { get => wandSampleAll; set => wandSampleAll = value; }
         internal Color GradientTo { get => gradientTo; set => gradientTo = value; }
+        internal float MoveAngle { get => moveAngle; set => moveAngle = value; }
+        internal Vector2 MoveScale { get => moveScale; set => moveScale = value; }
+        internal Vector2 MoveOffset { get => moveOffset; set => moveOffset = value; }
+        internal Resampling MoveResampling { get => moveResampling; set => moveResampling = value; }
         static BrushState ReadBrushState(string json)
         {
             var b=JsonUtility.FromJson<BrushState>(json);
@@ -697,12 +778,15 @@ namespace Yozolab.YoluPainter.Editor
             if(e.type!=EventType.KeyDown)return;
             if(e.keyCode==KeyCode.Escape && toolDragging){CancelToolDrag();GUIUtility.hotControl=0;e.Use();Repaint();}
             else if(e.keyCode==KeyCode.Escape && stroke!=null){FinishStroke(false);e.Use();}
+            else if(stroke==null && !toolDragging && tool==PaintTool.Move && GUIUtility.keyboardControl==0 && !(e.control||e.command) && ArrowDelta(e.keyCode)!=Vector2Int.zero)
+            {var d=ArrowDelta(e.keyCode)*(e.shift?10:1);TryAction(()=>MoveBy(d.x,d.y));e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.A){document.SetSelection(SelectionMask.All(document));e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.D){document.ClearSelection();e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.shift && e.keyCode==KeyCode.I){if(document.Selection!=null)document.SetSelection(document.Selection.Invert());e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.Z){if(e.shift)document.Redo();else document.Undo();e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.S){SaveProject(e.shift);e.Use();}
         }
+        static Vector2Int ArrowDelta(KeyCode key)=>key==KeyCode.LeftArrow?Vector2Int.left:key==KeyCode.RightArrow?Vector2Int.right:key==KeyCode.UpArrow?Vector2Int.up:key==KeyCode.DownArrow?Vector2Int.down:Vector2Int.zero;
         /// <summary>作った直後で何も手を加えていないドキュメントの版（New / 最初に開いたとき）。捨てても失うものが無いので確かめない。</summary>
         long pristineRevision=-1;
         bool ConfirmDiscard() => document.Revision==savedRevision || document.Revision==pristineRevision || Dialogs.Confirm("Keep current work?","Current work has unsaved changes. A native recovery checkpoint will be kept before opening another document.","Continue","Cancel") && SaveRecovery();

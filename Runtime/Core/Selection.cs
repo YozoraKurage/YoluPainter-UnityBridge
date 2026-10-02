@@ -203,6 +203,24 @@ namespace Yozolab.YoluPainter.Core
             return mask;
         }
 
+        internal SparseTileSurface Surface => surface;
+
+        /// <summary>This selection moved by an affine transform with the same resampling as the pixels it lifted (see
+        /// PaintDocument.Transform). Amounts moved off the canvas are lost.</summary>
+        internal SelectionMask Transformed(Affine2D forward, Affine2D inverse, Resampling resampling)
+        {
+            var mask = new SelectionMask(Width, Height, TileSize);
+            var source = new SurfaceSnapshot(surface);
+            var bytes = new byte[TileSize * TileSize * 4]; var scratch = new AffineResampler.Scratch(TileSize);
+            foreach (var coord in AffineResampler.Targets(source, null, forward))
+            {
+                AffineResampler.Render(source, null, inverse, resampling, coord, bytes, scratch);
+                bool any = false; for (int i = 3; i < bytes.Length; i += 4) if (bytes[i] != 0) { any = true; break; }
+                if (any) mask.surface.ImportTile(coord, bytes);
+            }
+            return mask;
+        }
+
         public SelectionMask Invert() { return FromTiles(Width, Height, TileSize, this, null, (a, _) => (byte)(255 - a), everyTile: true); }
 
         /// <summary>Combines this selection with another of the same size: Add takes the larger amount, Subtract removes the
