@@ -94,7 +94,17 @@ namespace Yozolab.YoluPainter.Core.Persistence
             {
                 if (exists) throw new IOException("The destination already has a document. Open it or choose a new folder; implicit overwrite is blocked.");
             }
-            else if (!exists || Load(root).Token != expectedToken) throw new IOException("Saved generation changed outside this window. Save to a new folder or reopen; local work was not discarded.");
+            else
+            {
+                const string changed = "Saved generation changed outside this window. Save to a new folder or reopen; local work was not discarded.";
+                if (!exists) throw new IOException(changed + " (The current pointer is missing.)");
+                string token;
+                // 外部の改変で current が読めない（ハッシュ・長さの不一致など）のも「外で変わった」の一種として伝える。
+                try { token = Load(root).Token; }
+                catch (Exception ex) when (ex is IOException || ex is InvalidDataException || ex is UnauthorizedAccessException)
+                { throw new IOException(changed + " (" + ex.Message + ")", ex); }
+                if (token != expectedToken) throw new IOException(changed);
+            }
         }
         static Dictionary<string, byte[]> ParseAndVerify(string directory, byte[] bytes, bool keepBytes)
         {
