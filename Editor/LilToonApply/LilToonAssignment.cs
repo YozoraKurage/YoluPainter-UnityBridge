@@ -147,7 +147,7 @@ namespace Yozolab.YoluPainter.Editor.LilToonApply
                 case PaintChannel.Color: return "RGBA as painted";
                 case PaintChannel.Emission: return "RGBA as painted (alpha is lilToon's blend amount)";
                 case PaintChannel.Roughness: return "r = 1 − roughness (lilToon reads smoothness)";
-                case PaintChannel.Normal: return "tangent-space normal; unpainted areas are flat";
+                case PaintChannel.Normal: return "tangent-space normal output (vector composite, Height → Normal when on); unpainted areas are flat";
                 default: return "r = value; unpainted areas are 0";
             }
         }
@@ -192,7 +192,9 @@ namespace Yozolab.YoluPainter.Editor.LilToonApply
             foreach (var item in plan.Items)
             {
                 bool isNew = !File.Exists(Path.GetFullPath(item.AssetPath));
-                File.WriteAllBytes(Path.GetFullPath(item.AssetPath), YlpContent.EncodePng(Convert(item.Channel, document.Composite(item.Channel)), document.Width, document.Height));
+                // Normal は Unity 向けの出力（ベクトルで合成・正規化、Height → Normal 込み、不透明・OpenGL）をそのまま使う
+                var pixels = item.Channel == PaintChannel.Normal ? YlpContent.Image(document, PaintChannel.Normal) : Convert(item.Channel, document.Composite(item.Channel));
+                File.WriteAllBytes(Path.GetFullPath(item.AssetPath), YlpContent.EncodePng(pixels, document.Width, document.Height));
                 AssetDatabase.ImportAsset(item.AssetPath, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
                 if (!isNew || !(AssetImporter.GetAtPath(item.AssetPath) is TextureImporter importer)) continue;
                 if (item.ColorSpace == LilToonColorSpace.NormalMap) importer.textureType = TextureImporterType.NormalMap;

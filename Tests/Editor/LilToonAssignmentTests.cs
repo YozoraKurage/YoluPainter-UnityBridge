@@ -96,6 +96,20 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(material.GetFloat("_UseBumpMap"), Is.EqualTo(bumpBefore));
         }
 
+        [Test] public void TheNormalMapIsTheNormalOutputIncludingHeightToNormal()
+        {
+            var d = Painted(PaintChannel.Height); // Normal のレイヤーは無い
+            d.SetNormalSettings(new NormalSettings(true, 4, HeightEdgeMode.Clamp, NormalYDirection.OpenGL));
+            var material = MaterialAsset("lilToon", "Body");
+            var plan = LilToonAssignment.Plan(d, material, folder, "H");
+            Assert.That(plan.Items.Select(i => i.Channel), Does.Contain(PaintChannel.Normal), "a derived normal is assigned even without Normal layers");
+            LilToonAssignment.Apply(plan, d);
+            var expected = YlpContent.Image(d, PaintChannel.Normal);
+            var px = PixelOf(folder + "/H_lilToon_Normal.png", 3, 3); int i0 = (3 * 8 + 3) * 4; // 盛り上がりの隣（中心は左右対称で傾かない）
+            Assert.That(new[] { px.r, px.g, px.b, px.a }, Is.EqualTo(new[] { expected[i0], expected[i0 + 1], expected[i0 + 2], expected[i0 + 3] }), "the same pixels as the .ylp's Normal texture");
+            Assert.That(px.r != 128 || px.g != 128, Is.True, "the height bump tilts the normal");
+        }
+
         [Test] public void MultiTurnsItsKeywordsOn()
         {
             var d = Painted(PaintChannel.Normal, PaintChannel.Emission);
