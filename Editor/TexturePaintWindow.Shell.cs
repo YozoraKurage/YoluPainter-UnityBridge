@@ -19,7 +19,6 @@ namespace Yozolab.YoluPainter.Editor
         sealed class ToolSlot { public PaintTool Tool; public bool Erase; public string Id, Name, Key; }
 
         [SerializeField] ViewMode viewMode = ViewMode.Split;
-        [SerializeField] bool dockTextureSetOpen = true, dockLayersOpen = true, dockPropertiesOpen = true;
         Rect menuRect, optionsRect, toolStripRect, viewAreaRect, dockRect, statusRect;
 
         Guid renamingLayer; double lastLayerClick; Guid lastLayerClicked;
@@ -55,9 +54,10 @@ namespace Yozolab.YoluPainter.Editor
             statusRect = new Rect(0, w.height - PaintTheme.StatusBarHeight, w.width, PaintTheme.StatusBarHeight);
             float top = optionsRect.yMax, bottom = statusRect.y;
             toolStripRect = new Rect(0, top, PaintTheme.ToolStripWidth, bottom - top);
-            float dockWidth = Mathf.Min(PaintTheme.DockWidth, Mathf.Max(220, w.width * .3f));
-            dockRect = new Rect(w.width - dockWidth, top, dockWidth, bottom - top);
-            viewAreaRect = new Rect(toolStripRect.xMax, top, dockRect.x - toolStripRect.xMax, bottom - top);
+            float rightWidth = DockWidth(false, w.width), leftWidth = DockWidth(true, w.width);
+            dockRect = new Rect(w.width - rightWidth, top, rightWidth, bottom - top);
+            leftDockRect = new Rect(toolStripRect.xMax, top, leftWidth, bottom - top);
+            viewAreaRect = new Rect(leftDockRect.xMax, top, dockRect.x - leftDockRect.xMax, bottom - top);
             var inner = new Rect(viewAreaRect.x + 1, viewAreaRect.y + 26, viewAreaRect.width - 2, viewAreaRect.height - 27);
             switch (viewMode)
             {
@@ -231,10 +231,8 @@ namespace Yozolab.YoluPainter.Editor
 
         void WindowMenu(GenericMenu m)
         {
-            Item(m, "Color", () => dockColorOpen = !dockColorOpen, true, dockColorOpen);
-            Item(m, "Texture Set", () => dockTextureSetOpen = !dockTextureSetOpen, true, dockTextureSetOpen);
-            Item(m, "Layers", () => dockLayersOpen = !dockLayersOpen, true, dockLayersOpen);
-            Item(m, "Properties", () => dockPropertiesOpen = !dockPropertiesOpen, true, dockPropertiesOpen);
+            foreach (var panel in Panels) { var id = panel.Id; Item(m, panel.Title, () => TogglePanel(id), true, !Layout.IsCollapsed(id)); }
+            Item(m, "Reset Panel Layout", ResetDockLayout);
             m.AddSeparator("");
             foreach (var (language, label) in new[] { (PainterLanguage.Auto, L.Tr("Automatic (Unity's language)")), (PainterLanguage.Japanese, "日本語"), (PainterLanguage.English, "English") })
             { var lang = language; m.AddItem(new GUIContent(L.Tr("Language") + "/" + label), L.Language == lang, () => { L.Language = lang; Repaint(); }); }

@@ -13,14 +13,13 @@ namespace Yozolab.YoluPainter.Editor
     /// </summary>
     public sealed partial class TexturePaintWindow
     {
-        [SerializeField] bool dockColorOpen = true;
         [SerializeField] List<Color> recentColors = new List<Color>();
         const int MaxRecentColors = 16;
         float pickHue, pickSat, pickVal; Color pickedFor = new Color(-1, -1, -1, -1);
         Texture2D svTexture, hueTexture; float svTextureHue = -1;
 
         /// <summary>彩度×明度の四角の高さ（低い画面では小さく）。</summary>
-        float SvHeight => Mathf.Clamp((dockRect.height - 480) * .5f, 72, 128);
+        float SvHeight => Mathf.Clamp((colorColumnHeight - 480) * .5f, 72, 128);
         float ColorPanelHeight => channel == PaintChannel.Color || channel == PaintChannel.Emission ? 8 + SvHeight + 6 + 22 + 6 + 16 + 8 : 70;
 
         void DrawColorPanel(Rect r)

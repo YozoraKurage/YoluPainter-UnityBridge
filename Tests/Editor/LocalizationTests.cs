@@ -10,13 +10,13 @@ using Yozolab.YoluPainter.Editor;
 
 namespace Yozolab.YoluPainter.Tests
 {
-    /// <summary>テストの間は UI の言語を英語に固定する（設定には書かない）。メッセージについての確かめが、日本語の Unity で走らせても同じ
-    /// 意味になるように。</summary>
+    /// <summary>テストの間は UI の言語を英語に、パネルの配置を既定に固定する（設定には書かない）。メッセージについての確かめが、日本語の
+    /// Unity で走らせても同じ意味になるように、また描き手のパネルの配置で窓の大きさが変わらないように。</summary>
     [SetUpFixture]
     public sealed class LanguagePin
     {
-        [OneTimeSetUp] public void Pin() => L.OverrideLanguage(PainterLanguage.English);
-        [OneTimeTearDown] public void Unpin() => L.OverrideLanguage(null);
+        [OneTimeSetUp] public void Pin() { L.OverrideLanguage(PainterLanguage.English); DockLayoutStore.UseDefaults = true; }
+        [OneTimeTearDown] public void Unpin() { L.OverrideLanguage(null); DockLayoutStore.UseDefaults = false; }
     }
 
     /// <summary>UI の文字列表（.po）: 読み手の決まり、言語の切り替え、そして UI の文字列が日本語の表から漏れていないこと。</summary>

@@ -7,36 +7,12 @@ using Yozolab.YoluPainter.Core;
 
 namespace Yozolab.YoluPainter.Editor
 {
-    /// <summary>右のドック: テクスチャセット（モデル・マテリアルのスロット・チャンネル）、レイヤー、プロパティ（今のツールと層の詳しい設定）。</summary>
+    /// <summary>ドックのパネルの中身: テクスチャセット（モデル・マテリアルのスロット・チャンネル）とレイヤー。並べ方は DockLayout.cs。</summary>
     public sealed partial class TexturePaintWindow
     {
         const float LayerRowHeight = 30, PanelHeaderHeight = 24, LayerToolbarHeight = 30;
 
-        void DrawDock()
-        {
-            var r = dockRect;
-            PaintGui.Fill(r, PaintTheme.PanelBg);
-            PaintGui.VLine(r.x, r.y, r.yMax, PaintTheme.Border);
-            float y = r.y;
-            // カラー（中身の高さはチャンネルで決まる）
-            var colorHead = new Rect(r.x + 1, y, r.width - 1, PanelHeaderHeight); y += PanelHeaderHeight;
-            dockColorOpen = PaintGui.SectionHeader(colorHead, L.Tr("Color"), dockColorOpen, "palette");
-            if (dockColorOpen) { float h = ColorPanelHeight; DrawColorPanel(new Rect(r.x + 1, y, r.width - 1, h)); y += h; }
-            // テクスチャセット（中身の高さは決まっている）
-            var head = new Rect(r.x + 1, y, r.width - 1, PanelHeaderHeight); y += PanelHeaderHeight;
-            dockTextureSetOpen = PaintGui.SectionHeader(head, L.Tr("Texture Set"), dockTextureSetOpen, "deployed_code");
-            if (dockTextureSetOpen) { float h = TextureSetHeight; DrawTextureSetPanel(new Rect(r.x + 1, y, r.width - 1, h)); y += h; }
-            // 残りをレイヤーとプロパティで分ける
-            float headers = PanelHeaderHeight * 2, rest = r.yMax - y - headers;
-            // レイヤーとプロパティで残りを半分ずつ（レイヤーは少なくとも 3 行ほど）
-            float layersH = dockLayersOpen ? (dockPropertiesOpen ? Mathf.Clamp(rest * .5f, Mathf.Min(140, rest), rest) : rest) : 0;
-            head = new Rect(r.x + 1, y, r.width - 1, PanelHeaderHeight); y += PanelHeaderHeight;
-            dockLayersOpen = PaintGui.SectionHeader(head, L.Tr("Layers"), dockLayersOpen, "layers");
-            if (dockLayersOpen) { DrawLayersPanel(new Rect(r.x + 1, y, r.width - 1, layersH)); y += layersH; }
-            head = new Rect(r.x + 1, y, r.width - 1, PanelHeaderHeight); y += PanelHeaderHeight;
-            dockPropertiesOpen = PaintGui.SectionHeader(head, L.Tr("Properties"), dockPropertiesOpen, "tune");
-            if (dockPropertiesOpen && r.yMax - y > 20) DrawPropertiesPanel(new Rect(r.x + 1, y, r.width - 1, r.yMax - y));
-        }
+        void DrawDock() => DrawDocks();
 
         // ───────── テクスチャセット ─────────
 
