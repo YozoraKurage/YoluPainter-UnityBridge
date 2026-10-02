@@ -242,8 +242,9 @@ namespace Yozolab.YoluPainter.Tests
             fill.AddFillLayer("F", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(1, 2, 3) } });
             Assert.That(() => PsdBridge.Export(fill, PaintChannel.Color), Throws.InvalidOperationException.With.Message.Contains("fill layers"));
 
-            var adjustment = new PaintDocument(8, 8, 8); Raster(adjustment, "a", Gradient); adjustment.AddAdjustmentLayer("I", AdjustmentSettings.Invert());
-            Assert.That(() => PsdBridge.Export(adjustment, PaintChannel.Color), Throws.InvalidOperationException.With.Message.Contains("adjustment layers"));
+            // Invert / Levels / Hue/Saturation are written now (PsdAdjustmentTests); settings between PSD's steps are not.
+            var adjustment = new PaintDocument(8, 8, 8); Raster(adjustment, "a", Gradient); adjustment.AddAdjustmentLayer("H", AdjustmentSettings.HueSaturation(10.5));
+            Assert.That(() => PsdBridge.Export(adjustment, PaintChannel.Color), Throws.InvalidOperationException.With.Message.Contains("between them"));
 
             var inverted = new PaintDocument(8, 8, 8); var layer = Raster(inverted, "a", Gradient).Id; inverted.AddLayerMask(layer); inverted.SetLayerMaskInverted(layer, true);
             Assert.That(() => PsdBridge.Export(inverted, PaintChannel.Color), Throws.InvalidOperationException.With.Message.Contains("inversion"));
@@ -455,7 +456,7 @@ namespace Yozolab.YoluPainter.Tests
         [TestCase("vmsk", "TaggedBlock", "Vector mask (vmsk)")]
         [TestCase("feather", "MaskFeather", "feather")]
         [TestCase("lsct", "SectionDivider", "lsct")]
-        [TestCase("levl", "TaggedBlock", "Adjustment layer (levl)")]
+        [TestCase("curv", "TaggedBlock", "Adjustment layer (curv)")]
         [TestCase("SoCo", "TaggedBlock", "Fill layer (SoCo)")]
         [TestCase("lfx2", "TaggedBlock", "Layer effects (lfx2)")]
         [TestCase("clbl", "ClippedBlend", "clbl")]
@@ -472,7 +473,7 @@ namespace Yozolab.YoluPainter.Tests
             {
                 case "diss": case "pass": clip.Blend = feature; break;
                 case "iOpa": layers[0].Tags[0] = new KeyValuePair<string, byte[]>("iOpa", ByteSetting(128)); break;
-                case "vmsk": case "lsct": case "levl": case "SoCo": case "lfx2": clip.Tags.Add(new KeyValuePair<string, byte[]>(feature, new byte[8])); break;
+                case "vmsk": case "lsct": case "curv": case "SoCo": case "lfx2": clip.Tags.Add(new KeyValuePair<string, byte[]>(feature, new byte[8])); break;
                 case "feather": clip.MaskData = MaskRecord(0, 1, 2, 3, 0, 16, new byte[] { 2, 0x40, 0x14, 0, 0, 0, 0, 0, 0, 0, 0 }); break; // 羽毛 5.0、2 バイトの詰め物で 28
                 case "clbl": layers[0].Tags[1] = new KeyValuePair<string, byte[]>("clbl", ByteSetting(0)); break;
                 case "hidden-pixels": clip.Flags = 8 | 16; break;

@@ -44,8 +44,10 @@ namespace Yozolab.YoluPainter.Core.Psd
         public byte[] CompositeRgba;
     }
 
-    /// <summary>A raster layer, or a group (folder) when <see cref="Children"/> is not null. A group has no pixels and no
-    /// rectangle; its Opacity, Visible, BlendMode (PassThrough or an isolated mode), Clipping and Mask apply to its contents.</summary>
+    /// <summary>A raster layer, a group (folder) when <see cref="Children"/> is not null, or an adjustment layer when
+    /// <see cref="Adjustment"/> is not null. Groups and adjustment layers have no pixels and no rectangle. A group's Opacity,
+    /// Visible, BlendMode (PassThrough or an isolated mode), Clipping and Mask apply to its contents; an adjustment layer's
+    /// apply to its adjustment of what is below it.</summary>
     public sealed class PsdRasterLayer
     {
         public int Id;
@@ -67,7 +69,10 @@ namespace Yozolab.YoluPainter.Core.Psd
         public List<PsdRasterLayer> Children;
         /// <summary>Layer ID of the group's bounding section divider record ("&lt;/Layer group&gt;"); 0 = the record has none.</summary>
         public int DividerId;
+        /// <summary>Invert (nvrt), Levels (levl) or Hue/Saturation (hue2) with the native formulas; null for other layers.</summary>
+        public AdjustmentSettings Adjustment;
         public bool IsGroup { get { return Children != null; } }
+        public bool IsAdjustment { get { return Adjustment != null; } }
     }
 
     /// <summary>Raster layer mask in Photoshop's sense: 255 shows, 0 hides. The rectangle is in canvas coordinates and may

@@ -12,7 +12,7 @@
 | 4 マルチチャンネル/lilToon | Color/Roughness/Metallic/Height/Normal/Emissionの分離ソース、選択チャンネル表示/描画、PNG/PSD出力、Export Images（全チャンネルを PNG、Assets の中の新しいテクスチャにカラースペースを設定）。lilToon の読み取り専用アダプター（実際のパッケージのバージョン・バリアント・パイプライン・プロパティ・コンパイル済みの機能を確かめ、2.3.4 の Built-in の 32 バリアントでチャンネルとの対応を返す。未検証は断る） | 純C#分離、PSD橋渡し、LilToonAdapterTests（偽物のシェーダー・バージョン/パイプラインの拒否・マテリアルを変えないこと） | 同時複数チャンネルの一筆、チャンネル別設定、専用Normal合成、Height派生、lilToon への割り当て（ユーザーの確認を挟む。Roughness は _SmoothnessTex に反転、lilToon がコンパイルから外した機能は効かない）、URP/HDRP・Fur・Gem 等の検証。プレビューは今も中立シェーダー |
 | 5 手続き効果 | Fill レイヤー（チャンネルごとの一定値を正本に、タイルをその場で生成。マスクと組み合わせ）、型付きノード/依存検証の基盤 | Fill の合成・Undo・変更追跡・保存、DAG型・順序テスト | 画像/手続き入力の Fill と UV 変換、mask/content効果スタック、Filter実行、Generator実行、プリセット/版/シード |
 | 6 Anchor/mesh map | 同Texture Set・下位/先行・型・semantic・循環・移動・削除検証 | 純C#回帰 | 実評価段階、Anchor revision伝播、ベイク、mesh map来歴、stale、欠落解決、キャッシュ |
-| 7 PSD互換 | RGB8 ラスターの入出力に、描画モード 26 種・クリッピング・ラスターマスク・非表示・不透明度・グループ（通過/分離、入れ子）。描画に関係しない既知のメタデータ（lnsr・shmd・ロック・ガイド・XMP・sRGB の ICC など）は取り込んで「書き出しに含まれない」と一覧で知らせる。描画を変え得る未対応情報は PreserveOnly。原本のバイト列は .ylp に保持。書き出しは明示の Export PSD（Fill・調整・反転マスク・クリッピングされたグループは断る） | 実C# + 手組みの raw/RLE fixture、PsdTests・PsdLayerFeatureTests・PsdGroupTests・PsdMetadataTests（変異入力を含む）、psd-tools 1.23.0 で書き出したファイルの構造の一致を確認（リポジトリ外） | Photoshop/CSP 実機での描画の一致、調整レイヤー（wip ブランチ）、Fill レイヤー、レイヤー効果、スマートオブジェクト、テキスト、高 bit、RLE での書き出し、新しい未分類ブロック（cinf・extn 等） |
+| 7 PSD互換 | RGB8 ラスターの入出力に、描画モード 26 種・クリッピング・ラスターマスク・非表示・不透明度・グループ（通過/分離、入れ子）・調整レイヤー（反転・レベル補正・色相/彩度。PSD の刻みに乗る値だけ書き、間の値は丸めずに断る。Photoshop の色相/彩度との式の違いは CompositeDiffers で知らせる）。描画に関係しない既知のメタデータ（lnsr・shmd・ロック・ガイド・XMP・sRGB の ICC など）は取り込んで「書き出しに含まれない」と一覧で知らせる。描画を変え得る未対応情報は PreserveOnly。原本のバイト列は .ylp に保持。書き出しは明示の Export PSD（Fill・刻みに乗らない調整・反転マスク・クリッピングされたグループは断る） | 実C# + 手組みの raw/RLE fixture、PsdTests・PsdLayerFeatureTests・PsdGroupTests・PsdMetadataTests・PsdAdjustmentTests（変異入力を含む）、psd-tools 1.23.0 で書き出したファイルの構造・調整レイヤーの種類と値の一致を確認（リポジトリ外） | Photoshop/CSP 実機での描画の一致、トーンカーブ等その他の調整・チャンネル別のレベル補正・範囲指定や色彩の統一の色相/彩度、Fill レイヤー、レイヤー効果、スマートオブジェクト、テキスト、高 bit、RLE での書き出し、新しい未分類ブロック（cinf・extn 等） |
 | 8 PSD保持と再現 | 未知ブロック等の編集拒否、ガード付き書戻し、merged整合検査、RGBA/Unicode/IDs | 純C#/外部decoder、最大合成差1byteのfixture | 未編集ブロック単位パススルー・部分編集、高bit、色管理、検証済ネイティブ調整、Photoshop/CSP6工程 |
 | 9 データモデル | UUID、schema（ネイティブ版 6: レイヤー種類・Fill 値・マスク・調整・クリッピング・グループ（親 ID）。版 1〜5 も読める）、channel、layer、tile archive。view/brush補助JSON。チャンネル別PSD | 独自保存往復byte一致、版 1〜5 の読み込み、入れ子の不正の拒否 | path/model binding指紋、procedural graph/資産保存、複数Texture Set、複雑な正本選択 |
 | 10 保存・外部変更 | 1 ファイル形式 .ylp（zip。先頭に無圧縮の mimetype、全エントリーの SHA-256 と CRC、予算、新しい版の拒否）。保存はメモリで作って検証 → 協調ロック → 印の確認 → 一時ファイル（~ 付き）に書いて Flush・再検証 → 再確認 → 最後に 1 回だけ置換。直前の版を <名前>.ylp-backups~ に退避（保持数は設定、既定はすべて）。外部改変は印（長さ・時刻、違えば SHA-256）で検出して通常保存を拒否。Assets の中の .ylp はインポーターがチャンネルごとのテクスチャを出す。復旧 checkpoint は世代/manifest/current最後 | YlpArchiveTests（66、別のエージェントによる敵対的テスト）・YlpStoreTests（40、中断点・保持数・改名したバックアップを消さない等）・YlpImporterTests・ウィンドウの保存まわり（GUI） | OS電源断fsync、低ディスク/プロセス間ロック、非同期UI保存、debounceウォッチ、差分表示と競合解決Undo。世代フォルダ形式のプロジェクトはウィンドウから開けない（未リリースのため移行なし） |
@@ -39,8 +39,8 @@
 `wip/2026-10-02-pause` ブランチに 1 コミットでまとめて push してある（未検証・途中を含む。
 そのまま `0.0.0` に入れず、内容を確かめてから分けて取り込む）。残り作業の詳細はそのブランチの `WIP~/README.md`。
 
-- PSD の調整レイヤー（レベル補正・色相/彩度・反転）の読み書き、クリッピングされたグループの書き出し拒否
-  （別のエージェントの作業。Runtime/Core/Psd/*, PsdBridge.cs, PSD のテスト）
+- ~~PSD の調整レイヤー（レベル補正・色相/彩度・反転）の読み書き、クリッピングされたグループの書き出し拒否~~:
+  新しい PC でテストの誤り 5 件を直し、文書と psd-tools の照合を済ませて 0.0.0 に取り込んだ
 - 構造変更（スライダー操作など）の高速化（別のエージェントの作業。TileGpuCompositor.cs、
   TileComposite.shader、Runtime/Core/SurfaceChangeTracker.cs、GpuInteractionTests、SurfaceChangeTrackerTests）
 - ~~変形（移動・回転・拡大縮小）~~: 新しい PC で Core を見直し、テストとウィンドウの UI を足して 0.0.0 に取り込んだ。
@@ -62,7 +62,7 @@
 ユーザーと合意した順（2026-10-02）。未対応要望はスコープから外していない。
 
 1. ユーザーの実環境（Windows の Unity・D3D11、実 GPU、ペンタブ）での G0 確認、Photoshop/CLIP STUDIO で書き出した PSD を開いて描画を確かめる、4K の実メモリ計測
-2. PSD の調整レイヤー（レベル補正・色相/彩度・反転）の読み書き（wip ブランチにほぼ完成。テスト 5 件の修正と文書が残り）
+2. ~~PSD の調整レイヤー（レベル補正・色相/彩度・反転）の読み書き~~（済）
 3. 構造変更（スライダー操作・並べ替え）の高速化（wip ブランチ。正しさは確認済み、速度が未計測）
 4. 描画ツールの残り（変形は済み。自由変形のハンドル、選択範囲のぼかし/拡張/縮小、3D ビューでの選択）
 5. ノーマルマップ専用の合成、Height からノーマルマップ

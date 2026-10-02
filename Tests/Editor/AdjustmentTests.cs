@@ -159,10 +159,13 @@ namespace Yozolab.YoluPainter.Tests
             throw new InvalidOperationException("adjustment block not found");
         }
 
-        [Test] public void PsdProjectionRefusesAdjustmentLayers()
+        /// <summary>PSD に書けるのは、PSD の刻みにちょうど乗る調整だけ。間の値は丸めずに断る（往復の詳細は PsdAdjustmentTests）。</summary>
+        [Test] public void PsdProjectionWritesExactAdjustmentsAndRefusesSettingsBetweenPsdSteps()
         {
             var doc = OnePixel(new Rgba32(1, 2, 3, 255), out _); doc.AddAdjustmentLayer("Invert", AdjustmentSettings.Invert());
-            Assert.Throws<InvalidOperationException>(() => PsdBridge.Export(doc, PaintChannel.Color));
+            Assert.That(PsdBridge.Export(doc, PaintChannel.Color).Layers[0].Adjustment.Type, Is.EqualTo(AdjustmentType.Invert));
+            var between = OnePixel(new Rgba32(1, 2, 3, 255), out _); between.AddAdjustmentLayer("Levels", AdjustmentSettings.Levels(0.3, 1));
+            Assert.That(() => PsdBridge.Export(between, PaintChannel.Color), Throws.InvalidOperationException.With.Message.Contains("between them"));
         }
     }
 }
