@@ -154,6 +154,30 @@ namespace Yozolab.YoluPainter.Tests
             layout.Dock(far.id); Assert.That(In(layout, DockPlace.Right).Last(), Is.EqualTo("textureSet"));
         }
 
+        /// <summary>列の一番下が畳んだまとまりのとき、その見出しの下の縁に落とすと最後に並び（タブには入らない）、見出しの中ほどならタブに入る。</summary>
+        [Test] public void DroppingOnTheLowerEdgeOfAFoldedLastHeaderPutsThePanelLast()
+        {
+            var w = ScriptableObject.CreateInstance<TexturePaintWindow>();
+            try
+            {
+                w.LayoutOverride = new Rect(0, 0, 1200, 800); LayoutShell(w);
+                var layout = w.DockLayoutForTests;
+                var material = layout.GroupOf("material");
+                layout.MoveGroup(material.id, DockPlace.Right, layout.Column(DockPlace.Right).Count); layout.SetCollapsed(material.id, true);
+                LayoutShell(w);
+                int last = layout.Column(DockPlace.Right).Count - 1;
+                Assert.That(layout.Column(DockPlace.Right)[last].id, Is.EqualTo(material.id));
+                var head = w.HeaderRectForTests(DockPlace.Right, last);
+                var edge = w.DropTargetForTests(new Vector2(head.center.x, head.yMax - 2));
+                Assert.That(edge.HasValue, Is.True);
+                Assert.That(edge.Value.join, Is.Null, "the lower edge of a folded header is not a tab drop");
+                Assert.That((edge.Value.place, edge.Value.index), Is.EqualTo((DockPlace.Right, last + 1)), "it puts the panel after the folded group, at the end");
+                var middle = w.DropTargetForTests(new Vector2(head.center.x, head.y + 10));
+                Assert.That(middle.Value.join, Is.EqualTo(material.id), "the middle of the header still makes a tab");
+            }
+            finally { Object.DestroyImmediate(w); }
+        }
+
         /// <summary>見出しの右クリックの項目と、ウィンドウ ▸ の項目が呼ぶ操作（バッチでは別のウィンドウは開かず、配置だけが変わる）。</summary>
         [Test] public void TheHeaderAndWindowMenusMovePanels()
         {

@@ -294,8 +294,9 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>
-        /// マウスの位置から落とす先。見出しの上（上の縁を除く）ならそのまとまりのタブに（自分のまとまりをまるごと自分に落とすのは除く）、
-        /// それ以外の列の中なら見出しの間。どこでもなければ null。
+        /// マウスの位置から落とす先。見出しの上（上の縁を除く。畳んだまとまりは下の縁も除く）ならそのまとまりのタブに（自分のまとまりを
+        /// まるごと自分に落とすのは除く）、それ以外の列の中なら見出しの間。どこでもなければ null。畳んだまとまりは見出しの帯しか無いので、
+        /// 下の縁は「その後ろ」にする（列の一番下が畳んだ見出しでも、下の端へ落とせば最後に並ぶ）。
         /// </summary>
         PanelDrop? PanelDropTarget(Vector2 mouse, string groupId = null, string panel = null)
         {
@@ -310,6 +311,8 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     var head = new Rect(column.x, y, column.width, PanelHeaderHeight);
                     bool self = groups[i].id == groupId && (panel == null || groups[i].panels.Count == 1);
+                    bool folded = heights[i] <= .5f;
+                    if (folded && head.Contains(mouse) && mouse.y > head.yMax - FoldedHeaderAfterBand) return new PanelDrop { Place = place, Index = i + 1 };
                     if (head.Contains(mouse) && mouse.y > head.y + 5 && !self)
                         return new PanelDrop { JoinGroup = groups[i].id, Tab = TabIndexAt(head, groups[i], mouse.x), Header = head };
                     float height = PanelHeaderHeight + heights[i];
@@ -320,6 +323,15 @@ namespace Yozolab.YoluPainter.Editor
             }
             return null;
         }
+
+        /// <summary>畳んだまとまりの見出しの下の縁のうち、「その後ろに入れる」にする高さ。</summary>
+        internal const float FoldedHeaderAfterBand = 6;
+
+        /// <summary>テスト用: 落とす先（列の中の位置、またはタブに入るまとまり）と、列の index 番目の見出しの矩形。</summary>
+        internal (DockPlace place, int index, string join)? DropTargetForTests(Vector2 mouse)
+        { var d = PanelDropTarget(mouse); return d == null ? ((DockPlace, int, string)?)null : (d.Value.Place, d.Value.Index, d.Value.JoinGroup); }
+        internal Rect HeaderRectForTests(DockPlace place, int index)
+        { var column = ColumnDropRect(place); return new Rect(column.x, HeaderY(column, Layout.Column(place), index), column.width, PanelHeaderHeight); }
 
         float HeaderY(Rect column, List<DockGroup> groups, int index)
         {
