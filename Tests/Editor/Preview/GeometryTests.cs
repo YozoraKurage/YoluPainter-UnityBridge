@@ -261,6 +261,39 @@ namespace Yozolab.YoluPainter.Tests.Editor
             }
         }
 
+        /// <summary>
+        /// 細かいマスを対角線で 2 枚に分けた面（左右対称の箱の前の面。16 × 16 のマス、UV は u = 0.5 ± 0.2·x のように丸めの入る式）。
+        /// 128 の画像ではマスの対角線の上にテクセルの中心が並ぶ。その中心は丸めで片方の三角形だけの候補になり（重心座標 1.1e-6）、カメラ
+        /// からのレイは隣の三角形に当たる。隣の三角形の、継ぎ目の上の当たりとして受け入れ、穴を開けない（以前は重心座標の 1e-6 の決め打ちの
+        /// 幅で断り、対角線に沿って点々と塗れなかった。シンメトリーの試験で、細かく分けた側だけ 1 テクセル欠けて見つかった）。
+        /// </summary>
+        [Test]
+        public void TexelsExactlyOnASharedEdgeOfSmallTrianglesAreNotDropped()
+        {
+            var geometry = new SurfaceGeometry(SymmetricBox.Triangles(16, 16));
+            var camera = new Vector3(0, 0, -5);
+            const int size = 128;
+            foreach (float side in new[] { -.4f, .4f })
+            {
+                Assert.That(geometry.TryRaycast(new Ray(camera, new Vector3(side, .1f, -1) - camera), out var hit), Is.True);
+                var result = geometry.BuildSurfaceDabs(hit, .3f, size, size, camera, 1);
+                var reference = geometry.BuildSurfaceDabsReference(hit, .3f, size, size, camera, 1);
+                Assert.That(result.WasClipped, Is.False, result.Diagnostic);
+                var painted = new HashSet<(int, int)>(result.Pixels.Select(p => (p.X, p.Y)));
+                var holes = new List<string>();
+                // 前の面のテクセル: u = 0.5 + 0.2·x（左右とも）、v = 0.05 + 0.1·(y + 1)
+                for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
+                {
+                    float u = (x + .5f) / size, v = (y + .5f) / size;
+                    if (u < .3f || u > .7f || v < .05f || v > .25f) continue;
+                    var position = new Vector3((u - .5f) / .2f, (v - .05f) / .1f - 1, -1);
+                    if (Vector3.Distance(position, hit.Position) < .29f && !painted.Contains((x, y))) holes.Add(x + "," + y);
+                }
+                Assert.That(holes, Is.Empty, side + ": texels inside the dab were not painted");
+                Assert.That(reference.Pixels.Select(p => (p.X, p.Y, p.Coverage)), Is.EqualTo(result.Pixels.Select(p => (p.X, p.Y, p.Coverage))), side + ": the sequential reference agrees");
+            }
+        }
+
         [Test]
         public void OutOfRangeUvDisablesSurfacePaintRatherThanWrappingOrClipping()
         {

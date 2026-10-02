@@ -197,12 +197,12 @@ namespace Yozolab.YoluPainter.Editor
             if(canvasRect.width>0) DrawCanvas();
             if(surfaceRect.width>0 && e.type==EventType.Repaint)
             {
-                PaintGui.Fill(surfaceRect,PaintTheme.CanvasBg); preview.Render(surfaceRect); DrawPathMarkers();
+                PaintGui.Fill(surfaceRect,PaintTheme.CanvasBg); SyncSymmetryPlane(); preview.Render(surfaceRect); DrawPathMarkers();
                 // 3D の描画（PreviewRenderUtility）の後はイベントのマウスの位置が (0,0) になっているので、外枠のマウスの乗った見た目のために戻す
                 if(Event.current!=null) Event.current.mousePosition=pointerAtStart;
             }
             DrawShell();
-            if(surfaceRect.width>0) DrawSurfaceBrushCursor(pointerAtStart); // 3D の描画の後に GUI の状態を戻してから重ねる
+            if(surfaceRect.width>0){DrawSurfaceBrushCursor(pointerAtStart);DrawMirroredBrushCursor(pointerAtStart);} // 3D の描画の後に GUI の状態を戻してから重ねる
             HandleCanvasInput(e);
         }
 

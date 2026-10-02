@@ -70,6 +70,7 @@ namespace Yozolab.YoluPainter.Tests
                 w.Channel = PaintChannel.Roughness;
                 w.Brush.tipId = "lib:nowhere/a-tip-that-is-not-installed-anywhere"; w.SetTexture(tip);
                 w.Brush.dualEnabled = true; w.Brush.dualTipId = tip;
+                w.Symmetry = true; w.SymmetryOffset = -123.4567f; // シンメトリーの欄（切り替えた後の有効な部品と長い数値）と 3D ビューの対称の面
                 d.SetSelection(SelectionMask.All(d));
                 var layer = d.AddLayer("Model path"); d.SetChannelEnabled(layer.Id, PaintChannel.Color, true);
                 d.SetPath(layer.Id, new SurfacePath(Guid.NewGuid(), PaintChannel.Color, "another-model", new PathBrush(), new[] { new PathPoint(0, .3, .3) }), new SparseTileSurface(d.Width, d.Height, d.TileSize));
@@ -101,7 +102,7 @@ namespace Yozolab.YoluPainter.Tests
 
         // ───────── 部品だけで描いていること ─────────
 
-        static readonly string[] ToolPanelFiles = { "Window/Tools/TexturePaintWindow.ToolPanels.cs", "Window/Tools/TexturePaintWindow.Stroke.cs", "Window/Tools/TexturePaintWindow.BrushDynamics.cs", "Window/Tools/TexturePaintWindow.Paths.cs", "Window/Model/TexturePaintWindow.Surface3D.cs" };
+        static readonly string[] ToolPanelFiles = { "Window/Tools/TexturePaintWindow.ToolPanels.cs", "Window/Tools/TexturePaintWindow.Stroke.cs", "Window/Tools/TexturePaintWindow.BrushDynamics.cs", "Window/Tools/TexturePaintWindow.Paths.cs", "Window/Model/TexturePaintWindow.Surface3D.cs", "Window/Model/TexturePaintWindow.Symmetry.cs" };
         /// <summary>Unity の標準の見た目の部品（と、それで描く区画）。EditorGUI.DrawRect はパスの印を描くだけなので除く。</summary>
         static readonly Regex UnityControls = new Regex(@"\b(?:EditorGUILayout|GUILayout|EditorStyles)\.|\bLegacySection\s*\(|\bEditorGUI\.(?!DrawRect\b)|\bGUI\.(?:Button|Toggle|TextField|TextArea|HorizontalSlider|VerticalSlider|Box|Label|Toolbar|SelectionGrid|BeginScrollView)\b");
 

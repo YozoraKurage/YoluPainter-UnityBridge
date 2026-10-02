@@ -396,7 +396,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 {
                     // Distance tolerance alone can leak through extremely thin, nearby clothing.
                     // Only an actual adjacent triangle at this triangle's edge may share a visible hit.
-                    if (Mathf.Min(c.Bary.x, Mathf.Min(c.Bary.y, c.Bary.z)) > 1e-6f ||
+                    if (!AtEdge(c.Triangle, c.Bary) ||
                         (o.Hit.Position - c.Position).sqrMagnitude > visibilityEpsilon * visibilityEpsilon ||
                         Array.IndexOf(adjacency[c.Triangle], o.Hit.TriangleIndex) < 0) continue;
                 }
@@ -472,7 +472,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                     {
                         // Distance tolerance alone can leak through extremely thin, nearby clothing.
                         // Only an actual adjacent triangle at this triangle's edge may share a visible hit.
-                        if (Mathf.Min(bary.x, Mathf.Min(bary.y, bary.z)) > 1e-6f ||
+                        if (!AtEdge(triangleIndex, bary) ||
                             (visible.Position - position).sqrMagnitude > visibilityEpsilon * visibilityEpsilon ||
                             Array.IndexOf(adjacency[triangleIndex], visible.TriangleIndex) < 0) continue;
                     }
@@ -485,6 +485,77 @@ namespace Yozolab.YoluPainter.Editor.Preview
             var keys = new List<int>(pixels.Keys); keys.Sort();
             foreach (int key in keys) result.Pixels.Add(new SurfacePixel(key % width, key / width, pixels[key]));
             return result;
+        }
+
+        /// <summary>
+        /// point にいちばん近い面の上の点。BVH を近い枝から辿り、今の最短より遠い枝は刈る。maxDistance より遠い点しか無ければ false。
+        /// facing が 0 でなければ、法線が facing と同じ側を向く（内積が正の）三角形だけを見る（薄い板の裏と表、重なった服の内側を
+        /// 取り違えないため）。同じ距離なら番号の小さい三角形。節点を見る数が maxNodeVisits を超えたら諦めて false を返し、exceeded を
+        /// true にする（重なり合った幾何で問い合わせが止まらないように）。返す当たりの Distance は point からの距離、Barycentric と UV は
+        /// その点のもの、Normal は三角形の法線。
+        /// </summary>
+        public bool TryFindClosestPoint(Vector3 point, float maxDistance, Vector3 facing, int maxNodeVisits, out SurfaceHit hit, out bool exceeded)
+        {
+            hit = default; exceeded = false;
+            if (triangles.Length == 0 || !Finite(point) || !Finite(facing) || float.IsNaN(maxDistance) || maxDistance < 0) return false;
+            float bestSquared = float.IsPositiveInfinity(maxDistance) ? float.PositiveInfinity : maxDistance * maxDistance;
+            int best = -1; Vector3 bestPoint = default; int visits = 0;
+            bool useFacing = facing.sqrMagnitude > 0;
+            var stack = new Stack<int>(); stack.Push(0);
+            while (stack.Count > 0)
+            {
+                if (++visits > maxNodeVisits) { exceeded = true; return false; }
+                var node = nodes[stack.Pop()];
+                if (node.Bounds.SqrDistance(point) > bestSquared) continue;
+                if (node.Count == 0)
+                {
+                    // 近い子を先に見る（積むのは遠い子が先）
+                    float left = nodes[node.Left].Bounds.SqrDistance(point), right = nodes[node.Right].Bounds.SqrDistance(point);
+                    if (left <= right) { stack.Push(node.Right); stack.Push(node.Left); } else { stack.Push(node.Left); stack.Push(node.Right); }
+                    continue;
+                }
+                for (int i = node.Start; i < node.Start + node.Count; i++)
+                {
+                    int index = indices[i]; var t = triangles[index];
+                    if (useFacing && Vector3.Dot(t.Normal, facing) <= 0) continue;
+                    var closest = ClosestPoint(point, t); float squared = (closest - point).sqrMagnitude;
+                    if (squared < bestSquared || (squared == bestSquared && (best < 0 || index < best))) { bestSquared = squared; best = index; bestPoint = closest; }
+                }
+            }
+            if (best < 0) return false;
+            var found = triangles[best]; var weights = Barycentric(bestPoint, found);
+            hit = new SurfaceHit
+            {
+                SnapshotRevision = SnapshotRevision, TriangleIndex = best, RendererIndex = found.RendererIndex, MaterialSlot = found.MaterialSlot,
+                Position = bestPoint, Normal = found.Normal, Distance = Mathf.Sqrt(bestSquared), Barycentric = weights,
+                UV = found.UvA * weights.x + found.UvB * weights.y + found.UvC * weights.z
+            };
+            return true;
+        }
+        /// <summary>三角形の上の点の重心座標（A・B・C の重み。丸めの誤差で出る負は 0 にして足して 1 に戻す）。</summary>
+        static Vector3 Barycentric(Vector3 p, SurfaceTriangle t)
+        {
+            Vector3 e0 = t.B - t.A, e1 = t.C - t.A, e2 = p - t.A;
+            float d00 = Vector3.Dot(e0, e0), d01 = Vector3.Dot(e0, e1), d11 = Vector3.Dot(e1, e1), d20 = Vector3.Dot(e2, e0), d21 = Vector3.Dot(e2, e1);
+            float denominator = d00 * d11 - d01 * d01;
+            if (Mathf.Abs(denominator) < 1e-30f) return new Vector3(1, 0, 0);
+            float v = (d11 * d20 - d01 * d21) / denominator, w = (d00 * d21 - d01 * d20) / denominator;
+            var weights = new Vector3(Mathf.Max(0, 1 - v - w), Mathf.Max(0, v), Mathf.Max(0, w));
+            float sum = weights.x + weights.y + weights.z;
+            return sum > 0 ? weights / sum : new Vector3(1, 0, 0);
+        }
+
+        /// <summary>三角形の上の点（重心座標）が辺の上にあるか: いちばん小さい重みが 1e-6 以下か、3D でいちばん近い辺までの距離が
+        /// visibilityEpsilon 以下。重みは UV から求めるので、UV の小さい三角形では丸めの誤差が 1e-6 を超え（対角線の上のテクセルで 1.1e-6
+        /// を実測）、隣の三角形の継ぎ目の上の当たりを断って穴が開いていた。距離で見る幅は三角形の大きさによらない。</summary>
+        bool AtEdge(int triangle, Vector3 bary)
+        {
+            if (Mathf.Min(bary.x, Mathf.Min(bary.y, bary.z)) <= 1e-6f) return true;
+            var t = triangles[triangle]; float twiceArea = Vector3.Cross(t.B - t.A, t.C - t.A).magnitude;
+            float toBc = bary.x * twiceArea / Mathf.Max(1e-30f, (t.C - t.B).magnitude);
+            float toCa = bary.y * twiceArea / Mathf.Max(1e-30f, (t.A - t.C).magnitude);
+            float toAb = bary.z * twiceArea / Mathf.Max(1e-30f, (t.B - t.A).magnitude);
+            return Mathf.Min(toBc, Mathf.Min(toCa, toAb)) <= visibilityEpsilon;
         }
 
         static bool UvFootprintBounds(SurfaceTriangle t, Vector3 center, float radius, out Vector2 min, out Vector2 max)

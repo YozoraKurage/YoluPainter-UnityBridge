@@ -193,6 +193,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             bool incomplete = false;
             Vector3 origin = loadOptions.Origin ?? source.transform.position;
             loadOrigin = origin;
+            ModelRootPosition = source.transform.position - origin; ModelRootRotation = source.transform.rotation;
             foreach (var unsupportedRenderer in source.GetComponentsInChildren<Renderer>(true))
             {
                 if (unsupportedRenderer is MeshRenderer || unsupportedRenderer is SkinnedMeshRenderer || !IsActiveRenderer(unsupportedRenderer, source.transform)) continue;
@@ -622,7 +623,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (!HasModel || rect.width < 2 || rect.height < 2) return;
             EnsurePreview(); UpdateCamera(rect);
             foreach (var material in materials) material.SetFloat("_PreviewLit", LitPreview ? 1 : 0);
-            ApplyScene();
+            ApplyScene(); UpdateSymmetryPlaneObject();
             Texture texture = null;
             // PreviewRenderUtility.Render in Unity 2022.3 temporarily changes this editor flag
             // without its own finally. Preserve it here even if a render callback throws.
@@ -667,6 +668,83 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (!CanPaint) return new SurfaceDabResult { Diagnostic = "Load a complete supported static mesh snapshot before surface painting." };
             return geometry.BuildSurfaceDabs(hit, radiusWorld, width, height, preview.camera.transform.position, hardness, BrushBudget, cache);
         }
+        // ───────────── シンメトリー ─────────────
+
+        /// <summary>読み込んだモデルのルートの位置（プレビューの空間）と向き。対称の面はこのローカルの軸で決める。デモのキューブと
+        /// モデルが無いときは原点と回転なし。</summary>
+        public Vector3 ModelRootPosition { get; private set; }
+        public Quaternion ModelRootRotation { get; private set; } = Quaternion.identity;
+        /// <summary>モデルのローカルの axis に直交し、ルートから offset（シーンの単位）ずらした対称の面。</summary>
+        public MirrorPlane SymmetryPlane(SymmetryAxis axis, float offset) => MirrorPlane.FromModel(ModelRootPosition, ModelRootRotation, axis, offset);
+        /// <summary><see cref="BuildSurfaceDabs"/> に、対称の面で映した側のダブを合わせたもの（<see cref="SurfaceSymmetry"/>）。</summary>
+        public SymmetricSurfaceDab BuildSymmetricSurfaceDabs(SurfaceHit hit, MirrorPlane plane, float radiusWorld, int width, int height, float hardness = 0.8f, SurfaceVisibilityCache cache = null)
+        {
+            if (!CanPaint)
+            {
+                var refused = new SurfaceDabResult { Diagnostic = "Load a complete supported static mesh snapshot before surface painting." };
+                return new SymmetricSurfaceDab { Original = refused, Result = refused, Outcome = MirrorOutcome.OnPlane };
+            }
+            return SurfaceSymmetry.Build(geometry, hit, plane, radiusWorld, width, height, preview.camera.transform.position, hardness, BrushBudget, cache);
+        }
+        /// <summary>今のカメラの位置（プレビューの空間。最後に描いた・当たりを調べた矩形での位置）。</summary>
+        public Vector3 CameraPosition => preview != null ? preview.camera.transform.position : Vector3.zero;
+
+        /// <summary>
+        /// 3D ビューに薄く見せる対称の面（null で見せない）。モデルを覆う大きさの四角とその縁で、奥行きを見て描く（モデルの手前にある
+        /// 所だけが重なって見え、面がモデルを切る所が分かる）。プレビューの中だけの物で、当たり判定・ブラシ・ベイクには入らない。
+        /// </summary>
+        public MirrorPlane? ShownSymmetryPlane { get; set; }
+        GameObject planeObject; Mesh planeMesh; Material planeMaterial; MirrorPlane builtPlane; Bounds builtBounds; bool planeBuilt;
+        static readonly Color PlaneFill = new Color(.35f, .78f, 1f, .16f), PlaneEdge = new Color(.35f, .78f, 1f, .7f);
+        /// <summary>試験用: 対称の面を見せる物が今の描画に入っているか。</summary>
+        internal bool SymmetryPlaneVisible => planeObject != null && planeObject.activeSelf;
+
+        void UpdateSymmetryPlaneObject()
+        {
+            bool show = ShownSymmetryPlane.HasValue && HasModel;
+            if (!show) { if (planeObject != null) planeObject.SetActive(false); return; }
+            if (planeObject == null)
+            {
+                var shader = Shader.Find("Hidden/Internal-Colored");
+                if (shader == null) return; // 組み込みのシェーダーが無ければ見せない（描くことには関わらない）
+                planeMaterial = new Material(shader) { name = "Symmetry plane (preview only)", hideFlags = HideFlags.HideAndDontSave, renderQueue = 3000 };
+                planeMaterial.SetInt("_SrcBlend", (int)BlendMode.SrcAlpha); planeMaterial.SetInt("_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
+                planeMaterial.SetInt("_ZWrite", 0); planeMaterial.SetInt("_ZTest", (int)CompareFunction.LessEqual); planeMaterial.SetInt("_Cull", (int)CullMode.Off);
+                planeMesh = new Mesh { name = "Symmetry plane (preview only)", hideFlags = HideFlags.HideAndDontSave };
+                planeObject = new GameObject("Symmetry plane (preview only)") { hideFlags = HideFlags.HideAndDontSave };
+                planeObject.AddComponent<MeshFilter>().sharedMesh = planeMesh;
+                var renderer = planeObject.AddComponent<MeshRenderer>(); renderer.sharedMaterials = new[] { planeMaterial, planeMaterial };
+                renderer.shadowCastingMode = ShadowCastingMode.Off; renderer.receiveShadows = false;
+                renderer.lightProbeUsage = LightProbeUsage.Off; renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
+                preview.AddSingleGO(planeObject); planeBuilt = false;
+            }
+            var plane = ShownSymmetryPlane.Value; var bounds = Bounds;
+            if (!planeBuilt || !builtPlane.Equals(plane) || builtBounds != bounds)
+            {
+                // 面に落としたモデルの中心から、モデルの外接球の半径の 1.1 倍の四角（どの向きの面でもモデルを覆う）
+                var center = bounds.center - plane.SignedDistance(bounds.center) * plane.Normal;
+                float half = Mathf.Max(.0001f, bounds.extents.magnitude * 1.1f);
+                Vector3 u = plane.AxisU * half, v = plane.AxisV * half;
+                var corners = new[] { center - u - v, center + u - v, center + u + v, center - u + v };
+                planeMesh.Clear();
+                planeMesh.SetVertices(new[] { corners[0], corners[1], corners[2], corners[3], corners[0], corners[1], corners[2], corners[3] });
+                planeMesh.SetColors(new[] { PlaneFill, PlaneFill, PlaneFill, PlaneFill, PlaneEdge, PlaneEdge, PlaneEdge, PlaneEdge });
+                planeMesh.subMeshCount = 2;
+                planeMesh.SetIndices(new[] { 0, 1, 2, 0, 2, 3 }, MeshTopology.Triangles, 0);
+                planeMesh.SetIndices(new[] { 4, 5, 5, 6, 6, 7, 7, 4 }, MeshTopology.Lines, 1);
+                planeMesh.RecalculateBounds();
+                builtPlane = plane; builtBounds = bounds; planeBuilt = true;
+            }
+            planeObject.SetActive(true);
+        }
+        void DisposeSymmetryPlane()
+        {
+            if (planeObject != null) Object.DestroyImmediate(planeObject);
+            if (planeMesh != null) Object.DestroyImmediate(planeMesh);
+            if (planeMaterial != null) Object.DestroyImmediate(planeMaterial);
+            planeObject = null; planeMesh = null; planeMaterial = null; planeBuilt = false;
+        }
+
         /// <summary>Perspective estimate for screen-space resampling; geometry still determines the actual footprint.</summary>
         public float WorldRadiusToGuiPoints(Vector3 worldPosition, float radiusWorld)
         {
@@ -730,7 +808,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         {
             ThrowIfDisposed();
             if (!HasModel) return null;
-            EnsurePreview(); var rect = new Rect(0, 0, width, height); UpdateCamera(rect); ApplyScene();
+            EnsurePreview(); var rect = new Rect(0, 0, width, height); UpdateCamera(rect); ApplyScene(); UpdateSymmetryPlaneObject();
             bool previousPipelineFlag = Unsupported.useScriptableRenderPipeline, previousAsync = ShaderUtil.allowAsyncCompilation;
             // 試験の画像は、元のシェーダーのコンパイルを待った絵にする（非同期のあいだは仮のシアンで描かれる）
             ShaderUtil.allowAsyncCompilation = false;
@@ -778,6 +856,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         void ClearModel()
         {
             CancelNavigation(); geometry = null; attributes = null;
+            ModelRootPosition = Vector3.zero; ModelRootRotation = Quaternion.identity;
             foreach (var e in entries) e.Skin?.Dispose();
             entries.Clear();
             skeleton?.Dispose(); skeleton = null; humanAvatar = null; humanRoot = null;
@@ -793,7 +872,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public void Dispose()
         {
             if (disposed) return;
-            ClearModel();
+            ClearModel(); DisposeSymmetryPlane();
             materialView?.Dispose(); materialView = null;
             if (preview != null) { preview.Cleanup(); preview = null; }
             disposed = true;

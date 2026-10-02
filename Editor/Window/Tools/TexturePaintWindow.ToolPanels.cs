@@ -31,7 +31,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>初めは閉じておくセクション（細かい設定。Photoshop のブラシ設定の一覧のように、見出しだけを並べる）。</summary>
         static readonly HashSet<string> ToolSectionsClosedAtFirst = new HashSet<string> { "brush-jitter", "brush-texture", "brush-dual", "brush-color", "brush-fade" };
         /// <summary>ツールのセクションのキー（テストがすべて開いて描くため）。</summary>
-        internal static readonly string[] ToolSectionKeys = { "brush", "brush-stroke", "brush-jitter", "brush-texture", "brush-dual", "brush-color", "brush-fade", "surface-pick", "selection-modify", "move", "path" };
+        internal static readonly string[] ToolSectionKeys = { "brush", "brush-stroke", "brush-symmetry", "brush-jitter", "brush-texture", "brush-dual", "brush-color", "brush-fade", "surface-pick", "selection-modify", "move", "path" };
         internal void SetToolSectionsOpen(bool open) { foreach (var key in ToolSectionKeys) sectionOpen[key] = open; }
 
         /// <summary>ツールのセクションの見出し（開いていれば true）。初めの開閉は <see cref="ToolSectionsClosedAtFirst"/>。</summary>
@@ -68,6 +68,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             BrushTipSection(rows);
             StrokeAssistSection(rows);
+            SymmetrySection(rows); // 3D ビューのシンメトリー（Model/TexturePaintWindow.Symmetry.cs）
             JitterSection(rows);
             TextureSection(rows);
             DualBrushSection(rows);

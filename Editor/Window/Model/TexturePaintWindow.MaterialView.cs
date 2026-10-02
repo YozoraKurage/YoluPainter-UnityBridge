@@ -135,6 +135,7 @@ namespace Yozolab.YoluPainter.Editor
             x -= 30;
             var scene = new Rect(x, bar.y + 2, 26, 22);
             if (PaintGui.IconButton(scene, "light_mode", L.Tr("Scene: camera views, the light, the ambient and the background of the 3D view (the preview only)"), false, stroke == null, 16)) OpenScenePopup(scene);
+            x -= 28; DrawSymmetryHeaderToggle(new Rect(x, bar.y + 2, 26, 22));
             if (previewShading == PreviewShading.Material && preview.HasModel)
             {
                 var notes = new List<string>();
