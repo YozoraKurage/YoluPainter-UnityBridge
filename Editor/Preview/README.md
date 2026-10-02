@@ -37,7 +37,7 @@ Per dab, default limits are 2,048 visited triangles, 262,144 candidate texels, 1
 
 ## Validation status
 
-The `tools/GeometryHarness` script executes the pure geometry test bodies with explicitly labeled Unity math/NUnit adapters. It does not execute Unity, shaders, preview ownership tests or real EditMode tests. Real Unity 2022.3 import/compile/render, source-script nonexecution, cleanup, focus, domain reload, play mode, HiDPI, tablet and SRP tests still need to run.
+All geometry tests and the three preview ownership tests run as Unity 2022.3.22f1 EditMode tests (2026-10-02). WindowTests drive the EditorWindow through real IMGUI events and confirm source-asset isolation, cleanup and stroke cancellation on focus loss / reload / play notifications. Still unverified: actual domain reload and play-mode transitions mid-stroke, HiDPI, tablets, SRP, and real GPUs (the devcontainer renders with llvmpipe).
 
 API references checked against Unity 2022.3:
 - [PreviewRenderUtility source](https://github.com/Unity-Technologies/UnityCsReference/blob/2022.3/Editor/Mono/Inspector/PreviewRenderUtility.cs)

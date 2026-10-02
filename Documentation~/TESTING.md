@@ -1,49 +1,50 @@
-# Build and test
+# テストの走らせ方
 
-## Portable core (requires .NET 8 SDK)
+テストはすべて Unity の EditMode テスト（`Tests/Editor`、アセンブリ `Yozolab.YoluPainter.Tests`）。.NET 単体のハーネスは使わない。
 
-```sh
-./tools/run_core_tests.sh
-# If dotnet is not on PATH:
-DOTNET=/absolute/path/to/dotnet ./tools/run_core_tests.sh
-```
-
-This compiles the actual production Core folder, not a Python translation or mock core. It does not compile UnityEngine/UnityEditor adapters. `tools/CoreNUnit` holds broader NUnit suites and a pinned NUnit/NUnitLite test-only dependency. The checked-in runtime package itself has no NuGet dependency.
-
-For read-only CI homes set DOTNET_CLI_HOME and NUGET_PACKAGES to writable directories. The included script supplies /tmp defaults. Do not interpret .NET 8 compilation as proof of Unity's exact runtime or API compatibility.
-
-## Unity import and EditMode gate (NOT executed in the cloud)
-
-1. Open a disposable Unity 2022.3 project with the intended renderer pipeline
-2. Add this UPM package from disk
-3. Add `com.dot.texture-painter` to the test project's manifest `testables` array and ensure Unity Test Framework is available
-4. Fix any actual Unity compilation/import errors before running tests
-5. Window → General → Test Runner → EditMode → Run All
-6. Record Editor exact patch, OS, CPU/GPU/driver, graphics API, color space, pipeline, tablet driver and model
-
-Example batch command, adapt absolute paths and Unity license setup:
+## devcontainer で
 
 ```sh
-Unity -batchmode -projectPath /path/to/test-project -runTests -testPlatform EditMode -testResults /path/to/editmode-results.xml -logFile /path/to/editor.log
+.devcontainer/unity/test-daemon.sh start --batch-gl   # シェーダー・GPU を確かめるとき（推奨の既定）
+.devcontainer/unity/test-daemon.sh restart            # EditorWindow の操作を確かめるとき（GUI モード）
+.devcontainer/unity/run-tests.sh                      # 全件
+.devcontainer/unity/run-tests.sh --filter 'Yozolab.YoluPainter.Tests.GpuTests'
 ```
 
-Use a graphics-enabled Editor for GPU tests. A `-nographics` run is insufficient for shader, rendering and readback gates. This repository does not activate or install Unity or accept Unity licensing on the user's behalf.
+この devcontainer の GUI モードではシェーダーのインクルードが解決できない（VALIDATION.md の「環境の既知の問題」）。そのため 2 つのモードで役割を分ける。
 
-## Manual acceptance script
+| モード | 動くもの | スキップされるもの |
+|---|---|---|
+| `--batch-gl`（`-batchmode`、`-nographics` なし、xvfb 上の OpenGL） | core・PSD・保存・幾何・プレビュー・**GPU テスト** | WindowTests（batchmode では EditorWindow の入力が回らない） |
+| GUI（既定の `start`） | core・PSD・保存・幾何・プレビュー・**WindowTests** | GpuTests（シェーダーが壊れているので） |
+| コールド実行（デーモン無し、`-nographics`） | core・PSD・保存・幾何・CPU 合成 | GpuTests（グラフィックスデバイスが無い）、WindowTests |
 
-- Make 256/512 document, draw dot/slow line/fast line, vary pressure, erase, undo/redo, Escape and leave focus midstroke
-- Check initial click, window drag/release outside, repeated new/open/save-as, exception cancellation, closing and domain reload
-- Add layer, name with Japanese/emoji, change opacity, hide/show, reorder, delete and undo; ensure per-channel isolation
-- Paint same UV in 2D/3D and check preview synchronized; test seam, backside, overlapping shell and material boundaries
-- Try unreadable/skinned/incomplete model, nonmanifold edge, missing UV and out-of-range UV; verify refusal/diagnostic instead of invisible partial coverage
-- Load supplied demo seam mesh when available; check source scene dirty state and asset hashes unchanged
-- Save new root, reopen, compare native bytes, PSD layer IDs/names/opacities/visible state; add unsupported PSD metadata and verify edit refusal
-- Interrupt saves at each stage, corrupt newest/current manifest/file, externally modify PSD, retry, and confirm last intact generation remains available
-- Run GPU brush parity probe; test linear/gamma project, D3D/Metal/Vulkan only where supported; collect pixel error and texture-orientation images
-- Run a 4K sparse stroke workload, then dense layers/channels under low RAM/VRAM; record source tiles, real RSS, GPU allocations, peak save memory, median/p95/p99 pointer-to-display latency
-- Verify pen/mouse de-duplication, true pressure-zero behavior, multi-monitor/HiDPI, tablet buttons and driver update transitions
-- Photoshop/CSP actual reopen + resave + reimport fixture matrix is still mandatory. Open-source PSD decoders alone do not satisfy this gate
+シリーズの区切りでは、batch-gl と GUI の両方で全件を回し、合わせて全テストが実行されたことを確かめる。
 
-## Retain results
+`--batch-gl` は起動時に、GUI モードで壊れた状態で取り込まれたシェーダーを自動で取り込み直す。
 
-Keep logs, XML, fixture hashes, OS/API/version metadata and image diffs. Never change the matrix to 'tested' based on code presence or a syntax check. Current measured results live in VALIDATION.md and validation/.
+## テストの分類
+
+| フィクスチャ | 中身 | 必要なもの |
+|---|---|---|
+| CoreTests / PsdTests / ChangeTrackingTests | 純 C# の core、PSD コーデック、変更追跡、タイル単位合成の参照一致 | なし |
+| IntegrationTests | 描画→Undo→保存→再読込→PSD、保存の中断・改変検出。一時フォルダの実ファイルシステムに書く | なし |
+| GeometryTests | 表面の当たり判定・継ぎ目・可視性・予算、プレビューの所有権 | なし（プレビュー 3 件は PreviewRenderUtility を使う） |
+| CompositorTests | 表示の差分更新（CPU 経路を強制） | なし |
+| GpuTests（Category `GPU`） | GPU ブラシ・GPU 合成と CPU 正本の画素比較（許容 1 段） | グラフィックスデバイスと正常なシェーダーコンパイラ |
+| WindowTests（Category `Window`） | 描画ウィンドウに SendEvent で実際の入力を流す | batchmode でないエディタ |
+
+GPU テストは、組み込みのインクルードすら解決できないエディタではスキップし、パッケージのシェーダーだけが壊れている場合は失敗にする。
+
+## 実機での手動確認（自動化していないもの）
+
+自動テストで代わりにできないもの。結果は VALIDATION.md に、環境（Editor の patch、OS、CPU/GPU/ドライバ、グラフィックス API、色空間、パイプライン、ペンタブのドライバと機種）と一緒に残す。
+
+- 実 GPU（Windows の D3D11 など）で `YozoLab → YoluPainter GPU Brush Parity Probe` を実行し、誤差を記録。リニア色空間のプロジェクトでも
+- 実ペンタブ: 筆圧 0〜1 の効き、真の筆圧 0、ペンとマウスの重複、低速・高速、HiDPI、複数モニタ、ボタン、ドライバ更新の前後
+- 実際のドメインリロード・Play モード切替・ウィンドウを閉じて開き直す、を描画中に行う
+- Save As → Open、復旧 checkpoint、保存中に外部アプリで改変、ディスク満杯・権限エラー・Windows のファイルロック
+- 4K の疎・密・多チャンネル・多レイヤーで RSS・VRAM・保存時ピーク・入力から表示までの遅延（中央値・p95・p99）
+- Photoshop / CSP での開き直し・保存・再取り込み（外部デコーダだけでは代わりにならない）
+
+コードがある・構文が通る・テストを書いた、だけで「確認済み」にしない。

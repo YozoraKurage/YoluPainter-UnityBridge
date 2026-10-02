@@ -1,7 +1,46 @@
 # YoluPainter — リポジトリルール
 
-Unity 2022.3 向けのパッケージ `net.yozolab.yolupainter`（名前空間 `Yozolab.YoluPainter`）。
-開発環境（DevContainer・テストデーモン・リリース用 Actions）は DaerD から切り出したもの。
+Unity 2022.3 向けのエディタ専用パッケージ `net.yozolab.yolupainter`（名前空間 `Yozolab.YoluPainter`）。
+専用 EditorWindow の中で 2D/3D のテクスチャ制作を行う拡張を、仕様書 v0.1 の全スコープへ
+段階的に実装する。現在は G0/G1 のプロトタイプで、完成品として扱わない。
+コードは Codex から引き継いだもの（原文は `Documentation~/handoff/`）。開発環境
+（DevContainer・テストデーモン・リリース用 Actions）は DaerD から切り出したもの。
+
+## 読む順序
+
+1. `Documentation~/STATUS.md`（仕様全範囲に対する現状）と `Documentation~/VALIDATION.md`（実行した検証）
+2. `Documentation~/spec/Unity_Texture_Paint_Spec_v0_1.md`（最終要望の仕様書。docx 版も同梱）
+3. `Documentation~/ARCHITECTURE.md`、`PSD_COMPATIBILITY.md`、`TESTING.md`
+4. `Runtime/Core/README.md`、`Editor/Preview/README.md`
+
+## 不変条件
+
+- 元シーン、元マテリアル、元テクスチャ、Prefab、import 設定を描画中に変更しない
+- ユーザーの Prefab/GameObject を Instantiate してからスクリプトを止める方式に戻さない。
+  現行は Mesh だけの snapshot と Renderer/Transform の再構成
+- フォーカス喪失、Escape、リロード、Play 移行、例外でストロークを取り残さない
+- ネイティブの straight RGBA8 ソースと透明画素の RGB を守る。GPU プレビューや低精度
+  キャッシュを保存の唯一の正本にしない
+- GPU の src/dst 同一 read-write は禁止。メモリ予算・readback の寿命・世代を守る
+- PSD の未対応情報を黙って捨てない。PreserveOnly に落ちた原本への編集書き戻しは禁止
+- シェーダーが似ているだけで lilToon へ自動適用しない。実際の version / variant /
+  property / 設定を確認する
+- 名前だけで外部 PSD レイヤーを対応付けたり、パス/生成レイヤーと外部画素を勝手に
+  上書きし合ったりしない
+- `current` を最後に置換する保存契約を守る。旧世代を無断で削除しない
+- 新機能には回帰テスト・保存復元・Undo/取消・型/予算拒否のテストも付ける
+- Unity の EditMode、llvmpipe での GPU、実 GPU、Photoshop/CSP 実機の結果を混同しない
+- Generator/Filter/Anchor/Mask、編集可能 3D パス、マルチチャンネル、PSD 調整は中核要望。
+  未実装だからといってスコープから削除しない
+
+IMGUI/UI Toolkit の構成や GPU/CPU 分担の改善などは、仕様の意味を保ち、計測・テストの
+根拠を残して進めてよい。新しいライセンス、資格情報、外部公開、元アセットへ適用する
+操作はユーザーの意思を確認する。
+
+## 節目ごとに STATUS と VALIDATION を更新する
+
+作業の区切りで `Documentation~/STATUS.md` と `Documentation~/VALIDATION.md` を更新する。
+コードがあるだけで tested にしない。失敗した検証も消さず、原因と修正後の再試験を残す。
 
 ## ユーザー固有データを git 履歴に絶対に残さない
 
@@ -52,23 +91,30 @@ git の履歴に入れてはならない**。コミットされるファイル�
 ## テストの走らせ方
 
 この DevContainer には Unity 2022.3.22f1 が入っている（ベースは game-ci の
-Editor イメージ）。EditMode テストはコンテナ内で完結する。
+Editor イメージ）。テストはすべて EditMode テスト（`Tests/Editor`）で、コンテナ内で完結する。
+詳細は `Documentation~/TESTING.md`。
 
 ```
+.devcontainer/unity/test-daemon.sh start --batch-gl   # 常駐 Unity（シェーダー・GPU が正しく動く）
+.devcontainer/unity/test-daemon.sh restart            # GUI モードに切り替え（EditorWindow の操作用）
 .devcontainer/unity/run-tests.sh                      # 全件
 .devcontainer/unity/run-tests.sh --filter 'Yozolab.YoluPainter.Tests.FooTests'   # 絞り込み(完全名)
-.devcontainer/unity/test-daemon.sh start              # 常駐 Unity(推奨・下記)
 ```
 
-- テストプロジェクトは `/home/node/unity-testproject`（名前付きボリューム）。
-  このリポジトリを `file:/workspace` のローカルパッケージとして参照している
-  ので、リポジトリ側には Library/ も Assets/ も生成されない。テストアセンブリは
-  manifest の `testables` で拾われる。
-- **テストデーモン**: `test-daemon.sh start` で常駐 Unity を立てると、以後の
-  run-tests.sh は自動でそちらへ依頼される（死んでいればコールドへ自動フォールバック）。
-  フィルタ実行が数秒になる（コールドは毎回数分の起動費を払う）。パッケージを
-  出し入れしたら `restart`。常駐中は同じプロジェクトを別の Unity で開けない。
-  常駐は GUI モード（xvfb 上）が既定、`start --batch` で batchmode。
+- **この devcontainer の GUI モードではシェーダーが壊れる**（組み込みの `HLSLSupport.cginc`
+  すら開けず、全シェーダーがマゼンタ。2026-10-02 実測、原因は Unity 内部で未特定）。
+  `--batch-gl`（`-batchmode` だけ付けて `-nographics` は付けず xvfb 上の OpenGL）では
+  正常。なので **GPU・シェーダーの検証は batch-gl、ウィンドウ操作の検証は GUI** で回す。
+  GpuTests は壊れたエディタでスキップ、WindowTests は batchmode でスキップされる。
+  区切りでは両モードで全件を回し、合わせて全テストが実行されたことを確かめる。
+- `--batch-gl` の起動時に、GUI モードで壊れた状態で取り込まれたシェーダーを自動で
+  取り込み直す。それでもシェーダーがおかしいときはテストプロジェクトの `Library` を
+  消して作り直す（`rm -rf /home/node/unity-testproject/Library`、数分かかる）。
+- グラフィックスは llvmpipe（ソフトウェアレンダラ）。GPU の結果は「llvmpipe で一致」で
+  あって、実 GPU / D3D11 での確認ではない。
+- **テストデーモン**: 常駐 Unity を立てると run-tests.sh は自動でそちらへ依頼される
+  （死んでいればコールドへ自動フォールバック。コールドは `-nographics` なので GPU と
+  ウィンドウのテストはスキップ）。パッケージを出し入れしたら `restart`。
 - **常駐 Unity を直接使う** — `.devcontainer/unity/unity-do.sh`:
   ```
   unity-do.sh run -e 'return AssetDatabase.FindAssets("t:Material").Length;'
@@ -76,16 +122,17 @@ Editor イメージ）。EditMode テストはコンテナ内で完結する。
   unity-do.sh console error warning  # コンソール（--limit N / --full / --clear）
   unity-do.sh compile [--force]      # 再コンパイルしてエラー本文（--force は全アセンブリ）
   ```
-  `run` はドメインリロード無しで 2〜3 秒。パッケージの `internal` 型は見えない
-  （リフレクションで触るか、パッケージ側で `InternalsVisibleTo("YoluPainterSnippet")`）。
+  `run` はドメインリロード無しで 2〜3 秒。スニペットのアセンブリ名は `YoluPainterSnippet`
+  で、Editor アセンブリが `InternalsVisibleTo` しているので internal 型も触れる。
   任意の `static string Method(string)` は `exec-method.sh` で叩ける。
-- 出力はサマリと失敗内容だけ。Unity の生ログは
-  `$YOLUPAINTER_UNITY_PROJECT/Logs/tests.log`。ログを丸ごと読み込まないこと（数万行ある）。
+- 出力はサマリと失敗内容だけ。Unity の生ログは `$YOLUPAINTER_UNITY_PROJECT/Logs/`
+  （デーモンは `daemon.log`）。ログを丸ごと読み込まないこと（数万行ある）。
 - 終了コード: 0 = 全件成功 / 1 = テスト失敗 / 3 = コンパイルエラー等で結果が
   出なかった / 4 = ライセンス未設定 / 5 = デーモンが止まっていた
   （`TestDaemon/trace.log` と `Logs/daemon.prev.log` を見てから `test-daemon.sh restart`）。
-- VPM パッケージ（VRChat SDK など）は `.devcontainer/unity/add-vpm.sh` で
-  テストプロジェクトへ出し入れできる（`--list` で確認）。
+- テストプロジェクトは `/home/node/unity-testproject`（名前付きボリューム）。
+  このリポジトリを `file:/workspace` のローカルパッケージとして参照している。
+  lilToon 2.3.4 を VPM で入れてある（`add-vpm.sh --list`）。パッケージは依存していない。
 - 初回だけ Unity Personal ライセンスの有効化が要る:
   `.devcontainer/unity/activate-license.sh --status` で状態を確認できる。
   未設定なら手順が表示されるが、ブラウザ操作を含むのでユーザーに依頼すること。

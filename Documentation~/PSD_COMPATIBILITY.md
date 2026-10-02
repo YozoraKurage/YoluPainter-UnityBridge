@@ -4,7 +4,7 @@ Status: implemented **limited RGB8 raster codec and G0 format spike**, 2026-10-0
 
 ## What actually works
 
-`Dot.TexturePainter.Core.Psd` is pure C#6 with no Unity or third-party runtime dependency. It writes an actual PSD version 1 containing normal raster layers, straight RGBA8 channel data, bounds, opacity, visibility, Unicode `luni` names, positive unique `lyid` IDs, and a current merged composite. Physical PSD layer records are bottom-to-top; the public DTO is top-to-bottom. Layer color samples under zero alpha and outside the canvas are retained exactly.
+`Yozolab.YoluPainter.Core.Psd` is pure C#6 with no Unity or third-party runtime dependency. It writes an actual PSD version 1 containing normal raster layers, straight RGBA8 channel data, bounds, opacity, visibility, Unicode `luni` names, positive unique `lyid` IDs, and a current merged composite. Physical PSD layer records are bottom-to-top; the public DTO is top-to-bottom. Layer color samples under zero alpha and outside the canvas are retained exactly.
 
 The reader accepts raw and PackBits/RLE layer and merged data. The writer deliberately emits uncompressed raw channels. It is a bounded whole-document prototype, not the future streaming/tile-backed codec required for large production documents.
 
@@ -83,7 +83,9 @@ These are logical allocation budgets, not a hard process RSS ceiling. Caller-own
 
 ## Executed verification
 
-2026-10-02, Linux x64:
+**Unity (2026-10-02, Claude Code):** the same 28 PSD cases (`Tests/Editor/PsdTests.cs`) and the PSD bridge round trip in `IntegrationTests` pass as Unity 2022.3.22f1 EditMode tests. The external-reader checks below were not repeated: their harness depended on .NET and was removed.
+
+**Codex handoff environment (history),** 2026-10-02, Linux x64, no Unity. The files and scripts it names were removed from this repository and remain in git history (commit ca64f42):
 
 1. Actual pure C# codec compiled under .NET SDK 8.0.425 with `LangVersion=6`; no Unity runtime was used
 2. **28/28 PSD NUnit cases passed** under NUnitLite 3.14.0 / .NET 8.0.31. They include an independent fixture encoder, format guards, bounds, RLE, source-copy isolation, layer attributes, Unicode and 500 deterministic mutations. See `validation/psd-spike/psd-nunit.xml`; this is ordinary .NET execution, not Unity EditMode execution
@@ -103,7 +105,7 @@ PYTHONPATH=/tmp/dot_psd_oracle python tools/psd_spike.py \
 
 The Python script installs nothing. Without `--dotnet`, it only tests its independently generated fixtures and explicitly reports C# execution as not run. Without optional readers, those checks report SKIP. `--csharp file.psd ...` checks other actual writer outputs. Optional development-only readers used here were installed outside the package; psd-tools is MIT, Pillow is MIT-CMU. They are not shipped or required by the Unity codec.
 
-NOT RUN: Unity Editor compilation/EditMode execution; Windows/macOS; actual Photoshop or CLIP STUDIO authored round trips; broad legacy/modern PSD corpus; color-profile parity; 16/32-bit rendering; low-memory or 4K performance. These remain release gates, not implied passes.
+NOT RUN: Windows/macOS; actual Photoshop or CLIP STUDIO authored round trips; broad legacy/modern PSD corpus; color-profile parity; 16/32-bit rendering; low-memory or 4K performance. These remain release gates, not implied passes.
 
 ## References and remaining gates
 
