@@ -69,7 +69,7 @@ namespace Yozolab.YoluPainter.Core.Psd
 
         /// <summary>Section divider kind of a layer record (lsct / lsdk type): 0 any other layer, 1 open folder, 2 closed folder,
         /// 3 bounding divider ("&lt;/Layer group&gt;", the bottom of a folder's contents).</summary>
-        private enum RecordKind { Raster, Folder, Divider, Adjustment }
+        private enum RecordKind { Raster, Folder, Divider, Adjustment, Fill }
         private sealed class Record
         {
             internal PsdRasterLayer Layer;
@@ -87,6 +87,8 @@ namespace Yozolab.YoluPainter.Core.Psd
             internal bool UnknownSection;
             /// <summary>The record carries an adjustment block (nvrt / levl / hue2), mapped or not.</summary>
             internal bool AdjustmentSeen;
+            /// <summary>The record carries a solid colour fill block (SoCo), mapped or not.</summary>
+            internal bool FillSeen;
         }
         private sealed class ParseState
         {
@@ -502,9 +504,11 @@ namespace Yozolab.YoluPainter.Core.Psd
             if (layer.Name.Length > state.Limits.MaxNameCodeUnits) throw new PsdFormatException("Layer name limit exceeded.", start);
 
             record.Kind = record.SectionType == 3 ? RecordKind.Divider : record.SectionType == 1 || record.SectionType == 2 ? RecordKind.Folder
-                : record.AdjustmentSeen ? RecordKind.Adjustment : RecordKind.Raster;
+                : record.AdjustmentSeen ? RecordKind.Adjustment : record.FillSeen ? RecordKind.Fill : RecordKind.Raster;
             if (record.AdjustmentSeen && record.Kind != RecordKind.Adjustment)
                 state.Preserve("Adjustment", "A folder or divider record that also carries an adjustment is not represented.", start);
+            if (record.FillSeen && record.Kind != RecordKind.Fill)
+                state.Preserve("FillLayer", "A fill block on a folder, divider or adjustment record is not represented.", start);
             if (record.Kind == RecordKind.Divider)
             {
                 // The divider only marks where a folder's contents begin. Its blend mode, opacity, visibility, clipping
@@ -540,6 +544,16 @@ namespace Yozolab.YoluPainter.Core.Psd
                 else state.Preserve("BlendMode", "Unsupported folder blend mode: " + key, blendOffset, 4);
                 if (record.SectionKey != null && record.BlendKey != record.SectionKey && !(record.SectionKey == "pass" && record.BlendKey == "norm"))
                     state.Preserve("GroupBlend", "Folder record blend '" + record.BlendKey + "' contradicts its section divider blend '" + record.SectionKey + "'.", blendOffset, 4);
+                return record;
+            }
+            if (record.Kind == RecordKind.Fill)
+            {
+                // 塗りつぶしレイヤーの画素は色から作り直すキャッシュ。持っていても使わない（原本のバイト列には残る）
+                layer.PixelsRgba = new byte[0];
+                if (width != 0 || height != 0) state.NotCarried("Fill layer pixel cache (SoCo)", start, 16); // 読むが合成と取り込みでは使わない
+                if ((record.Flags & ~(1 | 2 | 8 | 16)) != 0) state.Preserve("LayerFlags", "Unknown fill layer flags are not editable.", flagsOffset, 1);
+                if (TryGetBlendMode(record.BlendKey, out mode)) layer.BlendMode = mode;
+                else state.Preserve("BlendMode", "Unsupported fill layer blend mode: " + record.BlendKey, blendOffset, 4);
                 return record;
             }
             if (record.Kind == RecordKind.Adjustment)
@@ -743,6 +757,11 @@ namespace Yozolab.YoluPainter.Core.Psd
                     case "brst":
                         if (size != 0) state.Preserve("ChannelRestrictions", "Channel blending restrictions (brst) are not represented.", start, blockLength);
                         break;
+                    case "SoCo":
+                        if (record.FillSeen || record.AdjustmentSeen) { layer.FillColor = null; state.Preserve("FillLayer", "More than one fill or adjustment block on one layer.", start, blockLength); break; }
+                        record.FillSeen = true;
+                        layer.FillColor = ParseSolidColor(body, start, blockLength, state);
+                        break;
                     case "nvrt": case "levl": case "hue2":
                         if (record.AdjustmentSeen) { layer.Adjustment = null; state.Preserve("Adjustment", "More than one adjustment block (" + key + ") on one layer.", start, blockLength); break; }
                         record.AdjustmentSeen = true;
@@ -866,6 +885,44 @@ namespace Yozolab.YoluPainter.Core.Psd
             if (!(ch == 0 && cs == 25 && cl == 0) && !(ch == 0 && cs == 0 && cl == 0)) state.NotCarried("Hue/Saturation colorize values kept while Colorize is off (hue2)", start, length);
             if (!defaultRanges) state.NotCarried("Hue/Saturation colour range sliders (hue2)", start, length);
             return AdjustmentSettings.HueSaturation(hue, saturation / 100.0, lightness / 100.0);
+        }
+
+        /// <summary>Solid colour fill (SoCo): version 16, then a descriptor whose 'Clr ' item is an RGBC object with 'Rd  ', 'Grn ' and
+        /// 'Bl  ' doubles in 0..255. Photoshop often stores 16-bit derived fractions (127.996…); they are rounded to bytes and reported.
+        /// Other colour models (Grsc, CMYC, LbCl, HSBC…) and unknown layouts are preserved.</summary>
+        private static Rgba32? ParseSolidColor(PsdReader body, int start, int length, ParseState state)
+        {
+            if (body.Remaining < 4) throw new PsdFormatException("Solid colour fill (SoCo) is shorter than its version.", start);
+            uint version = body.U32();
+            if (version != 16) { state.Preserve("FillLayer", "Solid colour fill (SoCo) version " + version + " is not represented.", start, length); return null; }
+            var bytes = new byte[body.Remaining]; Buffer.BlockCopy(body.Data, body.Position, bytes, 0, bytes.Length); body.Skip(bytes.Length);
+            Brushes.DescriptorObject descriptor;
+            try { var reader = new Brushes.BigEndianReader(bytes); descriptor = Brushes.ActionDescriptorReader.ReadDescriptor(reader); for (int i = reader.Position; i < bytes.Length; i++) if (bytes[i] != 0) throw new Brushes.BrushImportException("trailing data"); }
+            catch (Brushes.BrushImportException ex) { state.Preserve("FillLayer", "Unreadable solid colour fill descriptor (" + ex.Message + ").", start, length); return null; }
+            catch (IndexOutOfRangeException) { throw new PsdFormatException("Solid colour fill (SoCo) descriptor is truncated.", start); }
+            catch (ArgumentException) { throw new PsdFormatException("Solid colour fill (SoCo) descriptor is truncated.", start); }
+            var color = descriptor.Get<Brushes.DescriptorObject>("Clr ");
+            if (color == null || color.ClassId != "RGBC") { state.Preserve("FillLayer", "Solid colour fill in a colour model other than RGB (" + (color?.ClassId ?? "none") + ") is not represented.", start, length); return null; }
+            double? r = color.Number("Rd  "), g = color.Number("Grn "), b = color.Number("Bl  ");
+            if (r == null || g == null || b == null || descriptor.Items.Count != 1) { state.Preserve("FillLayer", "Unrecognized solid colour fill descriptor.", start, length); return null; }
+            foreach (double v in new[] { r.Value, g.Value, b.Value })
+                if (double.IsNaN(v) || v < -1e-6 || v > 255 + 1e-6) { state.Preserve("FillLayer", "Solid colour fill values outside 0–255.", start, length); return null; }
+            byte R = (byte)Math.Round(r.Value), G = (byte)Math.Round(g.Value), B = (byte)Math.Round(b.Value);
+            if (Math.Abs(r.Value - R) > 1e-6 || Math.Abs(g.Value - G) > 1e-6 || Math.Abs(b.Value - B) > 1e-6) state.NotCarried("Solid colour fill fractions below one 8-bit step (SoCo, rounded)", start, length);
+            return new Rgba32(R, G, B, 255);
+        }
+
+        /// <summary>SoCo as Photoshop writes it: version 16 and a descriptor (empty name, class 'null') with 'Clr ' = RGBC {Rd, Grn, Bl}.</summary>
+        private static byte[] SolidColorBlock(Rgba32 color)
+        {
+            var w = new PsdWriter(256);
+            void Name() { w.U32(1); w.U16(0); } // 空の名前（終端の 1 文字だけ）
+            void Key(string k) { w.U32(0); w.Key(k); }
+            w.U32(16);
+            Name(); Key("null"); w.U32(1);
+            Key("Clr "); w.Key("Objc"); Name(); Key("RGBC"); w.U32(3);
+            foreach (var (k, v) in new[] { ("Rd  ", color.R), ("Grn ", color.G), ("Bl  ", color.B) }) { Key(k); w.Key("doub"); w.Double(v); }
+            var block = new byte[w.Position]; Buffer.BlockCopy(w.Data, 0, block, 0, block.Length); return block;
         }
 
         /// <summary>Why an adjustment cannot be written exactly as nvrt / levl / hue2, or null when it can. Levels need whole
@@ -1027,6 +1084,7 @@ namespace Yozolab.YoluPainter.Core.Psd
             {
                 var layer = topDown[i];
                 if (layer.IsAdjustment) { output.Add(new Emit(layer, RecordKind.Adjustment)); continue; }
+                if (layer.IsFill) { output.Add(new Emit(layer, RecordKind.Fill)); continue; }
                 if (!layer.IsGroup) { output.Add(new Emit(layer, RecordKind.Raster)); continue; }
                 output.Add(new Emit(layer, RecordKind.Divider));
                 Flatten(layer.Children, output);
@@ -1064,7 +1122,7 @@ namespace Yozolab.YoluPainter.Core.Psd
                     // A pass-through folder has "norm" in its record and "pass" in its section divider setting, as Photoshop writes it.
                     w.Key(layer.BlendMode == LayerBlendMode.PassThrough ? "norm" : BlendKey(layer.BlendMode));
                     // Adjustment layers carry Photoshop's "pixel data irrelevant" flag (bit 4, with bit 3 saying it is meaningful).
-                    w.U8(layer.Opacity); w.U8(layer.Clipping ? 1 : 0); w.U8((layer.Visible ? 0 : 2) | (record.Kind == RecordKind.Adjustment ? 8 | 16 : 0));
+                    w.U8(layer.Opacity); w.U8(layer.Clipping ? 1 : 0); w.U8((layer.Visible ? 0 : 2) | (record.Kind == RecordKind.Adjustment || record.Kind == RecordKind.Fill ? 8 | 16 : 0));
                 }
                 w.U8(0);
                 int extraLength = w.Position; w.U32(0);
@@ -1084,6 +1142,11 @@ namespace Yozolab.YoluPainter.Core.Psd
                 {
                     string adjustmentKey; byte[] block = AdjustmentBlock(layer.Adjustment, out adjustmentKey);
                     w.Key("8BIM"); w.Key(adjustmentKey); w.U32(block.Length); w.Bytes(block);
+                }
+                else if (record.Kind == RecordKind.Fill)
+                {
+                    byte[] block = SolidColorBlock(layer.FillColor.Value);
+                    w.Key("8BIM"); w.Key("SoCo"); w.U32(block.Length); w.Bytes(block);
                 }
                 else if (!raster)
                 {
@@ -1156,6 +1219,7 @@ namespace Yozolab.YoluPainter.Core.Psd
                 long id = (divider ? layer.DividerId : layer.Id) != 0 ? 16 : 0;
                 long section = divider ? 16 : raster ? 0 : 24;
                 if (record.Kind == RecordKind.Adjustment) { string adjustmentKey; section = 12 + AdjustmentBlock(layer.Adjustment, out adjustmentKey).Length; }
+                if (record.Kind == RecordKind.Fill) section = 12 + SolidColorBlock(layer.FillColor.Value).Length;
                 long extra = 8 + pascal + 16 + name.Length * 2L + id + section;
                 long layerBytes = raster ? (long)layer.Width * layer.Height * 4 : 0;
                 long recordBytes = 58, channelData = 8 + layerBytes;
@@ -1184,6 +1248,13 @@ namespace Yozolab.YoluPainter.Core.Psd
                 Utf16.GetByteCount(layer.Name); // Reject unpaired surrogate; never silently replace it.
                 CheckMask(layer.Mask, limits);
                 if (layer.IsGroup && layer.IsAdjustment) throw new ArgumentException("A layer cannot be both a group and an adjustment layer.");
+                if (layer.IsFill)
+                {
+                    if (layer.IsGroup || layer.IsAdjustment) throw new ArgumentException("A fill layer cannot also be a group or an adjustment layer.");
+                    if (layer.FillColor.Value.A != 255) throw new ArgumentException("A PSD solid colour fill is opaque; use the layer opacity for transparency.");
+                    if (BlendKey(layer.BlendMode) == null) throw new ArgumentException("Blend mode " + layer.BlendMode + " has no PSD fill layer equivalent.");
+                    continue;
+                }
                 if (layer.IsAdjustment)
                 {
                     string refusal = AdjustmentRefusal(layer.Adjustment);
@@ -1224,7 +1295,7 @@ namespace Yozolab.YoluPainter.Core.Psd
         private static bool UsesCompositingFeatures(List<PsdRasterLayer> layers)
         {
             foreach (var layer in layers)
-                if (layer.IsGroup || layer.IsAdjustment || layer.BlendMode != LayerBlendMode.Normal || layer.Clipping || layer.Mask != null) return true;
+                if (layer.IsGroup || layer.IsAdjustment || layer.IsFill || layer.BlendMode != LayerBlendMode.Normal || layer.Clipping || layer.Mask != null) return true;
             return false;
         }
 
@@ -1308,6 +1379,7 @@ namespace Yozolab.YoluPainter.Core.Psd
         }
         private static Rgba32 PixelAt(PsdRasterLayer layer, int x, int y)
         {
+            if (layer.IsFill) return layer.FillColor.Value;
             long lx = (long)x - layer.Left, ly = (long)y - layer.Top;
             if (lx < 0 || ly < 0 || lx >= layer.Width || ly >= layer.Height) return Rgba32.Transparent;
             int p = (int)(ly * layer.Width + lx) * 4;

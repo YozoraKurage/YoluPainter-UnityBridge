@@ -243,9 +243,9 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void ExportStillRefusesFillLayersAndInexactAdjustmentsInsideGroups()
         {
             var d = new PaintDocument(8, 8, 8); var a = Raster(d, "a", Gradient);
-            var fill = d.AddFillLayer("fill", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(1, 2, 3) } });
+            var fill = d.AddFillLayer("fill", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(1, 2, 3, 128) } });
             Group(d, "g", LayerBlendMode.PassThrough, a, fill);
-            Assert.That(() => PsdBridge.Export(d, PaintChannel.Color), Throws.InvalidOperationException.With.Message.Contains("fill layers"));
+            Assert.That(() => PsdBridge.Export(d, PaintChannel.Color), Throws.InvalidOperationException.With.Message.Contains("opaque"), "a translucent fill value has no SoCo form");
             var e = new PaintDocument(8, 8, 8); var b = Raster(e, "b", Gradient); var adj = e.AddAdjustmentLayer("levels", AdjustmentSettings.Levels(0.3));
             Group(e, "g", LayerBlendMode.Normal, b, adj);
             Assert.That(() => PsdBridge.Export(e, PaintChannel.Color), Throws.InvalidOperationException.With.Message.Contains("between them"), "Levels between PSD's whole steps are not rounded silently");

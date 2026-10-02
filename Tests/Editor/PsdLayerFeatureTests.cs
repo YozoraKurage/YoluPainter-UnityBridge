@@ -239,8 +239,8 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void ExportRefusesWhatPsdCannotRepresentInsteadOfFlattening()
         {
             var fill = new PaintDocument(8, 8, 8); Raster(fill, "a", Gradient);
-            fill.AddFillLayer("F", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(1, 2, 3) } });
-            Assert.That(() => PsdBridge.Export(fill, PaintChannel.Color), Throws.InvalidOperationException.With.Message.Contains("fill layers"));
+            fill.AddFillLayer("F", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(1, 2, 3, 128) } });
+            Assert.That(() => PsdBridge.Export(fill, PaintChannel.Color), Throws.InvalidOperationException.With.Message.Contains("opaque"), "opaque fills are written as SoCo (PsdFillTests); translucent values are not");
 
             // Invert / Levels / Hue/Saturation are written now (PsdAdjustmentTests); settings between PSD's steps are not.
             var adjustment = new PaintDocument(8, 8, 8); Raster(adjustment, "a", Gradient); adjustment.AddAdjustmentLayer("H", AdjustmentSettings.HueSaturation(10.5));
@@ -457,7 +457,7 @@ namespace Yozolab.YoluPainter.Tests
         [TestCase("feather", "MaskFeather", "feather")]
         [TestCase("lsct", "SectionDivider", "lsct")]
         [TestCase("curv", "TaggedBlock", "Adjustment layer (curv)")]
-        [TestCase("SoCo", "TaggedBlock", "Fill layer (SoCo)")]
+        [TestCase("GdFl", "TaggedBlock", "Fill layer (GdFl)")]
         [TestCase("lfx2", "TaggedBlock", "Layer effects (lfx2)")]
         [TestCase("clbl", "ClippedBlend", "clbl")]
         [TestCase("relative", "MaskPosition", "relative")]
@@ -473,7 +473,7 @@ namespace Yozolab.YoluPainter.Tests
             {
                 case "diss": case "pass": clip.Blend = feature; break;
                 case "iOpa": layers[0].Tags[0] = new KeyValuePair<string, byte[]>("iOpa", ByteSetting(128)); break;
-                case "vmsk": case "lsct": case "curv": case "SoCo": case "lfx2": clip.Tags.Add(new KeyValuePair<string, byte[]>(feature, new byte[8])); break;
+                case "vmsk": case "lsct": case "curv": case "GdFl": case "lfx2": clip.Tags.Add(new KeyValuePair<string, byte[]>(feature, new byte[8])); break;
                 case "feather": clip.MaskData = MaskRecord(0, 1, 2, 3, 0, 16, new byte[] { 2, 0x40, 0x14, 0, 0, 0, 0, 0, 0, 0, 0 }); break; // 羽毛 5.0、2 バイトの詰め物で 28
                 case "clbl": layers[0].Tags[1] = new KeyValuePair<string, byte[]>("clbl", ByteSetting(0)); break;
                 case "hidden-pixels": clip.Flags = 8 | 16; break;

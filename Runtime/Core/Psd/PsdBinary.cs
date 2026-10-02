@@ -50,6 +50,7 @@ namespace Yozolab.YoluPainter.Core.Psd
         internal void U8(int x) { Need(1); Data[Position++] = (byte)x; }
         internal void U16(int x) { U8(x >> 8); U8(x); }
         internal void U32(long x) { U16((int)(x >> 16)); U16((int)x); }
+        internal void Double(double v) { long bits = BitConverter.DoubleToInt64Bits(v); U32((bits >> 32) & 0xffffffffL); U32(bits & 0xffffffffL); }
         internal void Key(string s) { if (s.Length != 4) throw new ArgumentException("Four-byte key required."); foreach (char c in s) U8(c); }
         internal void Bytes(byte[] bytes) { Need(bytes.Length); Buffer.BlockCopy(bytes, 0, Data, Position, bytes.Length); Position += bytes.Length; }
         internal void Zeros(int n) { Need(n); Position += n; }

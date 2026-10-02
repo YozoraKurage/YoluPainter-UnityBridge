@@ -71,6 +71,9 @@ namespace Yozolab.YoluPainter.Core.Psd
         public int DividerId;
         /// <summary>Invert (nvrt), Levels (levl) or Hue/Saturation (hue2) with the native formulas; null for other layers.</summary>
         public AdjustmentSettings Adjustment;
+        /// <summary>Solid colour fill layer (SoCo) colour, opaque; null for other layers. A fill layer has no pixels of its own.</summary>
+        public Rgba32? FillColor;
+        public bool IsFill { get { return FillColor.HasValue; } }
         public bool IsGroup { get { return Children != null; } }
         public bool IsAdjustment { get { return Adjustment != null; } }
     }

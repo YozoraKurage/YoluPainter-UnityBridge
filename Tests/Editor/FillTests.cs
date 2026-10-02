@@ -137,10 +137,13 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(doc.CompositePixel(PaintChannel.Color, 0, 0).A, Is.Zero, "the version 2 mask hides the pixel");
         }
 
-        [Test] public void PsdProjectionRefusesFillLayers()
+        /// <summary>不透明な値の Fill は PSD の単色の塗りつぶし（SoCo）として書く（画素に焼かない。往復は PsdFillTests）。半透明の値は断る。</summary>
+        [Test] public void PsdProjectionWritesOpaqueFillsAndRefusesTranslucentOnes()
         {
-            var doc = new PaintDocument(16, 16, 8); doc.AddFillLayer("F", Values(PaintChannel.Color, Green));
-            Assert.Throws<InvalidOperationException>(() => PsdBridge.Export(doc, PaintChannel.Color));
+            var doc = new PaintDocument(16, 16, 8); doc.AddFillLayer("F", Values(PaintChannel.Color, new Rgba32(0, 200, 0)));
+            Assert.That(PsdBridge.Export(doc, PaintChannel.Color).Layers[0].FillColor, Is.EqualTo(new Rgba32(0, 200, 0)));
+            var glass = new PaintDocument(16, 16, 8); glass.AddFillLayer("F", Values(PaintChannel.Color, new Rgba32(0, 200, 0, 100)));
+            Assert.Throws<InvalidOperationException>(() => PsdBridge.Export(glass, PaintChannel.Color));
         }
     }
 }

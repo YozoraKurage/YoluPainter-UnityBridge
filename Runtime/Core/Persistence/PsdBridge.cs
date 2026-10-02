@@ -4,10 +4,10 @@ using Yozolab.YoluPainter.Core.Psd;
 
 namespace Yozolab.YoluPainter.Core.Persistence
 {
-    /// <summary>Native document ⇔ PSD DTO. Raster layers, groups (nested to the codec's depth budget) and Invert / Levels /
-    /// Hue/Saturation adjustment layers with any of the 26 PSD blend modes (pass-through or isolated for groups), clipping, a
+    /// <summary>Native document ⇔ PSD DTO. Raster layers, groups (nested to the codec's depth budget), solid colour fill layers
+    /// (opaque values, as SoCo) and Invert / Levels / Hue/Saturation adjustment layers with any of the 26 PSD blend modes (pass-through or isolated for groups), clipping, a
     /// raster mask (enabled, disabled, density), visibility and opacity map both ways. Anything without an exact PSD form here
-    /// (fill layers, adjustment settings between PSD's steps, inverted masks, clipped groups) is refused instead of being
+    /// (translucent fill values, adjustment settings between PSD's steps, inverted masks, clipped groups) is refused instead of being
     /// flattened into pixels.</summary>
     public static class PsdBridge
     {
@@ -52,8 +52,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 if (refusal != null) throw new InvalidOperationException("Adjustment layer '" + layer.Name + "': " + refusal + " Native project can still be saved losslessly.");
             }
             if (layer.IsGroup && layer.Clipping) throw new InvalidOperationException("Group '" + layer.Name + "' is clipped. Photoshop's handling of a clipped folder is not verified (psd-tools treats it as unsupported in Photoshop), so it is not exported; turn its clipping off or export from the native project. Native project can still be saved losslessly.");
-            if (layer.Kind == LayerKind.Fill) throw new InvalidOperationException("PSD projection does not write fill layers yet: they are generated from values, and baking them into pixels would lose that. Native project can still be saved losslessly.");
-            if (layer.Kind != LayerKind.Raster && layer.Kind != LayerKind.Group && layer.Kind != LayerKind.Adjustment) throw new InvalidOperationException("PSD projection does not write " + layer.Kind + " layers yet. Native project can still be saved losslessly.");
+            if (layer.Kind == LayerKind.Fill && layer.FillValues.TryGetValue(channel, out var fillValue) && fillValue.A != 255)
+                throw new InvalidOperationException("Fill layer '" + layer.Name + "': a PSD solid colour fill is opaque, and this fill's " + channel + " value has alpha " + fillValue.A + ". Use the layer opacity instead. Native project can still be saved losslessly.");
+            if (layer.Kind != LayerKind.Raster && layer.Kind != LayerKind.Group && layer.Kind != LayerKind.Adjustment && layer.Kind != LayerKind.Fill) throw new InvalidOperationException("PSD projection does not write " + layer.Kind + " layers yet. Native project can still be saved losslessly.");
             if (layer.Mask != null && layer.Mask.Inverted) throw new InvalidOperationException("PSD has no non-destructive mask inversion; turn Inverted off (or invert the mask pixels) before exporting. Native project can still be saved losslessly.");
             byte[] guid = layer.Id.ToByteArray();
             if (layer.Mask != null)
@@ -70,6 +71,14 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 return new PsdRasterLayer { Id = UniqueId(guid, 0, usedIds), Name = layer.Name, Opacity = opacity,
                     Visible = layer.Visible && layer.IsChannelEnabled(channel) && layer.Adjustment.AppliesTo(channel),
                     BlendMode = layer.BlendMode, Clipping = layer.Clipping, Mask = mask, Adjustment = layer.Adjustment, PixelsRgba = new byte[0] };
+            }
+            if (layer.Kind == LayerKind.Fill)
+            {
+                if (PsdCodec.BlendKey(layer.BlendMode) == null) throw new InvalidOperationException("Blend mode " + layer.BlendMode + " has no PSD equivalent for a fill layer. Native project can still be saved losslessly.");
+                // 塗りつぶしは単色の SoCo として書く（画素に焼かない）。このチャンネルに値が無ければ非表示で書く
+                bool covers = layer.FillValues.TryGetValue(channel, out var value) && layer.IsChannelEnabled(channel);
+                return new PsdRasterLayer { Id = UniqueId(guid, 0, usedIds), Name = layer.Name, Opacity = opacity, Visible = layer.Visible && covers,
+                    BlendMode = layer.BlendMode, Clipping = layer.Clipping, Mask = mask, FillColor = covers ? value : new Rgba32(0, 0, 0, 255), PixelsRgba = new byte[0] };
             }
             if (layer.IsGroup)
             {
@@ -158,7 +167,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             {
                 var layer = entry.Key;
                 // Native v1 has no off-canvas tile coordinates; do not crop imported pixels silently.
-                if (!layer.IsGroup && !layer.IsAdjustment && (layer.Left < 0 || layer.Top < 0 || (long)layer.Left+layer.Width > source.Width || (long)layer.Top+layer.Height > source.Height))
+                if (!layer.IsGroup && !layer.IsAdjustment && !layer.IsFill && (layer.Left < 0 || layer.Top < 0 || (long)layer.Left+layer.Width > source.Width || (long)layer.Top+layer.Height > source.Height))
                     throw new InvalidOperationException("PSD contains off-canvas layer pixels. Native import would crop them, so import is blocked.");
                 if (layer.Mask != null && MaskDiffersOffCanvas(layer.Mask, source.Width, source.Height))
                     throw new InvalidOperationException("PSD layer mask '" + layer.Name + "' has samples outside the canvas that differ from its default colour. Native import would crop them, so import is blocked.");
@@ -172,6 +181,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 PaintLayer layer;
                 if (original.IsGroup) layer = doc.AddGroup(original.Name, IdFor(original.Id, original.DividerId, salt));
                 else if (original.IsAdjustment) layer = doc.AddAdjustmentLayer(original.Name, original.Adjustment, null, IdFor(original.Id, 0, salt));
+                else if (original.IsFill) layer = doc.AddFillLayer(original.Name, new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, original.FillColor.Value } }, IdFor(original.Id, 0, salt));
                 else
                 {
                     layer = doc.AddLayer(original.Name, IdFor(original.Id, 0, salt));
