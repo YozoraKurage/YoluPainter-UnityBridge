@@ -287,9 +287,10 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>色の見本。押すと Unity の色選択が開き、決まるたびに changed が呼ばれる。</summary>
-        public static void ColorSwatch(Rect r, Color color, Action<Color> changed, bool showAlpha = true, string tooltip = null, bool enabled = true)
+        /// <param name="hdr">HDR の色（1 を超える値。Unity の色選択を HDR で開く）。</param>
+        public static void ColorSwatch(Rect r, Color color, Action<Color> changed, bool showAlpha = true, string tooltip = null, bool enabled = true, bool hdr = false)
         {
-            if (Clickable(r, out _, out bool hover, enabled)) OpenColorPicker(color, changed, showAlpha);
+            if (Clickable(r, out _, out bool hover, enabled)) OpenColorPicker(color, changed, showAlpha, hdr);
             if (Repainting)
             {
                 // 透明が分かるように市松の上に描く
@@ -304,7 +305,7 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         static MethodInfo s_pickerShow;
-        static void OpenColorPicker(Color color, Action<Color> changed, bool showAlpha)
+        static void OpenColorPicker(Color color, Action<Color> changed, bool showAlpha, bool hdr = false)
         {
             // UnityEditor.ColorPicker.Show(Action<Color>, Color, bool showAlpha, bool hdr)（internal）
             if (s_pickerShow == null)
@@ -313,7 +314,7 @@ namespace Yozolab.YoluPainter.Editor
                 s_pickerShow = type?.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
                     .FirstOrDefault(m => m.Name == "Show" && m.GetParameters().Select(p => p.ParameterType).SequenceEqual(new[] { typeof(Action<Color>), typeof(Color), typeof(bool), typeof(bool) }));
             }
-            if (s_pickerShow != null) s_pickerShow.Invoke(null, new object[] { (Action<Color>)(c => { changed(c); }), color, showAlpha, false });
+            if (s_pickerShow != null) s_pickerShow.Invoke(null, new object[] { (Action<Color>)(c => { changed(c); }), color, showAlpha, hdr });
             else Debug.LogWarning("YoluPainter: Unity's color picker could not be opened.");
         }
 

@@ -41,7 +41,11 @@ namespace Yozolab.YoluPainter.Editor
     [Serializable]
     internal sealed class DockLayout
     {
-        public static readonly string[] KnownPanels = { "color", "textureSet", "layers", "properties" };
+        /// <summary>知っているパネル（既定の配置の上からの順。マテリアルは畳んでプロパティの上に置く: 列の一番下を畳んだ見出しにすると、
+        /// 列の下の端へ落としたパネルがその見出しのタブになってしまう）。</summary>
+        public static readonly string[] KnownPanels = { "color", "textureSet", "layers", "material", "properties" };
+        /// <summary>初めて置くときに畳んでおくパネル（既定の配置でも、前の配置の記録に無くて右の列の最後に足すときも）。</summary>
+        static readonly string[] FoldedAtFirst = { "material" };
         public const float MinWidth = 220, MaxWidth = 560;
         /// <summary>保存の形式。0 は最初の形式（列ごとのパネルの ID の並びと、パネルごとの畳み・高さの比。<see cref="DockLayoutV0"/>）。</summary>
         public const int CurrentVersion = 1;
@@ -49,10 +53,11 @@ namespace Yozolab.YoluPainter.Editor
         public List<DockGroup> groups = new List<DockGroup>();
         public float leftWidth = 260, rightWidth = 300;
 
-        /// <summary>既定の配置: 右の列にカラー・テクスチャセット・レイヤー・プロパティを 1 つずつ。</summary>
-        public static DockLayout Default() => new DockLayout { groups = KnownPanels.Select(id => Single(id, DockPlace.Right)).ToList() };
+        /// <summary>既定の配置: 右の列にカラー・テクスチャセット・レイヤー・マテリアル（畳んだ）・プロパティを 1 つずつ。</summary>
+        public static DockLayout Default() => new DockLayout { groups = KnownPanels.Select(Added).ToList() };
 
         static DockGroup Single(string id, DockPlace place) => new DockGroup { id = NewId(), panels = new List<string> { id }, active = id, place = place, home = place == DockPlace.Left ? DockPlace.Left : DockPlace.Right };
+        static DockGroup Added(string id) { var g = Single(id, DockPlace.Right); g.collapsed = FoldedAtFirst.Contains(id); return g; }
         static string NewId() => Guid.NewGuid().ToString("N").Substring(0, 12);
 
         /// <summary>EditorPrefs の JSON を読む。最初の形式（版の番号が無い）は読み替える。読めない JSON は ArgumentException。</summary>
@@ -70,11 +75,11 @@ namespace Yozolab.YoluPainter.Editor
         {
             var layout = new DockLayout { groups = new List<DockGroup>(), leftWidth = old.leftWidth, rightWidth = old.rightWidth };
             bool weightsFit = old.weightIds != null && old.weights != null && old.weightIds.Count == old.weights.Count;
-            void Add(List<string> ids, DockPlace place)
+            void Add(List<string> ids, DockPlace place, bool missing = false)
             {
                 foreach (var id in ids ?? new List<string>())
                 {
-                    var g = Single(id, place); g.collapsed = old.collapsed != null && old.collapsed.Contains(id);
+                    var g = Single(id, place); g.collapsed = old.collapsed != null && old.collapsed.Contains(id) || missing && FoldedAtFirst.Contains(id);
                     int i = weightsFit ? old.weightIds.IndexOf(id) : -1; if (i >= 0) g.weight = old.weights[i];
                     layout.groups.Add(g);
                 }
@@ -82,7 +87,7 @@ namespace Yozolab.YoluPainter.Editor
             Add(old.left, DockPlace.Left); Add(old.right, DockPlace.Right);
             // 列に無かったパネルも、畳み・高さの比を持ったまま右の列の最後へ（前の版の直し方と同じ）
             var placed = new HashSet<string>(layout.groups.SelectMany(g => g.panels));
-            Add(KnownPanels.Where(id => !placed.Contains(id)).ToList(), DockPlace.Right);
+            Add(KnownPanels.Where(id => !placed.Contains(id)).ToList(), DockPlace.Right, true);
             return layout.Normalized();
         }
 
@@ -104,7 +109,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (string.IsNullOrEmpty(g.id) || !seenIds.Add(g.id)) { g.id = NewId(); seenIds.Add(g.id); }
             }
             groups.RemoveAll(g => g.panels.Count == 0);
-            foreach (var id in KnownPanels) if (!seenPanels.Contains(id)) groups.Add(Single(id, DockPlace.Right));
+            foreach (var id in KnownPanels) if (!seenPanels.Contains(id)) groups.Add(Added(id));
             leftWidth = Mathf.Clamp(float.IsNaN(leftWidth) ? 260 : leftWidth, MinWidth, MaxWidth);
             rightWidth = Mathf.Clamp(float.IsNaN(rightWidth) ? 300 : rightWidth, MinWidth, MaxWidth);
             version = CurrentVersion;

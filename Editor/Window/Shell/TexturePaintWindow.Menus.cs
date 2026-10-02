@@ -142,6 +142,10 @@ namespace Yozolab.YoluPainter.Editor
             Item(m, "Bake Mesh Maps…", () => OpenMeshBakeWindow());
             m.AddSeparator("");
             Item(m, "Light with Normal Output", () => PreviewNormals = !previewNormals, true, previewNormals);
+            m.AddSeparator("");
+            ShadingMenuItems(m);
+            m.AddSeparator("");
+            SceneMenuItems(m);
         }
 
         void ViewMenu(GenericMenu m)

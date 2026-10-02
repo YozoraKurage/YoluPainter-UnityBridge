@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -35,6 +36,10 @@ namespace Yozolab.YoluPainter.Editor.Preview
         readonly List<Material> sourceMaterials = new List<Material>();
         readonly List<Color> sourceColors = new List<Color>();
         readonly List<string> slotNames = new List<string>();
+        // 表示するレンダラーと、そのサブメッシュごとのスロット（描き方を切り替えるときに sharedMaterials を入れ替える）
+        readonly List<(MeshRenderer renderer, int[] slots)> slotRenderers = new List<(MeshRenderer, int[])>();
+        PreviewMaterialView materialView;
+        PreviewShading shading = PreviewShading.Neutral;
         PreviewRenderUtility preview;
         SurfaceGeometry geometry;
         PreviewLoadReport report = new PreviewLoadReport();
@@ -60,6 +65,122 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public IReadOnlyList<string> Diagnostics => report.Diagnostics;
         public SurfaceBrushBudget BrushBudget { get; } = new SurfaceBrushBudget();
         public bool LitPreview { get; set; } = true;
+        /// <summary>擬似的なシーン（光・環境光・背景。null なら既定）。描くたびに中立のマテリアルとプレビューの光に入れる。</summary>
+        public PreviewSceneSettings Scene { get; set; }
+        static readonly PreviewSceneSettings defaultScene = PreviewSceneSettings.Default();
+        public float CameraYaw => yaw;
+        public float CameraPitch => pitch;
+
+        /// <summary>カメラを (yaw, pitch) の向きにして、モデル全体が入るように置き直す（モデルが無ければ何もしない）。</summary>
+        public void ViewFrom(float viewYaw, float viewPitch)
+        {
+            if (!HasModel) return;
+            target = Bounds.center; yaw = viewYaw; pitch = Mathf.Clamp(viewPitch, -89, 89);
+            distance = ModelRadius / Mathf.Sin(15 * Mathf.Deg2Rad) * 1.15f;
+            UpdateCamera(lastRect.width > 0 ? lastRect : new Rect(0, 0, 500, 500));
+        }
+        public void ViewFrom(PreviewCameraView view) { var (y, p) = PreviewSceneSettings.CameraAngles(view); ViewFrom(y, p); }
+
+        /// <summary>シーンの設定を中立のマテリアルとプレビューの光・環境光・背景に入れる（プレビューの中だけ。シーンの RenderSettings には触れない）。</summary>
+        void ApplyScene()
+        {
+            var s = Scene ?? defaultScene;
+            preview.camera.backgroundColor = s.background;
+            var toLight = s.LightDirection;
+            if (preview.lights != null && preview.lights.Length > 0 && preview.lights[0] != null)
+            {
+                var key = preview.lights[0];
+                key.transform.rotation = Quaternion.LookRotation(-toLight);
+                key.intensity = s.intensity; key.color = new Color(s.lightColor.r * .769f, s.lightColor.g * .769f, s.lightColor.b * .769f, 1);
+            }
+            preview.ambientColor = new Color(s.ambient.r * .4f, s.ambient.g * .4f, s.ambient.b * .4f, 0);
+            var direction = new Vector4(toLight.x, toLight.y, toLight.z, 0);
+            var light = new Vector4(.65f * s.intensity * s.lightColor.r, .65f * s.intensity * s.lightColor.g, .65f * s.intensity * s.lightColor.b, 1);
+            var ambient = new Vector4(.7f * s.ambient.r, .7f * s.ambient.g, .7f * s.ambient.b, 1);
+            foreach (var material in materials)
+            {
+                material.SetVector("_PreviewLightDir", direction); material.SetVector("_PreviewLight", light); material.SetVector("_PreviewAmbient", ambient);
+            }
+        }
+
+        // ───────────── 描き方（中立 / マテリアル） ─────────────
+
+        PreviewMaterialView MaterialView => materialView ?? (materialView = CreateMaterialView());
+        PreviewMaterialView CreateMaterialView() { var view = new PreviewMaterialView(SourceMaterial); view.Reset(materials.Count); return view; }
+
+        /// <summary>
+        /// 3D ビューの描き方。Material では、各スロットを元のマテリアルの複製（元のシェーダー・キーワード・値）で描き、塗った中身は
+        /// <see cref="SetMaterialChannels"/> で対応のあるプロパティにだけ入れる。見せられないスロット（元のマテリアルが無い・シェーダーが
+        /// 壊れている・SRP など）は中立のまま（理由は <see cref="MaterialReason"/>）。当たり判定・ブラシは描き方によらず同じスナップショット。
+        /// </summary>
+        public PreviewShading Shading
+        {
+            get => shading;
+            set
+            {
+                ThrowIfDisposed();
+                if (shading == value) return;
+                shading = value;
+                if (shading == PreviewShading.Neutral) MaterialView.Reset(materials.Count); // 複製と詰めたテクスチャを放す
+                ApplyRendererMaterials();
+            }
+        }
+        /// <summary>マテリアルの欄で変えた値（マテリアル表示の複製に重ねる。元のマテリアルには入らない）。</summary>
+        public PreviewMaterialEdits MaterialEdits { get => MaterialView.Edits; set => MaterialView.Edits = value; }
+        /// <summary>スロットの元のマテリアルの対応（元が変わっていれば決め直す）。範囲外は null。</summary>
+        public PreviewMaterialBinding MaterialBinding(int slot) => slot >= 0 && slot < materials.Count ? MaterialView.Binding(slot) : null;
+        /// <summary>マテリアル表示で、そのスロットを中立で見せている理由（マテリアルで見せている・中立の表示なら null）。</summary>
+        public string MaterialReason(int slot) => shading == PreviewShading.Material ? MaterialView.Reason(slot) : null;
+        /// <summary>マテリアル表示でそのスロットを描いている複製（中立なら null）。読むだけにする（欄の変更は <see cref="MaterialEdits"/> へ）。</summary>
+        public Material DisplayMaterial(int slot) => shading == PreviewShading.Material ? MaterialView.Display(slot) : null;
+        /// <summary>そのスロットを今描いているマテリアル（試験用）。</summary>
+        internal Material RenderedMaterial(int slot)
+        {
+            foreach (var (renderer, slots) in slotRenderers)
+            {
+                int sub = Array.IndexOf(slots, slot);
+                if (sub >= 0) { var shared = renderer.sharedMaterials; return sub < shared.Length ? shared[sub] : null; }
+            }
+            return null;
+        }
+        /// <summary>試験用: スロットの、プロパティに入れた詰めたテクスチャ。</summary>
+        internal RenderTexture MaterialPackedTexture(int slot, string property) => MaterialView.PackedTexture(slot, property);
+        /// <summary>シェーダーのコンパイルを待っているか（マテリアル表示ではコンパイルが済むまで描き直す）。</summary>
+        public bool CompilingShaders => shading == PreviewShading.Material && ShaderUtil.anythingCompiling;
+
+        /// <summary>
+        /// マテリアル表示に塗った中身を渡す（slots に無いスロットは元のマテリアルのテクスチャのまま）。中立の表示のあいだは何もしない
+        /// （中立の表示は <see cref="SetPaintTextures"/> と <see cref="SetNormalTextures"/>）。表示だけで、元のマテリアルには触れない。
+        /// </summary>
+        public void SetMaterialChannels(IReadOnlyDictionary<int, PreviewSlotChannels> slots)
+        {
+            ThrowIfDisposed();
+            if (shading != PreviewShading.Material) return;
+            for (int i = 0; i < materials.Count; i++)
+            {
+                PreviewSlotChannels painted = null;
+                if (slots != null) slots.TryGetValue(i, out painted);
+                MaterialView.Bind(i, painted);
+            }
+            ApplyRendererMaterials();
+        }
+
+        /// <summary>レンダラーのマテリアルを今の描き方に合わせる（マテリアル表示で見せられるスロットは複製、それ以外は中立）。</summary>
+        void ApplyRendererMaterials()
+        {
+            foreach (var (renderer, slots) in slotRenderers)
+            {
+                if (renderer == null) continue;
+                var shared = new Material[slots.Length];
+                for (int sub = 0; sub < slots.Length; sub++)
+                {
+                    int slot = slots[sub];
+                    var display = shading == PreviewShading.Material ? MaterialView.Display(slot) : null;
+                    shared[sub] = display != null ? display : materials[slot];
+                }
+                renderer.sharedMaterials = shared;
+            }
+        }
 
         public PreviewLoadReport Load(GameObject source, PreviewLoadOptions options = null)
         {
@@ -127,6 +248,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             catch (Exception exception)
             { incomplete = true; geometry = null; report.Diagnostics.Add("Invalid mesh snapshot: " + exception.Message); }
             report.CanPaint = HasModel && !incomplete;
+            MaterialView.Reset(materials.Count); ApplyRendererMaterials();
             report.Diagnostics.Add("G1 uses UV0, 0–1 UVs, static readable meshes and an opaque neutral shader. UV tiling, alpha cutouts, shader displacement, exact lilToon/SRP appearance and shader-driven vertex motion are not represented. Skinned meshes show their current pose and BlendShapes, baked on the CPU.");
             report.Diagnostics.Add("Overlapping UVs share pixels. Duplicate-position edges may join seams; surface filtering cannot make overlapping UVs independent.");
             if (incomplete) report.Diagnostics.Add("Surface painting is disabled for this incomplete snapshot, so omitted geometry cannot silently allow painting through clothes. Choose a supported static-mesh root.");
@@ -156,7 +278,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 var go = new GameObject("Texture painter seam cube (preview only)") { hideFlags = HideFlags.HideAndDontSave };
                 objects.Add(go); preview.AddSingleGO(go);
                 go.AddComponent<MeshFilter>().sharedMesh = mesh;
-                var renderer = go.AddComponent<MeshRenderer>(); renderer.sharedMaterial = material;
+                var renderer = go.AddComponent<MeshRenderer>(); renderer.sharedMaterial = material; slotRenderers.Add((renderer, new[] { 0 }));
                 renderer.shadowCastingMode = ShadowCastingMode.Off; renderer.receiveShadows = false;
                 renderer.lightProbeUsage = LightProbeUsage.Off; renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
                 var triangles = new List<SurfaceTriangle>(); var attribute = new SurfaceAttributes.Builder();
@@ -172,6 +294,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 report.LoadedRendererCount = 1; report.TriangleCount = geometry.TriangleCount; report.CanPaint = true;
                 report.Diagnostics.Add("Demo: a tool-owned cube with six separate UV islands. Paint across a visible cube edge to check seam propagation, then orbit to check that hidden faces stayed unchanged. No source object or asset is created.");
                 FrameModel();
+                MaterialView.Reset(materials.Count); ApplyRendererMaterials();
             }
             catch (Exception exception)
             {
@@ -297,7 +420,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 var go = new GameObject(renderer.name + " (isolated paint preview)") { hideFlags = HideFlags.HideAndDontSave };
                 objects.Add(go); preview.AddSingleGO(go);
                 go.AddComponent<MeshFilter>().sharedMesh = mesh;
-                var copy = go.AddComponent<MeshRenderer>(); copy.sharedMaterials = clonedMaterials;
+                var copy = go.AddComponent<MeshRenderer>(); copy.sharedMaterials = clonedMaterials; slotRenderers.Add((copy, (int[])entry.Slots.Clone()));
                 copy.shadowCastingMode = ShadowCastingMode.Off; copy.receiveShadows = false;
                 copy.lightProbeUsage = LightProbeUsage.Off; copy.reflectionProbeUsage = ReflectionProbeUsage.Off;
                 entries.Add(entry);
@@ -307,6 +430,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             catch (Exception exception)
             {
                 incomplete = true;
+                slotRenderers.RemoveAll(r => r.renderer == null || r.slots.Any(slot => slot >= firstSlot));
                 DestroyTail(objects, firstObject); DestroyTail(meshes, firstMesh); DestroyTail(materials, firstSlot);
                 sourceTextures.RemoveRange(firstSlot, sourceTextures.Count - firstSlot);
                 sourceMaterials.RemoveRange(firstSlot, sourceMaterials.Count - firstSlot);
@@ -498,6 +622,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (!HasModel || rect.width < 2 || rect.height < 2) return;
             EnsurePreview(); UpdateCamera(rect);
             foreach (var material in materials) material.SetFloat("_PreviewLit", LitPreview ? 1 : 0);
+            ApplyScene();
             Texture texture = null;
             // PreviewRenderUtility.Render in Unity 2022.3 temporarily changes this editor flag
             // without its own finally. Preserve it here even if a render callback throws.
@@ -604,11 +729,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
         {
             ThrowIfDisposed();
             if (!HasModel) return null;
-            EnsurePreview(); var rect = new Rect(0, 0, width, height); UpdateCamera(rect);
-            bool previousPipelineFlag = Unsupported.useScriptableRenderPipeline;
+            EnsurePreview(); var rect = new Rect(0, 0, width, height); UpdateCamera(rect); ApplyScene();
+            bool previousPipelineFlag = Unsupported.useScriptableRenderPipeline, previousAsync = ShaderUtil.allowAsyncCompilation;
+            // 試験の画像は、元のシェーダーのコンパイルを待った絵にする（非同期のあいだは仮のシアンで描かれる）
+            ShaderUtil.allowAsyncCompilation = false;
             preview.BeginStaticPreview(rect);
             try { preview.Render(false, false); return preview.EndStaticPreview(); }
-            finally { Unsupported.useScriptableRenderPipeline = previousPipelineFlag; }
+            finally { Unsupported.useScriptableRenderPipeline = previousPipelineFlag; ShaderUtil.allowAsyncCompilation = previousAsync; }
         }
         public bool HandleNavigation(Rect rect, Event current)
         {
@@ -653,6 +780,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             foreach (var e in entries) e.Skin?.Dispose();
             entries.Clear();
             skeleton?.Dispose(); skeleton = null; humanAvatar = null; humanRoot = null;
+            slotRenderers.Clear(); materialView?.Reset(0);
             DestroyTail(objects, 0); DestroyTail(meshes, 0); DestroyTail(materials, 0);
             sourceTextures.Clear(); sourceColors.Clear(); sourceMaterials.Clear(); slotNames.Clear();
         }
@@ -665,6 +793,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         {
             if (disposed) return;
             ClearModel();
+            materialView?.Dispose(); materialView = null;
             if (preview != null) { preview.Cleanup(); preview = null; }
             disposed = true;
         }

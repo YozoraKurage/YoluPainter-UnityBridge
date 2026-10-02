@@ -40,7 +40,7 @@ namespace Yozolab.YoluPainter.Editor
         internal DockLayout DockLayoutForTests => Layout;
 
         /// <summary>パネルの名前（訳す前）。別のウィンドウは持ち主を失っていてもタブの名前に使う。</summary>
-        static readonly Dictionary<string, string> PanelTitles = new Dictionary<string, string> { { "color", "Color" }, { "textureSet", "Texture Set" }, { "layers", "Layers" }, { "properties", "Properties" } };
+        static readonly Dictionary<string, string> PanelTitles = new Dictionary<string, string> { { "color", "Color" }, { "textureSet", "Texture Set" }, { "layers", "Layers" }, { "properties", "Properties" }, { "material", "Material" } };
         internal static string PanelTitle(string id) => PanelTitles.TryGetValue(id, out var title) ? L.Tr(title) : id;
 
         DockPanel[] Panels => dockPanels ?? (dockPanels = new[]
@@ -49,6 +49,7 @@ namespace Yozolab.YoluPainter.Editor
             new DockPanel { Id = "textureSet", Title = PanelTitles["textureSet"], Icon = "deployed_code", FixedHeight = () => TextureSetHeight, Draw = DrawTextureSetPanel },
             new DockPanel { Id = "layers", Title = PanelTitles["layers"], Icon = "layers", MinHeight = 140, Draw = DrawLayersPanel },
             new DockPanel { Id = "properties", Title = PanelTitles["properties"], Icon = "tune", MinHeight = 80, Draw = DrawPropertiesPanel },
+            new DockPanel { Id = "material", Title = PanelTitles["material"], Icon = "auto_awesome", MinHeight = 160, Draw = DrawMaterialPanel },
         });
         DockPanel Panel(string id) => Panels.First(p => p.Id == id);
 

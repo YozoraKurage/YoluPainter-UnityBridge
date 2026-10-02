@@ -241,7 +241,13 @@ namespace Yozolab.YoluPainter.Editor
             string what = EditingMask ? L.Tr("Layer mask") : channelName;
             if (textureSets.Count > 1) what = currentSet.Name + " · " + what;
             if (canvasRect.width > 0) PaintGui.Text(new Rect(Mathf.Max(x + 8, canvasRect.x + 8), bar.y, 300, bar.height), PaintGui.Fit("2D · " + what + "  " + Mathf.RoundToInt(canvasZoom * 100) + "%", 300, PaintTheme.LabelDim, false), PaintTheme.LabelDim, EditingMask ? PaintTheme.Warning : PaintTheme.TextDim);
-            if (surfaceRect.width > 0) PaintGui.Text(new Rect(surfaceRect.x + 8, bar.y, 300, bar.height), "3D · " + (preview.HasModel ? (model != null ? model.name : L.Tr("Demo cube")) : L.Tr("No model")), PaintTheme.LabelDim);
+            if (surfaceRect.width > 0)
+            {
+                float right = DrawShadingSwitch(bar);
+                string label = "3D · " + (preview.HasModel ? (model != null ? model.name : L.Tr("Demo cube")) : L.Tr("No model"));
+                float width = Mathf.Max(0, Mathf.Min(300, right - surfaceRect.x - 12));
+                PaintGui.Text(new Rect(surfaceRect.x + 8, bar.y, width, bar.height), PaintGui.Fit(label, width, PaintTheme.LabelDim, false), PaintTheme.LabelDim);
+            }
             if (surfaceRect.width > 0 && !preview.HasModel)
                 PaintGui.Text(surfaceRect, L.Tr("Choose a model in Texture Set, or 3D ▸ Demo Cube.\nThe original prefab is never instantiated."), new GUIStyle(PaintTheme.LabelDim) { alignment = TextAnchor.MiddleCenter, wordWrap = true });
         }

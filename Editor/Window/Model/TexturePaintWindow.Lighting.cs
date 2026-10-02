@@ -23,7 +23,9 @@ namespace Yozolab.YoluPainter.Editor
         void UpdatePreviewLighting()
         {
             Texture current = null;
-            if (!previewNormals || !YlpContent.UsedChannels(document).Contains(PaintChannel.Normal)) DisposeLighting();
+            // マテリアル表示が Normal を使うなら、照明を切っていても出力を作る（_BumpMap などに入れる）
+            bool wanted = previewNormals || MaterialMaps(materialSlot, PaintChannel.Normal);
+            if (!wanted || !YlpContent.UsedChannels(document).Contains(PaintChannel.Normal)) DisposeLighting();
             else if (ShowsNormalOutput && normalOutput?.Texture != null) current = normalOutput.Texture; // 表示用の出力をそのまま使う
             else
             {
@@ -37,10 +39,11 @@ namespace Yozolab.YoluPainter.Editor
                 }
                 current = lightingOutput?.Texture;
             }
-            PreviewNormalTexture = current;
+            materialNormal = current;
+            PreviewNormalTexture = previewNormals ? current : null;
             if (preview == null) return;
             var normals = new System.Collections.Generic.Dictionary<int, Texture>();
-            if (current != null) normals[materialSlot] = current;
+            if (previewNormals && current != null) normals[materialSlot] = current;
             if (previewNormals && preview.HasModel)
                 foreach (var set in textureSets)
                     if (set != currentSet && set.MaterialSlot < preview.MaterialSlotCount && !normals.ContainsKey(set.MaterialSlot))

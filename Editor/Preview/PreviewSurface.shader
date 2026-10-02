@@ -4,9 +4,14 @@ Shader "Hidden/YoluPainter/PreviewSurface"
     {
         _MainTex ("Texture", 2D) = "white" {}
         _Color ("Tint", Color) = (1,1,1,1)
-        _PreviewLit ("Neutral lighting", Float) = 1
+        _PreviewLit ("Neutral lighting", Range(0, 1)) = 1
         _NormalMap ("Normal map (tangent space, OpenGL Y+)", 2D) = "bump" {}
-        _UseNormalMap ("Use normal map", Float) = 0
+        [ToggleUI] _UseNormalMap ("Use normal map", Float) = 0
+        // 擬似的なシーンの照明（PreviewSceneSettings）。既定は前の版の固定の値と同じ: 0.35 + 0.65 × saturate(dot(n, L))。
+        // 色も Vector で持つ（Color はリニアのカラースペースで変換されて、前の版の明るさと変わってしまう）
+        _PreviewLightDir ("Direction toward the light (world)", Vector) = (-0.3, 0.65, -0.7, 0)
+        _PreviewLight ("Light (rgb multiplier)", Vector) = (0.65, 0.65, 0.65, 1)
+        _PreviewAmbient ("Ambient (rgb multiplier)", Vector) = (0.35, 0.35, 0.35, 1)
     }
     SubShader
     {
@@ -25,6 +30,7 @@ Shader "Hidden/YoluPainter/PreviewSurface"
             float _PreviewLit;
             sampler2D _NormalMap;
             float _UseNormalMap;
+            float4 _PreviewLightDir, _PreviewLight, _PreviewAmbient;
             struct appdata { float4 vertex : POSITION; float3 normal : NORMAL; float4 tangent : TANGENT; float2 uv : TEXCOORD0; };
             struct v2f { float4 position : SV_POSITION; float2 uv : TEXCOORD0; float3 normal : TEXCOORD1; float3 tangent : TEXCOORD2; float3 bitangent : TEXCOORD3; };
             v2f vert(appdata input)
@@ -49,9 +55,9 @@ Shader "Hidden/YoluPainter/PreviewSurface"
                     float3 t = tex2D(_NormalMap, input.uv).xyz * 2 - 1;
                     n = normalize(input.tangent * t.x + input.bitangent * t.y + n * t.z);
                 }
-                float light = 0.35 + 0.65 * saturate(dot(n, normalize(float3(-0.3, 0.65, -0.7))));
+                float3 light = _PreviewAmbient.rgb + _PreviewLight.rgb * saturate(dot(n, normalize(_PreviewLightDir.xyz)));
                 color.rgb = lerp(background, color.rgb, color.a);
-                return fixed4(color.rgb * lerp(1, light, _PreviewLit), 1);
+                return fixed4(color.rgb * lerp(float3(1, 1, 1), light, _PreviewLit), 1);
             }
             ENDCG
         }

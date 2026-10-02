@@ -77,6 +77,8 @@ namespace Yozolab.YoluPainter.Editor
         {
             minSize = new Vector2(980,640); wantsMouseMove = true; L.LanguageChanged += Repaint; PainterToolIcons.Changed += Repaint;
             compositor = new TileGpuCompositor(); preview = new IsolatedModelPreview();
+            if (materialEdits == null) materialEdits = new PreviewMaterialEdits();
+            materialEdits.Touch(); preview.MaterialEdits = materialEdits; preview.Shading = previewShading; BindPreviewScene();
             if (String.IsNullOrEmpty(recoveryRoot)) recoveryRoot=Path.GetFullPath(Path.Combine("Library","YoluPainter","recovery-"+Guid.NewGuid().ToString("N")));
             try
             {
@@ -155,7 +157,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             FinishStroke(false); preview?.CancelNavigation(); SaveRecovery();
             EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
-            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeThumbnails(); DisposeColorPanel(); DisposeTextureSetTextures(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
+            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeThumbnails(); DisposeColorPanel(); DisposeTextureSetTextures(); DisposeMaterialChannelTextures(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
             if(selectionOverlay!=null){DestroyImmediate(selectionOverlay);selectionOverlay=null;overlayFor=null;}
         }
         void Tick()
@@ -167,6 +169,7 @@ namespace Yozolab.YoluPainter.Editor
             if(stroke==null && SetThumbnailStale && document.Revision!=thumbnailRepaintAsked && EditorApplication.timeSinceStartup-setThumbnailBuilt>SetThumbnailInterval){thumbnailRepaintAsked=document.Revision;Repaint();}
             // 描いていないあいだは GPU の写しを手放す（Update が来ないと合成器は古い写しを捨てられない）
             if(compositor!=null && compositor.ResidentBytes>0 && EditorApplication.timeSinceStartup-lastComposite>GpuCacheIdleSeconds) compositor.ReleaseResidentCaches();
+            WatchSourceMaterials(); ReconcileMaterialEdits();
         }
         long thumbnailRepaintAsked=-1;
         internal const double GpuCacheIdleSeconds=120;
@@ -206,6 +209,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             TryAction(()=> { compositor.Update(document,channel); UpdateNormalOutput(); ShowTextureSets(); });
             TryAction(UpdatePreviewLighting);
+            TryAction(ShowMaterialChannels);
             lastComposite=EditorApplication.timeSinceStartup; CompositeCount++;
             renderedRevision=document.Revision; repaintPixels=false;
         }

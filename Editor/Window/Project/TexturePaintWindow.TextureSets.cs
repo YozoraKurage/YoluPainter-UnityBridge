@@ -46,6 +46,14 @@ namespace Yozolab.YoluPainter.Editor
             // 表示（今のセットでないあいだの 3D ビュー・照明と、パネルのサムネイル）。保存にも履歴にも入らない
             internal Texture2D Display, Lighting, Thumbnail;
             internal string DisplayKey, LightingKey; internal long ThumbnailRevision = long.MinValue; internal PaintDocument ThumbnailFor;
+            /// <summary>マテリアル表示に渡すチャンネルの CPU の合成（<see cref="ChannelTexture"/>）。表示だけ。</summary>
+            internal sealed class ChannelCache { public Texture2D Texture; public PaintDocument Document; public long Revision, Serial; public int Width, Height; }
+            internal readonly Dictionary<PaintChannel, ChannelCache> MaterialChannels = new Dictionary<PaintChannel, ChannelCache>();
+            internal void DisposeMaterialChannels()
+            {
+                foreach (var c in MaterialChannels.Values) if (c.Texture != null) UnityEngine.Object.DestroyImmediate(c.Texture);
+                MaterialChannels.Clear();
+            }
 
             public TextureSet(Guid id, string name, int materialSlot, PaintDocument document)
             {
@@ -58,6 +66,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 foreach (var t in new[] { Display, Lighting, Thumbnail }) if (t != null) UnityEngine.Object.DestroyImmediate(t);
                 Display = Lighting = Thumbnail = null; DisplayKey = LightingKey = null; ThumbnailFor = null; ThumbnailRevision = long.MinValue;
+                DisposeMaterialChannels();
             }
         }
 
@@ -113,6 +122,7 @@ namespace Yozolab.YoluPainter.Editor
             foreach (var set in textureSets) if (!next.Contains(set)) set.DisposeTextures();
             textureSets.Clear(); textureSets.AddRange(next);
             currentSet = null; LoadSet(current);
+            materialEditsNoticePending = true; // マテリアルの欄の未反映の変更（プロジェクトには入らない）が残っていれば、開いた後に知らせる
         }
 
         /// <summary>セットの並びの版を 0 にする（saved: 開いたファイルと同じ / false: 新しいプロジェクト）。</summary>
