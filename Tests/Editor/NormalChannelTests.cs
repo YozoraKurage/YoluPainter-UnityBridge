@@ -232,11 +232,11 @@ namespace Yozolab.YoluPainter.Tests
             var d = new PaintDocument(16, 16, 8, id: Guid.NewGuid()); var layer = d.AddLayer("p");
             layer.GetChannel(PaintChannel.Color).SetPixel(1, 2, new Rgba32(9, 8, 7));
             var plain = DocumentBinary.Write(d);
-            Assert.That(BitConverter.ToInt32(plain, 8), Is.EqualTo(7));
+            Assert.That(BitConverter.ToInt32(plain, 8), Is.EqualTo(DocumentBinary.CurrentVersion));
             var restoredPlain = DocumentBinary.Read(ArchiveTestUtil.AsVersion(plain, "p", 6));
             Assert.That(restoredPlain.NormalSettings, Is.EqualTo(NormalSettings.Default), "version 6 has no Normal settings");
             Assert.That(restoredPlain.Composite(PaintChannel.Color), Is.EqualTo(d.Composite(PaintChannel.Color)));
-            Assert.That(DocumentBinary.Write(restoredPlain), Is.EqualTo(plain), "rewritten as version 7 with the defaults");
+            Assert.That(DocumentBinary.Write(restoredPlain), Is.EqualTo(plain), "rewritten as the current version with the defaults");
             var settings = new NormalSettings(true, 12.5, HeightEdgeMode.Wrap, NormalYDirection.DirectX);
             d.SetNormalSettings(settings);
             var bytes = DocumentBinary.Write(d); var restored = DocumentBinary.Read(bytes);

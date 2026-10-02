@@ -7,7 +7,7 @@ namespace Yozolab.YoluPainter.Core
     /// <summary>Raster mask of one layer, shared by all of its channels. The surface stores the amount to HIDE in each
     /// pixel's alpha (RGB stays zero), so an absent tile reveals everything and an untouched mask costs no memory.
     /// Painting hides, erasing reveals. Enabled, Inverted and Density are non-destructive parameters.</summary>
-    public sealed class RasterMask
+    public sealed partial class RasterMask
     {
         public SparseTileSurface Surface { get; private set; }
         public bool Enabled { get; internal set; }
@@ -32,7 +32,7 @@ namespace Yozolab.YoluPainter.Core
     /// Groups own no pixels: their children (the layers whose ParentId is the group) composite through them.</summary>
     public enum LayerKind { Raster = 0, Fill = 1, Adjustment = 2, Group = 3 }
 
-    public sealed class PaintLayer
+    public sealed partial class PaintLayer
     {
         private readonly PaintDocument document;
         private readonly Dictionary<PaintChannel, Rgba32> fillValues = new Dictionary<PaintChannel, Rgba32>();
@@ -60,6 +60,8 @@ namespace Yozolab.YoluPainter.Core
         public AdjustmentSettings Adjustment { get; internal set; }
         /// <summary>The layer's raster mask, or null when it has none.</summary>
         public RasterMask Mask { get; internal set; }
+        /// <summary>The editable surface path the layer's pixels are drawn from (one channel), or null for ordinary pixels.</summary>
+        public Paths.SurfacePath Path { get; internal set; }
         public IReadOnlyList<PaintChannel> EnabledChannels
         {
             get { var values = new List<PaintChannel>(enabled); values.Sort(); return values.AsReadOnly(); }
@@ -616,6 +618,7 @@ namespace Yozolab.YoluPainter.Core
             EnsureNoStroke(); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
             var layer = GetLayer(layerId);
             if (layer.Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers are generated from their values and cannot be painted. Paint on the layer's mask, or add a paint layer.");
+            RefusePathLayer(layer);
             var surface = layer.GetChannel(channel);
             if (!layer.IsChannelEnabled(channel)) throw new InvalidOperationException("Enable the target channel before painting.");
             activeStroke = new BrushStroke(this, surface, settings.Clone()); return activeStroke;

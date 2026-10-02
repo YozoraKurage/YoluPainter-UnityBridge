@@ -48,7 +48,7 @@ namespace Yozolab.YoluPainter.Editor
         Vector2 previousPointer, layerScroll, brushScroll, canvasPan;
         float canvasZoom = 1, previousPressure = 1;
         /// <summary>キャンバスでの左ボタンの働き。</summary>
-        internal enum PaintTool { Brush, Fill, Gradient, SelectRectangle, SelectEllipse, Lasso, MagicWand, Move }
+        internal enum PaintTool { Brush, Fill, Gradient, SelectRectangle, SelectEllipse, Lasso, MagicWand, Move, Path }
         PaintTool tool;
         int wandTolerance = 32; bool wandContiguous = true, wandSampleAll;
         Color gradientTo = new Color(0, 0, 0, 0); GradientShape gradientShape;
@@ -195,6 +195,7 @@ namespace Yozolab.YoluPainter.Editor
             GUI.Label(new Rect(surfaceRect.x,main.y,surfaceRect.width,20),"3D / isolated static mesh",EditorStyles.boldLabel);
             DrawCanvas();
             if(Event.current.type==EventType.Repaint) preview.Render(surfaceRect);
+            if(Event.current.type==EventType.Repaint) DrawPathMarkers();
             if(!preview.HasModel) GUI.Label(surfaceRect,"Assign a readable static mesh object above\nNo source prefab is instantiated",EditorStyles.centeredGreyMiniLabel);
             HandleCanvasInput(Event.current);
             GUI.Label(new Rect(8,position.height-50,position.width-16,20),$"{document.Width} × {document.Height} | Tiles {document.AllocatedBytes/1048576.0:F2} MiB | History {document.HistoryBytes/1048576.0:F2} MiB | {compositor.Backend}",EditorStyles.miniLabel);
@@ -235,7 +236,7 @@ namespace Yozolab.YoluPainter.Editor
             GUILayout.Label("Tool",EditorStyles.boldLabel);
             using(new EditorGUI.DisabledScope(stroke!=null))
             {
-                var tools=new[]{new GUIContent("Brush"),new GUIContent("Fill","Bucket fill (B)"),new GUIContent("Grad","Gradient"),new GUIContent("Rect","Rectangle selection"),new GUIContent("Ellipse","Ellipse selection"),new GUIContent("Lasso","Lasso selection"),new GUIContent("Wand","Magic wand"),new GUIContent("Move","Move the layer, or the selected pixels (drag, arrow keys). Rotate, scale and flip below.")};
+                var tools=new[]{new GUIContent("Brush"),new GUIContent("Fill","Bucket fill (B)"),new GUIContent("Grad","Gradient"),new GUIContent("Rect","Rectangle selection"),new GUIContent("Ellipse","Ellipse selection"),new GUIContent("Lasso","Lasso selection"),new GUIContent("Wand","Magic wand"),new GUIContent("Move","Move the layer, or the selected pixels (drag, arrow keys). Rotate, scale and flip below."),new GUIContent("Path","Editable stroke on the 3D model: click to add points, drag to move them")};
                 var nextTool=(PaintTool)GUILayout.SelectionGrid((int)tool,tools,4,EditorStyles.miniButton);
                 if(nextTool!=tool)Tool=nextTool;
                 if(tool==PaintTool.Fill||tool==PaintTool.MagicWand)
@@ -250,6 +251,7 @@ namespace Yozolab.YoluPainter.Editor
                     gradientTo=EditorGUILayout.ColorField(new GUIContent("To","The colour at the end (the start is the brush value)"),gradientTo);
                 }
                 if(tool==PaintTool.Move) DrawMoveSettings();
+                if(tool==PaintTool.Path) DrawPathSettings();
                 if(tool==PaintTool.Fill||(tool>=PaintTool.SelectRectangle&&tool<=PaintTool.MagicWand)) DrawSurfacePick();
                 if(tool>=PaintTool.SelectRectangle&&tool<=PaintTool.MagicWand) EditorGUILayout.LabelField("Shift: add · Ctrl: subtract · Shift+Ctrl: intersect",EditorStyles.miniLabel);
                 GUILayout.BeginHorizontal();
@@ -813,6 +815,7 @@ namespace Yozolab.YoluPainter.Editor
                 if(e.type==EventType.MouseDrag && e.button==2){canvasPan+=e.delta;e.Use();Repaint();return;}
             }
             if(stroke==null&&HandleToolInput(e))return;
+            if(stroke==null&&HandlePathTool(e))return;
             if(stroke==null&&HandleSurfaceTool(e))return;
             if(tool!=PaintTool.Brush&&e.type==EventType.MouseDown&&surfaceRect.Contains(e.mousePosition)&&e.button==0&&!e.alt){message=tool+" works on the 2D canvas. Use the brush, a selection tool or the bucket on the 3D view.";e.Use();return;}
             if(e.type==EventType.MouseDown && e.button==0 && !e.alt && (canvasRect.Contains(e.mousePosition)||surfaceRect.Contains(e.mousePosition)))
@@ -924,6 +927,7 @@ namespace Yozolab.YoluPainter.Editor
             else if(e.keyCode==KeyCode.Escape && stroke!=null){FinishStroke(false);e.Use();}
             else if(stroke==null && !toolDragging && tool==PaintTool.Move && GUIUtility.keyboardControl==0 && !(e.control||e.command) && ArrowDelta(e.keyCode)!=Vector2Int.zero)
             {var d=ArrowDelta(e.keyCode)*(e.shift?10:1);TryAction(()=>MoveBy(d.x,d.y));e.Use();Repaint();}
+            else if(stroke==null && tool==PaintTool.Path && GUIUtility.keyboardControl==0 && (e.keyCode==KeyCode.Delete||e.keyCode==KeyCode.Backspace)){TryAction(RemoveLastPathPoint);e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.A){document.SetSelection(SelectionMask.All(document));e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.D){document.ClearSelection();e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.shift && e.keyCode==KeyCode.I){if(document.Selection!=null)document.SetSelection(document.Selection.Invert());e.Use();Repaint();}

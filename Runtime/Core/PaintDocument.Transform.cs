@@ -73,6 +73,7 @@ namespace Yozolab.YoluPainter.Core
                 ? "A group has no pixels to transform. Select a layer inside it."
                 : "Only paint layers have pixels to transform.");
             if (!Enum.IsDefined(typeof(Resampling), resampling)) throw new ArgumentOutOfRangeException(nameof(resampling));
+            RefusePathLayer(layer);
             if (!transform.IsFinite) throw new ArgumentException("The transform must be finite.", nameof(transform));
             if (transform.IsIdentity) return false;
             var inverse = transform.Inverse();

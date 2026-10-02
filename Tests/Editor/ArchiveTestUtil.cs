@@ -12,11 +12,14 @@ namespace Yozolab.YoluPainter.Tests
         /// <summary>Normal の出力設定の位置（magic, 版, 文書 ID, 幅・高さ・タイルの後）。</summary>
         public const int NormalSettingsOffset = 8 + 4 + 16 + 12;
 
-        /// <summary>targetVersion: 6 なら版 7 で足した Normal の出力設定（21 バイト）を抜く。5 なら版 6 で足した親グループ ID（16 バイト）も
+        /// <summary>targetVersion: 7 なら版 8 で各レイヤーの最後に足したパスの有無（1 バイト。1 レイヤーの文書ではファイルの最後）を抜く。6 なら版 7 で足した Normal の出力設定（21 バイト）も抜く。5 なら版 6 で足した親グループ ID（16 バイト）も
         /// 抜く。4 以下ならクリッピングの 1 バイト（版 5）も抜く。版 3 以下で無くなる種類・Fill・調整の並びは呼び出し側が持たない文書で使うこと。</summary>
         public static byte[] AsVersion(byte[] current, string layerName, int targetVersion)
         {
-            Assert.That(BitConverter.ToInt32(current, 8), Is.EqualTo(7), "the helper converts from version 7");
+            Assert.That(BitConverter.ToInt32(current, 8), Is.EqualTo(8), "the helper converts from version 8");
+            Assert.That(current[current.Length - 1], Is.EqualTo(0), "a layer without a path");
+            current = current.Take(current.Length - 1).ToArray();
+            if (targetVersion == 7) { BitConverter.GetBytes(7).CopyTo(current, 8); return current; }
             current = current.Take(NormalSettingsOffset).Concat(current.Skip(NormalSettingsOffset + NormalSettingsBytes)).ToArray();
             if (targetVersion == 6) { BitConverter.GetBytes(6).CopyTo(current, 8); return current; }
             // magic, 版, 文書 ID, 幅・高さ・タイル, レイヤー数, レイヤー ID, 名前, 表示, 不透明度, 合成モード

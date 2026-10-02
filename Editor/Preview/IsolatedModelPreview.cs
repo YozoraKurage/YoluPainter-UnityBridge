@@ -458,6 +458,17 @@ namespace Yozolab.YoluPainter.Editor.Preview
             }
             if (texture != null) GUI.DrawTexture(rect, texture, ScaleMode.StretchToFill, false);
         }
+        /// <summary>モデルの空間の点が 3D ビューのどこに見えるか（GUI 座標）。カメラの後ろなら false。</summary>
+        public bool TryWorldToGui(Rect viewRect, Vector3 world, out Vector2 gui)
+        {
+            gui = default;
+            if (preview == null || viewRect.width <= 0 || viewRect.height <= 0) return false;
+            UpdateCamera(viewRect);
+            var v = preview.camera.WorldToViewportPoint(world);
+            if (v.z <= 0) return false;
+            gui = new Vector2(viewRect.x + v.x * viewRect.width, viewRect.y + (1 - v.y) * viewRect.height);
+            return true;
+        }
         public bool TryPick(Rect viewRect, Vector2 guiPosition, out SurfaceHit hit)
         {
             hit = default;

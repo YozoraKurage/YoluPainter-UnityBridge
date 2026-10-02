@@ -11,10 +11,14 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// clipping flag after the blend mode. Version 6 adds groups: layer kind 3, the PassThrough blend mode, and each layer's
     /// parent group id after the layer kind. Version 7 adds the document's Normal-output settings (algorithm version, Height →
     /// Normal on/off, strength, edges, file Y direction; 21 bytes) after the tile size; older archives read as
-    /// <see cref="NormalSettings.Default"/>. Older archives still load.</summary>
+    /// <see cref="NormalSettings.Default"/>. Version 8 ends each layer with an editable surface path flag and, when set, the path
+    /// (algorithm version, id, channel, model fingerprint, brush, points); the layer's pixels stay stored as before, so a
+    /// document opens without its model. Older archives still load.</summary>
     public static class DocumentBinary
     {
-        const int Version = 7;
+        const int Version = 8;
+        /// <summary>The version <see cref="Write"/> produces.</summary>
+        public const int CurrentVersion = Version;
         const long MaxArchiveBytes = 512L * 1024 * 1024;
         static readonly byte[] Magic = Encoding.ASCII.GetBytes("DOTPAINT");
 
@@ -74,6 +78,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         writer.Write(layer.Mask.Enabled); writer.Write(layer.Mask.Inverted); writer.Write(layer.Mask.Density);
                         WriteTiles(writer, stream, layer.Mask.Surface);
                     }
+                    writer.Write(layer.Path != null);
+                    if (layer.Path != null) WritePath(writer, layer.Path);
                 }
                 writer.Flush(); return stream.ToArray();
             }
@@ -193,6 +199,12 @@ namespace Yozolab.YoluPainter.Core.Persistence
                             doc.SetLayerMaskEnabled(layer.Id, maskEnabled); doc.SetLayerMaskInverted(layer.Id, maskInverted); doc.SetLayerMaskDensity(layer.Id, density);
                             ReadTiles(reader, mask.Surface, width, height, tileSize, maskOnly: true);
                         }
+                        if (version >= 8 && reader.ReadBoolean())
+                        {
+                            var path = ReadPath(reader);
+                            if (layer.Kind != LayerKind.Raster || !layer.IsChannelEnabled(path.Channel)) throw new InvalidDataException("A surface path needs a paint layer with its channel enabled.");
+                            layer.Path = path;
+                        }
                     }
                     if (stream.Position != stream.Length) throw new InvalidDataException("Trailing native data requires a newer reader.");
                     try { doc.ValidateStructure(); }
@@ -201,6 +213,33 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 }
                 catch (EndOfStreamException ex) { throw new InvalidDataException("Native archive is truncated.", ex); }
             }
+        }
+        static void WritePath(BinaryWriter writer, Paths.SurfacePath path)
+        {
+            writer.Write(Paths.SurfacePath.AlgorithmVersion); writer.Write(path.Id.ToByteArray()); writer.Write((int)path.Channel); WriteString(writer, path.ModelFingerprint);
+            var b = path.Brush;
+            foreach (double v in new[] { b.RadiusWorld, b.Hardness, b.Spacing, b.Opacity, b.Flow }) writer.Write(v);
+            writer.Write(b.Color.R); writer.Write(b.Color.G); writer.Write(b.Color.B); writer.Write(b.Color.A);
+            writer.Write(b.Erase); writer.Write(b.PressureSize); writer.Write(b.PressureOpacity); writer.Write(b.PressureFlow);
+            writer.Write(path.Points.Count);
+            foreach (var point in path.Points) { writer.Write(point.Triangle); writer.Write(point.U); writer.Write(point.V); writer.Write(point.Pressure); }
+        }
+        static Paths.SurfacePath ReadPath(BinaryReader reader)
+        {
+            int algorithm = reader.ReadInt32();
+            if (algorithm != Paths.SurfacePath.AlgorithmVersion) throw new InvalidDataException("Surface path algorithm version " + algorithm + " is not supported by this reader; source retained unchanged.");
+            var id = new Guid(ReadExact(reader, 16)); int channel = reader.ReadInt32(); string fingerprint = ReadString(reader);
+            var brush = new Paths.PathBrush { RadiusWorld = reader.ReadDouble(), Hardness = reader.ReadDouble(), Spacing = reader.ReadDouble(), Opacity = reader.ReadDouble(), Flow = reader.ReadDouble(),
+                Color = new Rgba32(reader.ReadByte(), reader.ReadByte(), reader.ReadByte(), reader.ReadByte()), Erase = reader.ReadBoolean(), PressureSize = reader.ReadBoolean(), PressureOpacity = reader.ReadBoolean(), PressureFlow = reader.ReadBoolean() };
+            int count = ReadCount(reader, Paths.SurfacePath.MaxPoints, "path points");
+            var points = new Paths.PathPoint[count];
+            try
+            {
+                for (int i = 0; i < count; i++) points[i] = new Paths.PathPoint(reader.ReadInt32(), reader.ReadDouble(), reader.ReadDouble(), reader.ReadDouble());
+                if (!Enum.IsDefined(typeof(PaintChannel), channel)) throw new ArgumentOutOfRangeException(nameof(channel));
+                return new Paths.SurfacePath(id, (PaintChannel)channel, fingerprint, brush, points);
+            }
+            catch (ArgumentException ex) { throw new InvalidDataException("Invalid surface path.", ex); }
         }
         static void WriteTiles(BinaryWriter writer, Stream stream, SparseTileSurface surface)
         {

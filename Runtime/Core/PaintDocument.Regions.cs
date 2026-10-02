@@ -97,6 +97,7 @@ namespace Yozolab.YoluPainter.Core
             var layer = GetLayer(layerId);
             if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException("Only paint layers have pixels to fill. Use the layer's mask for fill, adjustment and group layers.");
             if (!layer.IsChannelEnabled(channel)) throw new InvalidOperationException("Enable the target channel before filling.");
+            RefusePathLayer(layer);
             return layer.GetChannel(channel);
         }
 
