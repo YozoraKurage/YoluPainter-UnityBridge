@@ -21,6 +21,7 @@ namespace Yozolab.YoluPainter.Core
         private double distanceSinceStamp;
         private double direction; // radians of the current input segment, for FollowDirection
         private readonly Random random;
+        private int tipIndex; // next tip for TipSelection.Sequential
         private long rollbackBytes;
         public Guid TransactionId { get; private set; }
         public bool IsFinished { get { return finished; } }
@@ -102,14 +103,17 @@ namespace Yozolab.YoluPainter.Core
                 if (settings.RoundnessJitter > 0) roundness = Math.Max(0.01, roundness * (1 - settings.RoundnessJitter * random.NextDouble()));
                 double opacityScale = settings.OpacityJitter > 0 ? 1 - settings.OpacityJitter * random.NextDouble() : 1;
                 double flowScale = settings.FlowJitter > 0 ? 1 - settings.FlowJitter * random.NextDouble() : 1;
-                changed |= Dab(cx, cy, radius, angle, roundness, pressure, opacityScale, flowScale);
+                BrushTip tip = settings.Tip;
+                var tips = settings.Tips;
+                if (tips != null && tips.Length > 0)
+                    tip = settings.TipSelection == TipSelection.Sequential ? tips[tipIndex++ % tips.Length] : tips[random.Next(tips.Length)];
+                changed |= Dab(cx, cy, radius, angle, roundness, pressure, opacityScale, flowScale, tip);
             }
             if (changed) document.PixelsChanged();
         }
         /// <summary>One dab. With the round tip, no rotation and roundness 1 this is exactly the original circular dab.</summary>
-        private bool Dab(double x, double y, double radius, double angle, double roundness, double pressure, double opacityScale, double flowScale)
+        private bool Dab(double x, double y, double radius, double angle, double roundness, double pressure, double opacityScale, double flowScale, BrushTip tip)
         {
-            var tip = settings.Tip;
             double extent = tip == null ? radius : radius * 1.4142135623730951; // a square tip's corners reach √2·r when rotated
             int minX = Math.Max(0, (int)Math.Ceiling(x - extent - 0.5));
             int maxX = Math.Min(surface.Width - 1, (int)Math.Floor(x + extent - 0.5));

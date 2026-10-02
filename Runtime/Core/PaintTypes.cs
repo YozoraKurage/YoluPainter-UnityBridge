@@ -50,6 +50,9 @@ namespace Yozolab.YoluPainter.Core
         }
     }
 
+    /// <summary>How a brush with several tips picks one for each dab.</summary>
+    public enum TipSelection { Random = 0, Sequential = 1 }
+
     public sealed class BrushSettings
     {
         public double Radius = 16;
@@ -67,6 +70,9 @@ namespace Yozolab.YoluPainter.Core
         // --- Tip shape. A null Tip is the procedural round tip shaped by Hardness. ---
         /// <summary>Sampled tip image, or null for the round tip. Its larger side spans the brush diameter.</summary>
         public BrushTip Tip;
+        /// <summary>Several tips used in turn (GIMP image hoses, CLIP STUDIO tip arrays). When set it replaces Tip.</summary>
+        public BrushTip[] Tips;
+        public TipSelection TipSelection;
         /// <summary>Tip rotation in degrees (counter-clockwise, canvas Y up).</summary>
         public double Angle;
         /// <summary>Squash of the tip across its rotated vertical axis (1 = no squash).</summary>
@@ -91,7 +97,7 @@ namespace Yozolab.YoluPainter.Core
         {
             return new BrushSettings { Radius = Radius, Hardness = Hardness, Spacing = Spacing, Opacity = Opacity,
                 Flow = Flow, Color = Color, PressureSize = PressureSize, PressureOpacity = PressureOpacity, PressureFlow = PressureFlow, Erase = Erase,
-                Tip = Tip, Angle = Angle, Roundness = Roundness, FollowDirection = FollowDirection,
+                Tip = Tip, Tips = Tips == null ? null : (BrushTip[])Tips.Clone(), TipSelection = TipSelection, Angle = Angle, Roundness = Roundness, FollowDirection = FollowDirection,
                 SizeJitter = SizeJitter, AngleJitter = AngleJitter, RoundnessJitter = RoundnessJitter, OpacityJitter = OpacityJitter, FlowJitter = FlowJitter,
                 Scatter = Scatter, Count = Count, Seed = Seed, Texture = Texture, TextureDepth = TextureDepth, TextureScale = TextureScale };
         }
@@ -112,6 +118,8 @@ namespace Yozolab.YoluPainter.Core
             if (Scatter < 0 || Scatter > 10) throw new ArgumentOutOfRangeException(nameof(Scatter));
             if (Count < 1 || Count > 16) throw new ArgumentOutOfRangeException(nameof(Count));
             if (TextureScale < 0.05 || TextureScale > 64) throw new ArgumentOutOfRangeException(nameof(TextureScale));
+            if (Tips != null && (Tips.Length > 256 || Array.IndexOf(Tips, null) >= 0)) throw new ArgumentException("Tips must hold 1..256 non-null tips.", nameof(Tips));
+            if (!Enum.IsDefined(typeof(TipSelection), TipSelection)) throw new ArgumentOutOfRangeException(nameof(TipSelection));
         }
     }
 
