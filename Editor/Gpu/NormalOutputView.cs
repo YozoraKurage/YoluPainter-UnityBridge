@@ -13,6 +13,7 @@ namespace Yozolab.YoluPainter.Editor
     {
         const string ShaderName = "Hidden/YoluPainter/NormalOutput";
         readonly bool allowGpu;
+        readonly CompositorBackend heightBackend;
         TileGpuCompositor height;
         Material material;
         RenderTexture output;
@@ -28,7 +29,9 @@ namespace Yozolab.YoluPainter.Editor
         public bool UsedGpu { get; private set; }
 
         /// <param name="allowGpu">false なら CPU の経路だけを使う（テスト用）。</param>
-        public NormalOutputView(bool allowGpu = true) { this.allowGpu = allowGpu; }
+        /// <param name="heightBackend">Height の合成器の「表示の合成」（ウィンドウは設定のもの）。CPU でも表示の RenderTexture が
+        /// 使えれば、出力のパスは GPU のまま。</param>
+        public NormalOutputView(bool allowGpu = true, CompositorBackend heightBackend = CompositorBackend.Gpu) { this.allowGpu = allowGpu; this.heightBackend = heightBackend; }
 
         /// <param name="normalComposite">Normal チャンネルのレイヤーの合成（<see cref="TileGpuCompositor.Texture"/>）。</param>
         public void Update(PaintDocument doc, Texture normalComposite)
@@ -36,11 +39,15 @@ namespace Yozolab.YoluPainter.Editor
             if (doc == null) throw new ArgumentNullException(nameof(doc));
             var settings = doc.NormalSettings;
             var shader = allowGpu ? Shader.Find(ShaderName) : null;
-            bool gpu = ShaderHealth.IsUsable(shader) && normalComposite is RenderTexture && normalComposite.width == doc.Width && normalComposite.height == doc.Height;
+            // 入力が RenderTexture でも、CPU で合成した表示（Display compositing = CPU や GPU の合成の代わり）のことがある。GPU の合成が
+            // 使えない環境では出力のパスも使わない（devcontainer の GUI モードでは、組み込みのインクルードが開けず TileComposite が使えない
+            // とき、NormalOutput のコンパイルの失敗を ShaderHealth が見逃して何も描かなかった。2026-10-03 実測）
+            bool gpu = ShaderHealth.IsUsable(shader) && TileGpuCompositor.GpuCompositingAvailable(out _)
+                && normalComposite is RenderTexture && normalComposite.width == doc.Width && normalComposite.height == doc.Height;
             Texture heights = null;
             if (gpu && settings.DeriveFromHeight)
             {
-                if (height == null) height = new TileGpuCompositor(allowGpu) { ResidentBudgetBytes = 0 };
+                if (height == null) { height = allowGpu ? new TileGpuCompositor(heightBackend) : new TileGpuCompositor(false); height.ResidentBudgetBytes = 0; }
                 height.Update(doc, PaintChannel.Height); heights = height.Texture;
                 gpu = heights is RenderTexture;
             }

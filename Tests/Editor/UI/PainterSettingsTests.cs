@@ -145,6 +145,70 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(PainterSettings.BackupsToKeep, Is.EqualTo(0));
         }
 
+        /// <summary>表示の合成と CPU のスレッドの数: 既定は自動、保存して読み直せる、範囲外は保存を断り読み込みで直す。スレッドの数は
+        /// Core（CoreParallelism）に入る。</summary>
+        [Test] public void DisplayCompositingAndCpuThreadsAreSavedCheckedAndAppliedToTheCore()
+        {
+            try
+            {
+                Assert.That(PainterSettings.DisplayCompositing, Is.EqualTo(CompositorBackend.Automatic));
+                Assert.That(PainterSettings.CpuThreads, Is.EqualTo(PainterSettings.Automatic));
+                Assert.That(CoreParallelism.MaxDegreeOfParallelism, Is.Zero, "automatic: one thread per logical processor");
+                var personal = PainterSettings.PersonalSettings; personal.displayCompositing = CompositorBackend.Cpu; personal.cpuThreads = 3;
+                PainterSettings.Save(null, personal);
+                Assert.That(File.ReadAllText(PainterSettings.PersonalPath), Does.Contain("\"displayCompositing\": 2").And.Contain("\"cpuThreads\": 3"));
+                Assert.That(CoreParallelism.MaxDegreeOfParallelism, Is.EqualTo(3), "saving applies the thread limit");
+                PainterSettings.ProjectRoot = project; // 読み直す
+                Assert.That(PainterSettings.DisplayCompositing, Is.EqualTo(CompositorBackend.Cpu)); Assert.That(PainterSettings.CpuThreads, Is.EqualTo(3));
+                Assert.That(CoreParallelism.Degree, Is.EqualTo(3));
+                personal.cpuThreads = 1; PainterSettings.Save(null, personal);
+                Assert.That(CoreParallelism.Degree, Is.EqualTo(1), "1 = no parallel work");
+                foreach (int bad in new[] { 0, -2, PainterSettings.MaxCpuThreads + 1 })
+                {
+                    personal.cpuThreads = bad;
+                    Assert.That(() => PainterSettings.Save(null, personal), Throws.ArgumentException.With.Message.Contains("CPU threads"), bad.ToString());
+                }
+                personal.cpuThreads = 1; personal.displayCompositing = (CompositorBackend)9;
+                Assert.That(() => PainterSettings.Save(null, personal), Throws.ArgumentException.With.Message.Contains("Display compositing"));
+                Assert.That(PainterSettings.DisplayCompositing, Is.EqualTo(CompositorBackend.Cpu), "a refused save changes nothing");
+
+                // 知らない値（新しい版の選択肢・手で書いた値）は読み込みで自動に直し、同じファイルのほかの値は残す
+                File.WriteAllText(PainterSettings.PersonalPath, "{\"schema\":1,\"displayCompositing\":7,\"cpuThreads\":0,\"recoveryIntervalSeconds\":30}");
+                PainterSettings.ProjectRoot = project;
+                Assert.That(PainterSettings.DisplayCompositing, Is.EqualTo(CompositorBackend.Automatic)); Assert.That(PainterSettings.CpuThreads, Is.EqualTo(PainterSettings.Automatic));
+                Assert.That(PainterSettings.RecoveryIntervalSeconds, Is.EqualTo(30));
+                Assert.That(PainterSettings.Warnings.Count, Is.EqualTo(2)); Assert.That(PainterSettings.Warnings, Has.Some.Contains("Display compositing 7")); Assert.That(PainterSettings.Warnings, Has.Some.Contains("CPU threads"));
+                Assert.That(CoreParallelism.MaxDegreeOfParallelism, Is.Zero);
+                // この項目の無い以前のファイルは自動のまま、知らせも無い
+                File.WriteAllText(PainterSettings.PersonalPath, "{\"schema\":1,\"recoveryIntervalSeconds\":20}");
+                PainterSettings.ProjectRoot = project;
+                Assert.That((PainterSettings.DisplayCompositing, PainterSettings.CpuThreads), Is.EqualTo((CompositorBackend.Automatic, PainterSettings.Automatic)));
+                Assert.That(PainterSettings.Warnings, Is.Empty);
+            }
+            finally { PainterSettings.ProjectRoot = project; CoreParallelism.MaxDegreeOfParallelism = 0; }
+        }
+
+        [Test] public void TheSettingsPageListsThreadChoicesUpToThisMachine()
+        {
+            PainterSettings.ProcessorCountOverride = 12;
+            try
+            {
+                Assert.That(PainterSettingsProvider.ThreadChoices(), Is.EqualTo(new[] { PainterSettings.Automatic, 1, 2, 4, 8, 12 }));
+                PainterSettings.ProcessorCountOverride = 1;
+                Assert.That(PainterSettingsProvider.ThreadChoices(), Is.EqualTo(new[] { PainterSettings.Automatic, 1 }));
+            }
+            finally { PainterSettings.ProcessorCountOverride = null; }
+            TileGpuCompositor.SimulatedGpuUnavailable = "no device (test)";
+            try
+            {
+                Assert.That(PainterSettingsProvider.CompositingNote(CompositorBackend.Gpu, "no device (test)"), Does.Contain("the CPU is used"));
+                Assert.That(PainterSettingsProvider.CompositingNote(CompositorBackend.Automatic, "no device (test)"), Does.Contain("the CPU"));
+                Assert.That(PainterSettingsProvider.CompositingNote(CompositorBackend.Cpu, null), Does.Contain("on the CPU"));
+                Assert.That(PainterSettingsProvider.CompositingNote(CompositorBackend.Automatic, null), Does.StartWith("Here: the GPU"));
+            }
+            finally { TileGpuCompositor.SimulatedGpuUnavailable = null; }
+        }
+
         [Test] public void ABrokenFileIsKeptAsideWhenSettingsAreSaved()
         {
             Directory.CreateDirectory(Path.GetDirectoryName(PainterSettings.SharedPath));

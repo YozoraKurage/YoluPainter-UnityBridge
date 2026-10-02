@@ -31,9 +31,9 @@ namespace Yozolab.YoluPainter.Editor
             {
                 if (stroke == null && document.Revision != lightingRevision)
                 {
-                    if (lightingCompositor == null) lightingCompositor = new TileGpuCompositor { ResidentBudgetBytes = 0 };
+                    if (lightingCompositor == null) lightingCompositor = NewDisplayCompositor(0);
                     lightingCompositor.Update(document, PaintChannel.Normal);
-                    if (lightingOutput == null) lightingOutput = new NormalOutputView();
+                    if (lightingOutput == null) lightingOutput = NewNormalOutputView();
                     lightingOutput.Update(document, lightingCompositor.Texture);
                     lightingRevision = document.Revision;
                 }

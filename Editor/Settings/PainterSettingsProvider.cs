@@ -17,14 +17,16 @@ namespace Yozolab.YoluPainter.Editor
         PainterSettings.Shared shared;
         PainterSettings.Personal personal;
         string error, notice;
+        /// <summary>この環境で GPU の合成が使えるか（開いたときに 1 度調べる）。使えなければ理由。</summary>
+        string gpuUnavailable; bool gpuChecked;
 
-        PainterSettingsProvider() : base(Path, SettingsScope.Project, new[] { "YoluPainter", "brush", "brushes", "recovery", "budget", "memory", "texture paint" }) { }
+        PainterSettingsProvider() : base(Path, SettingsScope.Project, new[] { "YoluPainter", "brush", "brushes", "recovery", "budget", "memory", "texture paint", "GPU", "CPU", "compositing", "threads" }) { }
 
         [SettingsProvider] public static SettingsProvider Create() => new PainterSettingsProvider();
 
         public override void OnActivate(string searchContext, UnityEngine.UIElements.VisualElement rootElement) { Reload(); }
 
-        void Reload() { PainterSettings.Reload(); shared = PainterSettings.SharedSettings; personal = PainterSettings.PersonalSettings; }
+        void Reload() { PainterSettings.Reload(); shared = PainterSettings.SharedSettings; personal = PainterSettings.PersonalSettings; gpuChecked = false; }
 
         public override void OnGUI(string searchContext)
         {
@@ -75,6 +77,7 @@ namespace Yozolab.YoluPainter.Editor
                 personal.shortcutGuard = (ShortcutGuardMode)EditorGUILayout.IntPopup(new GUIContent("Unity shortcuts while painting", "While a YoluPainter window has focus. Block all: only YoluPainter's keys work (Unity's and other extensions' shortcuts, such as W switching the Scene tool or Ctrl+P entering Play, do nothing). Block YoluPainter's keys: a key YoluPainter uses does not also reach Unity; other Unity shortcuts work. Off: Unity's default, where letter keys YoluPainter uses (W, E…) also switch the Scene tool. Typing in a YoluPainter text field never triggers shortcuts."),
                     (int)personal.shortcutGuard, new[] { new GUIContent("Block all"), new GUIContent("Block YoluPainter's keys"), new GUIContent("Off (Unity's default)") }, new[] { 0, 1, 2 });
                 if (!ShortcutGuard.Available) EditorGUILayout.HelpBox("This Unity version does not expose the hook the shortcut guard needs; Unity's shortcuts are not blocked.", MessageType.Warning);
+                CompositingFields(personal);
                 personal.recoveryIntervalSeconds = EditorGUILayout.IntSlider(new GUIContent("Recovery checkpoint every (s)", "How often unsaved work is written to Library/YoluPainter for crash recovery. It is also written on focus loss, reload and Play."), personal.recoveryIntervalSeconds, PainterSettings.MinRecoverySeconds, PainterSettings.MaxRecoverySeconds);
                 EditorGUILayout.LabelField("Memory budgets (MiB) — automatic values follow this machine's " + (PainterSettings.SystemMemoryMiB / 1024.0).ToString("0.#") + " GB of memory", EditorStyles.miniBoldLabel);
                 personal.undoBudgetMiB = BudgetField(new GUIContent("Undo history", "Oldest undo steps are dropped beyond this (the minimum steps below are always kept). 0 keeps only those."), personal.undoBudgetMiB, PainterSettings.Budget.Undo);
@@ -100,6 +103,52 @@ namespace Yozolab.YoluPainter.Editor
             bool nextAuto = GUILayout.Toggle(auto, new GUIContent("Auto", "Follow this machine's memory (" + automatic + " MiB now)"), EditorStyles.miniButton, GUILayout.Width(44));
             EditorGUILayout.EndHorizontal();
             return nextAuto == auto ? value : nextAuto ? PainterSettings.Automatic : automatic;
+        }
+
+        static readonly GUIContent[] CompositingNames = { new GUIContent("Automatic"), new GUIContent("GPU"), new GUIContent("CPU") };
+        static readonly int[] CompositingValues = { (int)CompositorBackend.Automatic, (int)CompositorBackend.Gpu, (int)CompositorBackend.Cpu };
+
+        /// <summary>「表示の合成」と CPU のスレッドの数の欄。値は呼び出し側の変更の確かめ（保存）に入る。</summary>
+        void CompositingFields(PainterSettings.Personal p)
+        {
+            if (!gpuChecked) { gpuUnavailable = TileGpuCompositor.GpuCompositingAvailable(out string reason) ? null : reason; gpuChecked = true; }
+            p.displayCompositing = (CompositorBackend)EditorGUILayout.IntPopup(new GUIContent("Display compositing",
+                "Where the layers are composited for the 2D view and the 3D preview. Automatic: on the GPU when it can be used (as before). " +
+                "GPU: on the GPU; when it cannot be used, on the CPU, and the status bar says so. CPU: on the CPU with the threads below, sending only the " +
+                "changed tiles to the display. A brush stroke is about as fast either way, but changing a layer's opacity, blend mode or visibility " +
+                "composites the whole canvas again on the CPU (the GPU keeps the layers below). Saving, exporting and recovery always composite on the CPU, whatever is chosen. Open windows switch after the current stroke."),
+                (int)p.displayCompositing, CompositingNames, CompositingValues);
+            EditorGUILayout.LabelField(" ", CompositingNote(p.displayCompositing, gpuUnavailable), EditorStyles.wordWrappedMiniLabel);
+            p.cpuThreads = ThreadsPopup(p.cpuThreads);
+        }
+        internal static string CompositingNote(CompositorBackend choice, string gpuUnavailable)
+        {
+            string device = SystemInfo.graphicsDeviceName + " / " + SystemInfo.graphicsDeviceType;
+            switch (choice)
+            {
+                case CompositorBackend.Cpu: return "Composited on the CPU; changed tiles are sent to the display texture.";
+                case CompositorBackend.Gpu: return gpuUnavailable == null ? "Composited on the GPU (" + device + ")." : "The GPU cannot composite here (" + gpuUnavailable + "), so the CPU is used.";
+                default:
+                    if (gpuUnavailable != null) return "Here: the CPU, because the GPU cannot composite (" + gpuUnavailable + ").";
+                    var automatic = TileGpuCompositor.ResolveAutomatic(out string why);
+                    return automatic == CompositorBackend.Gpu ? "Here: the GPU (" + device + ")." : "Here: the CPU (" + why + ").";
+            }
+        }
+
+        internal static int[] ThreadChoices()
+        {
+            var values = new System.Collections.Generic.List<int> { PainterSettings.Automatic, 1 };
+            for (int n = 2; n < PainterSettings.ProcessorCount; n *= 2) values.Add(n);
+            if (PainterSettings.ProcessorCount > 1) values.Add(PainterSettings.ProcessorCount);
+            return values.ToArray();
+        }
+        static int ThreadsPopup(int value)
+        {
+            var choices = ThreadChoices();
+            var values = choices.Contains(value) ? choices : choices.Concat(new[] { value }).ToArray();
+            var names = values.Select(v => new GUIContent(v == PainterSettings.Automatic ? "Automatic (" + PainterSettings.ProcessorCount + ", one per logical processor)" : v == 1 ? "1 (no parallel work)" : v.ToString())).ToArray();
+            return EditorGUILayout.IntPopup(new GUIContent("CPU threads", "The most threads YoluPainter's CPU work uses at once: compositing on the CPU, brushes, fills, gradients, transforms, filters, the magic wand and selection edits. " +
+                "Any value gives the same pixels; fewer threads are slower on large canvases but leave cores to other programs. 1 runs everything on Unity's main thread. Mesh baking has its own limit."), value, names, values);
         }
 
         static readonly int[] BackupChoices = { -1, 0, 1, 3, 5, 10, 20 };

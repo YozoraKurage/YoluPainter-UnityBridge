@@ -49,6 +49,12 @@ namespace Yozolab.YoluPainter.Editor
             public int backupsToKeep = -1;
             /// <summary>YoluPainter の窓にフォーカスがあるとき、Unity と他の拡張のショートカットを止めるか（ShortcutGuard）。</summary>
             public ShortcutGuardMode shortcutGuard = ShortcutGuardMode.BlockAll;
+            /// <summary>表示の合成（2D の表示と 3D のプレビュー）をどこで行うか。保存・書き出しの合成はこれに依らず CPU の正本。
+            /// この項目の無い以前のファイルは自動（今までどおり、GPU が使えれば GPU）。</summary>
+            public CompositorBackend displayCompositing = CompositorBackend.Automatic;
+            /// <summary>CPU の処理（合成・ブラシ・塗りつぶし・変形・フィルター・選択範囲など。Core の CoreParallelism）に使うスレッドの上限。
+            /// -1 は自動（論理プロセッサの数）、1 は並列にしない。</summary>
+            public int cpuThreads = Automatic;
         }
 
         public static readonly int[] Resolutions = { 256, 512, 1024, 2048, 4096 };
@@ -60,6 +66,8 @@ namespace Yozolab.YoluPainter.Editor
         public const int Automatic = -1;
         internal enum Budget { Undo, Source, Stroke, GpuCache }
         public const int MaxGpuCacheMiB = 16384;
+        /// <summary>CPU のスレッドの上限に入れられる最大の数（論理プロセッサの数より多くてもよい。多すぎると遅くなるだけ）。</summary>
+        public const int MaxCpuThreads = 1024;
         /// <summary>この GPU のメモリ（MiB）。テストは差し替える。</summary>
         internal static int? GraphicsMemoryMiBOverride;
         public static int GraphicsMemoryMiB => GraphicsMemoryMiBOverride ?? Math.Max(256, SystemInfo.graphicsMemorySize);
@@ -133,9 +141,25 @@ namespace Yozolab.YoluPainter.Editor
         public static string BrushImportFolder { get { Load(); return personal.brushImportFolder; } }
         public static int BackupsToKeep { get { Load(); return personal.backupsToKeep; } }
         public static ShortcutGuardMode ShortcutGuard { get { Load(); return personal.shortcutGuard; } }
+        public static CompositorBackend DisplayCompositing { get { Load(); return personal.displayCompositing; } }
+        /// <summary>CPU のスレッドの上限の設定（-1 = 自動）。</summary>
+        public static int CpuThreads { get { Load(); return personal.cpuThreads; } }
+        /// <summary>このマシンの論理プロセッサの数（自動のときのスレッドの数）。テストは差し替える。</summary>
+        internal static int? ProcessorCountOverride;
+        public static int ProcessorCount => ProcessorCountOverride ?? Math.Max(1, Environment.ProcessorCount);
         public const int MaxBackups = 1000;
 
-        public static void Reload() { shared = null; personal = null; Changed?.Invoke(); }
+        public static void Reload() { shared = null; personal = null; ApplyCoreSettings(); Changed?.Invoke(); }
+
+        /// <summary>Core に入れる設定（CPU のスレッドの上限）を入れ直す。読み込み・保存・プロジェクトの差し替えのたびに呼ばれ、
+        /// Unity を起動したときとスクリプトを読み直したときにも呼ぶ。設定の読めないときは自動（Core の既定）。</summary>
+        [UnityEditor.InitializeOnLoadMethod]
+        internal static void ApplyCoreSettings()
+        {
+            int threads;
+            try { threads = CpuThreads; } catch (Exception) { threads = Automatic; }
+            Yozolab.YoluPainter.Core.CoreParallelism.MaxDegreeOfParallelism = threads == Automatic ? 0 : threads;
+        }
 
         static void Load()
         {
@@ -202,6 +226,12 @@ namespace Yozolab.YoluPainter.Editor
                 problems.Add("Unity shortcuts while YoluPainter has focus " + (int)p.shortcutGuard + " is not a known choice.");
                 if (fix) p.shortcutGuard = defaultsPersonal.shortcutGuard;
             }
+            if (!Enum.IsDefined(typeof(CompositorBackend), p.displayCompositing))
+            {
+                problems.Add("Display compositing " + (int)p.displayCompositing + " is not a known choice.");
+                if (fix) p.displayCompositing = defaultsPersonal.displayCompositing;
+            }
+            if (p.cpuThreads != Automatic) Range(ref p.cpuThreads, 1, MaxCpuThreads, Automatic, "CPU threads (-1 = automatic)");
             if (p.brushImportFolder == null && fix) p.brushImportFolder = "";
             if (s.projectBrushFolder == null && fix) s.projectBrushFolder = "";
             if (p.brushFolder == null && fix) p.brushFolder = "";

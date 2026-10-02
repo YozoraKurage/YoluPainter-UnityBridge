@@ -260,7 +260,7 @@ namespace Yozolab.YoluPainter.Editor
             PaintGui.Fill(r, PaintTheme.MenuBg);
             PaintGui.HLine(r.x, r.xMax, r.y, PaintTheme.Border);
             bool gpu = compositor.Backend != null && compositor.Backend.Contains("GPU tiled");
-            string right = document.Width + " × " + document.Height + "   " + L.Tr("Layers") + " " + (document.AllocatedBytes / 1048576.0).ToString("F1") + " MiB   " + L.Tr("History") + " " + (document.HistoryBytes / 1048576.0).ToString("F1") + " MiB   " + L.Tr(gpu ? "GPU compositing" : "CPU compositing");
+            string right = document.Width + " × " + document.Height + "   " + L.Tr("Layers") + " " + (document.AllocatedBytes / 1048576.0).ToString("F1") + " MiB   " + L.Tr("History") + " " + (document.HistoryBytes / 1048576.0).ToString("F1") + " MiB   " + L.Tr(gpu ? "GPU compositing" : compositor.FellBackToCpu ? "CPU compositing (GPU unavailable)" : "CPU compositing");
             float rw = Mathf.Min(r.width * .5f, PaintTheme.LabelSmall.CalcSize(new GUIContent(right)).x + 16);
             var color = externalConflict ? PaintTheme.Warning : PaintTheme.TextDim;
             if (externalConflict) PaintGui.Icon(new Rect(r.x + 4, r.y, 18, r.height), "warning", PaintTheme.Warning, 15);

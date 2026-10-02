@@ -8,6 +8,18 @@ using UnityEngine.Rendering;
 
 namespace Yozolab.YoluPainter.Editor
 {
+    /// <summary>表示の合成（2D の表示と 3D のプレビューに出す合成）をどこで行うか。個人の設定「Display compositing」。
+    /// 保存・書き出し・復旧に入る合成はこれに依らず、いつも CPU の正本（YlpContent / PaintDocument.Composite）。</summary>
+    internal enum CompositorBackend
+    {
+        /// <summary>GPU で合成できれば GPU（<see cref="TileGpuCompositor.ResolveAutomatic"/>）。</summary>
+        Automatic = 0,
+        /// <summary>GPU で合成する。使えなければ CPU に落ちて <see cref="TileGpuCompositor.FellBackToCpu"/> を立てる。</summary>
+        Gpu = 1,
+        /// <summary>CPU（Core の CpuCompositor）で合成し、変わったタイルだけを表示のテクスチャへ送る。</summary>
+        Cpu = 2,
+    }
+
     /// <summary>Bounded layer residency on the GPU. Recomposites only what the document reports as changed
     /// (PaintDocument.TryGetChangedTiles), in work blocks of several document tiles, and keeps a bounded, LRU-evicted set of
     /// GPU copies (uploaded layer/mask blocks and the composite below the first changed layer) so that dragging a layer's
@@ -29,6 +41,11 @@ namespace Yozolab.YoluPainter.Editor
     /// 1 つ深い段へ写して中身を重ね、不透明度×マスクでフェードする（不透明度 1 でマスクが無ければ同じ段でそのまま重ねる）。
     /// <see cref="MaxNestedLevels"/> 段と <see cref="NestedLevelBudgetBytes"/> を超える文書では、深いグループが触れるタイルだけ CPU の正本の
     /// 式で合成して上書きする（Backend に書く）。</para>
+    /// <para>CPU の経路（<see cref="CompositorBackend.Cpu"/> を選んだとき、GPU が使えないとき）は Core の CpuCompositor で合成する。変更記録の
+    /// タイルを長方形にまとめて（<see cref="CoverTiles"/>）1 つの長方形を 1 回の CompositeRegion で合成し、ほとんど全部なら全面を 1 回の
+    /// Composite で合成する。結果は表示の RenderTexture へ、変わったタイルだけ（ブロックが丸ごと変わっていればブロックで）小さな
+    /// Texture2D に載せて CopyTexture（無ければ描き込み）で写す。グラフィックスデバイスや RenderTexture が使えなければ、CPU 側の 1 枚の
+    /// Texture2D に全面を載せ直す（<see cref="CompositePath.CpuFrame"/>）。どの経路でも表示の画素は CPU の正本とバイト単位で同じ。</para>
     /// </remarks>
     internal sealed class TileGpuCompositor : IDisposable
     {
@@ -52,19 +69,50 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>層の入力: テクスチャか、塗りつぶしの一定の色。</summary>
         struct Source { public Texture Texture; public bool Constant; public Rgba32 Color; }
 
+        /// <summary>合成と表示の経路。</summary>
+        internal enum CompositePath
+        {
+            /// <summary>GPU で合成する（ブロック・写し）。</summary>
+            Gpu,
+            /// <summary>CPU で合成し、変わったタイルだけを表示の RenderTexture へ写す（CopyTexture か、描き込み）。</summary>
+            CpuTiles,
+            /// <summary>CPU で合成し、CPU 側の Texture2D へ全面を載せ直す（グラフィックスデバイス・RenderTexture・写す手段のどれかが無いとき）。</summary>
+            CpuFrame,
+        }
+
         Material material;
         Texture2D cpuFallback, tileUpload;
         readonly Texture2D[] transientLayer = new Texture2D[2], transientMask = new Texture2D[2];
         int transientLayerNext, transientMaskNext;
+        /// <summary>CPU の経路で表示へ送るときの載せ台（タイル 1 枚分とブロック 1 つ分。2 枚ずつ交互に使う）。</summary>
+        readonly Texture2D[] tileStage = new Texture2D[2], blockStage = new Texture2D[2];
+        int tileStageNext, blockStageNext;
         RenderTexture composite, cpuTile;
         readonly List<Level> levels = new List<Level>();
         readonly Dictionary<long, BlockState> blocks = new Dictionary<long, BlockState>();
         readonly Dictionary<(long, long), Resident> residents = new Dictionary<(long, long), Resident>();
+        /// <summary><see cref="CompositePath.CpuFrame"/> の全面の画素（<see cref="CompositePath.CpuTiles"/> は全面を持たない）。</summary>
         byte[] cpuPixels;
+        /// <summary>CPU の経路の表示に、前回までの合成が全部入っているか（false なら次は全面）。</summary>
+        bool cpuValid;
+        /// <summary>載せ台から表示の RenderTexture へ CopyTexture で写せるか（false なら TileComposite の写しのパスで描き込む）。</summary>
+        bool copyStageToDisplay;
         readonly HashSet<TileCoord> previous = new HashSet<TileCoord>();
         public Texture Texture => composite != null ? (Texture)composite : cpuFallback;
         public string Backend { get; private set; } = "Not initialized";
         string gpuBackend;
+        /// <summary>今の合成と表示の経路（最初の <see cref="Update"/> で決まる）。</summary>
+        internal CompositePath Path { get; private set; } = CompositePath.CpuFrame;
+        /// <summary>GPU で合成するつもり（自動か GPU）だったのに使えず、CPU で合成している。理由は <see cref="Backend"/>。</summary>
+        public bool FellBackToCpu { get; private set; }
+        /// <summary>作ったときの「表示の合成」の選択。</summary>
+        internal CompositorBackend Preference => preference;
+        /// <summary>直近の Update が表示のテクスチャへ送ったタイルの数（CPU の経路。<see cref="CompositePath.CpuFrame"/> は全面のタイルの数）。</summary>
+        internal int LastSentTileCount { get; private set; }
+        /// <summary>直近の Update が呼んだ CPU の合成（CompositeRegion / Composite）の回数。</summary>
+        internal int LastCpuCompositeCalls { get; private set; }
+        /// <summary>直近の Update が CPU の経路で全面を合成し直したか。</summary>
+        internal bool LastCpuFullFrame { get; private set; }
         /// <summary>Tiles whose composite the last Update refreshed (the change journal's tiles), for diagnostics and tests.</summary>
         public int LastUpdatedTileCount { get; private set; }
         /// <summary>The last Update composited this many tiles on the CPU on the GPU path (groups nested deeper than the
@@ -101,11 +149,21 @@ namespace Yozolab.YoluPainter.Editor
         PaintChannel lastChannel;
         long lastSerial = -1;
         readonly bool allowGpu, allowCopyTexture;
+        readonly CompositorBackend preference;
         bool useCopyTexture;
 
-        /// <param name="allowGpu">false forces the CPU path (used by tests that must run without a graphics device).</param>
+        /// <param name="allowGpu">true: GPU compositing where usable (whatever the settings say; GPU tests use this). false forces CPU
+        /// compositing into a CPU-side Texture2D without touching the graphics device (tests that must run without one).</param>
         /// <param name="allowCopyTexture">false forces the draw-copy path even where Graphics.CopyTexture is supported (tests).</param>
-        public TileGpuCompositor(bool allowGpu = true, bool allowCopyTexture = true) { this.allowGpu = allowGpu; this.allowCopyTexture = allowCopyTexture; }
+        public TileGpuCompositor(bool allowGpu = true, bool allowCopyTexture = true)
+        { this.allowGpu = allowGpu; this.allowCopyTexture = allowCopyTexture; preference = allowGpu ? CompositorBackend.Gpu : CompositorBackend.Cpu; }
+        /// <summary>「表示の合成」の選択に従う合成器（ウィンドウが設定から作る）。CPU を選んでも、表示のテクスチャは使えれば GPU の
+        /// RenderTexture（変わったタイルだけ送る）。</summary>
+        public TileGpuCompositor(CompositorBackend backend, bool allowCopyTexture = true)
+        {
+            if (!Enum.IsDefined(typeof(CompositorBackend), backend)) throw new ArgumentOutOfRangeException(nameof(backend));
+            allowGpu = true; this.allowCopyTexture = allowCopyTexture; preference = backend;
+        }
 
         public void Update(PaintDocument doc, PaintChannel channel)
         {
@@ -113,9 +171,11 @@ namespace Yozolab.YoluPainter.Editor
             try { UpdateTiles(doc,channel); }
             catch (Exception ex)
             {
-                Dispose(); width=doc.Width;height=doc.Height;tileSize=doc.TileSize;
+                bool wasGpu = Path == CompositePath.Gpu;
+                Dispose(); SetSize(doc);
                 cpuFallback=new Texture2D(width,height,TextureFormat.RGBA32,false,true){hideFlags=HideFlags.HideAndDontSave,filterMode=FilterMode.Bilinear};
-                Backend="CPU composite fallback after GPU failure: "+ex.Message;
+                Path = CompositePath.CpuFrame; FellBackToCpu |= wasGpu;
+                Backend=(wasGpu ? "CPU composite fallback after GPU failure: " : "CPU composite fallback after a display failure: ")+ex.Message+"; the whole frame is uploaded to the display texture";
                 UpdateTiles(doc,channel);
             }
         }
@@ -133,14 +193,21 @@ namespace Yozolab.YoluPainter.Editor
         {
             var dirty = new HashSet<TileCoord>();
             bool incremental = ReferenceEquals(doc, lastDocument) && channel == lastChannel && doc.TryGetChangedTiles(channel, lastSerial, dirty);
-            var occupied = new HashSet<TileCoord>();
-            foreach (var layer in doc.Layers)
-                foreach (var coord in layer.EnumerateContentTiles(channel)) occupied.Add(coord);
+            // 中身のあるタイル（変更記録が使えないとき、前回あって今は無いタイルも消すため）。CPU の経路はそのとき全面を合成し直すので、
+            // 差分のときは数えない（4096²・10 層で 1 回 0.9 ms）
+            HashSet<TileCoord> occupied = null;
+            if (Path == CompositePath.Gpu || !incremental)
+            {
+                occupied = new HashSet<TileCoord>();
+                foreach (var layer in doc.Layers)
+                    foreach (var coord in layer.EnumerateContentTiles(channel)) occupied.Add(coord);
+            }
             if (!incremental) { dirty.Clear(); dirty.UnionWith(previous); dirty.UnionWith(occupied); }
             LastUpdatedTileCount = dirty.Count; LastCpuTileCount = 0;
             LastBlockCount = LastSkippedBlockCount = LastBelowReuseCount = LastResidentHitCount = LastUploadCount = 0;
+            LastSentTileCount = LastCpuCompositeCalls = 0; LastCpuFullFrame = false;
 
-            if (material == null || composite == null) UpdateCpu(doc, channel, dirty, incremental);
+            if (Path != CompositePath.Gpu) UpdateCpu(doc, channel, dirty, incremental);
             else
             {
                 updateIndex++;
@@ -169,21 +236,145 @@ namespace Yozolab.YoluPainter.Editor
                 TrimIdle();
             }
 
-            previous.Clear(); previous.UnionWith(occupied);
+            if (occupied != null) { previous.Clear(); previous.UnionWith(occupied); }
             lastDocument = doc; lastChannel = channel; lastSerial = doc.ChangeSerial;
         }
+        // ───────────── CPU の経路 ─────────────
+
+        /// <summary>CPU の正本の式で、変わったタイルを合成して表示へ送る。変更記録が使えない（別の文書・チャンネル、構造の変更の一部）か、
+        /// 変わったタイルをまとめた長方形の手間が全面と変わらなければ、全面を 1 回の Composite で合成する。</summary>
         void UpdateCpu(PaintDocument doc, PaintChannel channel, HashSet<TileCoord> dirty, bool incremental)
         {
-            if (!incremental || cpuPixels == null) cpuPixels = doc.Composite(channel);
-            else
-                foreach (var coord in dirty)
-                {
-                    int x = coord.X * tileSize, y = coord.Y * tileSize, w = Math.Min(tileSize, width - x), h = Math.Min(tileSize, height - y);
-                    var region = CpuCompositor.CompositeRegion(doc, channel, x, y, w, h);
-                    for (int row = 0; row < h; row++) Buffer.BlockCopy(region, row * w * 4, cpuPixels, ((y + row) * width + x) * 4, w * 4);
-                }
-            if (dirty.Count > 0 || !incremental) { cpuFallback.LoadRawTextureData(cpuPixels); cpuFallback.Apply(false, false); }
+            bool full = !incremental || !cpuValid;
+            List<TileRect> rects = null;
+            if (!full)
+            {
+                rects = CoverTiles(dirty, TilesX, TilesY);
+                if (rects.Count == 0) return;
+                long work = 0; foreach (var r in rects) work += r.Count;
+                // 全面は全部のタイル + 1 回、長方形は覆うタイル + 回数ぶん。全面のほうが安いか同じなら全面
+                if ((long)TilesX * TilesY <= work + (long)CallCostInTiles * (rects.Count - 1)) full = true;
+            }
+            if (full)
+            {
+                var pixels = doc.Composite(channel);
+                LastCpuCompositeCalls = 1; LastCpuFullFrame = true;
+                if (Path == CompositePath.CpuTiles) SendRegion(pixels, 0, 0, width, new TileRect(0, 0, TilesX, TilesY), null);
+                else { cpuPixels = pixels; UploadFrame(); }
+                cpuValid = true;
+                return;
+            }
+            foreach (var r in rects)
+            {
+                int x = r.X0 * tileSize, y = r.Y0 * tileSize, w = Math.Min(r.X1 * tileSize, width) - x, h = Math.Min(r.Y1 * tileSize, height) - y;
+                var region = CpuCompositor.CompositeRegion(doc, channel, x, y, w, h);
+                LastCpuCompositeCalls++;
+                if (Path == CompositePath.CpuTiles) SendRegion(region, x, y, w, r, dirty);
+                else for (int row = 0; row < h; row++) Buffer.BlockCopy(region, row * w * 4, cpuPixels, ((y + row) * width + x) * 4, w * 4);
+            }
+            if (Path == CompositePath.CpuFrame) UploadFrame();
         }
+        void UploadFrame()
+        {
+            cpuFallback.LoadRawTextureData(cpuPixels); cpuFallback.Apply(false, false);
+            LastSentTileCount = TilesX * TilesY;
+        }
+
+        /// <summary>タイルの長方形 [X0, X1) × [Y0, Y1)（タイルの番号）。</summary>
+        internal readonly struct TileRect
+        {
+            public readonly int X0, Y0, X1, Y1;
+            public TileRect(int x0, int y0, int x1, int y1) { X0 = x0; Y0 = y0; X1 = x1; Y1 = y1; }
+            public int Count => (X1 - X0) * (Y1 - Y0);
+            public override string ToString() => "[" + X0 + "," + X1 + ")x[" + Y0 + "," + Y1 + ")";
+        }
+        /// <summary>CompositeRegion を 1 回呼ぶ手間を、タイル何枚の合成と見るか。4096²・タイル 128・32 スレッドの実測で、タイルごとに
+        /// 呼ぶと全面を 1 回で呼ぶより 1 層で 1 回 0.12 ms（タイル 2.6 枚分）、10 層で 0.9 ms（1.6 枚分）多くかかった。</summary>
+        internal const int CallCostInTiles = 2;
+
+        /// <summary>tiles（tilesX × tilesY の外は除く）を覆う長方形の並び。行ごとの連続を、すぐ下の行の同じ幅の連続とつないで、tiles だけを
+        /// 覆う長方形にする。外接長方形 1 つのほうが（余分なタイルの合成と、減る呼び出しの手間で）安ければ外接長方形にする。</summary>
+        internal static List<TileRect> CoverTiles(IEnumerable<TileCoord> tiles, int tilesX, int tilesY)
+        {
+            var rows = new SortedDictionary<int, List<int>>();
+            int count = 0, minX = int.MaxValue, minY = int.MaxValue, maxX = -1, maxY = -1;
+            foreach (var t in tiles)
+            {
+                if (t.X < 0 || t.Y < 0 || t.X >= tilesX || t.Y >= tilesY) continue;
+                if (!rows.TryGetValue(t.Y, out var xs)) rows.Add(t.Y, xs = new List<int>());
+                xs.Add(t.X); count++;
+                minX = Math.Min(minX, t.X); maxX = Math.Max(maxX, t.X); minY = Math.Min(minY, t.Y); maxY = Math.Max(maxY, t.Y);
+            }
+            var result = new List<TileRect>();
+            if (count == 0) return result;
+            var open = new Dictionary<(int, int), int>(); // 前の行まで伸びている長方形: (x0, x1) → result の添え字
+            int previousRow = int.MinValue; count = 0;
+            foreach (var pair in rows)
+            {
+                int y = pair.Key; var xs = pair.Value; xs.Sort();
+                var next = new Dictionary<(int, int), int>();
+                for (int i = 0; i < xs.Count;)
+                {
+                    int x0 = xs[i], x1 = x0 + 1; i++;
+                    for (; i < xs.Count && xs[i] <= x1; i++) if (xs[i] == x1) x1++; // 同じ番号が重なっていても 1 枚
+                    count += x1 - x0;
+                    if (y == previousRow + 1 && open.TryGetValue((x0, x1), out int index))
+                    { var r = result[index]; result[index] = new TileRect(r.X0, r.Y0, r.X1, y + 1); next[(x0, x1)] = index; }
+                    else { next[(x0, x1)] = result.Count; result.Add(new TileRect(x0, y, x1, y + 1)); }
+                }
+                open = next; previousRow = y;
+            }
+            long box = (long)(maxX - minX + 1) * (maxY - minY + 1);
+            if (result.Count > 1 && box - count <= (long)CallCostInTiles * (result.Count - 1))
+                return new List<TileRect> { new TileRect(minX, minY, maxX + 1, maxY + 1) };
+            return result;
+        }
+
+        /// <summary>pixels（文書の (px, py) から幅 pw の画素）のうち、長方形 r の中の変わったタイル（dirty が null なら全部）を表示の
+        /// RenderTexture へ送る。ブロックが丸ごと r の中で全部変わっていればブロック 1 つで、そうでなければタイル 1 枚ずつ。</summary>
+        void SendRegion(byte[] pixels, int px, int py, int pw, TileRect r, HashSet<TileCoord> dirty)
+        {
+            for (int by = r.Y0 / blockTiles; by <= (r.Y1 - 1) / blockTiles; by++)
+                for (int bx = r.X0 / blockTiles; bx <= (r.X1 - 1) / blockTiles; bx++)
+                {
+                    int tx0 = bx * blockTiles, ty0 = by * blockTiles, tx1 = Math.Min(tx0 + blockTiles, TilesX), ty1 = Math.Min(ty0 + blockTiles, TilesY);
+                    if (blockTiles > 1 && tx0 >= r.X0 && ty0 >= r.Y0 && tx1 <= r.X1 && ty1 <= r.Y1 && AllChanged(dirty, tx0, ty0, tx1, ty1))
+                    {
+                        int x = tx0 * tileSize, y = ty0 * tileSize;
+                        SendPixels(pixels, px, py, pw, x, y, Math.Min(tx1 * tileSize, width) - x, Math.Min(ty1 * tileSize, height) - y, blockStage, ref blockStageNext, blockSize);
+                        LastSentTileCount += (tx1 - tx0) * (ty1 - ty0);
+                        continue;
+                    }
+                    for (int ty = Math.Max(ty0, r.Y0); ty < Math.Min(ty1, r.Y1); ty++)
+                        for (int tx = Math.Max(tx0, r.X0); tx < Math.Min(tx1, r.X1); tx++)
+                        {
+                            if (dirty != null && !dirty.Contains(new TileCoord(tx, ty))) continue; // 外接長方形で一緒に合成しただけのタイル（変わっていない）
+                            int x = tx * tileSize, y = ty * tileSize;
+                            SendPixels(pixels, px, py, pw, x, y, Math.Min(tileSize, width - x), Math.Min(tileSize, height - y), tileStage, ref tileStageNext, tileSize);
+                            LastSentTileCount++;
+                        }
+                }
+        }
+        static bool AllChanged(HashSet<TileCoord> dirty, int tx0, int ty0, int tx1, int ty1)
+        {
+            if (dirty == null) return true;
+            for (int ty = ty0; ty < ty1; ty++) for (int tx = tx0; tx < tx1; tx++) if (!dirty.Contains(new TileCoord(tx, ty))) return false;
+            return true;
+        }
+        /// <summary>pixels の w×h（文書の (x, y) から）を載せ台に置き、表示の (x, y) へ写す。載せ台は 2 枚を交互に使う。行は管理側の
+        /// バッファへ並べてから 1 回で載せる（4096² の全面で、載せ台の NativeArray へ行ごとに写すより 30 → 20 ms と速かった）。
+        /// w×h の外の画素（端の欠けたタイル）は前の内容のままで、写さない。</summary>
+        void SendPixels(byte[] pixels, int px, int py, int pw, int x, int y, int w, int h, Texture2D[] ring, ref int next, int size)
+        {
+            var stage = ring[next] ?? (ring[next] = MakeStage(size));
+            next = (next + 1) % ring.Length;
+            var buffer = size == tileSize ? (tileBuffer ?? (tileBuffer = new byte[size * size * 4])) : (blockBuffer ?? (blockBuffer = new byte[size * size * 4]));
+            for (int row = 0; row < h; row++) Buffer.BlockCopy(pixels, ((y - py + row) * pw + (x - px)) * 4, buffer, row * size * 4, w * 4);
+            stage.LoadRawTextureData(buffer); stage.Apply(false, false);
+            if (copyStageToDisplay) Graphics.CopyTexture(stage, 0, 0, 0, 0, w, h, composite, 0, 0, x, y);
+            else DrawCopy(stage, x, y, w, h);
+        }
+        static Texture2D MakeStage(int size) => new Texture2D(size, size, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
 
         // ───────────── ブロックの合成 ─────────────
 
@@ -642,7 +833,7 @@ namespace Yozolab.YoluPainter.Editor
         }
         /// <summary>CopyTexture の代わりに、作業ブロックの左下 w×h を composite の (x, y) へ描き込む。
         /// Unity は OpenGL 4.3 未満（ARB_copy_image を持っていても）や一部の GLES で CopyTexture を無効にする。</summary>
-        void DrawCopy(RenderTexture source, int x, int y, int w, int h)
+        void DrawCopy(Texture source, int x, int y, int w, int h)
         {
             var old = RenderTexture.active;
             try
@@ -691,34 +882,88 @@ namespace Yozolab.YoluPainter.Editor
             if (level != levels[0]) NestedRenderTextureCount += 2;
         }
         Texture2D MakeBlockTexture() => new Texture2D(blockSize, blockSize, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+        void SetSize(PaintDocument doc)
+        {
+            width = doc.Width; height = doc.Height; tileSize = doc.TileSize;
+            int maxTiles = Math.Max(TilesX, TilesY);
+            blockTiles = Math.Max(1, Math.Min(TargetBlockPixels / tileSize, maxTiles)); blockSize = blockTiles * tileSize;
+        }
+
+        /// <summary>この環境で <see cref="CompositorBackend.Automatic"/> がどちらで合成するか。今は「GPU で合成できれば GPU」
+        /// （GPU が使えなければ CPU に落ちるのは GPU を選んだときと同じ）。CPU のほうが速いのはストロークと最初の全面で、レイヤーの
+        /// 不透明度などの構造の変更は GPU が下の合成結果を残しているぶん速い（10 層で実 GPU は数十倍、llvmpipe でも 4 倍）。ストロークの差は
+        /// 測ったどの条件でも 1 回 4 ms 未満なので、構造の変更の差を取る。数値は VALIDATION.md「表示の合成の GPU と CPU」。</summary>
+        /// <param name="note">自動で CPU にした理由（GPU のときは null）。</param>
+        internal static CompositorBackend ResolveAutomatic(out string note) { note = null; return CompositorBackend.Gpu; }
+
+        /// <summary>この環境で GPU の合成が使えるか（グラフィックスデバイス、RenderTexture の形式、TileComposite のシェーダー）。設定の画面の表示用。</summary>
+        internal static bool GpuCompositingAvailable(out string reason)
+        {
+            reason = SimulatedGpuUnavailable != null ? SimulatedGpuUnavailable
+                : SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null ? "no graphics device"
+                : !SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGB32) ? "the ARGB32 render texture format is unsupported"
+                : !ShaderHealth.IsUsable(Shader.Find(ShaderName)) ? "the compositing shader is unavailable or failed to compile" : null;
+            return reason == null;
+        }
+        const string ShaderName = "Hidden/YoluPainter/TileComposite";
+        /// <summary>テスト用: null でなければ、この環境の GPU の合成は使えないものとして扱う（値は理由。CPU の経路の表示には GPU を使ってよい）。</summary>
+        internal static string SimulatedGpuUnavailable;
+
         void Ensure(PaintDocument doc)
         {
             if (width == doc.Width && height == doc.Height && tileSize == doc.TileSize && Texture != null) return;
-            Dispose(); width = doc.Width; height = doc.Height; tileSize = doc.TileSize;
-            int maxTiles = Math.Max((width + tileSize - 1) / tileSize, (height + tileSize - 1) / tileSize);
-            blockTiles = Math.Max(1, Math.Min(TargetBlockPixels / tileSize, maxTiles)); blockSize = blockTiles * tileSize;
-            var shader = Shader.Find("Hidden/YoluPainter/TileComposite");
-            bool supported = allowGpu && ShaderHealth.IsUsable(shader) && SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGB32);
+            Dispose(); SetSize(doc);
+            bool device = allowGpu && SystemInfo.graphicsDeviceType != GraphicsDeviceType.Null;
+            var shader = device ? Shader.Find(ShaderName) : null;
+            bool shaderUsable = ShaderHealth.IsUsable(shader), renderTextures = device && SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGB32);
             useCopyTexture = allowCopyTexture && (SystemInfo.copyTextureSupport & CopyTextureSupport.Basic) != 0;
-            if (supported)
+            string automaticNote = null;
+            var wanted = preference == CompositorBackend.Automatic ? ResolveAutomatic(out automaticNote) : preference;
+            string reason;
+            FellBackToCpu = false;
+            if (wanted == CompositorBackend.Gpu)
+            {
+                if (shaderUsable && renderTextures && SimulatedGpuUnavailable == null)
+                {
+                    try
+                    {
+                        tileBuffer = new byte[tileSize * tileSize * 4]; blockBuffer = new byte[blockSize * blockSize * 4];
+                        material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+                        material.SetTexture("_LayerTex", Texture2D.blackTexture);
+                        for (int i = 0; i < transientLayer.Length; i++) { transientLayer[i] = MakeBlockTexture(); transientMask[i] = MakeBlockTexture(); }
+                        tileUpload = new Texture2D(tileSize, tileSize, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point };
+                        cpuTile = MakeRt(tileSize, tileSize, FilterMode.Point);
+                        EnsureClipPair(LevelAt(0));
+                        composite = MakeRt(width, height, FilterMode.Bilinear); Clear(composite);
+                        Path = CompositePath.Gpu;
+                        gpuBackend = Backend = "CPU source brush / GPU tiled compositor (encoded-space prototype" + (useCopyTexture ? ")" : ", draw copy)"); return;
+                    }
+                    catch (Exception ex) { Dispose(); SetSize(doc); reason = "CPU composite fallback: GPU allocation failed (" + ex.Message + ")"; }
+                }
+                else reason = "CPU composite fallback: " + (SimulatedGpuUnavailable ?? "GPU render texture format or shader unavailable (or the shader failed to compile)");
+                FellBackToCpu = true;
+            }
+            else if (!allowGpu) reason = "CPU composite fallback: the GPU is not used by this compositor";
+            else reason = "CPU compositor (" + (preference == CompositorBackend.Cpu ? "chosen in Project Settings > YoluPainter" : "automatic: " + automaticNote) + ")";
+
+            // CPU で合成する。表示は使えれば RenderTexture（変わったタイルだけ写す）。写す手段は Texture2D → RenderTexture の CopyTexture、
+            // 無ければ TileComposite の写しのパス。どちらも無ければ CPU 側の Texture2D に全面を載せる
+            bool copyToRenderTexture = useCopyTexture && (SystemInfo.copyTextureSupport & CopyTextureSupport.TextureToRT) != 0;
+            if (renderTextures && (copyToRenderTexture || shaderUsable))
             {
                 try
                 {
-                    tileBuffer = new byte[tileSize * tileSize * 4]; blockBuffer = new byte[blockSize * blockSize * 4];
-                    material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
-                    material.SetTexture("_LayerTex", Texture2D.blackTexture);
-                    for (int i = 0; i < transientLayer.Length; i++) { transientLayer[i] = MakeBlockTexture(); transientMask[i] = MakeBlockTexture(); }
-                    tileUpload = new Texture2D(tileSize, tileSize, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point };
-                    cpuTile = MakeRt(tileSize, tileSize, FilterMode.Point);
-                    EnsureClipPair(LevelAt(0));
+                    if (!copyToRenderTexture) { material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave }; material.SetTexture("_LayerTex", Texture2D.blackTexture); }
                     composite = MakeRt(width, height, FilterMode.Bilinear); Clear(composite);
-                    gpuBackend = Backend = "CPU source brush / GPU tiled compositor (encoded-space prototype" + (useCopyTexture ? ")" : ", draw copy)"); return;
+                    copyStageToDisplay = copyToRenderTexture; Path = CompositePath.CpuTiles;
+                    Backend = reason + "; changed tiles are copied to the display texture" + (copyToRenderTexture ? "" : " (draw copy)");
+                    return;
                 }
-                catch (Exception ex) { Dispose(); Backend = "GPU allocation failed: " + ex.Message + "; CPU composite fallback"; }
+                catch (Exception ex) { Dispose(); SetSize(doc); reason += "; the display render texture failed (" + ex.Message + ")"; }
             }
-            else Backend = "CPU composite fallback: GPU render texture format or shader unavailable (or the shader failed to compile)";
-            width = doc.Width; height = doc.Height; tileSize = doc.TileSize;
             cpuFallback = new Texture2D(width, height, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Bilinear };
+            Path = CompositePath.CpuFrame;
+            Backend = reason + "; the whole frame is uploaded to the display texture";
         }
         static RenderTexture MakeRt(int w, int h, FilterMode filter)
         {
@@ -743,9 +988,10 @@ namespace Yozolab.YoluPainter.Editor
             Release(composite); Release(cpuTile);
             if (material != null) UnityEngine.Object.DestroyImmediate(material);
             for (int i = 0; i < transientLayer.Length; i++) { DestroyTexture(transientLayer[i]); DestroyTexture(transientMask[i]); transientLayer[i] = transientMask[i] = null; }
+            for (int i = 0; i < tileStage.Length; i++) { DestroyTexture(tileStage[i]); DestroyTexture(blockStage[i]); tileStage[i] = blockStage[i] = null; }
             DestroyTexture(tileUpload); DestroyTexture(cpuFallback);
             tileBuffer = null; blockBuffer = null; cpuPixels = null; material = null; tileUpload = null; cpuFallback = null; composite = null; cpuTile = null; previous.Clear();
-            lastDocument = null; lastSerial = -1; blockSize = blockTiles = 0;
+            lastDocument = null; lastSerial = -1; blockSize = blockTiles = 0; cpuValid = false;
         }
     }
 }

@@ -24,7 +24,7 @@ namespace Yozolab.YoluPainter.Editor
         void UpdateNormalOutput()
         {
             if (!ShowsNormalOutput) { DisposeNormalOutput(); return; }
-            if (normalOutput == null) normalOutput = new NormalOutputView();
+            if (normalOutput == null) normalOutput = NewNormalOutputView();
             normalOutput.Update(document, compositor.Texture);
         }
         void DisposeNormalOutput() { normalOutput?.Dispose(); normalOutput = null; }
