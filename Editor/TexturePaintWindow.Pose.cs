@@ -29,7 +29,7 @@ namespace Yozolab.YoluPainter.Editor
                     if(next!=w){preview.SetBlendShapeWeight(shape,next);posePending=true;}
                 }
                 if(shapes.Count>MaxBlendShapeRows)EditorGUILayout.LabelField("… "+(shapes.Count-MaxBlendShapeRows)+" more; narrow the filter.",EditorStyles.miniLabel);
-                poseClip=(AnimationClip)EditorGUILayout.ObjectField(new GUIContent("Clip","A Generic animation clip to pose the bones with (Humanoid clips are not supported yet)"),poseClip,typeof(AnimationClip),false);
+                poseClip=(AnimationClip)EditorGUILayout.ObjectField(new GUIContent("Clip","An animation clip to pose the bones with: Generic clips follow bone paths, Humanoid clips use the model's Avatar"),poseClip,typeof(AnimationClip),false);
                 using(new EditorGUI.DisabledScope(poseClip==null))
                 {
                     poseTime=EditorGUILayout.Slider("Time (s)",poseTime,0,poseClip!=null?Mathf.Max(0,poseClip.length):0);

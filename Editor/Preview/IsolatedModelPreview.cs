@@ -109,6 +109,9 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 AddEntry(renderer, input, matrix, matrix.determinant < 0, origin, shader, ref incomplete, null);
             }
             var triangles = BuildTriangles();
+            var animator = source.GetComponentInChildren<Animator>(true);
+            if (skeleton != null && animator != null && animator.avatar != null && animator.avatar.isValid && animator.avatar.isHuman && skeleton[animator.transform] != null)
+            { humanAvatar = animator.avatar; humanRoot = animator.transform; }
             try
             {
                 if (triangles.Count > 0)
@@ -185,6 +188,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         readonly List<SnapshotEntry> entries = new List<SnapshotEntry>();
         TransformCopy skeleton;
         Vector3 loadOrigin;
+        // Humanoid のポーズ用: 元のモデルの Animator の Avatar（アセットへの参照だけ）と、その Animator の位置
+        Avatar humanAvatar; Transform humanRoot;
 
         bool CheckInput(Renderer renderer, Mesh input, ref bool incomplete, ref long triangleTotal)
         {
@@ -327,15 +332,54 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (float.IsNaN(weight) || float.IsInfinity(weight)) throw new ArgumentOutOfRangeException(nameof(weight));
             SkinAt(shape.Mesh).SetBlendShapeWeight(shape.Index, weight);
         }
-        /// <summary>汎用（Generic）のアニメーションクリップの time 秒の姿勢を複製の骨に置く（Humanoid は未対応で断る）。形に反映するのは
-        /// <see cref="ApplyPose"/> のとき。</summary>
+        /// <summary>アニメーションクリップの time 秒の姿勢を複製の骨に置く。汎用（Generic）はパスで骨を動かし、Humanoid は元のモデルの
+        /// Avatar で筋肉の値から骨の向きを決める（HumanPoseHandler。複製の骨だけを動かす）。形に反映するのは <see cref="ApplyPose"/> のとき。</summary>
         public void SamplePose(AnimationClip clip, float time)
         {
             if (clip == null) throw new ArgumentNullException(nameof(clip));
             if (skeleton == null) throw new InvalidOperationException("The loaded model has no skinned mesh to pose.");
-            if (clip.humanMotion) throw new InvalidOperationException("Humanoid clips need an Avatar retarget, which the preview does not do yet. Use a Generic clip.");
-            clip.SampleAnimation(skeleton.Root, Mathf.Clamp(time, 0, clip.length));
+            time = Mathf.Clamp(time, 0, clip.length);
+            if (!clip.humanMotion) { clip.SampleAnimation(skeleton.Root, time); return; }
+            if (humanAvatar == null) throw new InvalidOperationException("This is a Humanoid clip, but the loaded model has no valid Humanoid Avatar on its Animator.");
+            using (var handler = new HumanPoseHandler(humanAvatar, skeleton[humanRoot]))
+            {
+                var pose = new HumanPose(); handler.GetHumanPose(ref pose);
+                Vector3 body = pose.bodyPosition; Quaternion rotation = pose.bodyRotation; bool hasRotation = false;
+                foreach (var binding in UnityEditor.AnimationUtility.GetCurveBindings(clip))
+                {
+                    if (binding.type != typeof(Animator)) continue;
+                    var curve = UnityEditor.AnimationUtility.GetEditorCurve(clip, binding); if (curve == null) continue;
+                    float value = curve.Evaluate(time); string name = binding.propertyName;
+                    switch (name)
+                    {
+                        case "RootT.x": body.x = value; continue;
+                        case "RootT.y": body.y = value; continue;
+                        case "RootT.z": body.z = value; continue;
+                        case "RootQ.x": rotation.x = value; hasRotation = true; continue;
+                        case "RootQ.y": rotation.y = value; hasRotation = true; continue;
+                        case "RootQ.z": rotation.z = value; hasRotation = true; continue;
+                        case "RootQ.w": rotation.w = value; hasRotation = true; continue;
+                    }
+                    int muscle = MuscleIndex(name);
+                    if (muscle >= 0) pose.muscles[muscle] = value;
+                }
+                pose.bodyPosition = body;
+                if (hasRotation) { float length = Mathf.Sqrt(rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z + rotation.w * rotation.w); if (length > 1e-6f) pose.bodyRotation = new Quaternion(rotation.x / length, rotation.y / length, rotation.z / length, rotation.w / length); }
+                handler.SetHumanPose(ref pose);
+            }
         }
+        /// <summary>Humanoid のクリップのカーブの名前に当たる筋肉の番号（HumanTrait.MuscleName）。指はクリップでは
+        /// "LeftHand.Thumb.1 Stretched"、筋肉名では "Left Thumb 1 Stretched" と書くので読み替える。無ければ −1。</summary>
+        internal static int MuscleIndex(string curveName)
+        {
+            int index = Array.IndexOf(HumanTrait.MuscleName, curveName);
+            if (index >= 0 || curveName == null) return index;
+            string name = curveName.StartsWith("LeftHand.", StringComparison.Ordinal) ? "Left " + curveName.Substring(9)
+                : curveName.StartsWith("RightHand.", StringComparison.Ordinal) ? "Right " + curveName.Substring(10) : null;
+            return name == null ? -1 : Array.IndexOf(HumanTrait.MuscleName, name.Replace('.', ' '));
+        }
+        /// <summary>Humanoid のクリップでポーズできるモデルか（元のモデルの Animator に有効な Humanoid の Avatar がある）。</summary>
+        public bool HasHumanoidAvatar => humanAvatar != null;
         /// <summary>骨と BlendShape を読み込んだときの状態に戻す。形に反映するのは <see cref="ApplyPose"/> のとき。</summary>
         public void ResetPose() { skeleton?.Reset(); foreach (var skin in Skins) skin.ResetBlendShapes(); }
         /// <summary>今の骨と BlendShape でスキンメッシュを焼き直し、表示と当たり判定の形を新しい世代（<see cref="SnapshotRevision"/>）に
@@ -543,7 +587,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             CancelNavigation(); geometry = null;
             foreach (var e in entries) e.Skin?.Dispose();
             entries.Clear();
-            skeleton?.Dispose(); skeleton = null;
+            skeleton?.Dispose(); skeleton = null; humanAvatar = null; humanRoot = null;
             DestroyTail(objects, 0); DestroyTail(meshes, 0); DestroyTail(materials, 0);
             sourceTextures.Clear(); sourceColors.Clear(); sourceMaterials.Clear(); slotNames.Clear();
         }
