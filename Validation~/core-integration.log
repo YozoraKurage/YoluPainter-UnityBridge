@@ -1,9 +1,0 @@
-PASS sparse canvas and channel isolation
-PASS exact undo redo and cancellation
-PASS native archive exact attributes and hidden RGB
-PASS native corruption refuses unknown versions and truncation
-PASS save interruption leaves valid current generation
-PASS PSD bridge layered native roundtrip
-PASS save refuses provisional stroke
-PASS committed generation survives interrupted acknowledgement
-PASS 8 integration scenarios (production pure C# sources, .NET 8). Unity adapter/GPU/device tests NOT run.
