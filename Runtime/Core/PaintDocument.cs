@@ -43,6 +43,10 @@ namespace Yozolab.YoluPainter.Core
         public double Opacity { get; internal set; }
         public LayerBlendMode BlendMode { get; internal set; }
         public LayerKind Kind { get; private set; }
+        /// <summary>Clipped to the layer below: drawn only inside the clipping base (the nearest unclipped layer below) and
+        /// composited together with it, like Photoshop's default "blend clipped layers as group". The bottom layer cannot
+        /// be clipped (the flag is kept but has no effect there).</summary>
+        public bool Clipping { get; internal set; }
         /// <summary>Raster layers' pixel surfaces. Always empty for fill layers.</summary>
         public IReadOnlyDictionary<PaintChannel, SparseTileSurface> Channels { get; private set; }
         /// <summary>Fill layers' value per channel. Always empty for other kinds.</summary>
@@ -340,6 +344,14 @@ namespace Yozolab.YoluPainter.Core
             var layer = GetLayer(id); var old = layer.BlendMode; if (old == mode) return;
             Execute(LayerScoped(layer, null, () => layer.BlendMode = mode, () => layer.BlendMode = old, 64));
         }
+        /// <summary>Clips the layer to the layer below (or releases it). Undoable.</summary>
+        public void SetLayerClipping(Guid id, bool clipping)
+        {
+            EnsureNoStroke(); var layer = GetLayer(id); bool old = layer.Clipping; if (old == clipping) return;
+            Execute(LayerScoped(layer, null, () => layer.Clipping = clipping, () => layer.Clipping = old, 64));
+        }
+        /// <summary>True when the layer at index is effectively clipped (flag set and not the bottom layer).</summary>
+        public bool IsEffectivelyClipped(int index) { return index > 0 && index < layers.Count && layers[index].Clipping; }
         public void SetChannelEnabled(Guid id, PaintChannel channel, bool enabled)
         {
             EnsureNoStroke(); PaintLayer.ValidateChannel(channel); var layer = GetLayer(id);
@@ -472,9 +484,16 @@ namespace Yozolab.YoluPainter.Core
                 if (channel == null || entry.Key == channel.Value)
                     foreach (var coord in entry.Value.EnumerateTileCoordinates()) MarkTileChanged(entry.Key, coord);
         }
-        /// <summary>A history command whose apply and revert change how one layer composites, but not its pixels.</summary>
+        /// <summary>A history command whose apply and revert change how one layer composites, but not its pixels.
+        /// Clipped layers are re-marked too: moving, hiding, adding or removing a layer can change which base a clipped layer
+        /// is drawn inside, and so where its pixels are visible, without touching the clipped layer itself.</summary>
         private DelegateCommand LayerScoped(PaintLayer layer, PaintChannel? channel, Action apply, Action revert, long cost)
-        { return new DelegateCommand(() => { apply(); MarkLayerChanged(layer, channel); }, () => { revert(); MarkLayerChanged(layer, channel); }, cost); }
+        {
+            return new DelegateCommand(() => { apply(); MarkLayerChanged(layer, channel); MarkClippedLayersChanged(); },
+                () => { revert(); MarkLayerChanged(layer, channel); MarkClippedLayersChanged(); }, cost);
+        }
+        private void MarkClippedLayersChanged()
+        { for (int i = 1; i < layers.Count; i++) if (layers[i].Clipping) MarkLayerChanged(layers[i], null); }
         internal void EnsureSourceGrowth(long additionalBytes)
         {
             if (additionalBytes > 0 && additionalBytes > sourceBudgetBytes - AllocatedBytes)

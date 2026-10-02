@@ -229,7 +229,7 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     var layer=document.Layers[i]; GUILayout.BeginHorizontal();
                     bool visible=GUILayout.Toggle(layer.Visible,"",GUILayout.Width(18)); if(visible!=layer.Visible) document.SetLayerVisibility(layer.Id,visible);
-                    if(GUILayout.Toggle(selectedLayer==layer.Id,(layer.Kind==LayerKind.Fill?"[Fill] ":layer.Kind==LayerKind.Adjustment?"[Adj] ":"")+layer.Name,"Button")) selectedLayer=layer.Id;
+                    if(GUILayout.Toggle(selectedLayer==layer.Id,(document.IsEffectivelyClipped(i)?"↳ ":"")+(layer.Kind==LayerKind.Fill?"[Fill] ":layer.Kind==LayerKind.Adjustment?"[Adj] ":"")+layer.Name,"Button")) selectedLayer=layer.Id;
                     GUILayout.EndHorizontal();
                 }
                 GUILayout.EndScrollView();
@@ -239,6 +239,7 @@ namespace Yozolab.YoluPainter.Editor
                     string name=EditorGUILayout.DelayedTextField("Name",active.Name);if(name!=active.Name)document.SetLayerName(active.Id,name);
                     float opacity=EditorGUILayout.Slider("Opacity",(float)active.Opacity,0,1);if(Math.Abs(opacity-active.Opacity)>.00001)document.SetLayerOpacity(active.Id,opacity,coalesce:true);
                     var blend=(LayerBlendMode)EditorGUILayout.EnumPopup("Blend",active.BlendMode);if(blend!=active.BlendMode)document.SetLayerBlendMode(active.Id,blend);
+                    bool clipping=EditorGUILayout.Toggle("Clip to layer below",active.Clipping);if(clipping!=active.Clipping)document.SetLayerClipping(active.Id,clipping);
                     bool enabled=EditorGUILayout.Toggle("Channel enabled",active.IsChannelEnabled(channel));if(enabled!=active.IsChannelEnabled(channel))TryAction(()=>document.SetChannelEnabled(active.Id,channel,enabled));
                     GUILayout.BeginHorizontal();int index=document.Layers.ToList().FindIndex(l=>l.Id==active.Id);
                     using(new EditorGUI.DisabledScope(index>=document.Layers.Count-1)) if(GUILayout.Button("Up"))document.MoveLayer(active.Id,index+1);

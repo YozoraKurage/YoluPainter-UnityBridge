@@ -7,10 +7,11 @@ namespace Yozolab.YoluPainter.Core.Persistence
 {
     /// <summary>Versioned, bounded, lossless native sparse source archive. No GPU cache is persisted.
     /// Version 2 adds an optional raster mask block after each layer's channels. Version 3 adds the layer kind and fill
-    /// values after the layer attributes. Version 4 adds adjustment parameters after the fill values. Older archives still load.</summary>
+    /// values after the layer attributes. Version 4 adds adjustment parameters after the fill values. Version 5 adds the
+    /// clipping flag after the blend mode. Older archives still load.</summary>
     public static class DocumentBinary
     {
-        const int Version = 4;
+        const int Version = 5;
         const long MaxArchiveBytes = 512L * 1024 * 1024;
         static readonly byte[] Magic = Encoding.ASCII.GetBytes("DOTPAINT");
 
@@ -29,6 +30,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 {
                     writer.Write(layer.Id.ToByteArray()); WriteString(writer, layer.Name);
                     writer.Write(layer.Visible); writer.Write(layer.Opacity); writer.Write((int)layer.BlendMode);
+                    writer.Write(layer.Clipping);
                     writer.Write((int)layer.Kind);
                     var fills = layer.FillValues.Keys.OrderBy(c => c).ToArray();
                     writer.Write(fills.Length);
@@ -94,6 +96,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         bool visible = reader.ReadBoolean(); double opacity = reader.ReadDouble(); int blend = reader.ReadInt32();
                         if (double.IsNaN(opacity) || double.IsInfinity(opacity) || opacity < 0 || opacity > 1 || !Enum.IsDefined(typeof(LayerBlendMode), blend))
                             throw new InvalidDataException("Invalid layer attributes.");
+                        bool clipping = version >= 5 && reader.ReadBoolean();
                         int kind = version >= 3 ? reader.ReadInt32() : (int)LayerKind.Raster;
                         if (!Enum.IsDefined(typeof(LayerKind), kind)) throw new InvalidDataException("Unknown layer kind; a newer reader is required.");
                         PaintLayer layer;
@@ -141,6 +144,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         }
                         else layer = doc.AddLayer(layerName, layerId);
                         doc.SetLayerVisibility(layer.Id, visible); doc.SetLayerOpacity(layer.Id, opacity); doc.SetLayerBlendMode(layer.Id, (LayerBlendMode)blend);
+                        doc.SetLayerClipping(layer.Id, clipping);
                         int channelCount = ReadCount(reader, 6, "channels");
                         if (layer.Kind != LayerKind.Raster && channelCount != 0) throw new InvalidDataException("Only raster layers have pixel channels.");
                         var seenChannels = new System.Collections.Generic.HashSet<int>();

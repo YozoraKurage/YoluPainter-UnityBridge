@@ -14,7 +14,7 @@ namespace Yozolab.YoluPainter.Editor
     {
         Material material;
         Texture2D upload, uploadMask, cpuFallback;
-        RenderTexture ping, pong, composite;
+        RenderTexture ping, pong, composite, groupA, groupB;
         byte[] cpuPixels;
         readonly HashSet<TileCoord> previous = new HashSet<TileCoord>();
         public Texture Texture => composite != null ? (Texture)composite : cpuFallback;
@@ -76,9 +76,9 @@ namespace Yozolab.YoluPainter.Editor
         void CompositeTileOnGpu(PaintDocument doc, PaintChannel channel, TileCoord coord)
         {
             Clear(ping);
-            foreach (var layer in doc.Layers)
+            foreach (var entry in CpuCompositor.Plan(doc, channel))
             {
-                if (!layer.Visible || layer.Opacity <= 0 || !layer.IsChannelEnabled(channel) || !layer.HasContent(channel)) continue;
+                var layer = entry.Base;
                 int pass;
                 if (layer.Kind == LayerKind.Adjustment)
                 {
@@ -87,10 +87,12 @@ namespace Yozolab.YoluPainter.Editor
                 }
                 else
                 {
-                    // A layer without this tile contributes transparent pixels; skipping it is exact and saves a pass.
+                    // A layer without this tile contributes transparent pixels (and so does its clipping group).
                     if (!layer.CopyTile(channel, coord, uploadPixels)) continue;
                     upload.LoadRawTextureData(uploadPixels); upload.Apply(false, false);
-                    material.SetTexture("_LayerTex", upload); pass = 0;
+                    if (entry.Clips.Count == 0) material.SetTexture("_LayerTex", upload);
+                    else material.SetTexture("_LayerTex", BuildClippingGroup(entry, channel, coord));
+                    pass = 0;
                 }
                 material.SetFloat("_Opacity", (float)layer.Opacity); material.SetInt("_BlendMode", (int)layer.BlendMode);
                 SetMask(layer.Mask, coord);
@@ -100,6 +102,32 @@ namespace Yozolab.YoluPainter.Editor
             int tw = Math.Min(tileSize, width - coord.X * tileSize), th = Math.Min(tileSize, height - coord.Y * tileSize);
             if (useCopyTexture) Graphics.CopyTexture(ping, 0, 0, 0, 0, tw, th, composite, 0, 0, coord.X * tileSize, coord.Y * tileSize);
             else DrawCopy(ping, coord.X * tileSize, coord.Y * tileSize, tw, th);
+        }
+        /// <summary>下地（upload に入っている）をまとまり用の作業タイルへ写し、クリッピングされたレイヤーを順に重ねる。
+        /// まとまりは下地のアルファを保つ。戻り値はまとまりの入ったタイル（下地の不透明度・マスク・合成モードでこのあと下に合成する）。</summary>
+        RenderTexture BuildClippingGroup(CpuCompositor.StackEntry entry, PaintChannel channel, TileCoord coord)
+        {
+            Clear(groupA);
+            material.SetTexture("_LayerTex", upload); material.SetFloat("_Opacity", 1); material.SetInt("_BlendMode", (int)LayerBlendMode.Normal);
+            material.SetVector("_Mask", Vector4.zero);
+            Graphics.Blit(groupA, groupB, material, 0); // 透明の上に下地をそのまま置く
+            RenderTexture current = groupB, other = groupA;
+            foreach (var clip in entry.Clips)
+            {
+                int pass;
+                if (clip.Kind == LayerKind.Adjustment) { SetAdjustment(clip.Adjustment); pass = 2; }
+                else
+                {
+                    if (!clip.CopyTile(channel, coord, uploadPixels)) continue;
+                    upload.LoadRawTextureData(uploadPixels); upload.Apply(false, false);
+                    material.SetTexture("_LayerTex", upload); pass = 3;
+                }
+                material.SetFloat("_Opacity", (float)clip.Opacity); material.SetInt("_BlendMode", (int)clip.BlendMode);
+                SetMask(clip.Mask, coord);
+                Graphics.Blit(current, other, material, pass);
+                var swap = current; current = other; other = swap;
+            }
+            return current;
         }
         void SetMask(RasterMask mask, TileCoord coord)
         {
@@ -162,7 +190,8 @@ namespace Yozolab.YoluPainter.Editor
                     material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
                     upload = new Texture2D(tileSize, tileSize, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point };
                     uploadMask = new Texture2D(tileSize, tileSize, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point };
-                    ping = MakeRt(tileSize, tileSize, FilterMode.Point); pong = MakeRt(tileSize, tileSize, FilterMode.Point); composite = MakeRt(width, height, FilterMode.Bilinear); Clear(composite);
+                    ping = MakeRt(tileSize, tileSize, FilterMode.Point); pong = MakeRt(tileSize, tileSize, FilterMode.Point);
+                    groupA = MakeRt(tileSize, tileSize, FilterMode.Point); groupB = MakeRt(tileSize, tileSize, FilterMode.Point); composite = MakeRt(width, height, FilterMode.Bilinear); Clear(composite);
                     Backend = "CPU source brush / GPU tiled compositor (encoded-space prototype" + (useCopyTexture ? ")" : ", draw copy)"); return;
                 }
                 catch (Exception ex) { Dispose(); Backend = "GPU allocation failed: " + ex.Message + "; CPU composite fallback"; }
@@ -180,12 +209,12 @@ namespace Yozolab.YoluPainter.Editor
         { var old = RenderTexture.active; try { RenderTexture.active = rt; GL.Clear(false, true, Color.clear); } finally { RenderTexture.active = old; } }
         public void Dispose()
         {
-            foreach (var rt in new[]{ping,pong,composite}) if (rt != null) { rt.Release(); UnityEngine.Object.DestroyImmediate(rt); }
+            foreach (var rt in new[]{ping,pong,composite,groupA,groupB}) if (rt != null) { rt.Release(); UnityEngine.Object.DestroyImmediate(rt); }
             if (material != null) UnityEngine.Object.DestroyImmediate(material);
             if (upload != null) UnityEngine.Object.DestroyImmediate(upload);
             if (uploadMask != null) UnityEngine.Object.DestroyImmediate(uploadMask);
             if (cpuFallback != null) UnityEngine.Object.DestroyImmediate(cpuFallback);
-            uploadPixels=null; maskPixels=null; cpuPixels=null; material = null; upload = null; uploadMask = null; cpuFallback = null; ping = pong = composite = null; previous.Clear();
+            uploadPixels=null; maskPixels=null; cpuPixels=null; material = null; upload = null; uploadMask = null; cpuFallback = null; ping = pong = composite = groupA = groupB = null; previous.Clear();
             lastDocument = null; lastSerial = -1;
         }
     }

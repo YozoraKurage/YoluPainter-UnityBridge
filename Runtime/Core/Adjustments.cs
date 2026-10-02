@@ -108,14 +108,8 @@ namespace Yozolab.YoluPainter.Core
             // 完全に透明な画素は見えないので変えない（何も無いタイルを飛ばす最適化とも一致する）。
             if (amount <= 0 || below.A == 0) return below;
             Rgba32 adjusted = Apply(below);
-            return new Rgba32(Mix(below.R, adjusted.R, amount, mode), Mix(below.G, adjusted.G, amount, mode), Mix(below.B, adjusted.B, amount, mode), below.A);
-        }
-        static byte Mix(byte below, byte adjusted, double amount, LayerBlendMode mode)
-        {
-            double d = below / 255.0, a = adjusted / 255.0, m = a;
-            if (mode == LayerBlendMode.Multiply) m = d * a;
-            else if (mode == LayerBlendMode.Screen) m = 1 - (1 - d) * (1 - a);
-            return MathUtil.ToByte(d + (m - d) * amount);
+            return new Rgba32(CpuCompositor.Mix(below.R, adjusted.R, amount, mode), CpuCompositor.Mix(below.G, adjusted.G, amount, mode),
+                CpuCompositor.Mix(below.B, adjusted.B, amount, mode), below.A);
         }
 
         public bool Equals(AdjustmentSettings other)

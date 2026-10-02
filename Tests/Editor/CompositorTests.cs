@@ -46,6 +46,9 @@ namespace Yozolab.YoluPainter.Tests
             var hsl = doc.AddAdjustmentLayer("HSL", AdjustmentSettings.HueSaturation(60, -.3, .1));
             doc.SetLayerOpacity(hsl.Id, .7); doc.SetLayerBlendMode(hsl.Id, LayerBlendMode.Screen); Step("hue/saturation adjustment", null);
             doc.AddAdjustmentLayer("Invert", AdjustmentSettings.Invert()); Step("invert adjustment", null);
+            var clipped = doc.AddLayer("Clipped"); Stroke(clipped.Id, 6, 12); doc.MoveLayer(clipped.Id, 1); doc.SetLayerClipping(clipped.Id, true);
+            Step("layer clipped to a", null);
+            doc.SetLayerVisibility(b.Id, true); doc.SetLayerClipping(b.Id, true); Step("second layer clipped to the same base", null);
             using (var s = doc.BeginStroke(a.Id, PaintChannel.Color, brush)) { s.Add(new BrushSample(40, 24)); Step("mid-stroke preview", 2); s.Cancel(); }
             Step("after cancel", 2);
             compositor.Update(doc, PaintChannel.Roughness); assertMatches(doc.Composite(PaintChannel.Roughness), read(), "channel switch");

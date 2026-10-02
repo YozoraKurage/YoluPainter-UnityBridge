@@ -115,6 +115,38 @@ Shader "Hidden/YoluPainter/TileComposite"
             }
             ENDCG
         }
+        // Pass 3: クリッピング。_MainTex（クリッピングのまとまり＝下地にここまで重ねた結果）に、_LayerTex（クリッピングされた
+        // レイヤー）を合成モードで組み合わせ、レイヤーのアルファ×不透明度×マスクで混ぜる。まとまりのアルファ（下地のアルファ）は
+        // 変えない。CpuCompositor.ClipOnto と同じ式。
+        Pass
+        {
+            CGPROGRAM
+            #pragma vertex vert_img
+            #pragma fragment fragClip
+            #include "UnityCG.cginc"
+            sampler2D _MainTex, _LayerTex, _MaskTex;
+            float _Opacity;
+            int _BlendMode;
+            float4 _Mask;
+            float4 fragClip(v2f_img i) : SV_Target
+            {
+                float4 g = tex2D(_MainTex, i.uv);
+                float4 s = tex2D(_LayerTex, i.uv);
+                float factor = 1;
+                if (_Mask.x > 0.5)
+                {
+                    float hide = tex2D(_MaskTex, i.uv).a;
+                    factor = _Mask.y > 0.5 ? 1 - _Mask.z * (1 - hide) : 1 - _Mask.z * hide;
+                }
+                float t = s.a * _Opacity * factor;
+                if (t <= 0 || g.a <= 0) return g;
+                float3 m = s.rgb;
+                if (_BlendMode == 1) m = g.rgb * s.rgb;
+                else if (_BlendMode == 2) m = 1 - (1 - g.rgb) * (1 - s.rgb);
+                return float4(g.rgb + (m - g.rgb) * t, g.a);
+            }
+            ENDCG
+        }
     }
     Fallback Off
 }

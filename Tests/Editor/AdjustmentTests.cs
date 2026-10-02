@@ -130,12 +130,21 @@ namespace Yozolab.YoluPainter.Tests
             CollectionAssert.AreEquivalent(new[] { PaintChannel.Roughness }, restored.Layers[2].EnabledChannels);
             Assert.That(restored.Composite(PaintChannel.Color), Is.EqualTo(doc.Composite(PaintChannel.Color)));
 
-            // 版 3 は調整レイヤーが無いことを除けば同じ並び。調整の無いアーカイブの版番号を 3 にしても読める。
-            var plain = OnePixel(new Rgba32(1, 2, 3, 255), out _); plain.AddFillLayer("F", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(9, 9, 9, 9) } });
-            var v3 = DocumentBinary.Write(plain); BitConverter.GetBytes(3).CopyTo(v3, 8);
-            Assert.That(DocumentBinary.Read(v3).Composite(PaintChannel.Color), Is.EqualTo(plain.Composite(PaintChannel.Color)));
-            var adjustedAsV3 = (byte[])bytes.Clone(); BitConverter.GetBytes(3).CopyTo(adjustedAsV3, 8);
-            Assert.Throws<InvalidDataException>(() => DocumentBinary.Read(adjustedAsV3), "a version 3 archive cannot contain adjustment layers");
+            // 版 3 は「各レイヤーのクリッピングの 1 バイト（版 5）」と「調整のブロック（版 4）」が無い並び。
+            // 1 レイヤーの文書からクリッピングのバイトを抜いて版 3 にする。
+            var plain = new PaintDocument(16, 16, 8); plain.AddFillLayer("F", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(9, 9, 9, 9) } });
+            Assert.That(DocumentBinary.Read(AsVersion3(DocumentBinary.Write(plain), "F")).Composite(PaintChannel.Color), Is.EqualTo(plain.Composite(PaintChannel.Color)));
+            var adjusted = new PaintDocument(16, 16, 8); adjusted.AddAdjustmentLayer("A", AdjustmentSettings.Invert());
+            Assert.Throws<InvalidDataException>(() => DocumentBinary.Read(AsVersion3(DocumentBinary.Write(adjusted), "A")), "a version 3 archive cannot contain adjustment layers");
+        }
+
+        /// <summary>1 レイヤーの版 5 アーカイブから、クリッピングの 1 バイトを抜いて版 3 にする。</summary>
+        static byte[] AsVersion3(byte[] v5, string layerName)
+        {
+            int clippingByte = 8 + 4 + 16 + 12 + 4 + 16 + 4 + System.Text.Encoding.UTF8.GetByteCount(layerName) + 1 + 8 + 4;
+            Assert.That(v5[clippingByte], Is.EqualTo(0));
+            var v3 = v5.Take(clippingByte).Concat(v5.Skip(clippingByte + 1)).ToArray(); BitConverter.GetBytes(3).CopyTo(v3, 8);
+            return v3;
         }
 
         [Test] public void UnknownAdjustmentAlgorithmVersionsAreRefused()

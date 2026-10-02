@@ -17,6 +17,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             {
                 var layer = source.Layers[i];
                 if (layer.BlendMode != LayerBlendMode.Normal) throw new InvalidOperationException("PSD projection currently supports Normal layers only. Native project can still be saved losslessly.");
+                if (source.IsEffectivelyClipped(i)) throw new InvalidOperationException("PSD projection does not write clipping yet. Native project can still be saved losslessly.");
                 if (layer.Kind == LayerKind.Adjustment) throw new InvalidOperationException("PSD projection does not write adjustment layers yet: PSD adjustment types need their own verified mapping. Native project can still be saved losslessly.");
                 if (layer.Kind == LayerKind.Fill) throw new InvalidOperationException("PSD projection does not write fill layers yet: they are generated from values, and baking them into pixels would lose that. Native project can still be saved losslessly.");
                 if (layer.Mask != null && !layer.Mask.IsNeutral) throw new InvalidOperationException("PSD projection does not write layer masks yet, and flattening the mask into the pixels would lose it. Native project can still be saved losslessly.");
