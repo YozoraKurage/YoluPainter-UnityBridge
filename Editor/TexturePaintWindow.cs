@@ -105,7 +105,8 @@ namespace Yozolab.YoluPainter.Editor
                 if (File.Exists(Path.Combine(recoveryRoot,"current")))
                 {
                     var snapshot=GenerationStore.Load(recoveryRoot); document=DocumentBinary.Read(snapshot.Files["document.utpaint"]); recoveryToken=snapshot.Token;
-                    message="Recovered native source from the last durable checkpoint. Unsaved edits after that checkpoint may be missing.";
+                    var recoveryNotes=new List<string>(); RestoreSavedSelection(snapshot.Files,recoveryNotes);
+                    message="Recovered native source from the last durable checkpoint. Unsaved edits after that checkpoint may be missing."+(recoveryNotes.Count>0?" "+String.Join(" ",recoveryNotes):"");
                 }
             }
             catch (Exception ex) { message="Recovery was not loaded: "+ex.Message; }
@@ -957,10 +958,18 @@ namespace Yozolab.YoluPainter.Editor
             try
             {
                 var files=new Dictionary<string,byte[]>{{"document.utpaint",DocumentBinary.Write(document)}};
+                if(document.Selection!=null)files.Add(SelectionBinary.EntryName,SelectionBinary.Write(document.Selection));
                 var snapshot=GenerationStore.Commit(recoveryRoot,files,recoveryToken); recoveryToken=snapshot.Token;
                 recoveredRevision=document.Revision;lastRecovery=EditorApplication.timeSinceStartup;return true;
             }
             catch(Exception ex){message="Recovery checkpoint failed: "+ex.Message;return false;}
+        }
+        /// <summary>保存した選択範囲を戻す（履歴も版も増やさない）。読めなければ選択なしで開き、そのことを知らせる（文書は開ける）。</summary>
+        void RestoreSavedSelection(IReadOnlyDictionary<string,byte[]> files,List<string> notes)
+        {
+            if(!files.TryGetValue(SelectionBinary.EntryName,out var bytes))return;
+            try{document.RestoreSelection(SelectionBinary.Read(bytes,document));}
+            catch(InvalidDataException ex){notes.Add("The saved selection was not restored ("+ex.Message+"); nothing is selected, and saving will leave it out.");}
         }
         /// <summary>.ylp に保存する。上書きは開いた/保存した時点から外で変わっていないときだけで、直前の版は
         /// &lt;名前&gt;.ylp-backups~ に退避する（保持数は設定）。Assets の中のファイルなら保存後に取り込み直してテクスチャを更新する。</summary>
@@ -991,6 +1000,7 @@ namespace Yozolab.YoluPainter.Editor
                 files.Add(YlpContent.BrushName,System.Text.Encoding.UTF8.GetBytes(JsonUtility.ToJson(brush,true)));
                 if(importedOriginal!=null)files.Add(YlpContent.ImportedOriginalName,importedOriginal);
                 AddMeshMapFiles(files);
+                if(document.Selection!=null)files.Add(SelectionBinary.EntryName,SelectionBinary.Write(document.Selection));
                 var saved=YlpStore.Save(target,files,sameFile?projectToken:null,!sameFile,keep);
                 projectPath=saved.Path;projectToken=saved.Token;savedRevision=document.Revision;externalConflict=false;MeshMapsWereSaved();
                 message="Saved "+Path.GetFileName(saved.Path)+(saved.Backup!=null?"; the previous version is kept in "+Path.GetFileName(Path.GetDirectoryName(saved.Backup))+".":".");
@@ -1037,6 +1047,7 @@ namespace Yozolab.YoluPainter.Editor
                     if(loaded!=null){model=loaded;preview.Load(model);materialSlot=Mathf.Clamp(materialSlot,0,Mathf.Max(0,preview.MaterialSlotCount-1));}else if(!String.IsNullOrEmpty(state.modelAssetGuid))notes.Add("Model asset is unavailable; assign it explicitly.");
                 }
                 LoadMeshMapFiles(snapshot.Files,notes);
+                RestoreSavedSelection(snapshot.Files,notes);
                 message="Opened "+Path.GetFileName(path)+" (verified)"+(notes.Count>0?". "+String.Join(" ",notes):"");
             });
         }

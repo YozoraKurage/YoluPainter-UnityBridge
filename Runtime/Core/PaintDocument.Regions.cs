@@ -53,6 +53,15 @@ namespace Yozolab.YoluPainter.Core
             Execute(new DelegateCommand(() => selection = next, () => selection = old, 64 + (next == null ? 0 : next.AllocatedBytes)));
         }
         public void ClearSelection() { SetSelection(null); }
+        /// <summary>Puts back a selection read with the document (<see cref="Persistence.SelectionBinary"/>): no undo step and no new
+        /// revision, so the freshly opened file still counts as saved. Only before any history exists.</summary>
+        public void RestoreSelection(SelectionMask mask)
+        {
+            EnsureNoStroke();
+            if (CanUndo || CanRedo) throw new InvalidOperationException("A selection can only be restored right after the document is loaded.");
+            if (mask != null && (mask.Width != Width || mask.Height != Height || mask.TileSize != TileSize)) throw new ArgumentException("The selection must match the document size.", nameof(mask));
+            selection = mask == null || mask.IsEmpty ? null : mask;
+        }
 
         /// <summary>Fills a layer's channel with a colour where region (else the selection, else everything) allows, by
         /// opacity × the region's amount. Erase removes alpha instead. Returns false when no pixel changed.</summary>
