@@ -43,7 +43,8 @@ namespace Yozolab.YoluPainter.Core
             {
                 SparseTileSurface surface;
                 if (!layer.Visible || layer.Opacity <= 0 || !layer.IsChannelEnabled(channel) || !layer.TryGetChannel(channel, out surface)) continue;
-                result = Blend(result, surface.GetPixel(x, y), layer.Opacity, layer.BlendMode);
+                double maskFactor = layer.Mask == null ? 1 : layer.Mask.FactorAt(x, y);
+                result = Blend(result, surface.GetPixel(x, y), layer.Opacity * maskFactor, layer.BlendMode);
             }
             return result;
         }
@@ -75,12 +76,17 @@ namespace Yozolab.YoluPainter.Core
             int tile = document.TileSize, tileBytes = checked(tile * tile * 4);
             var buffers = new byte[surfaces.Count][]; var present = new bool[surfaces.Count];
             for (int i = 0; i < buffers.Length; i++) buffers[i] = new byte[tileBytes];
+            // Masks that can change a pixel. A neutral mask multiplies by exactly 1, so skipping it is exact.
+            var masks = new LayerMask[surfaces.Count]; var maskBuffers = new byte[surfaces.Count][];
+            for (int i = 0; i < masks.Length; i++)
+                if (layers[i].Mask != null && !layers[i].Mask.IsNeutral) { masks[i] = layers[i].Mask; maskBuffers[i] = new byte[tileBytes]; }
             for (int ty = y / tile; ty <= (y + height - 1) / tile; ty++)
                 for (int tx = x / tile; tx <= (x + width - 1) / tile; tx++)
                 {
                     var coord = new TileCoord(tx, ty); bool any = false;
                     for (int i = 0; i < surfaces.Count; i++) any |= present[i] = surfaces[i].CopyTile(coord, buffers[i]);
                     if (!any) continue; // region bytes are already transparent
+                    for (int i = 0; i < surfaces.Count; i++) if (present[i] && masks[i] != null) masks[i].Surface.CopyTile(coord, maskBuffers[i]);
                     int x0 = Math.Max(x, tx * tile), x1 = Math.Min(x + width, (tx + 1) * tile);
                     int y0 = Math.Max(y, ty * tile), y1 = Math.Min(y + height, (ty + 1) * tile);
                     for (int py = y0; py < y1; py++) for (int px = x0; px < x1; px++)
@@ -91,7 +97,8 @@ namespace Yozolab.YoluPainter.Core
                         {
                             if (!present[i]) continue;
                             var b = buffers[i];
-                            result = BlendUnchecked(result, new Rgba32(b[source], b[source + 1], b[source + 2], b[source + 3]), layers[i].Opacity, layers[i].BlendMode);
+                            double opacity = masks[i] == null ? layers[i].Opacity : layers[i].Opacity * masks[i].Factor(maskBuffers[i][source + 3]);
+                            result = BlendUnchecked(result, new Rgba32(b[source], b[source + 1], b[source + 2], b[source + 3]), opacity, layers[i].BlendMode);
                         }
                         int offset = ((py - y) * width + (px - x)) * 4;
                         bytes[offset] = result.R; bytes[offset + 1] = result.G; bytes[offset + 2] = result.B; bytes[offset + 3] = result.A;

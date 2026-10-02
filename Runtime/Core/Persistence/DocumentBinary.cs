@@ -5,10 +5,11 @@ using System.Linq;
 
 namespace Yozolab.YoluPainter.Core.Persistence
 {
-    /// <summary>Versioned, bounded, lossless native sparse source archive. No GPU cache is persisted.</summary>
+    /// <summary>Versioned, bounded, lossless native sparse source archive. No GPU cache is persisted.
+    /// Version 2 adds an optional raster mask block after each layer's channels; version 1 archives (no masks) still load.</summary>
     public static class DocumentBinary
     {
-        const int Version = 1;
+        const int Version = 2;
         const long MaxArchiveBytes = 512L * 1024 * 1024;
         static readonly byte[] Magic = Encoding.ASCII.GetBytes("DOTPAINT");
 
@@ -41,6 +42,12 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         }
                         long end = stream.Position; stream.Position = countPosition; writer.Write(count); stream.Position = end;
                     }
+                    writer.Write(layer.Mask != null);
+                    if (layer.Mask != null)
+                    {
+                        writer.Write(layer.Mask.Enabled); writer.Write(layer.Mask.Inverted); writer.Write(layer.Mask.Density);
+                        WriteTiles(writer, stream, layer.Mask.Surface);
+                    }
                 }
                 writer.Flush(); return stream.ToArray();
             }
@@ -55,7 +62,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 try
                 {
                     for (int i = 0; i < Magic.Length; i++) if (reader.ReadByte() != Magic[i]) throw new InvalidDataException("Not a dot paint archive.");
-                    if (reader.ReadInt32() != Version) throw new InvalidDataException("Unsupported archive version; source retained unchanged.");
+                    int version = reader.ReadInt32();
+                    if (version != 1 && version != Version) throw new InvalidDataException("Unsupported archive version; source retained unchanged.");
                     var id = new Guid(ReadExact(reader, 16));
                     int width = reader.ReadInt32(), height = reader.ReadInt32(), tileSize = reader.ReadInt32();
                     if (width < 1 || height < 1 || width > 4096 || height > 4096 || tileSize < 8 || tileSize > 512 || (tileSize & (tileSize - 1)) != 0)
@@ -90,11 +98,47 @@ namespace Yozolab.YoluPainter.Core.Persistence
                                 layer.GetChannel((PaintChannel)channelValue).ImportTile(coord, ReadExact(reader, length));
                             }
                         }
+                        if (version >= 2 && reader.ReadBoolean())
+                        {
+                            bool maskEnabled = reader.ReadBoolean(), maskInverted = reader.ReadBoolean(); double density = reader.ReadDouble();
+                            if (double.IsNaN(density) || double.IsInfinity(density) || density < 0 || density > 1) throw new InvalidDataException("Invalid mask density.");
+                            var mask = doc.AddLayerMask(layer.Id);
+                            doc.SetLayerMaskEnabled(layer.Id, maskEnabled); doc.SetLayerMaskInverted(layer.Id, maskInverted); doc.SetLayerMaskDensity(layer.Id, density);
+                            ReadTiles(reader, mask.Surface, width, height, tileSize, maskOnly: true);
+                        }
                     }
                     if (stream.Position != stream.Length) throw new InvalidDataException("Trailing native data requires a newer reader.");
                     doc.ClearHistory(); return doc;
                 }
                 catch (EndOfStreamException ex) { throw new InvalidDataException("Native archive is truncated.", ex); }
+            }
+        }
+        static void WriteTiles(BinaryWriter writer, Stream stream, SparseTileSurface surface)
+        {
+            long countPosition = stream.Position; writer.Write(0); int count = 0;
+            foreach (var tile in surface.EnumerateTiles())
+            {
+                writer.Write(tile.Coord.X); writer.Write(tile.Coord.Y);
+                writer.Write(tile.Bytes.Length); writer.Write(tile.Bytes); count++;
+                if (stream.Length > MaxArchiveBytes) throw new InvalidOperationException("Native archive exceeds the prototype's 512 MiB safety budget.");
+            }
+            long end = stream.Position; stream.Position = countPosition; writer.Write(count); stream.Position = end;
+        }
+        static void ReadTiles(BinaryReader reader, SparseTileSurface surface, int width, int height, int tileSize, bool maskOnly)
+        {
+            int columns = (width + tileSize - 1) / tileSize, rows = (height + tileSize - 1) / tileSize;
+            int tiles = ReadCount(reader, checked(columns * rows), "tiles");
+            var seen = new System.Collections.Generic.HashSet<TileCoord>();
+            for (int t = 0; t < tiles; t++)
+            {
+                int x = reader.ReadInt32(), y = reader.ReadInt32(), length = reader.ReadInt32();
+                var coord = new TileCoord(x, y);
+                if (x < 0 || y < 0 || x >= columns || y >= rows || !seen.Add(coord) || length != checked(tileSize * tileSize * 4))
+                    throw new InvalidDataException("Invalid or duplicate tile.");
+                byte[] bytes = ReadExact(reader, length);
+                // A mask stores only the hide amount in alpha. Colour bytes would be silently ignored, so refuse them.
+                if (maskOnly) for (int i = 0; i < bytes.Length; i += 4) if ((bytes[i] | bytes[i + 1] | bytes[i + 2]) != 0) throw new InvalidDataException("Mask tiles must keep RGB at zero.");
+                surface.ImportTile(coord, bytes);
             }
         }
         static int ReadCount(BinaryReader reader, int maximum, string label)

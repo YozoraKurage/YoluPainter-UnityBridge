@@ -195,6 +195,21 @@ namespace Yozolab.YoluPainter.Tests
             finally { Object.DestroyImmediate(source); Object.DestroyImmediate(material); }
         }
 
+        [Test] public void PaintingOnTheMaskHidesWithoutTouchingPixels()
+        {
+            BeginLine(300, 300); Mouse(window, EventType.MouseUp, At(window, 360, 300));
+            var layer = window.Document.Layers[0];
+            var colorTiles = layer.GetChannel(PaintChannel.Color).EnumerateTiles().Select(t => t.Bytes).ToArray();
+            Assert.That(window.Document.CompositePixel(PaintChannel.Color, 330, 300).A, Is.GreaterThan((byte)0));
+            window.Document.AddLayerMask(layer.Id); window.EditMask = true;
+            BeginLine(300, 300); Mouse(window, EventType.MouseUp, At(window, 360, 300));
+            Assert.That(layer.Mask.Surface.TileCount, Is.GreaterThan(0), window.StatusMessage);
+            Assert.That(layer.GetChannel(PaintChannel.Color).EnumerateTiles().Select(t => t.Bytes), Is.EqualTo(colorTiles), "mask strokes never change pixels");
+            Assert.That(window.Document.CompositePixel(PaintChannel.Color, 330, 300).A, Is.Zero, "the default brush hides fully");
+            Key(window, KeyCode.Z, EventModifiers.Control);
+            Assert.That(window.Document.CompositePixel(PaintChannel.Color, 330, 300).A, Is.GreaterThan((byte)0), "undo reveals again");
+        }
+
         [Test] public void WindowsKeepIndependentDocuments()
         {
             var other = Open();

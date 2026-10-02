@@ -34,7 +34,7 @@ namespace Yozolab.YoluPainter.Editor
         IsolatedModelPreview preview;
         string projectRoot, projectToken, recoveryToken, message = "G0/G1 prototype: CPU source brush, GPU compositor; no production validation yet";
         long renderedRevision = -1, savedRevision = -1, recoveredRevision = -1;
-        bool repaintPixels = true, surfaceStroke, externalConflict;
+        bool repaintPixels = true, surfaceStroke, externalConflict, editMask;
         Vector2 previousPointer, layerScroll, brushScroll, canvasPan;
         float canvasZoom = 1, previousPressure = 1;
         int materialSlot, resolution = 1024;
@@ -56,6 +56,8 @@ namespace Yozolab.YoluPainter.Editor
         internal bool IsSaved => document != null && document.Revision == savedRevision;
         internal bool HasExternalConflict => externalConflict;
         internal PaintChannel Channel { get => channel; set { channel = value; repaintPixels = true; } }
+        /// <summary>true のあいだ、ストロークは選択レイヤーの画素ではなくマスクに入る。</summary>
+        internal bool EditMask { get => editMask; set => editMask = value; }
         /// <summary>モーダルダイアログの差し替え口（テスト用）。</summary>
         internal IPainterDialogs Dialogs { get; set; } = EditorPainterDialogs.Instance;
         /// <summary>PaintAt の 2D 写像の逆。ピクセル中心 (x+0.5, y+0.5) の GUI 座標を返す。</summary>
@@ -136,7 +138,7 @@ namespace Yozolab.YoluPainter.Editor
             float centerWidth=position.width-455;
             canvasRect=new Rect(224,main.y+22,(centerWidth-12)*.5f,main.height-28);
             surfaceRect=new Rect(canvasRect.xMax+8,canvasRect.y,canvasRect.width,canvasRect.height);
-            GUI.Label(new Rect(canvasRect.x,main.y,canvasRect.width,20),"2D / "+channel+" (bottom-left UV origin)",EditorStyles.boldLabel);
+            GUI.Label(new Rect(canvasRect.x,main.y,canvasRect.width,20),"2D / "+channel+(EditingMask?" — painting MASK (erase = reveal)":" (bottom-left UV origin)"),EditorStyles.boldLabel);
             GUI.Label(new Rect(surfaceRect.x,main.y,surfaceRect.width,20),"3D / isolated static mesh",EditorStyles.boldLabel);
             DrawCanvas();
             if(Event.current.type==EventType.Repaint) preview.Render(surfaceRect);
@@ -230,9 +232,27 @@ namespace Yozolab.YoluPainter.Editor
                     using(new EditorGUI.DisabledScope(index>=document.Layers.Count-1)) if(GUILayout.Button("Up"))document.MoveLayer(active.Id,index+1);
                     using(new EditorGUI.DisabledScope(index<=0)) if(GUILayout.Button("Down"))document.MoveLayer(active.Id,index-1);
                     GUILayout.EndHorizontal();
+                    DrawMask(active);
                 }
             }
             GUILayout.EndArea();
+        }
+        bool EditingMask => editMask && document.Layers.Any(l => l.Id == selectedLayer && l.Mask != null);
+        void DrawMask(PaintLayer active)
+        {
+            GUILayout.Space(6);
+            GUILayout.Label("Mask (shared by all channels)",EditorStyles.miniBoldLabel);
+            var mask=active.Mask;
+            if(mask==null)
+            {
+                if(GUILayout.Button("Add mask")){document.AddLayerMask(active.Id);editMask=true;}
+                return;
+            }
+            editMask=GUILayout.Toggle(editMask,"Paint on mask (paint hides, erase reveals)");
+            bool maskEnabled=EditorGUILayout.Toggle("Mask enabled",mask.Enabled);if(maskEnabled!=mask.Enabled)document.SetLayerMaskEnabled(active.Id,maskEnabled);
+            bool inverted=EditorGUILayout.Toggle("Invert mask",mask.Inverted);if(inverted!=mask.Inverted)document.SetLayerMaskInverted(active.Id,inverted);
+            float density=EditorGUILayout.Slider("Mask density",(float)mask.Density,0,1);if(Math.Abs(density-mask.Density)>.00001)document.SetLayerMaskDensity(active.Id,density);
+            if(GUILayout.Button("Remove mask")){document.RemoveLayerMask(active.Id);editMask=false;}
         }
         Rect ImageRect()
         {
@@ -262,8 +282,12 @@ namespace Yozolab.YoluPainter.Editor
                 if(surfaceStroke && !preview.CanPaint){message="This preview snapshot is not safe to paint. See its load diagnostics.";return;}
                 TryAction(()=>
                 {
-                    if(!document.GetLayer(selectedLayer).IsChannelEnabled(channel)) document.SetChannelEnabled(selectedLayer,channel,true);
-                    stroke=document.BeginStroke(selectedLayer,channel,GetBrush());
+                    if(EditingMask) stroke=document.BeginMaskStroke(selectedLayer,GetBrush());
+                    else
+                    {
+                        if(!document.GetLayer(selectedLayer).IsChannelEnabled(channel)) document.SetChannelEnabled(selectedLayer,channel,true);
+                        stroke=document.BeginStroke(selectedLayer,channel,GetBrush());
+                    }
                     previousPointer=e.mousePosition; previousPressure=Pressure(e);
                     PaintAt(e.mousePosition,previousPressure); GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive);
                 });

@@ -17,6 +17,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             {
                 var layer = source.Layers[i];
                 if (layer.BlendMode != LayerBlendMode.Normal) throw new InvalidOperationException("PSD projection currently supports Normal layers only. Native project can still be saved losslessly.");
+                if (layer.Mask != null && !layer.Mask.IsNeutral) throw new InvalidOperationException("PSD projection does not write layer masks yet, and flattening the mask into the pixels would lose it. Native project can still be saved losslessly.");
                 int left = source.Width, bottom = source.Height, right = 0, top = 0;
                 SparseTileSurface surface;
                 if (layer.TryGetChannel(channel, out surface))

@@ -4,6 +4,28 @@ using System.Collections.ObjectModel;
 
 namespace Yozolab.YoluPainter.Core
 {
+    /// <summary>Raster mask of one layer, shared by all of its channels. The surface stores the amount to HIDE in each
+    /// pixel's alpha (RGB stays zero), so an absent tile reveals everything and an untouched mask costs no memory.
+    /// Painting hides, erasing reveals. Enabled, Inverted and Density are non-destructive parameters.</summary>
+    public sealed class LayerMask
+    {
+        public SparseTileSurface Surface { get; private set; }
+        public bool Enabled { get; internal set; }
+        public bool Inverted { get; internal set; }
+        public double Density { get; internal set; }
+        internal LayerMask(SparseTileSurface surface) { Surface = surface; Enabled = true; Density = 1; }
+        /// <summary>Multiplier applied to the layer's source alpha for a stored hide amount (0..255).</summary>
+        public double Factor(byte hide)
+        {
+            if (!Enabled) return 1;
+            double h = hide / 255.0;
+            return Inverted ? 1 - Density * (1 - h) : 1 - Density * h;
+        }
+        public double FactorAt(int x, int y) { return Factor(Surface.GetPixel(x, y).A); }
+        /// <summary>True when the mask cannot change any pixel: disabled, zero density, or nothing hidden and not inverted.</summary>
+        public bool IsNeutral { get { return !Enabled || Density == 0 || (!Inverted && Surface.TileCount == 0); } }
+    }
+
     public sealed class PaintLayer
     {
         private readonly PaintDocument document;
@@ -15,11 +37,16 @@ namespace Yozolab.YoluPainter.Core
         public double Opacity { get; internal set; }
         public LayerBlendMode BlendMode { get; internal set; }
         public IReadOnlyDictionary<PaintChannel, SparseTileSurface> Channels { get; private set; }
+        /// <summary>The layer's raster mask, or null when it has none.</summary>
+        public LayerMask Mask { get; internal set; }
         public IReadOnlyList<PaintChannel> EnabledChannels
         {
             get { var values = new List<PaintChannel>(enabled); values.Sort(); return values.AsReadOnly(); }
         }
-        public long AllocatedBytes { get { long bytes = 0; foreach (var s in channels.Values) bytes += s.AllocatedBytes; return bytes; } }
+        public long AllocatedBytes
+        {
+            get { long bytes = Mask == null ? 0 : Mask.Surface.AllocatedBytes; foreach (var s in channels.Values) bytes += s.AllocatedBytes; return bytes; }
+        }
         internal PaintLayer(PaintDocument owner, string name, Guid id)
         {
             document = owner; Name = name; Id = id; Visible = true; Opacity = 1;
@@ -174,6 +201,59 @@ namespace Yozolab.YoluPainter.Core
             bool old = layer.IsChannelEnabled(channel); if (old == enabled) return;
             Execute(LayerScoped(layer, channel, () => layer.Enable(channel, enabled), () => layer.Enable(channel, old), 64));
         }
+        /// <summary>Adds an empty raster mask (reveals everything) to a layer. Undoable.</summary>
+        public LayerMask AddLayerMask(Guid id)
+        {
+            EnsureNoStroke(); var layer = GetLayer(id);
+            if (layer.Mask != null) throw new InvalidOperationException("The layer already has a mask.");
+            var surface = new SparseTileSurface(Width, Height, TileSize);
+            surface.BeforeExternalMutation = BeforeExternalMutation;
+            surface.AfterExternalMutation = AfterExternalMutation;
+            surface.BeforeSourceGrowth = EnsureSourceGrowth;
+            surface.TileChanged = coord => MarkMaskTileChanged(layer, coord);
+            var mask = new LayerMask(surface);
+            Execute(LayerScoped(layer, null, () => layer.Mask = mask, () => layer.Mask = null, 64));
+            return mask;
+        }
+        /// <summary>Removes a layer's mask. Undo restores the same mask, pixels and parameters.</summary>
+        public void RemoveLayerMask(Guid id)
+        {
+            EnsureNoStroke(); var layer = GetLayer(id); var mask = layer.Mask;
+            if (mask == null) throw new InvalidOperationException("The layer has no mask.");
+            Execute(LayerScoped(layer, null, () => layer.Mask = null, () => { EnsureSourceGrowth(mask.Surface.AllocatedBytes); layer.Mask = mask; }, 64 + mask.Surface.AllocatedBytes));
+        }
+        public void SetLayerMaskEnabled(Guid id, bool enabled)
+        {
+            EnsureNoStroke(); var mask = RequireMask(id, out var layer); bool old = mask.Enabled; if (old == enabled) return;
+            Execute(LayerScoped(layer, null, () => mask.Enabled = enabled, () => mask.Enabled = old, 64));
+        }
+        public void SetLayerMaskInverted(Guid id, bool inverted)
+        {
+            EnsureNoStroke(); var mask = RequireMask(id, out var layer); bool old = mask.Inverted; if (old == inverted) return;
+            Execute(LayerScoped(layer, null, () => mask.Inverted = inverted, () => mask.Inverted = old, 64));
+        }
+        public void SetLayerMaskDensity(Guid id, double density)
+        {
+            EnsureNoStroke(); MathUtil.RequireFinite(density, nameof(density));
+            if (density < 0 || density > 1) throw new ArgumentOutOfRangeException(nameof(density));
+            var mask = RequireMask(id, out var layer); double old = mask.Density; if (old == density) return;
+            Execute(LayerScoped(layer, null, () => mask.Density = density, () => mask.Density = old, 64));
+        }
+        /// <summary>Starts a stroke on a layer's mask: painting hides, Erase reveals. The brush colour is ignored
+        /// (the mask stores only a hide amount); opacity, flow, hardness and pressure apply as usual.</summary>
+        public BrushStroke BeginMaskStroke(Guid layerId, BrushSettings settings)
+        {
+            EnsureNoStroke(); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
+            var mask = RequireMask(layerId, out _);
+            var maskSettings = settings.Clone(); maskSettings.Color = new Rgba32(0, 0, 0, 255);
+            activeStroke = new BrushStroke(this, mask.Surface, maskSettings); return activeStroke;
+        }
+        private LayerMask RequireMask(Guid id, out PaintLayer layer)
+        {
+            layer = GetLayer(id);
+            if (layer.Mask == null) throw new InvalidOperationException("The layer has no mask.");
+            return layer.Mask;
+        }
         public BrushStroke BeginStroke(Guid layerId, PaintChannel channel, BrushSettings settings)
         {
             EnsureNoStroke(); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
@@ -223,6 +303,9 @@ namespace Yozolab.YoluPainter.Core
             if (!tileSerials.TryGetValue(channel, out serials)) tileSerials.Add(channel, serials = new Dictionary<TileCoord, long>());
             serials[coord] = ++changeSerial;
         }
+        /// <summary>A mask tile can change the composite of every channel the layer has.</summary>
+        internal void MarkMaskTileChanged(PaintLayer layer, TileCoord coord)
+        { foreach (var channel in layer.Channels.Keys) MarkTileChanged(channel, coord); }
         /// <summary>Marks every tile the layer holds (in one channel, or all when channel is null) as changed.</summary>
         private void MarkLayerChanged(PaintLayer layer, PaintChannel? channel)
         {

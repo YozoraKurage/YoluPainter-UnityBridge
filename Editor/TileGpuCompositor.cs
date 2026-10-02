@@ -13,7 +13,7 @@ namespace Yozolab.YoluPainter.Editor
     internal sealed class TileGpuCompositor : IDisposable
     {
         Material material;
-        Texture2D upload, cpuFallback;
+        Texture2D upload, uploadMask, cpuFallback;
         RenderTexture ping, pong, composite;
         byte[] cpuPixels;
         readonly HashSet<TileCoord> previous = new HashSet<TileCoord>();
@@ -22,7 +22,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>Tiles recomposited by the last Update, for diagnostics and tests.</summary>
         public int LastUpdatedTileCount { get; private set; }
         int width, height, tileSize;
-        byte[] uploadPixels;
+        byte[] uploadPixels, maskPixels;
         PaintDocument lastDocument;
         PaintChannel lastChannel;
         long lastSerial = -1;
@@ -83,6 +83,15 @@ namespace Yozolab.YoluPainter.Editor
                 if (!surface.CopyTile(coord, uploadPixels)) continue;
                 upload.LoadRawTextureData(uploadPixels); upload.Apply(false, false);
                 material.SetTexture("_LayerTex", upload); material.SetFloat("_Opacity", (float)layer.Opacity); material.SetInt("_BlendMode", (int)layer.BlendMode);
+                var mask = layer.Mask;
+                if (mask != null && !mask.IsNeutral)
+                {
+                    mask.Surface.CopyTile(coord, maskPixels); // absent tile = nothing hidden (zeros)
+                    uploadMask.LoadRawTextureData(maskPixels); uploadMask.Apply(false, false);
+                    material.SetTexture("_MaskTex", uploadMask);
+                    material.SetVector("_Mask", new Vector4(1, mask.Inverted ? 1 : 0, (float)mask.Density, 0));
+                }
+                else material.SetVector("_Mask", Vector4.zero);
                 Graphics.Blit(ping, pong, material, 0);
                 var swap = ping; ping = pong; pong = swap;
             }
@@ -129,9 +138,10 @@ namespace Yozolab.YoluPainter.Editor
             {
                 try
                 {
-                    uploadPixels = new byte[tileSize*tileSize*4];
+                    uploadPixels = new byte[tileSize*tileSize*4]; maskPixels = new byte[tileSize*tileSize*4];
                     material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
                     upload = new Texture2D(tileSize, tileSize, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point };
+                    uploadMask = new Texture2D(tileSize, tileSize, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point };
                     ping = MakeRt(tileSize, tileSize, FilterMode.Point); pong = MakeRt(tileSize, tileSize, FilterMode.Point); composite = MakeRt(width, height, FilterMode.Bilinear); Clear(composite);
                     Backend = "CPU source brush / GPU tiled compositor (encoded-space prototype" + (useCopyTexture ? ")" : ", draw copy)"); return;
                 }
@@ -153,8 +163,9 @@ namespace Yozolab.YoluPainter.Editor
             foreach (var rt in new[]{ping,pong,composite}) if (rt != null) { rt.Release(); UnityEngine.Object.DestroyImmediate(rt); }
             if (material != null) UnityEngine.Object.DestroyImmediate(material);
             if (upload != null) UnityEngine.Object.DestroyImmediate(upload);
+            if (uploadMask != null) UnityEngine.Object.DestroyImmediate(uploadMask);
             if (cpuFallback != null) UnityEngine.Object.DestroyImmediate(cpuFallback);
-            uploadPixels=null; cpuPixels=null; material = null; upload = null; cpuFallback = null; ping = pong = composite = null; previous.Clear();
+            uploadPixels=null; maskPixels=null; cpuPixels=null; material = null; upload = null; uploadMask = null; cpuFallback = null; ping = pong = composite = null; previous.Clear();
             lastDocument = null; lastSerial = -1;
         }
     }

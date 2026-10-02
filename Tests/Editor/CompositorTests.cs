@@ -33,6 +33,10 @@ namespace Yozolab.YoluPainter.Tests
             doc.SetLayerBlendMode(b.Id, LayerBlendMode.Multiply); Step("blend change", 4);
             doc.SetLayerOpacity(a.Id, .3); Step("opacity change", 4);
             doc.SetLayerVisibility(b.Id, false); Step("hide", 4);
+            doc.AddLayerMask(a.Id); Step("add mask", 4);
+            using (var s = doc.BeginMaskStroke(a.Id, brush)) { s.Add(new BrushSample(10, 8)); s.Add(new BrushSample(14, 8)); s.Commit(); }
+            Step("mask stroke", 2);
+            doc.SetLayerMaskInverted(a.Id, true); doc.SetLayerMaskDensity(a.Id, .6); Step("invert and density", 4);
             using (var s = doc.BeginStroke(a.Id, PaintChannel.Color, brush)) { s.Add(new BrushSample(40, 24)); Step("mid-stroke preview", 2); s.Cancel(); }
             Step("after cancel", 2);
             compositor.Update(doc, PaintChannel.Roughness); assertMatches(doc.Composite(PaintChannel.Roughness), read(), "channel switch");
