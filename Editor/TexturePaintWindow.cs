@@ -208,6 +208,7 @@ namespace Yozolab.YoluPainter.Editor
             if(GUILayout.Button("Save As",EditorStyles.toolbarButton,GUILayout.Width(55))) SaveProject(true);
             if(GUILayout.Button("Import PSD",EditorStyles.toolbarButton,GUILayout.Width(78))) ImportPsd();
             if(GUILayout.Button(new GUIContent("Export Images","Write every channel in use as PNG into a folder"),EditorStyles.toolbarButton,GUILayout.Width(90))) ExportImages();
+            if(GUILayout.Button(new GUIContent("lilToon…","Write lilToon-ready textures and assign them to this slot's lilToon material (asks first)"),EditorStyles.toolbarButton,GUILayout.Width(62))) TryAction(AssignToLilToon);
             if(GUILayout.Button(new GUIContent("Export PNG","Write the selected channel as one PNG"),EditorStyles.toolbarButton,GUILayout.Width(78))) ExportPng();
             if(GUILayout.Button("Export PSD",EditorStyles.toolbarButton,GUILayout.Width(78))) ExportPsd();
             GUILayout.Space(8);

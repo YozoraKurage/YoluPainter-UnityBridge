@@ -30,6 +30,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         readonly List<Mesh> meshes = new List<Mesh>();
         readonly List<Material> materials = new List<Material>();
         readonly List<Texture> sourceTextures = new List<Texture>();
+        // スロットごとの元のマテリアル（参照だけ。プレビューは複製を描き、元には触れない）。デモキューブは null
+        readonly List<Material> sourceMaterials = new List<Material>();
         readonly List<Color> sourceColors = new List<Color>();
         readonly List<string> slotNames = new List<string>();
         PreviewRenderUtility preview;
@@ -47,6 +49,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public float CameraDistance => distance;
         public int SnapshotRevision => revision;
         public int MaterialSlotCount => materials.Count;
+        /// <summary>スロットの元のマテリアル（読み込んだモデルの Renderer のもの）。デモキューブや範囲外は null。</summary>
+        public Material SourceMaterial(int slot) => slot >= 0 && slot < sourceMaterials.Count ? sourceMaterials[slot] : null;
         public IReadOnlyList<string> MaterialSlotNames => slotNames;
         public IReadOnlyList<string> Diagnostics => report.Diagnostics;
         public SurfaceBrushBudget BrushBudget { get; } = new SurfaceBrushBudget();
@@ -155,7 +159,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                         material.SetTextureScale("_MainTex", Vector2.one); material.SetTextureOffset("_MainTex", Vector2.zero);
                         material.SetColor("_Color", color); material.SetFloat("_PreviewLit", LitPreview ? 1 : 0);
                         int slot = materials.Count;
-                        materials.Add(material); sourceTextures.Add(texture); sourceColors.Add(color);
+                        materials.Add(material); sourceTextures.Add(texture); sourceColors.Add(color); sourceMaterials.Add(original);
                         slotNames.Add(renderer.name + " / " + sub + " / " + (original != null ? original.name : "Unassigned"));
                         clonedMaterials[sub] = material;
                         var indices = mesh.GetTriangles(sub);
@@ -185,6 +189,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                     triangles.RemoveRange(firstTriangle, triangles.Count - firstTriangle);
                     DestroyTail(objects, firstObject); DestroyTail(meshes, firstMesh); DestroyTail(materials, firstSlot);
                     sourceTextures.RemoveRange(firstSlot, sourceTextures.Count - firstSlot);
+                    sourceMaterials.RemoveRange(firstSlot, sourceMaterials.Count - firstSlot);
                     sourceColors.RemoveRange(firstSlot, sourceColors.Count - firstSlot);
                     slotNames.RemoveRange(firstSlot, slotNames.Count - firstSlot);
                     report.Diagnostics.Add(renderer.name + ": could not build safe mesh snapshot: " + exception.Message);
@@ -228,7 +233,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 var mesh = new Mesh { name = "Texture painter UV seam demo", hideFlags = HideFlags.HideAndDontSave };
                 meshes.Add(mesh); mesh.SetVertices(vertices); mesh.SetUVs(0, uvs); mesh.SetTriangles(indices, 0); mesh.RecalculateNormals(); mesh.RecalculateBounds();
                 var material = new Material(shader) { name = "Seam demo (preview only)", hideFlags = HideFlags.HideAndDontSave };
-                materials.Add(material); sourceTextures.Add(null); sourceColors.Add(Color.white); slotNames.Add("Seam cube / 0 / Neutral");
+                materials.Add(material); sourceTextures.Add(null); sourceColors.Add(Color.white); sourceMaterials.Add(null); slotNames.Add("Seam cube / 0 / Neutral");
                 var go = new GameObject("Texture painter seam cube (preview only)") { hideFlags = HideFlags.HideAndDontSave };
                 objects.Add(go); preview.AddSingleGO(go);
                 go.AddComponent<MeshFilter>().sharedMesh = mesh;
@@ -402,7 +407,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         {
             CancelNavigation(); geometry = null;
             DestroyTail(objects, 0); DestroyTail(meshes, 0); DestroyTail(materials, 0);
-            sourceTextures.Clear(); sourceColors.Clear(); slotNames.Clear();
+            sourceTextures.Clear(); sourceColors.Clear(); sourceMaterials.Clear(); slotNames.Clear();
         }
         static void DestroyTail<T>(List<T> items, int start) where T : Object
         {
