@@ -190,11 +190,11 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(psd.Mode, Is.EqualTo(PsdCompatibilityMode.EditableRaster));
             Assert.That(PsdBridge.Import(psd).Composite(PaintChannel.Color), Is.EqualTo(window.Document.Composite(PaintChannel.Color)));
 
-            // Fill レイヤーは PSD では表せない。平らにせず、保存先も尋ねずに理由を示す（描画モードなどの対応範囲は PSD のテストが受け持つ）
-            window.Document.AddFillLayer("Fill", new System.Collections.Generic.Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(1, 2, 3) } });
+            // 半透明の Fill レイヤーは PSD では表せない。平らにせず、保存先も尋ねずに理由を示す（不透明な Fill や描画モードなどの対応範囲は PSD のテストが受け持つ）
+            window.Document.AddFillLayer("Fill", new System.Collections.Generic.Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(1, 2, 3, 128) } });
             fake.File = NewTempPath(".psd"); fake.Asked.Clear();
             window.ExportPsd();
-            Assert.That(fake.Asked, Is.EqualTo(new[] { "Inform: PSD export unavailable" }), "a fill layer is not flattened, and no file is asked for");
+            Assert.That(fake.Asked, Is.EqualTo(new[] { "Inform: PSD export unavailable" }), "a translucent fill layer is not flattened, and no file is asked for");
             Assert.That(System.IO.File.Exists(fake.File), Is.False);
             // .ylp はそのまま保存でき、開き直しても同じ
             fake.File = NewYlpPath();

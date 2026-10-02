@@ -15,10 +15,11 @@ namespace Yozolab.YoluPainter.Editor
     public sealed partial class TexturePaintWindow : EditorWindow
     {
         /// <summary>ウィンドウのブラシ設定。brush.json とブラシプリセットのファイルにそのまま JSON で書く。
-        /// schema 2 で筆先・ゆらぎ・紙の質感を足した（schema 1 のファイルも読める。足した項目は既定値になる）。</summary>
-        [Serializable] internal sealed class BrushState
+        /// schema 2 で筆先・ゆらぎ・紙の質感を、schema 3 でダイナミクス（TexturePaintWindow.BrushDynamics.cs）を足した
+        /// （古い schema のファイルも読める。足した項目は既定値になる）。</summary>
+        [Serializable] internal sealed partial class BrushState
         {
-            public int schema = 2;
+            public int schema = 3;
             public string presetId = "", presetName = "Custom";
             public float radius = 16, hardness = .8f, spacing = .15f, opacity = 1, flow = 1;
             public Color color = new Color(.2f,.6f,1,1);
@@ -324,10 +325,11 @@ namespace Yozolab.YoluPainter.Editor
                         brush.textureDepth=EditorGUILayout.Slider("Texture depth",brush.textureDepth,0,1);
                         brush.textureScale=EditorGUILayout.Slider("Texture scale",brush.textureScale,.05f,16);
                     }
+                    DrawBrushDynamics();
                 }
                 if(GUILayout.Button("Save brush preset")) SavePreset();
                 if(GUILayout.Button("Load brush preset")) LoadPreset();
-                if(GUILayout.Button(new GUIContent("Import brushes…","Photoshop .abr, GIMP .gbr / .gih / .vbr, or a PNG tip (dark = paint). Stored in this project's UserSettings."))) ImportBrushes();
+                if(GUILayout.Button(new GUIContent("Import brushes…","Photoshop .abr / .pat (patterns as textures), GIMP .gbr / .gih / .vbr, or a PNG tip (dark = paint). Stored in this project's UserSettings."))) ImportBrushes();
                 if(BrushLibrary.IsLibraryPreset(brush.presetId)&&GUILayout.Button("Delete imported brush")) DeleteImportedBrush();
             }
             DrawNormalPanel();
@@ -407,6 +409,7 @@ namespace Yozolab.YoluPainter.Editor
                     if(active.Kind==LayerKind.Fill) DrawFill(active);
                     if(active.Kind==LayerKind.Adjustment) DrawAdjustment(active);
                     DrawMask(active);
+                    DrawFilters(active);
                 }
             }
             GUILayout.EndArea();
@@ -877,11 +880,14 @@ namespace Yozolab.YoluPainter.Editor
         static BrushState ReadBrushState(string json)
         {
             var b=JsonUtility.FromJson<BrushState>(json);
-            if(b==null||b.schema<1||b.schema>2||b.pressureCurve==null)throw new InvalidDataException("Unsupported brush settings");
+            if(b==null||b.schema<1||b.schema>3||b.pressureCurve==null)throw new InvalidDataException("Unsupported brush settings");
             if(b.schema<2){b.roundness=1;b.textureScale=1;b.count=1;b.randomSeedPerStroke=true;b.schema=2;}
+            UpgradeBrushState(b);
             return b;
         }
-        internal BrushSettings GetBrush() { var s = NewBrushSettings(); BrushTips.Apply(s, brush.tipId); return s; }
+        internal BrushSettings GetBrush() { var s = NewBrushSettings(); BrushTips.Apply(s, brush.tipId);
+            ApplyBrushDynamics(s);
+            return s; }
         BrushSettings NewBrushSettings() => new BrushSettings { Radius=brush.radius, Hardness=brush.hardness, Spacing=brush.spacing, Opacity=brush.opacity, Flow=brush.flow,
             Color=new Rgba32((byte)Mathf.RoundToInt(brush.color.r*255),(byte)Mathf.RoundToInt(brush.color.g*255),(byte)Mathf.RoundToInt(brush.color.b*255),(byte)Mathf.RoundToInt(brush.color.a*255)),
             PressureSize=brush.pressureSize,PressureOpacity=brush.pressureOpacity,PressureFlow=brush.pressureFlow,Erase=brush.erase,
@@ -893,12 +899,14 @@ namespace Yozolab.YoluPainter.Editor
         internal void ApplyPreset(Core.BrushPreset preset)
         {
             var s=preset.CreateSettings(); var color=brush.color; var curve=brush.pressureCurve; var assist=(brush.stabilizer,brush.taperIn,brush.taperOut);
+            var secondary=brush.secondaryColor;
             brush=new BrushState{ presetId=preset.Id, presetName=preset.Name, radius=(float)s.Radius, hardness=(float)s.Hardness, spacing=(float)s.Spacing, opacity=(float)s.Opacity, flow=(float)s.Flow,
                 color=color, pressureCurve=curve, pressureSize=s.PressureSize, pressureOpacity=s.PressureOpacity, pressureFlow=s.PressureFlow, erase=s.Erase,
                 tipId=BrushTips.IdOf(s), textureId=BrushTips.IdOf(s.Texture), angle=(float)s.Angle, roundness=(float)s.Roundness, followDirection=s.FollowDirection,
                 sizeJitter=(float)s.SizeJitter, angleJitter=(float)s.AngleJitter, roundnessJitter=(float)s.RoundnessJitter, opacityJitter=(float)s.OpacityJitter, flowJitter=(float)s.FlowJitter,
                 scatter=(float)s.Scatter, count=s.Count, textureDepth=(float)s.TextureDepth, textureScale=(float)s.TextureScale,
                 stabilizer=assist.Item1, taperIn=assist.Item2, taperOut=assist.Item3 }; // 補正と入り抜きは描き手の設定として残す
+            CopyPresetDynamics(s,secondary);
         }
         void PaintAt(Vector2 pointer,float pressure)
         {
@@ -915,7 +923,7 @@ namespace Yozolab.YoluPainter.Editor
             else
             {
                 var image=ImageRect();
-                stroke.Add(new BrushSample((pointer.x-image.x)/image.width*document.Width,(1-(pointer.y-image.y)/image.height)*document.Height,pressure,EditorApplication.timeSinceStartup));
+                stroke.Add(PenSample((pointer.x-image.x)/image.width*document.Width,(1-(pointer.y-image.y)/image.height)*document.Height,pressure));
             }
             repaintPixels=true;
         }

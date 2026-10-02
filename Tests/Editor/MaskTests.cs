@@ -166,8 +166,8 @@ namespace Yozolab.YoluPainter.Tests
         {
             var doc = FullRedLayer(out var layer); doc.AddLayerMask(layer); MaskPixel(doc, layer, 0, 0);
             var bytes = DocumentBinary.Write(doc);
-            // マスクのタイルはアーカイブの末尾（版 8 からはその後にパスの有無の 1 バイト）にある。その最初の画素の R を 0 以外にする。
-            int maskTileStart = bytes.Length - 1 - 8 * 8 * 4;
+            // マスクのタイルはアーカイブの末尾（版 8 からはその後にパスの有無の 1 バイト、版 9 からはさらにフィルターの有無の 1 バイト）にある。その最初の画素の R を 0 以外にする。
+            int maskTileStart = bytes.Length - 2 - 8 * 8 * 4;
             Assert.That(bytes[maskTileStart + 3], Is.EqualTo(255)); bytes[maskTileStart] = 1;
             Assert.Throws<InvalidDataException>(() => DocumentBinary.Read(bytes));
         }

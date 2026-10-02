@@ -21,9 +21,10 @@ namespace Yozolab.YoluPainter.Core
             double h = hide / 255.0;
             return Inverted ? 1 - Density * (1 - h) : 1 - Density * h;
         }
-        public double FactorAt(int x, int y) { return Factor(Surface.GetPixel(x, y).A); }
-        /// <summary>True when the mask cannot change any pixel: disabled, zero density, or nothing hidden and not inverted.</summary>
-        public bool IsNeutral { get { return !Enabled || Density == 0 || (!Inverted && Surface.TileCount == 0); } }
+        public double FactorAt(int x, int y) { return Factor(OutputHideAt(x, y)); }
+        /// <summary>True when the mask cannot change any pixel: disabled, zero density, or nothing hidden, not inverted and no active
+        /// mask filter (an inverting or noise filter can hide pixels of an empty mask).</summary>
+        public bool IsNeutral { get { return !Enabled || Density == 0 || (!Inverted && Surface.TileCount == 0 && !HasActiveFilters); } }
     }
 
     /// <summary>Raster layers own pixels. Fill layers own one value per channel and generate their tiles on demand
@@ -92,7 +93,7 @@ namespace Yozolab.YoluPainter.Core
                 surface.BeforeExternalMutation = document.BeforeExternalMutation;
                 surface.AfterExternalMutation = document.AfterExternalMutation;
                 surface.BeforeSourceGrowth = document.EnsureSourceGrowth;
-                surface.TileChanged = coord => document.MarkTileChanged(channel, coord);
+                surface.TileChanged = coord => document.MarkSourceTileChanged(this, channel, coord);
                 channels.Add(channel, surface); enabled.Add(channel);
             }
             return surface;
@@ -163,13 +164,13 @@ namespace Yozolab.YoluPainter.Core
             { int i = (y * tile + x) * 4; destination[i] = fill.R; destination[i + 1] = fill.G; destination[i + 2] = fill.B; destination[i + 3] = fill.A; }
             return true;
         }
-        /// <summary>Tiles where the layer may have pixels in the channel: a raster surface's occupied tiles, or every
-        /// canvas tile for a fill value.</summary>
+        /// <summary>Tiles where the layer may have pixels in the channel: a raster surface's occupied tiles (grown by the reach
+        /// of its active blurs), or every canvas tile for a fill value.</summary>
         public IEnumerable<TileCoord> EnumerateContentTiles(PaintChannel channel)
         {
             if (Kind == LayerKind.Group) return new TileCoord[0];
             if (Kind == LayerKind.Raster)
-                return channels.TryGetValue(channel, out var surface) ? surface.EnumerateTileCoordinates() : new TileCoord[0];
+                return channels.TryGetValue(channel, out var surface) ? OutputContentTiles(surface, channel) : new TileCoord[0];
             return HasContent(channel) ? document.EnumerateCanvasTiles() : new TileCoord[0];
         }
         internal static void ValidateChannel(PaintChannel channel)
@@ -570,7 +571,7 @@ namespace Yozolab.YoluPainter.Core
             surface.AfterExternalMutation = AfterExternalMutation;
             surface.BeforeSourceGrowth = EnsureSourceGrowth;
             surface.TileChanged = coord => MarkMaskTileChanged(layer, coord);
-            var mask = new RasterMask(surface);
+            var mask = new RasterMask(surface) { Owner = layer };
             Execute(LayerScoped(layer, null, () => layer.Mask = mask, () => layer.Mask = null, 64));
             return mask;
         }
@@ -659,6 +660,7 @@ namespace Yozolab.YoluPainter.Core
             Dictionary<TileCoord, long> serials;
             if (tileSerials.TryGetValue(channel, out serials))
                 foreach (var entry in serials) if (entry.Value > since) changed.Add(entry.Key);
+            AddFilterInfluence(channel, since, changed);
             return true;
         }
         internal void MarkTileChanged(PaintChannel channel, TileCoord coord)
@@ -669,7 +671,7 @@ namespace Yozolab.YoluPainter.Core
         }
         /// <summary>A mask tile can change the composite of every channel the layer has.</summary>
         internal void MarkMaskTileChanged(PaintLayer layer, TileCoord coord)
-        { foreach (var channel in layer.CoveredChannels) MarkTileChanged(channel, coord); }
+        { foreach (var channel in layer.CoveredChannels) MarkTileChanged(channel, coord); RecordMaskHalo(layer, coord); }
         /// <summary>Marks every tile the layer holds (in one channel, or all when channel is null) as changed.</summary>
         private void MarkLayerChanged(PaintLayer layer, PaintChannel? channel)
         {
@@ -678,7 +680,7 @@ namespace Yozolab.YoluPainter.Core
                 // グループ自身は画素を持たない。中身のどれかが関わるタイルだけが変わり得る。
                 foreach (var l in layers) if (IsDescendant(l, layer)) MarkLayerChanged(l, channel);
                 if (layer.Mask != null) foreach (var target in channel.HasValue ? new[] { channel.Value } : (PaintChannel[])Enum.GetValues(typeof(PaintChannel)))
-                        foreach (var coord in layer.Mask.Surface.EnumerateTileCoordinates()) MarkTileChanged(target, coord);
+                        foreach (var coord in MaskMarkTiles(layer.Mask)) MarkTileChanged(target, coord);
                 return;
             }
             if (layer.Kind != LayerKind.Raster)
@@ -691,7 +693,7 @@ namespace Yozolab.YoluPainter.Core
             }
             foreach (var entry in layer.Channels)
                 if (channel == null || entry.Key == channel.Value)
-                    foreach (var coord in entry.Value.EnumerateTileCoordinates()) MarkTileChanged(entry.Key, coord);
+                    foreach (var coord in layer.EnumerateContentTiles(entry.Key)) MarkTileChanged(entry.Key, coord);
         }
         /// <summary>A history command whose apply and revert change how one layer composites, but not its pixels.
         /// Clipped layers are re-marked too: moving, hiding, adding or removing a layer can change which base a clipped layer

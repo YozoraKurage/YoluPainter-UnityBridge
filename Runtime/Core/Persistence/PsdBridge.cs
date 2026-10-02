@@ -7,8 +7,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// <summary>Native document ⇔ PSD DTO. Raster layers, groups (nested to the codec's depth budget), solid colour fill layers
     /// (opaque values, as SoCo) and Invert / Levels / Hue/Saturation adjustment layers with any of the 26 PSD blend modes (pass-through or isolated for groups), clipping, a
     /// raster mask (enabled, disabled, density), visibility and opacity map both ways. Anything without an exact PSD form here
-    /// (translucent fill values, adjustment settings between PSD's steps, inverted masks, clipped groups) is refused instead of being
-    /// flattened into pixels.</summary>
+    /// (translucent fill values, adjustment settings between PSD's steps, inverted masks, clipped groups, layers or masks with filters) is
+    /// refused instead of being flattened into pixels.</summary>
     public static class PsdBridge
     {
         /// <summary>Export a native channel. The merged image is the CPU composite of that channel. Opacity and mask density are
@@ -52,6 +52,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 if (refusal != null) throw new InvalidOperationException("Adjustment layer '" + layer.Name + "': " + refusal + " Native project can still be saved losslessly.");
             }
             if (layer.IsGroup && layer.Clipping) throw new InvalidOperationException("Group '" + layer.Name + "' is clipped. Photoshop's handling of a clipped folder is not verified (psd-tools treats it as unsupported in Photoshop), so it is not exported; turn its clipping off or export from the native project. Native project can still be saved losslessly.");
+            if (layer.Filters.Count > 0 || layer.Mask != null && layer.Mask.Filters.Count > 0)
+                throw new InvalidOperationException("Layer '" + layer.Name + "' has non-destructive filters. PSD has no exact form for them here (Photoshop keeps smart filters inside smart objects, which this exporter does not write), and writing only the filtered pixels would drop the filter stack silently. Bake the filters into the layer (or remove them) before exporting PSD. Native project can still be saved losslessly.");
             if (layer.Kind == LayerKind.Fill && layer.FillValues.TryGetValue(channel, out var fillValue) && fillValue.A != 255)
                 throw new InvalidOperationException("Fill layer '" + layer.Name + "': a PSD solid colour fill is opaque, and this fill's " + channel + " value has alpha " + fillValue.A + ". Use the layer opacity instead. Native project can still be saved losslessly.");
             if (layer.Kind != LayerKind.Raster && layer.Kind != LayerKind.Group && layer.Kind != LayerKind.Adjustment && layer.Kind != LayerKind.Fill) throw new InvalidOperationException("PSD projection does not write " + layer.Kind + " layers yet. Native project can still be saved losslessly.");

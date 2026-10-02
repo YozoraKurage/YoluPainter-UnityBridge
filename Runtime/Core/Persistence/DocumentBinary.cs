@@ -13,10 +13,13 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// Normal on/off, strength, edges, file Y direction; 21 bytes) after the tile size; older archives read as
     /// <see cref="NormalSettings.Default"/>. Version 8 ends each layer with an editable surface path flag and, when set, the path
     /// (algorithm version, id, channel, model fingerprint, brush, points); the layer's pixels stay stored as before, so a
-    /// document opens without its model. Older archives still load.</summary>
+    /// document opens without its model. Version 9 ends each layer (after the path) with a filter flag and, when set, the layer's
+    /// content filter stack and, when the layer has a mask, the mask's filter stack (per filter: id, type, algorithm version,
+    /// enabled, strength, content channels, parameters); an unknown filter type or algorithm version refuses the archive instead
+    /// of dropping the filter. Older archives still load.</summary>
     public static class DocumentBinary
     {
-        const int Version = 8;
+        const int Version = 9;
         /// <summary>The version <see cref="Write"/> produces.</summary>
         public const int CurrentVersion = Version;
         const long MaxArchiveBytes = 512L * 1024 * 1024;
@@ -80,6 +83,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     }
                     writer.Write(layer.Path != null);
                     if (layer.Path != null) WritePath(writer, layer.Path);
+                    bool filtered = layer.Filters.Count > 0 || layer.Mask != null && layer.Mask.Filters.Count > 0;
+                    writer.Write(filtered);
+                    if (filtered) { WriteFilters(writer, layer.Filters, true); if (layer.Mask != null) WriteFilters(writer, layer.Mask.Filters, false); }
                 }
                 writer.Flush(); return stream.ToArray();
             }
@@ -205,6 +211,11 @@ namespace Yozolab.YoluPainter.Core.Persistence
                             if (layer.Kind != LayerKind.Raster || !layer.IsChannelEnabled(path.Channel)) throw new InvalidDataException("A surface path needs a paint layer with its channel enabled.");
                             layer.Path = path;
                         }
+                        if (version >= 9 && reader.ReadBoolean())
+                        {
+                            ReadFilters(reader, doc, layer, FilterTarget.Content);
+                            if (layer.Mask != null) ReadFilters(reader, doc, layer, FilterTarget.Mask);
+                        }
                     }
                     if (stream.Position != stream.Length) throw new InvalidDataException("Trailing native data requires a newer reader.");
                     try { doc.ValidateStructure(); }
@@ -212,6 +223,45 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     doc.ClearHistory(); return doc;
                 }
                 catch (EndOfStreamException ex) { throw new InvalidDataException("Native archive is truncated.", ex); }
+            }
+        }
+        static void WriteFilters(BinaryWriter writer, System.Collections.Generic.IReadOnlyList<FilterEffect> filters, bool content)
+        {
+            writer.Write(filters.Count);
+            foreach (var e in filters)
+            {
+                var f = e.Settings;
+                writer.Write(e.Id.ToByteArray()); writer.Write((int)f.Type); writer.Write(f.AlgorithmVersion); writer.Write(e.Enabled); writer.Write(e.Strength);
+                if (content) { writer.Write(e.Channels.Count); foreach (var c in e.Channels) writer.Write((int)c); }
+                writer.Write(f.Radius); writer.Write(f.Amount); writer.Write(f.Threshold); writer.Write(f.Seed); writer.Write(f.Monochrome);
+                foreach (double v in new[] { f.InputBlack, f.InputWhite, f.Gamma, f.OutputBlack, f.OutputWhite }) writer.Write(v);
+            }
+        }
+        /// <summary>Reads one filter stack and adds it through the document (the same validation as editing: value types of the
+        /// channels, halo and working budget). Unknown types and algorithm versions are refused, never dropped.</summary>
+        static void ReadFilters(BinaryReader reader, PaintDocument doc, PaintLayer layer, FilterTarget target)
+        {
+            int count = ReadCount(reader, PaintDocument.MaxFiltersPerStack, "filters");
+            for (int i = 0; i < count; i++)
+            {
+                var id = new Guid(ReadExact(reader, 16)); int type = reader.ReadInt32(), algorithm = reader.ReadInt32();
+                if (!Enum.IsDefined(typeof(FilterType), type)) throw new InvalidDataException("Unknown filter type " + type + "; a newer reader is required (source retained unchanged).");
+                if (algorithm != FilterSettings.AlgorithmVersionOf((FilterType)type)) throw new InvalidDataException("Filter algorithm version " + algorithm + " of " + (FilterType)type + " is not supported by this reader; source retained unchanged.");
+                bool enabled = reader.ReadBoolean(); double strength = reader.ReadDouble();
+                System.Collections.Generic.List<PaintChannel> channels = null;
+                if (target == FilterTarget.Content)
+                {
+                    int n = ReadCount(reader, 6, "filter channels"); channels = new System.Collections.Generic.List<PaintChannel>();
+                    for (int c = 0; c < n; c++) { int v = reader.ReadInt32(); if (!Enum.IsDefined(typeof(PaintChannel), v) || channels.Contains((PaintChannel)v)) throw new InvalidDataException("Invalid or duplicate filter channel."); channels.Add((PaintChannel)v); }
+                }
+                int radius = reader.ReadInt32(); double amount = reader.ReadDouble(); int threshold = reader.ReadInt32(), seed = reader.ReadInt32(); bool mono = reader.ReadBoolean();
+                var p = new double[5]; for (int k = 0; k < 5; k++) p[k] = reader.ReadDouble();
+                try
+                {
+                    var settings = FilterSettings.FromValues((FilterType)type, radius, amount, threshold, seed, mono, p[0], p[1], p[2], p[3], p[4]);
+                    doc.AddFilter(layer.Id, target, settings, channels, -1, id, enabled, strength);
+                }
+                catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException) { throw new InvalidDataException("Invalid filter on layer '" + layer.Name + "': " + ex.Message, ex); }
             }
         }
         static void WritePath(BinaryWriter writer, Paths.SurfacePath path)

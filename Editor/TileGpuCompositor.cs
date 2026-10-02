@@ -12,7 +12,9 @@ namespace Yozolab.YoluPainter.Editor
     /// (PaintDocument.TryGetChangedTiles), in work blocks of several document tiles, and keeps a bounded, LRU-evicted set of
     /// GPU copies (uploaded layer/mask blocks and the composite below the first changed layer) so that dragging a layer's
     /// opacity, blend mode or visibility, moving it, or editing an adjustment only recomposites from that layer up.
-    /// Effects with halos and graph-driven dependency scheduling are not handled here yet.</summary>
+    /// Layers and masks with active filters upload their filtered tiles (evaluated on the CPU by Core with halos, the same bytes
+    /// as the CPU reference); their signatures and resident stamps include the filter stamp of the block grown by the halo.
+    /// Graph-driven dependency scheduling is not handled here yet.</summary>
     /// <remarks>
     /// <para>合成の単位は「ブロック」（文書のタイル k×k 枚、辺 <see cref="TargetBlockPixels"/> 画素前後）。描画の呼び出しとアップロードの回数を
     /// タイル単位の 1/k² にする。変更記録のタイルを含むブロックを、ブロック全体で合成し直す。</para>
@@ -46,7 +48,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>ブロックの記憶: 前回の最上段の署名、下の写し（Sigs の先頭 BelowIndex 項目を合成した結果）。</summary>
         sealed class BlockState { public string[] Sigs; public RenderTexture Below; public int BelowIndex; public int LastUsed; }
         /// <summary>GPU に残したレイヤー・マスクのブロック。Stamp（ブロック内のタイルの最後の書き換え番号）が今と同じなら有効。</summary>
-        sealed class Resident { public Texture2D Texture; public long Stamp; public int LastUsed; }
+        sealed class Resident { public Texture2D Texture; public FilterStamp Stamp; public int LastUsed; }
         /// <summary>層の入力: テクスチャか、塗りつぶしの一定の色。</summary>
         struct Source { public Texture Texture; public bool Constant; public Rgba32 Color; }
 
@@ -287,6 +289,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 sb.Append("|m").Append(mask.Enabled ? 1 : 0).Append(mask.Inverted ? 1 : 0).Append(mask.Density.ToString("R", CultureInfo.InvariantCulture))
                   .Append(mask.IsNeutral ? "n" : "").Append(':').Append(mask.Surface.Id).Append(':').Append(BlockRevision(mask.Surface, bx, by));
+                if (mask.HasActiveFilters) sb.Append("|F").Append(mask.OutputStamp(bx * blockTiles, by * blockTiles, (bx + 1) * blockTiles, (by + 1) * blockTiles));
             }
             switch (layer.Kind)
             {
@@ -296,10 +299,12 @@ namespace Yozolab.YoluPainter.Editor
                         sb.Append("|r").Append(surface.Id).Append(':').Append(BlockRevision(surface, bx, by));
                     }
                     else sb.Append("|r-");
+                    AppendFilterStamp(sb, layer, channel, bx, by);
                     break;
                 case LayerKind.Fill:
                     var c = layer.GetPixel(channel, 0, 0);
                     sb.Append("|f").Append(c.R).Append(',').Append(c.G).Append(',').Append(c.B).Append(',').Append(c.A);
+                    AppendFilterStamp(sb, layer, channel, bx, by);
                     break;
                 case LayerKind.Adjustment:
                     var a = layer.Adjustment;
@@ -320,6 +325,11 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
         static string R(double v) => v.ToString("R", CultureInfo.InvariantCulture);
+        /// <summary>フィルターのある層: 出力の印（スタックの版と、halo だけ広げた範囲の入力の書き換え番号）。</summary>
+        void AppendFilterStamp(StringBuilder sb, PaintLayer layer, PaintChannel channel, int bx, int by)
+        {
+            if (layer.HasActiveFilters(channel)) sb.Append("|F").Append(layer.OutputStamp(channel, bx * blockTiles, by * blockTiles, (bx + 1) * blockTiles, (by + 1) * blockTiles));
+        }
         long BlockRevision(SparseTileSurface surface, int bx, int by)
         { return surface.MaxTileRevision(bx * blockTiles, by * blockTiles, (bx + 1) * blockTiles, (by + 1) * blockTiles); }
 
@@ -369,9 +379,7 @@ namespace Yozolab.YoluPainter.Editor
             var layer = e.Base;
             if (layer.IsGroup) { foreach (var child in e.Children) if (Touches(child, channel, x0, y0, x1, y1)) return true; return false; }
             if (layer.Kind != LayerKind.Raster) return true; // Fill と調整はキャンバス全面
-            if (!layer.TryGetChannel(channel, out var surface)) return false;
-            for (int y = y0; y < y1; y++) for (int x = x0; x < x1; x++) if (surface.HasTile(new TileCoord(x, y))) return true;
-            return false;
+            return layer.OutputMayCover(channel, x0, y0, x1, y1); // フィルターのぼかしで広がる分も含む
         }
         bool TouchesBlock(CpuCompositor.StackEntry e, PaintChannel channel, int bx, int by)
         { return Touches(e, channel, bx * blockTiles, by * blockTiles, (bx + 1) * blockTiles, (by + 1) * blockTiles); }
@@ -491,6 +499,14 @@ namespace Yozolab.YoluPainter.Editor
         bool TryGetSource(PaintLayer layer, PaintChannel channel, int bx, int by, bool keep, out Source source)
         {
             source = default;
+            if (layer.HasActiveFilters(channel))
+            {
+                // フィルターのある層は、Core が halo 込みで評価した出力のタイルを載せる（CPU の正本と同じバイト）
+                int tx0 = bx * blockTiles, ty0 = by * blockTiles, tx1 = tx0 + blockTiles, ty1 = ty0 + blockTiles;
+                if (!layer.OutputMayCover(channel, tx0, ty0, tx1, ty1)) return false;
+                source.Texture = Upload(FilteredId(layer, channel), layer.OutputStamp(channel, tx0, ty0, tx1, ty1), (c, b) => layer.CopyOutputTile(channel, c, b), bx, by, keep, transientLayer, ref transientLayerNext);
+                return true;
+            }
             if (layer.Kind == LayerKind.Fill)
             {
                 source.Constant = true; source.Color = layer.GetPixel(channel, 0, 0);
@@ -506,18 +522,28 @@ namespace Yozolab.YoluPainter.Editor
         }
         /// <summary>面のこのブロックを GPU に置く。keep なら予算の内側で残し、書き換え番号が同じならアップロードし直さない。</summary>
         Texture2D Upload(SparseTileSurface surface, int bx, int by, bool keep, Texture2D[] transient, ref int next)
+        { return Upload(surface.Id, new FilterStamp(0, BlockRevision(surface, bx, by)), surface.CopyTile, bx, by, keep, transient, ref next); }
+        /// <summary>フィルターを通した出力の写しの番号: 面の番号の符号を変えたもの（塗りつぶしは層とチャンネルごとに振る）。面の番号とは重ならない。</summary>
+        long FilteredId(PaintLayer layer, PaintChannel channel)
         {
-            long stamp = BlockRevision(surface, bx, by);
-            var key = (surface.Id, BlockKey(bx, by));
+            if (layer.TryGetChannel(channel, out var surface)) return -surface.Id;
+            if (!fillOutputIds.TryGetValue((layer.Id, channel), out long id)) fillOutputIds.Add((layer.Id, channel), id = long.MinValue / 2 - fillOutputIds.Count);
+            return id;
+        }
+        readonly Dictionary<(Guid, PaintChannel), long> fillOutputIds = new Dictionary<(Guid, PaintChannel), long>();
+        /// <summary>id の出力のこのブロックを GPU に置く。copy がタイルを書く。keep なら予算の内側で残し、印が同じならアップロードし直さない。</summary>
+        Texture2D Upload(long id, FilterStamp stamp, Func<TileCoord, byte[], bool> copy, int bx, int by, bool keep, Texture2D[] transient, ref int next)
+        {
+            var key = (id, BlockKey(bx, by));
             if (residents.TryGetValue(key, out var resident))
             {
                 resident.LastUsed = updateIndex;
-                if (resident.Stamp == stamp) { LastResidentHitCount++; return resident.Texture; }
-                FillBlock(surface, bx, by); resident.Texture.LoadRawTextureData(blockBuffer); resident.Texture.Apply(false, false); LastUploadCount++;
+                if (resident.Stamp.Equals(stamp)) { LastResidentHitCount++; return resident.Texture; }
+                FillBlock(copy, bx, by); resident.Texture.LoadRawTextureData(blockBuffer); resident.Texture.Apply(false, false); LastUploadCount++;
                 resident.Stamp = stamp;
                 return resident.Texture;
             }
-            FillBlock(surface, bx, by); LastUploadCount++;
+            FillBlock(copy, bx, by); LastUploadCount++;
             if (keep && MakeRoom(BlockBytes))
             {
                 resident = new Resident { Texture = MakeBlockTexture(), Stamp = stamp, LastUsed = updateIndex };
@@ -530,14 +556,14 @@ namespace Yozolab.YoluPainter.Editor
             return texture;
         }
         /// <summary>ブロックの画素を blockBuffer に並べる（タイルが無いところと文書の外は 0）。</summary>
-        void FillBlock(SparseTileSurface surface, int bx, int by)
+        void FillBlock(Func<TileCoord, byte[], bool> copy, int bx, int by)
         {
             int rowBytes = tileSize * 4, blockRow = blockSize * 4;
             for (int j = 0; j < blockTiles; j++)
                 for (int i = 0; i < blockTiles; i++)
                 {
                     var coord = new TileCoord(bx * blockTiles + i, by * blockTiles + j);
-                    bool present = coord.X < TilesX && coord.Y < TilesY && surface.CopyTile(coord, tileBuffer);
+                    bool present = coord.X < TilesX && coord.Y < TilesY && copy(coord, tileBuffer);
                     for (int row = 0; row < tileSize; row++)
                     {
                         int dst = (j * tileSize + row) * blockRow + i * rowBytes;
@@ -551,7 +577,9 @@ namespace Yozolab.YoluPainter.Editor
             material.SetFloat("_Opacity", (float)opacity); material.SetInt("_BlendMode", (int)mode);
             if (mask != null && !mask.IsNeutral)
             {
-                material.SetTexture("_MaskTex", Upload(mask.Surface, bx, by, keep, transientMask, ref transientMaskNext)); // 無いタイル = 何も隠さない（0）
+                material.SetTexture("_MaskTex", mask.HasActiveFilters // フィルターのあるマスクは、フィルターを通した隠す量
+                    ? Upload(-mask.Surface.Id, mask.OutputStamp(bx * blockTiles, by * blockTiles, (bx + 1) * blockTiles, (by + 1) * blockTiles), mask.CopyOutputTile, bx, by, keep, transientMask, ref transientMaskNext)
+                    : Upload(mask.Surface, bx, by, keep, transientMask, ref transientMaskNext)); // 無いタイル = 何も隠さない（0）
                 material.SetVector("_Mask", new Vector4(1, mask.Inverted ? 1 : 0, (float)mask.Density, 0));
             }
             else material.SetVector("_Mask", Vector4.zero);

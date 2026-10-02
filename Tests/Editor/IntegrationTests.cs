@@ -106,8 +106,13 @@ namespace Yozolab.YoluPainter.Tests
             imported = PsdBridge.Import(PsdCodec.Read(PsdCodec.Write(PsdBridge.Export(d, PaintChannel.Color))));
             Assert.That(imported.Layers[1].BlendMode, Is.EqualTo(LayerBlendMode.Multiply), "non-Normal blend is written as a mode, not flattened");
             Assert.That(imported.Composite(PaintChannel.Color), Is.EqualTo(d.Composite(PaintChannel.Color)));
+            // 不透明な Fill は SoCo として往復する。半透明の値は PSD の単色塗りつぶしで表せないので、画素に焼かずに断る
             d.AddFillLayer("fill", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(1, 2, 3) } });
-            Assert.That(() => PsdBridge.Export(d, PaintChannel.Color), Throws.InvalidOperationException, "a fill layer must not be baked into pixels");
+            imported = PsdBridge.Import(PsdCodec.Read(PsdCodec.Write(PsdBridge.Export(d, PaintChannel.Color))));
+            Assert.That(imported.Layers[2].Kind, Is.EqualTo(LayerKind.Fill));
+            Assert.That(imported.Composite(PaintChannel.Color), Is.EqualTo(d.Composite(PaintChannel.Color)));
+            d.AddFillLayer("glass", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(1, 2, 3, 128) } });
+            Assert.That(() => PsdBridge.Export(d, PaintChannel.Color), Throws.InvalidOperationException, "a translucent fill must not be baked into pixels");
         }
 
         [Test] public void SaveAndPsdExportRefuseProvisionalStroke()

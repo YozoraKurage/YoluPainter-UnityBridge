@@ -205,13 +205,13 @@ namespace Yozolab.YoluPainter.Core
                 double amount = layer.Opacity * (layer.Mask == null ? 1 : layer.Mask.FactorAt(x, y));
                 if (layer.Kind == LayerKind.Adjustment) { result = layer.Adjustment.Composite(result, amount, layer.BlendMode); continue; }
                 if (entry.PassesThrough) { result = StackFade(normal, result, EvaluatePixel(entry.Children, result, channel, x, y), amount); continue; }
-                Rgba32 group = layer.IsGroup ? EvaluatePixel(entry.Children, Rgba32.Transparent, channel, x, y) : layer.GetPixel(channel, x, y);
+                Rgba32 group = layer.IsGroup ? EvaluatePixel(entry.Children, Rgba32.Transparent, channel, x, y) : layer.GetOutputPixel(channel, x, y);
                 foreach (var clip in entry.ClipEntries)
                 {
                     var c = clip.Base;
                     double clipAmount = c.Opacity * (c.Mask == null ? 1 : c.Mask.FactorAt(x, y));
                     if (c.Kind == LayerKind.Adjustment) group = c.Adjustment.Composite(group, clipAmount, c.BlendMode);
-                    else group = StackClip(normal, group, c.IsGroup ? EvaluatePixel(clip.Children, Rgba32.Transparent, channel, x, y) : c.GetPixel(channel, x, y), clipAmount, ModeOf(c));
+                    else group = StackClip(normal, group, c.IsGroup ? EvaluatePixel(clip.Children, Rgba32.Transparent, channel, x, y) : c.GetOutputPixel(channel, x, y), clipAmount, ModeOf(c));
                 }
                 result = StackBlend(normal, result, group, amount, ModeOf(layer));
             }
@@ -245,10 +245,11 @@ namespace Yozolab.YoluPainter.Core
             }
             public void Load(PaintChannel channel, TileCoord coord)
             {
-                Present = Layer.Kind == LayerKind.Adjustment || Layer.CopyTile(channel, coord, Pixels);
+                // フィルターのある層は、フィルターを通した画素（halo を含めて評価した派生物。正本は変えない）
+                Present = Layer.Kind == LayerKind.Adjustment || Layer.CopyOutputTile(channel, coord, Pixels);
                 LoadMask(coord);
             }
-            public void LoadMask(TileCoord coord) { if (Present && MaskSource != null) MaskSource.Surface.CopyTile(coord, Mask); }
+            public void LoadMask(TileCoord coord) { if (Present && MaskSource != null) MaskSource.CopyOutputTile(coord, Mask); }
             public double Amount(int offset) { return MaskSource == null ? Layer.Opacity : Layer.Opacity * MaskSource.Factor(Mask[offset + 3]); }
             public Rgba32 Pixel(int offset) { return new Rgba32(Pixels[offset], Pixels[offset + 1], Pixels[offset + 2], Pixels[offset + 3]); }
         }
