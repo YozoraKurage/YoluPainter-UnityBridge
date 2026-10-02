@@ -22,14 +22,14 @@ namespace Yozolab.YoluPainter.Editor
             bool overflow = propertiesContentHeight > r.height + .5f;
             var view = new Rect(0, 0, r.width - (overflow ? 8 : 0), Mathf.Max(propertiesContentHeight, r.height));
             propertiesScroll.y = Mathf.Clamp(propertiesScroll.y, 0, Mathf.Max(0, propertiesContentHeight - r.height));
-            propertiesScroll = GUI.BeginScrollView(r, propertiesScroll, view, false, false, GUIStyle.none, GUIStyle.none);
+            PaintGui.BeginScroll(r, propertiesScroll);
             var rows = new UiRows(new Rect(0, 0, view.width, 1e6f), 0);
             ToolSections(rows);
             LayerSections(rows);
             ChannelSections(rows);
             rows.Space(8);
             if (Event.current.type == EventType.Repaint && Mathf.Abs(rows.Used - propertiesContentHeight) > .5f) { propertiesContentHeight = rows.Used; Repaint(); }
-            GUI.EndScrollView();
+            PaintGui.EndScroll();
             if (Event.current.type == EventType.ScrollWheel && r.Contains(Event.current.mousePosition))
             { propertiesScroll.y = Mathf.Clamp(propertiesScroll.y + Event.current.delta.y * 14, 0, Mathf.Max(0, propertiesContentHeight - r.height)); Event.current.Use(); Repaint(); }
             if (overflow) PaintGui.Rounded(new Rect(r.xMax - 6, r.y + r.height * propertiesScroll.y / propertiesContentHeight, 4, r.height * r.height / propertiesContentHeight), PaintTheme.ControlActive, 2);

@@ -155,7 +155,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             FinishStroke(false); preview?.CancelNavigation(); SaveRecovery();
             EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
-            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeThumbnails(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
+            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeThumbnails(); DisposeColorPanel(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
             if(selectionOverlay!=null){DestroyImmediate(selectionOverlay);selectionOverlay=null;overlayFor=null;}
         }
         void Tick()
@@ -536,6 +536,7 @@ namespace Yozolab.YoluPainter.Editor
                 if(surfaceStroke && !preview.CanPaint){message="This preview snapshot is not safe to paint. See its load diagnostics.";return;}
                 TryAction(()=>
                 {
+                    RememberColor();
                     if(EditingMask) stroke=document.BeginMaskStroke(selectedLayer,GetBrush());
                     else
                     {

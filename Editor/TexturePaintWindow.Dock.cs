@@ -18,13 +18,18 @@ namespace Yozolab.YoluPainter.Editor
             PaintGui.Fill(r, PaintTheme.PanelBg);
             PaintGui.VLine(r.x, r.y, r.yMax, PaintTheme.Border);
             float y = r.y;
+            // カラー（中身の高さはチャンネルで決まる）
+            var colorHead = new Rect(r.x + 1, y, r.width - 1, PanelHeaderHeight); y += PanelHeaderHeight;
+            dockColorOpen = PaintGui.SectionHeader(colorHead, L.Tr("Color"), dockColorOpen, "palette");
+            if (dockColorOpen) { float h = ColorPanelHeight; DrawColorPanel(new Rect(r.x + 1, y, r.width - 1, h)); y += h; }
             // テクスチャセット（中身の高さは決まっている）
             var head = new Rect(r.x + 1, y, r.width - 1, PanelHeaderHeight); y += PanelHeaderHeight;
             dockTextureSetOpen = PaintGui.SectionHeader(head, L.Tr("Texture Set"), dockTextureSetOpen, "deployed_code");
             if (dockTextureSetOpen) { float h = TextureSetHeight; DrawTextureSetPanel(new Rect(r.x + 1, y, r.width - 1, h)); y += h; }
             // 残りをレイヤーとプロパティで分ける
             float headers = PanelHeaderHeight * 2, rest = r.yMax - y - headers;
-            float layersH = dockLayersOpen ? (dockPropertiesOpen ? Mathf.Max(160, rest * .5f) : rest) : 0;
+            // レイヤーとプロパティで残りを半分ずつ（レイヤーは少なくとも 3 行ほど）
+            float layersH = dockLayersOpen ? (dockPropertiesOpen ? Mathf.Clamp(rest * .5f, Mathf.Min(140, rest), rest) : rest) : 0;
             head = new Rect(r.x + 1, y, r.width - 1, PanelHeaderHeight); y += PanelHeaderHeight;
             dockLayersOpen = PaintGui.SectionHeader(head, L.Tr("Layers"), dockLayersOpen, "layers");
             if (dockLayersOpen) { DrawLayersPanel(new Rect(r.x + 1, y, r.width - 1, layersH)); y += layersH; }
@@ -36,7 +41,8 @@ namespace Yozolab.YoluPainter.Editor
         // ───────── テクスチャセット ─────────
 
         static readonly PaintChannel[] Channels = (PaintChannel[])Enum.GetValues(typeof(PaintChannel));
-        float TextureSetHeight => 8 + 26 + 4 + 26 + 8 + Channels.Length * 24 + 6;
+        const int ChannelColumns = 3; const float ChannelChipHeight = 26;
+        float TextureSetHeight => 8 + 26 + 4 + 26 + 8 + Mathf.Ceil(Channels.Length / (float)ChannelColumns) * (ChannelChipHeight + 4) + 4;
         static string ChannelIcon(PaintChannel c)
         {
             switch (c)
@@ -75,18 +81,22 @@ namespace Yozolab.YoluPainter.Editor
                 menu.DropDown(at);
             }, L.Tr("The material slot this document paints"), preview.HasModel, 64);
             rows.Space(4);
-            // チャンネル
+            // チャンネル（3 列のボタン。使っているチャンネルには青い点）
             var used = new HashSet<PaintChannel>(YlpContent.UsedChannels(document));
-            foreach (var c in Channels)
+            for (int start = 0; start < Channels.Length; start += ChannelColumns)
             {
-                var line = rows.FullRow(24);
-                bool selected = c == channel, hover = line.Contains(Event.current.mousePosition);
-                if (selected) { PaintGui.Fill(line, PaintTheme.AccentSoft); PaintGui.Fill(new Rect(line.x, line.y, 3, line.height), PaintTheme.Accent); }
-                else if (hover) PaintGui.Fill(line, PaintTheme.ControlHover);
-                PaintGui.Icon(new Rect(line.x + 10, line.y, 20, line.height), ChannelIcon(c), selected ? Color.white : PaintTheme.TextDim, 16);
-                PaintGui.Text(new Rect(line.x + 36, line.y, line.width - 60, line.height), L.Tr(c.ToString()), PaintTheme.Label, selected ? Color.white : PaintTheme.Text);
-                if (used.Contains(c)) PaintGui.Rounded(new Rect(line.xMax - 18, line.center.y - 3, 6, 6), PaintTheme.Accent, 3);
-                if (Event.current.type == EventType.MouseDown && Event.current.button == 0 && hover && GUI.enabled) { SetChannel(c); Event.current.Use(); }
+                var cells = UiRows.Split(rows.Row(ChannelChipHeight), ChannelColumns, 4);
+                for (int k = 0; k < ChannelColumns && start + k < Channels.Length; k++)
+                {
+                    var c = Channels[start + k]; var cell = cells[k];
+                    bool selected = c == channel, hover = cell.Contains(Event.current.mousePosition) && GUI.enabled;
+                    PaintGui.Rounded(cell, selected ? PaintTheme.AccentDim : hover ? PaintTheme.ControlHover : PaintTheme.ControlBg, 4);
+                    PaintGui.Icon(new Rect(cell.x + 3, cell.y, 18, cell.height), ChannelIcon(c), selected ? Color.white : PaintTheme.TextDim, 14);
+                    PaintGui.Text(new Rect(cell.x + 21, cell.y, cell.width - 27, cell.height), L.Tr(c.ToString()), PaintTheme.LabelSmall, selected ? Color.white : PaintTheme.Text);
+                    if (used.Contains(c)) PaintGui.Rounded(new Rect(cell.xMax - 8, cell.y + 4, 5, 5), selected ? Color.white : PaintTheme.Accent, 2.5f);
+                    PaintGui.Tooltip(cell, L.Tr(c.ToString()));
+                    if (Event.current.type == EventType.MouseDown && Event.current.button == 0 && hover) { SetChannel(c); Event.current.Use(); }
+                }
             }
         }
 
@@ -135,10 +145,11 @@ namespace Yozolab.YoluPainter.Editor
             PaintGui.Fill(list, PaintTheme.ControlBg);
             float content = document.Layers.Count * LayerRowHeight;
             var view = new Rect(0, 0, list.width - (content > list.height ? 10 : 0), content);
-            layerScroll = GUI.BeginScrollView(list, layerScroll, view, false, false, GUIStyle.none, GUIStyle.none);
+            layerScroll.y = Mathf.Clamp(layerScroll.y, 0, Mathf.Max(0, content - list.height));
+            PaintGui.BeginScroll(list, layerScroll);
             int row = 0;
             for (int i = document.Layers.Count - 1; i >= 0; i--, row++) DrawLayerRow(new Rect(0, row * LayerRowHeight, view.width, LayerRowHeight), document.Layers[i], i);
-            GUI.EndScrollView();
+            PaintGui.EndScroll();
             if (Event.current.type == EventType.ScrollWheel && list.Contains(Event.current.mousePosition))
             { layerScroll.y = Mathf.Clamp(layerScroll.y + Event.current.delta.y * 12, 0, Mathf.Max(0, content - list.height)); Event.current.Use(); Repaint(); }
             if (content > list.height) PaintGui.Rounded(new Rect(list.xMax - 6, list.y + list.height * layerScroll.y / content, 4, list.height * list.height / content), PaintTheme.ControlActive, 2);

@@ -231,6 +231,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void WindowMenu(GenericMenu m)
         {
+            Item(m, "Color", () => dockColorOpen = !dockColorOpen, true, dockColorOpen);
             Item(m, "Texture Set", () => dockTextureSetOpen = !dockTextureSetOpen, true, dockTextureSetOpen);
             Item(m, "Layers", () => dockLayersOpen = !dockLayersOpen, true, dockLayersOpen);
             Item(m, "Properties", () => dockPropertiesOpen = !dockPropertiesOpen, true, dockPropertiesOpen);

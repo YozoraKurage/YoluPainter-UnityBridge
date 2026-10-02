@@ -258,13 +258,29 @@ namespace Yozolab.YoluPainter.Editor
             return value;
         }
 
+        static readonly System.Collections.Generic.Dictionary<string, string> s_textBuffers = new System.Collections.Generic.Dictionary<string, string>();
+
+        /// <summary>文字の入力欄。打っている間は値を返さず、Enter か、ほかを押してフォーカスが外れたときに確定する（Esc でやめる）。
+        /// Unity の EditorGUI を使わない（バッチモードのオフスクリーンの描画では標準のスタイルが無いため）。</summary>
         public static string TextField(Rect r, string text, string tooltip = null)
         {
+            text = text ?? "";
+            int id = GUIUtility.GetControlID("YoluPainterText".GetHashCode(), FocusType.Passive, r);
+            string name = "yp-text-" + id;
+            bool focused = GUI.GetNameOfFocusedControl() == name;
+            string result = text;
+            if (focused && E.type == EventType.KeyDown && (E.keyCode == KeyCode.Return || E.keyCode == KeyCode.KeypadEnter))
+            { if (s_textBuffers.TryGetValue(name, out var typed)) result = typed; s_textBuffers.Remove(name); GUIUtility.keyboardControl = 0; E.Use(); GUI.changed = true; return result; }
+            if (focused && E.type == EventType.KeyDown && E.keyCode == KeyCode.Escape) { s_textBuffers.Remove(name); GUIUtility.keyboardControl = 0; E.Use(); return text; }
+            if (!focused && s_textBuffers.TryGetValue(name, out var pending)) { s_textBuffers.Remove(name); if (pending != text) { result = pending; GUI.changed = true; } } // フォーカスが外れたら確定
             Rounded(r, PaintTheme.ControlBg, 3);
-            Outline(r, Hover(r) ? PaintTheme.AccentDim : PaintTheme.Border, 1, 3);
-            var next = EditorGUI.DelayedTextField(new Rect(r.x + 1, r.y + 1, r.width - 2, r.height - 2), text ?? "", PaintTheme.Field);
+            Outline(r, focused ? PaintTheme.Accent : Hover(r) ? PaintTheme.AccentDim : PaintTheme.Border, 1, 3);
+            string shown = focused && s_textBuffers.TryGetValue(name, out var buffer) ? buffer : text;
+            GUI.SetNextControlName(name);
+            string edited = GUI.TextField(new Rect(r.x + 1, r.y + 1, r.width - 2, r.height - 2), shown, PaintTheme.Field);
+            if (GUI.GetNameOfFocusedControl() == name) s_textBuffers[name] = edited;
             Tooltip(r, tooltip);
-            return next;
+            return result;
         }
 
         /// <summary>色の見本。押すと Unity の色選択が開き、決まるたびに changed が呼ばれる。</summary>
@@ -314,6 +330,11 @@ namespace Yozolab.YoluPainter.Editor
                 x += w;
             }
         }
+
+        /// <summary>スクロールする領域の始まり（GUI のスキンに頼らない。バッチモードのオフスクリーンの描画では GUI.BeginScrollView が
+        /// スキンの無さで落ちる）。中は (0, 0) 始まりの座標で描き、<see cref="EndScroll"/> で閉じる。マウスの位置も中の座標になる。</summary>
+        public static void BeginScroll(Rect viewport, Vector2 scroll) => GUI.BeginClip(viewport, -scroll, Vector2.zero, false);
+        public static void EndScroll() => GUI.EndClip();
 
         /// <summary>透明を表す市松（cell の大きさ）。</summary>
         public static void Checker(Rect r, float cell = 4)
