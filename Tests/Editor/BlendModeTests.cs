@@ -143,6 +143,7 @@ namespace Yozolab.YoluPainter.Tests
         {
             foreach (LayerBlendMode mode in Enum.GetValues(typeof(LayerBlendMode)))
             {
+                if (mode == LayerBlendMode.PassThrough) continue; // グループ専用（GroupTests）
                 var doc = Scene(mode);
                 var tiles = doc.Composite(PaintChannel.Color);
                 for (int y = 0; y < 24; y++) for (int x = 0; x < 24; x++)
@@ -160,8 +161,8 @@ namespace Yozolab.YoluPainter.Tests
         {
             // 保存形式に入る値。既存のファイルの意味が変わらないこと。
             Assert.That((int)LayerBlendMode.Normal, Is.EqualTo(0)); Assert.That((int)LayerBlendMode.Multiply, Is.EqualTo(1)); Assert.That((int)LayerBlendMode.Screen, Is.EqualTo(2));
-            Assert.That(Enum.GetValues(typeof(LayerBlendMode)).Length, Is.EqualTo(26));
-            Assert.That((int)LayerBlendMode.LighterColor, Is.EqualTo(25));
+            Assert.That(Enum.GetValues(typeof(LayerBlendMode)).Length, Is.EqualTo(27));
+            Assert.That((int)LayerBlendMode.LighterColor, Is.EqualTo(25)); Assert.That((int)LayerBlendMode.PassThrough, Is.EqualTo(26));
         }
 
         [Test] public void ChangingTheModeIsOneUndoStepAndPsdProjectionStillRefusesIt()
@@ -171,7 +172,8 @@ namespace Yozolab.YoluPainter.Tests
             doc.SetLayerBlendMode(layer.Id, LayerBlendMode.SoftLight);
             Assert.That(doc.Undo(), Is.True); Assert.That(doc.Layers[0].BlendMode, Is.EqualTo(LayerBlendMode.Normal));
             Assert.That(doc.Redo(), Is.True); Assert.That(doc.Layers[0].BlendMode, Is.EqualTo(LayerBlendMode.SoftLight));
-            Assert.That(() => doc.SetLayerBlendMode(layer.Id, (LayerBlendMode)26), Throws.TypeOf<ArgumentOutOfRangeException>());
+            Assert.That(() => doc.SetLayerBlendMode(layer.Id, (LayerBlendMode)27), Throws.TypeOf<ArgumentOutOfRangeException>());
+            Assert.That(() => doc.SetLayerBlendMode(layer.Id, LayerBlendMode.PassThrough), Throws.ArgumentException, "pass through is for groups only");
             Assert.That(() => PsdBridge.Export(doc, PaintChannel.Color), Throws.InvalidOperationException, "the PSD writer does not map blend modes yet; it must not flatten them");
         }
     }

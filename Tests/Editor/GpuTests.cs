@@ -44,6 +44,14 @@ namespace Yozolab.YoluPainter.Tests
             finally { RenderTexture.active = previous; Object.DestroyImmediate(readback); }
         }
 
+        /// <summary>CPU 代替（Texture2D）の中身。</summary>
+        internal static byte[] ReadCpu(Texture texture)
+        {
+            var t = texture as Texture2D;
+            Assert.That(t, Is.Not.Null, "expected the CPU composite fallback texture");
+            return t.GetRawTextureData<byte>().ToArray();
+        }
+
         internal static void AssertMatches(byte[] expected, byte[] actual, string context)
         {
             Assert.That(actual.Length, Is.EqualTo(expected.Length), context);
@@ -105,6 +113,7 @@ namespace Yozolab.YoluPainter.Tests
             foreach (LayerBlendMode mode in Enum.GetValues(typeof(LayerBlendMode)))
                 foreach (var path in new[] { "stack", "clip", "adjustment" })
                 {
+                    if (mode == LayerBlendMode.PassThrough) continue; // グループ専用
                     var doc = new PaintDocument(32, 32, 16);
                     var below = doc.AddLayer("Below");
                     for (int y = 0; y < 32; y++) for (int x = 0; x < 32; x++) below.GetChannel(PaintChannel.Color).SetPixel(x, y, Below(x, y));

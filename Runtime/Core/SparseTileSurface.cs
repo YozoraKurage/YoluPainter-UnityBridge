@@ -18,6 +18,8 @@ namespace Yozolab.YoluPainter.Core
         public int Height { get; private set; }
         public int TileSize { get; private set; }
         public int TileCount { get { return tiles.Count; } }
+        /// <summary>True when the tile holds data (an absent tile is transparent).</summary>
+        public bool HasTile(TileCoord coord) { return tiles.ContainsKey(coord); }
         public long AllocatedBytes
         {
             get { long bytes = 0; foreach (var tile in tiles.Values) bytes += tile.ByteSize; return bytes; }

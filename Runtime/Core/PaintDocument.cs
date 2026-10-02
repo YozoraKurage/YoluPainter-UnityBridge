@@ -28,8 +28,9 @@ namespace Yozolab.YoluPainter.Core
 
     /// <summary>Raster layers own pixels. Fill layers own one value per channel and generate their tiles on demand
     /// (the value is the source; nothing is allocated per pixel).
-    /// Adjustment layers own no pixels either: they change the composite of the layers below them.</summary>
-    public enum LayerKind { Raster = 0, Fill = 1, Adjustment = 2 }
+    /// Adjustment layers own no pixels either: they change the composite of the layers below them.
+    /// Groups own no pixels: their children (the layers whose ParentId is the group) composite through them.</summary>
+    public enum LayerKind { Raster = 0, Fill = 1, Adjustment = 2, Group = 3 }
 
     public sealed class PaintLayer
     {
@@ -47,6 +48,10 @@ namespace Yozolab.YoluPainter.Core
         /// composited together with it, like Photoshop's default "blend clipped layers as group". The bottom layer cannot
         /// be clipped (the flag is kept but has no effect there).</summary>
         public bool Clipping { get; internal set; }
+        /// <summary>The group this layer is in, or Guid.Empty at the top level. A group's descendants always sit directly
+        /// below it in <see cref="PaintDocument.Layers"/> (the same order as PSD folders).</summary>
+        public Guid ParentId { get; internal set; }
+        public bool IsGroup { get { return Kind == LayerKind.Group; } }
         /// <summary>Raster layers' pixel surfaces. Always empty for fill layers.</summary>
         public IReadOnlyDictionary<PaintChannel, SparseTileSurface> Channels { get; private set; }
         /// <summary>Fill layers' value per channel. Always empty for other kinds.</summary>
@@ -76,6 +81,7 @@ namespace Yozolab.YoluPainter.Core
             ValidateChannel(channel);
             if (Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers have no pixel surface. Change the fill value, or paint on the layer's mask.");
             if (Kind == LayerKind.Adjustment) throw new InvalidOperationException("Adjustment layers have no pixel surface. Change the adjustment, or paint on the layer's mask.");
+            if (Kind == LayerKind.Group) throw new InvalidOperationException("Groups have no pixel surface. Paint on a layer inside the group, or on the group's mask.");
             SparseTileSurface surface;
             if (!channels.TryGetValue(channel, out surface))
             {
@@ -104,6 +110,7 @@ namespace Yozolab.YoluPainter.Core
             {
                 case LayerKind.Fill: return fillValues.ContainsKey(channel);
                 case LayerKind.Adjustment: return Adjustment != null && Adjustment.AppliesTo(channel) && enabled.Contains(channel);
+                case LayerKind.Group: return false; // 中身は子が持つ。合成は CpuCompositor.Plan が子から判断する
                 default: return channels.ContainsKey(channel);
             }
         }
@@ -116,6 +123,7 @@ namespace Yozolab.YoluPainter.Core
                 {
                     case LayerKind.Fill: return new List<PaintChannel>(fillValues.Keys);
                     case LayerKind.Adjustment: return new List<PaintChannel>(enabled);
+                    case LayerKind.Group: return (PaintChannel[])Enum.GetValues(typeof(PaintChannel));
                     default: return new List<PaintChannel>(channels.Keys);
                 }
             }
@@ -123,7 +131,7 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>The layer's own pixel (before mask, opacity and blending). Transparent where it has no content.</summary>
         public Rgba32 GetPixel(PaintChannel channel, int x, int y)
         {
-            if (Kind == LayerKind.Adjustment) return Rgba32.Transparent; // owns no pixels; see AdjustmentSettings.Composite
+            if (Kind == LayerKind.Adjustment || Kind == LayerKind.Group) return Rgba32.Transparent; // owns no pixels
             if (Kind == LayerKind.Fill)
             {
                 if (x < 0 || y < 0 || x >= document.Width || y >= document.Height) throw new ArgumentOutOfRangeException("pixel");
@@ -157,6 +165,7 @@ namespace Yozolab.YoluPainter.Core
         /// canvas tile for a fill value.</summary>
         public IEnumerable<TileCoord> EnumerateContentTiles(PaintChannel channel)
         {
+            if (Kind == LayerKind.Group) return new TileCoord[0];
             if (Kind == LayerKind.Raster)
                 return channels.TryGetValue(channel, out var surface) ? surface.EnumerateTileCoordinates() : new TileCoord[0];
             return HasContent(channel) ? document.EnumerateCanvasTiles() : new TileCoord[0];
@@ -230,28 +239,38 @@ namespace Yozolab.YoluPainter.Core
             if (Id == Guid.Empty) throw new ArgumentException("Document ID must not be empty.", nameof(id));
             Layers = layers.AsReadOnly();
         }
-        public PaintLayer AddLayer(string name, Guid? id = null)
+        /// <param name="above">Places the new layer directly above this layer, in the same group (the top of the document when
+        /// null). Above a group means above the group and its contents, as a sibling of the group.</param>
+        public PaintLayer AddLayer(string name, Guid? id = null, Guid? above = null)
         {
-            EnsureNoStroke(); Guid layerId = id ?? Guid.NewGuid();
-            if (layerId == Guid.Empty) throw new ArgumentException("Layer ID must not be empty.", nameof(id));
-            foreach (var existing in layers) if (existing.Id == layerId) throw new ArgumentException("Duplicate layer ID.", nameof(id));
+            EnsureNoStroke(); Guid layerId = NewLayerId(id);
             var layer = new PaintLayer(this, name ?? "Layer", layerId);
             layer.GetChannel(PaintChannel.Color);
-            int index = layers.Count;
-            Execute(LayerScoped(layer, null, () => { EnsureSourceGrowth(layer.AllocatedBytes); layers.Insert(index, layer); }, () => layers.Remove(layer), 128));
+            Insert(layer, above, () => EnsureSourceGrowth(layer.AllocatedBytes));
             return layer;
+        }
+        Guid NewLayerId(Guid? id)
+        {
+            Guid layerId = id ?? Guid.NewGuid();
+            if (layerId == Guid.Empty) throw new ArgumentException("Layer ID must not be empty.", nameof(id));
+            foreach (var existing in layers) if (existing.Id == layerId) throw new ArgumentException("Duplicate layer ID.", nameof(id));
+            return layerId;
+        }
+        /// <summary>Adds a new layer as one undo step: on top, or directly above another layer in that layer's group.</summary>
+        void Insert(PaintLayer layer, Guid? above, Action beforeInsert = null)
+        {
+            int index = layers.Count; Guid parent = Guid.Empty;
+            if (above.HasValue) { var reference = GetLayer(above.Value); index = layers.IndexOf(reference) + 1; parent = reference.ParentId; }
+            Execute(LayerScoped(layer, null, () => { beforeInsert?.Invoke(); layer.ParentId = parent; layers.Insert(index, layer); }, () => layers.Remove(layer), 128));
         }
         /// <summary>Adds a fill layer on top. values sets the initial value per channel (each one enabled); the layer
         /// covers the whole canvas wherever its channel has a value. Use a mask to limit where it shows.</summary>
-        public PaintLayer AddFillLayer(string name, IDictionary<PaintChannel, Rgba32> values = null, Guid? id = null)
+        public PaintLayer AddFillLayer(string name, IDictionary<PaintChannel, Rgba32> values = null, Guid? id = null, Guid? above = null)
         {
-            EnsureNoStroke(); Guid layerId = id ?? Guid.NewGuid();
-            if (layerId == Guid.Empty) throw new ArgumentException("Layer ID must not be empty.", nameof(id));
-            foreach (var existing in layers) if (existing.Id == layerId) throw new ArgumentException("Duplicate layer ID.", nameof(id));
+            EnsureNoStroke(); Guid layerId = NewLayerId(id);
             var layer = new PaintLayer(this, name ?? "Fill", layerId, LayerKind.Fill);
             if (values != null) foreach (var entry in values) { PaintLayer.ValidateChannel(entry.Key); layer.SetFillValueInternal(entry.Key, entry.Value); layer.Enable(entry.Key, true); }
-            int index = layers.Count;
-            Execute(LayerScoped(layer, null, () => layers.Insert(index, layer), () => layers.Remove(layer), 128));
+            Insert(layer, above);
             return layer;
         }
         /// <summary>Sets (or with null removes) a fill layer's value for one channel. Setting a value enables the channel.</summary>
@@ -268,12 +287,10 @@ namespace Yozolab.YoluPainter.Core
         }
         /// <summary>Adds an adjustment layer on top that changes the composite below it in the given channels (all channels
         /// the adjustment applies to when null). Hue/saturation can only target Color and Emission.</summary>
-        public PaintLayer AddAdjustmentLayer(string name, AdjustmentSettings settings, IEnumerable<PaintChannel> channels = null, Guid? id = null)
+        public PaintLayer AddAdjustmentLayer(string name, AdjustmentSettings settings, IEnumerable<PaintChannel> channels = null, Guid? id = null, Guid? above = null)
         {
             EnsureNoStroke(); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
-            Guid layerId = id ?? Guid.NewGuid();
-            if (layerId == Guid.Empty) throw new ArgumentException("Layer ID must not be empty.", nameof(id));
-            foreach (var existing in layers) if (existing.Id == layerId) throw new ArgumentException("Duplicate layer ID.", nameof(id));
+            Guid layerId = NewLayerId(id);
             var layer = new PaintLayer(this, name ?? settings.Type.ToString(), layerId, LayerKind.Adjustment) { Adjustment = settings };
             foreach (PaintChannel channel in channels ?? (PaintChannel[])Enum.GetValues(typeof(PaintChannel)))
             {
@@ -281,8 +298,7 @@ namespace Yozolab.YoluPainter.Core
                 if (!settings.AppliesTo(channel)) { if (channels == null) continue; throw new InvalidOperationException(settings.Type + " cannot be applied to the " + channel + " channel."); }
                 layer.Enable(channel, true);
             }
-            int index = layers.Count;
-            Execute(LayerScoped(layer, null, () => layers.Insert(index, layer), () => layers.Remove(layer), 128));
+            Insert(layer, above);
             return layer;
         }
         /// <summary>Replaces an adjustment layer's parameters (the type may change if every enabled channel still applies).</summary>
@@ -307,19 +323,184 @@ namespace Yozolab.YoluPainter.Core
             foreach (var layer in layers) if (layer.Id == id) return layer;
             throw new KeyNotFoundException("Layer not found: " + id);
         }
+        /// <summary>Removes a layer. Removing a group removes everything in it (one undo step restores all of it).</summary>
         public void RemoveLayer(Guid id)
         {
-            EnsureNoStroke(); PaintLayer layer = GetLayer(id); int index = layers.IndexOf(layer);
-            Execute(LayerScoped(layer, null, () => layers.Remove(layer), () => { EnsureSourceGrowth(layer.AllocatedBytes); layers.Insert(index, layer); }, 128 + layer.AllocatedBytes));
+            EnsureNoStroke(); PaintLayer layer = GetLayer(id); int top = layers.IndexOf(layer), start = SubtreeStart(top);
+            var block = layers.GetRange(start, top - start + 1); long bytes = 0; foreach (var l in block) bytes += l.AllocatedBytes;
+            Execute(SubtreeScoped(block, () => layers.RemoveRange(start, block.Count), () => { EnsureSourceGrowth(bytes); layers.InsertRange(start, block); }, 128 + bytes));
         }
-        public void MoveLayer(Guid id, int newIndex)
+
+        // ---------------- groups ----------------
+
+        /// <summary>Adds an empty group on top of the top level. Groups pass through by default (their children composite
+        /// as if they were not grouped); any other blend mode makes the group isolated.</summary>
+        public PaintLayer AddGroup(string name, Guid? id = null, Guid? above = null)
+        {
+            EnsureNoStroke(); Guid layerId = NewLayerId(id);
+            var layer = new PaintLayer(this, name ?? "Group", layerId, LayerKind.Group) { BlendMode = LayerBlendMode.PassThrough };
+            Insert(layer, above);
+            return layer;
+        }
+        /// <summary>The direct children of a group (Guid.Empty for the top level), bottom to top.</summary>
+        public IReadOnlyList<PaintLayer> ChildrenOf(Guid parentId)
+        {
+            if (parentId != Guid.Empty && !GetLayer(parentId).IsGroup) throw new ArgumentException("Not a group.", nameof(parentId));
+            var result = new List<PaintLayer>(); foreach (var layer in layers) if (layer.ParentId == parentId) result.Add(layer);
+            return result.AsReadOnly();
+        }
+        /// <summary>Nesting depth (0 at the top level).</summary>
+        public int DepthOf(Guid id)
+        {
+            int depth = 0; var layer = GetLayer(id);
+            while (layer.ParentId != Guid.Empty) { layer = GetLayer(layer.ParentId); depth++; }
+            return depth;
+        }
+        /// <summary>Moves a layer (with its contents when it is a group) to a position among the siblings of its current
+        /// group (0 = bottom). Without groups this is the index in <see cref="Layers"/>.</summary>
+        public void MoveLayer(Guid id, int newIndex) { MoveLayerTo(id, GetLayer(id).ParentId, newIndex); }
+        /// <summary>Moves a layer (with its contents when it is a group) into a group (Guid.Empty for the top level) at a
+        /// position among that group's children (0 = bottom). A group cannot be moved into itself or its descendants.</summary>
+        public void MoveLayerTo(Guid id, Guid parentId, int position)
         {
             EnsureNoStroke(); var layer = GetLayer(id);
-            if (newIndex < 0 || newIndex >= layers.Count) throw new ArgumentOutOfRangeException(nameof(newIndex));
-            int oldIndex = layers.IndexOf(layer); if (oldIndex == newIndex) return;
-            Execute(LayerScoped(layer, null, () => MoveLayerInternal(layer, newIndex), () => MoveLayerInternal(layer, oldIndex), 64));
+            if (parentId != Guid.Empty)
+            {
+                var parent = GetLayer(parentId);
+                if (!parent.IsGroup) throw new ArgumentException("Layers can only be moved into groups.", nameof(parentId));
+                for (var p = parent; ; p = GetLayer(p.ParentId)) { if (p == layer) throw new InvalidOperationException("A group cannot be moved into itself."); if (p.ParentId == Guid.Empty) break; }
+            }
+            var siblings = new List<PaintLayer>(); foreach (var l in layers) if (l.ParentId == parentId && l != layer) siblings.Add(l);
+            if (position < 0 || position > siblings.Count) throw new ArgumentOutOfRangeException(nameof(position));
+            var before = SnapshotStructure(); var block = Block(layer);
+            MoveSubtreeInternal(layer, parentId, position);
+            var after = SnapshotStructure(); RestoreStructure(before);
+            if (SameStructure(before, after)) return;
+            Execute(StructureCommand(before, after, 64, block));
         }
-        private void MoveLayerInternal(PaintLayer layer, int index) { layers.Remove(layer); layers.Insert(index, layer); }
+        /// <summary>Puts sibling layers into a new group placed where the topmost of them was. They keep their order.</summary>
+        public PaintLayer GroupLayers(IReadOnlyCollection<Guid> ids, string name = null, Guid? groupId = null)
+        {
+            EnsureNoStroke(); if (ids == null || ids.Count == 0) throw new ArgumentException("Choose at least one layer.", nameof(ids));
+            var members = new List<PaintLayer>(); foreach (var id in ids) { var l = GetLayer(id); if (!members.Contains(l)) members.Add(l); }
+            Guid parentId = members[0].ParentId;
+            foreach (var m in members) if (m.ParentId != parentId) throw new InvalidOperationException("Only layers in the same group can be grouped together.");
+            members.Sort((a, b) => layers.IndexOf(a).CompareTo(layers.IndexOf(b)));
+            Guid gid = groupId ?? Guid.NewGuid();
+            if (gid == Guid.Empty) throw new ArgumentException("Layer ID must not be empty.", nameof(groupId));
+            foreach (var existing in layers) if (existing.Id == gid) throw new ArgumentException("Duplicate layer ID.", nameof(groupId));
+            var group = new PaintLayer(this, name ?? "Group", gid, LayerKind.Group) { BlendMode = LayerBlendMode.PassThrough };
+            var before = SnapshotStructure();
+            var siblings = ChildrenOf(parentId); int topPosition = 0;
+            for (int i = 0; i < siblings.Count; i++) if (siblings[i] == members[members.Count - 1]) topPosition = i;
+            // グループを一番上の対象の上に置き、対象を下から順に中へ入れる
+            int insertAt = layers.IndexOf(members[members.Count - 1]) + 1;
+            var moved = new List<PaintLayer>(); foreach (var m in members) moved.AddRange(Block(m));
+            group.ParentId = parentId; layers.Insert(insertAt, group);
+            for (int i = 0; i < members.Count; i++) MoveSubtreeInternal(members[i], gid, i);
+            var after = SnapshotStructure(); RestoreStructure(before);
+            Execute(StructureCommand(before, after, 128, moved));
+            return group;
+        }
+        /// <summary>Removes a group but keeps its contents, which take the group's place in its parent.</summary>
+        public void Ungroup(Guid groupId)
+        {
+            EnsureNoStroke(); var group = GetLayer(groupId);
+            if (!group.IsGroup) throw new InvalidOperationException("Not a group.");
+            var before = SnapshotStructure(); var block = Block(group);
+            int index = layers.IndexOf(group);
+            foreach (var child in layers) if (child.ParentId == groupId) child.ParentId = group.ParentId;
+            layers.RemoveAt(index); // 子は既にグループのすぐ下にあるので、グループの記録を抜くだけで位置が保たれる
+            var after = SnapshotStructure(); RestoreStructure(before);
+            Execute(StructureCommand(before, after, 128, block));
+        }
+
+        int SubtreeStart(int top)
+        {
+            int start = top;
+            if (layers[top].IsGroup) while (start > 0 && IsDescendant(layers[start - 1], layers[top])) start--;
+            return start;
+        }
+        bool IsDescendant(PaintLayer layer, PaintLayer group)
+        {
+            for (var id = layer.ParentId; id != Guid.Empty;)
+            {
+                if (id == group.Id) return true;
+                PaintLayer parent = null; foreach (var l in layers) if (l.Id == id) { parent = l; break; }
+                if (parent == null) return false;
+                id = parent.ParentId;
+            }
+            return false;
+        }
+        /// <summary>Moves a layer's block into parent at position (no history; the caller records before/after).</summary>
+        void MoveSubtreeInternal(PaintLayer layer, Guid parentId, int position)
+        {
+            int top = layers.IndexOf(layer), start = SubtreeStart(top);
+            var block = layers.GetRange(start, top - start + 1); layers.RemoveRange(start, block.Count);
+            var siblings = new List<PaintLayer>(); foreach (var l in layers) if (l.ParentId == parentId) siblings.Add(l);
+            int insertAt;
+            if (position < siblings.Count) insertAt = SubtreeStart(layers.IndexOf(siblings[position]));
+            else if (parentId == Guid.Empty) insertAt = layers.Count;
+            else insertAt = layers.IndexOf(GetLayer(parentId)); // グループの記録のすぐ下 = 子の一番上
+            layer.ParentId = parentId;
+            layers.InsertRange(insertAt, block);
+        }
+        sealed class Structure { public PaintLayer[] Order; public Guid[] Parents; }
+        Structure SnapshotStructure()
+        {
+            var s = new Structure { Order = layers.ToArray(), Parents = new Guid[layers.Count] };
+            for (int i = 0; i < layers.Count; i++) s.Parents[i] = layers[i].ParentId;
+            return s;
+        }
+        void RestoreStructure(Structure s)
+        {
+            layers.Clear(); layers.AddRange(s.Order);
+            for (int i = 0; i < s.Order.Length; i++) s.Order[i].ParentId = s.Parents[i];
+        }
+        static bool SameStructure(Structure a, Structure b)
+        {
+            if (a.Order.Length != b.Order.Length) return false;
+            for (int i = 0; i < a.Order.Length; i++) if (a.Order[i] != b.Order[i] || a.Parents[i] != b.Parents[i]) return false;
+            return true;
+        }
+        /// <summary>A history command that switches between two layer orders/nestings. Every layer present in either is
+        /// re-marked (moving into or out of a group changes how all of them composite).</summary>
+        IHistoryCommand StructureCommand(Structure before, Structure after, long cost, IEnumerable<PaintLayer> moved)
+        {
+            // 動かしたレイヤー（まとまりの全員）だけが自分のタイルで合成を変える。並べ替えで合成が変わるのは動いたものと
+            // 追い越されたものが重なる所だけなので、動いた側のタイルで足りる。クリッピングの下地が変わり得るレイヤーは
+            // MarkClippedLayersChanged が拾う。
+            var affected = new List<PaintLayer>(moved);
+            return new DelegateCommand(() => { RestoreStructure(after); foreach (var l in affected) MarkLayerChanged(l, null); MarkClippedLayersChanged(); },
+                () => { RestoreStructure(before); foreach (var l in affected) MarkLayerChanged(l, null); MarkClippedLayersChanged(); }, cost);
+        }
+        List<PaintLayer> Block(PaintLayer layer)
+        { int top = layers.IndexOf(layer), start = SubtreeStart(top); return layers.GetRange(start, top - start + 1); }
+        /// <summary>Checks the nesting: every parent exists and is a group, there are no cycles, and each group's descendants
+        /// sit directly below it. DocumentBinary uses it for loaded archives.</summary>
+        public void ValidateStructure()
+        {
+            var byId = new Dictionary<Guid, int>(); for (int i = 0; i < layers.Count; i++) byId[layers[i].Id] = i;
+            for (int i = 0; i < layers.Count; i++)
+            {
+                var layer = layers[i]; int hops = 0;
+                for (var id = layer.ParentId; id != Guid.Empty; id = layers[byId[id]].ParentId)
+                {
+                    if (!byId.TryGetValue(id, out int parentIndex)) throw new InvalidOperationException("Layer '" + layer.Name + "' is in a group that does not exist.");
+                    if (!layers[parentIndex].IsGroup) throw new InvalidOperationException("Layer '" + layer.Name + "' is inside a layer that is not a group.");
+                    if (++hops > layers.Count) throw new InvalidOperationException("Groups are nested in a cycle.");
+                }
+                if (layer.ParentId != Guid.Empty)
+                {
+                    int parent = byId[layer.ParentId];
+                    if (parent <= i) throw new InvalidOperationException("Layer '" + layer.Name + "' must be below its group.");
+                    for (int j = i + 1; j < parent; j++)
+                        if (!IsDescendant(layers[j], layers[parent])) throw new InvalidOperationException("The contents of group '" + layers[parent].Name + "' are not contiguous.");
+                }
+            }
+        }
+        /// <summary>For loaders: sets a layer's group without history. Call ValidateStructure afterwards.</summary>
+        internal void SetParentForLoad(PaintLayer layer, Guid parentId) { layer.ParentId = parentId; }
         public void SetLayerName(Guid id, string name)
         {
             EnsureNoStroke(); if (name == null) throw new ArgumentNullException(nameof(name)); var layer = GetLayer(id);
@@ -341,7 +522,9 @@ namespace Yozolab.YoluPainter.Core
         public void SetLayerBlendMode(Guid id, LayerBlendMode mode)
         {
             EnsureNoStroke(); if (!Enum.IsDefined(typeof(LayerBlendMode), mode)) throw new ArgumentOutOfRangeException(nameof(mode));
-            var layer = GetLayer(id); var old = layer.BlendMode; if (old == mode) return;
+            var layer = GetLayer(id);
+            if (mode == LayerBlendMode.PassThrough && !layer.IsGroup) throw new ArgumentException("Pass through applies to groups only.", nameof(mode));
+            var old = layer.BlendMode; if (old == mode) return;
             Execute(LayerScoped(layer, null, () => layer.BlendMode = mode, () => layer.BlendMode = old, 64));
         }
         /// <summary>Clips the layer to the layer below (or releases it). Undoable.</summary>
@@ -350,8 +533,15 @@ namespace Yozolab.YoluPainter.Core
             EnsureNoStroke(); var layer = GetLayer(id); bool old = layer.Clipping; if (old == clipping) return;
             Execute(LayerScoped(layer, null, () => layer.Clipping = clipping, () => layer.Clipping = old, 64));
         }
-        /// <summary>True when the layer at index is effectively clipped (flag set and not the bottom layer).</summary>
-        public bool IsEffectivelyClipped(int index) { return index > 0 && index < layers.Count && layers[index].Clipping; }
+        /// <summary>True when the layer at index is effectively clipped: the flag is set and it has a sibling below it in the
+        /// same group (the bottom layer of the document or of a group has nothing to clip to).</summary>
+        public bool IsEffectivelyClipped(int index)
+        {
+            if (index <= 0 || index >= layers.Count || !layers[index].Clipping) return false;
+            var parent = layers[index].ParentId;
+            for (int j = index - 1; j >= 0; j--) if (layers[j].ParentId == parent) return true;
+            return false;
+        }
         public void SetChannelEnabled(Guid id, PaintChannel channel, bool enabled)
         {
             EnsureNoStroke(); PaintLayer.ValidateChannel(channel); var layer = GetLayer(id);
@@ -472,6 +662,14 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>Marks every tile the layer holds (in one channel, or all when channel is null) as changed.</summary>
         private void MarkLayerChanged(PaintLayer layer, PaintChannel? channel)
         {
+            if (layer.IsGroup)
+            {
+                // グループ自身は画素を持たない。中身のどれかが関わるタイルだけが変わり得る。
+                foreach (var l in layers) if (IsDescendant(l, layer)) MarkLayerChanged(l, channel);
+                if (layer.Mask != null) foreach (var target in channel.HasValue ? new[] { channel.Value } : (PaintChannel[])Enum.GetValues(typeof(PaintChannel)))
+                        foreach (var coord in layer.Mask.Surface.EnumerateTileCoordinates()) MarkTileChanged(target, coord);
+                return;
+            }
             if (layer.Kind != LayerKind.Raster)
             {
                 // A fill or adjustment covers the whole canvas. Mark every tile for the channel (or all channels): the value may just
@@ -487,6 +685,12 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>A history command whose apply and revert change how one layer composites, but not its pixels.
         /// Clipped layers are re-marked too: moving, hiding, adding or removing a layer can change which base a clipped layer
         /// is drawn inside, and so where its pixels are visible, without touching the clipped layer itself.</summary>
+        /// <summary>LayerScoped for a whole block (a group and its contents).</summary>
+        private DelegateCommand SubtreeScoped(List<PaintLayer> block, Action apply, Action revert, long cost)
+        {
+            return new DelegateCommand(() => { foreach (var l in block) MarkLayerChanged(l, null); apply(); MarkClippedLayersChanged(); },
+                () => { revert(); foreach (var l in block) MarkLayerChanged(l, null); MarkClippedLayersChanged(); }, cost);
+        }
         private DelegateCommand LayerScoped(PaintLayer layer, PaintChannel? channel, Action apply, Action revert, long cost)
         {
             return new DelegateCommand(() => { apply(); MarkLayerChanged(layer, channel); MarkClippedLayersChanged(); },

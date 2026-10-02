@@ -143,11 +143,9 @@ namespace Yozolab.YoluPainter.Tests
 
             // 版 4 には各レイヤーのクリッピングの 1 バイトが無い。クリッピングの無い文書を書き、そのバイトを抜いて版 4 として読む。
             var plain = new PaintDocument(16, 16, 8); var layer = plain.AddLayer("p"); layer.GetChannel(PaintChannel.Color).SetPixel(3, 3, Red);
-            var v5 = DocumentBinary.Write(plain);
-            int clippingByte = 8 + 4 + 16 + 12 + 4 + 16 + 4 + System.Text.Encoding.UTF8.GetByteCount("p") + 1 + 8 + 4; // magic,ver,id,dims,count,layer id,name,visible,opacity,blend
-            Assert.That(v5[clippingByte], Is.EqualTo(0));
-            var v4 = v5.Take(clippingByte).Concat(v5.Skip(clippingByte + 1)).ToArray(); BitConverter.GetBytes(4).CopyTo(v4, 8);
-            Assert.That(DocumentBinary.Read(v4).Composite(PaintChannel.Color), Is.EqualTo(plain.Composite(PaintChannel.Color)));
+            var current = DocumentBinary.Write(plain);
+            foreach (int version in new[] { 4, 5 })
+                Assert.That(DocumentBinary.Read(ArchiveTestUtil.AsVersion(current, "p", version)).Composite(PaintChannel.Color), Is.EqualTo(plain.Composite(PaintChannel.Color)), "version " + version);
         }
 
         [Test] public void PsdProjectionRefusesClipping()

@@ -38,7 +38,7 @@ namespace Yozolab.YoluPainter.Core
         {
             switch (mode)
             {
-                case LayerBlendMode.Normal: r = sr; g = sg; b = sb; return;
+                case LayerBlendMode.Normal: case LayerBlendMode.PassThrough: r = sr; g = sg; b = sb; return;
                 case LayerBlendMode.Hue: SetLum(SetSat(sr, sg, sb, Sat(dr, dg, db)), Lum(dr, dg, db), out r, out g, out b); return;
                 case LayerBlendMode.Saturation: SetLum(SetSat(dr, dg, db, Sat(sr, sg, sb)), Lum(dr, dg, db), out r, out g, out b); return;
                 case LayerBlendMode.Color: SetLum((sr, sg, sb), Lum(dr, dg, db), out r, out g, out b); return;
@@ -121,31 +121,93 @@ namespace Yozolab.YoluPainter.Core
             return new Rgba32(MathUtil.ToByte(dr + (r - dr) * amount), MathUtil.ToByte(dg + (g - dg) * amount), MathUtil.ToByte(db + (b - db) * amount), below.A);
         }
 
-        /// <summary>One step of the layer stack for a channel: an unclipped layer and the active layers clipped to it, bottom to top.</summary>
+        /// <summary>One step of the layer stack for a channel: an unclipped layer (or group) and the active layers clipped to
+        /// it, bottom to top. For a group, Children is the plan of its contents.</summary>
         public sealed class StackEntry
         {
             readonly System.Collections.Generic.List<PaintLayer> clips = new System.Collections.Generic.List<PaintLayer>();
+            readonly System.Collections.Generic.List<StackEntry> clipEntries = new System.Collections.Generic.List<StackEntry>();
             public PaintLayer Base { get; internal set; }
             public System.Collections.Generic.IReadOnlyList<PaintLayer> Clips { get { return clips; } }
-            internal void AddClip(PaintLayer layer) { clips.Add(layer); }
+            /// <summary>The clipped layers as entries (a clipped group carries its own Children).</summary>
+            public System.Collections.Generic.IReadOnlyList<StackEntry> ClipEntries { get { return clipEntries; } }
+            /// <summary>The plan of a group's contents; empty for other layers.</summary>
+            public System.Collections.Generic.IReadOnlyList<StackEntry> Children { get; internal set; } = new StackEntry[0];
+            internal void AddClip(StackEntry entry) { clips.Add(entry.Base); clipEntries.Add(entry); }
+            /// <summary>A pass-through group without clipped layers: its children composite straight onto the backdrop.</summary>
+            public bool PassesThrough { get { return Base.IsGroup && Base.BlendMode == LayerBlendMode.PassThrough && clipEntries.Count == 0; } }
         }
         static bool Active(PaintLayer layer, PaintChannel channel)
         { return layer.Visible && layer.Opacity > 0 && layer.IsChannelEnabled(channel) && layer.HasContent(channel); }
         /// <summary>Groups the layers into clipping groups for a channel, dropping what cannot show: a hidden (or empty in this
-        /// channel) base hides its clipped layers too, and an adjustment base has no pixels to clip to.</summary>
+        /// channel) base hides its clipped layers too, and an adjustment base has no pixels to clip to. Groups recurse; a hidden
+        /// group or one with nothing active inside is dropped with everything in it. Clipping only reaches siblings.</summary>
         public static System.Collections.Generic.List<StackEntry> Plan(PaintDocument document, PaintChannel channel)
+        { return PlanLevel(document, channel, Guid.Empty); }
+        static System.Collections.Generic.List<StackEntry> PlanLevel(PaintDocument document, PaintChannel channel, Guid parent)
         {
             var plan = new System.Collections.Generic.List<StackEntry>(); var layers = document.Layers;
-            for (int i = 0; i < layers.Count; i++)
+            var siblings = new System.Collections.Generic.List<int>();
+            for (int i = 0; i < layers.Count; i++) if (layers[i].ParentId == parent) siblings.Add(i);
+            // 兄弟の中で、一番下でなくクリッピングの印があるものが「クリッピングされている」（IsEffectivelyClipped と同じ規則）
+            for (int k = 0; k < siblings.Count; k++)
             {
-                if (document.IsEffectivelyClipped(i) || !Active(layers[i], channel)) continue;
-                var entry = new StackEntry { Base = layers[i] };
+                int i = siblings[k];
+                if (k > 0 && layers[i].Clipping) continue;
+                var entry = MakeEntry(document, channel, layers[i]); if (entry == null) continue;
                 if (layers[i].Kind != LayerKind.Adjustment)
-                    for (int j = i + 1; j < layers.Count && document.IsEffectivelyClipped(j); j++)
-                        if (Active(layers[j], channel)) entry.AddClip(layers[j]);
+                    for (int m = k + 1; m < siblings.Count && layers[siblings[m]].Clipping; m++)
+                    { var clip = MakeEntry(document, channel, layers[siblings[m]]); if (clip != null) entry.AddClip(clip); }
                 plan.Add(entry);
             }
             return plan;
+        }
+        static StackEntry MakeEntry(PaintDocument document, PaintChannel channel, PaintLayer layer)
+        {
+            if (layer.IsGroup)
+            {
+                if (!layer.Visible || layer.Opacity <= 0) return null;
+                var children = PlanLevel(document, channel, layer.Id);
+                return children.Count == 0 ? null : new StackEntry { Base = layer, Children = children };
+            }
+            return Active(layer, channel) ? new StackEntry { Base = layer } : null;
+        }
+        static LayerBlendMode ModeOf(PaintLayer layer) { return layer.BlendMode == LayerBlendMode.PassThrough ? LayerBlendMode.Normal : layer.BlendMode; }
+        /// <summary>Fades between the backdrop and a pass-through group's result by amount (premultiplied interpolation, so a
+        /// transparent side does not darken the other).</summary>
+        internal static Rgba32 Fade(Rgba32 backdrop, Rgba32 inner, double amount)
+        {
+            if (amount >= 1) return inner;
+            if (amount <= 0) return backdrop;
+            double ba = backdrop.A / 255.0 * (1 - amount), ia = inner.A / 255.0 * amount, a = ba + ia;
+            if (a <= 0) return Rgba32.Transparent;
+            return new Rgba32(MathUtil.ToByte((backdrop.R / 255.0 * ba + inner.R / 255.0 * ia) / a), MathUtil.ToByte((backdrop.G / 255.0 * ba + inner.G / 255.0 * ia) / a),
+                MathUtil.ToByte((backdrop.B / 255.0 * ba + inner.B / 255.0 * ia) / a), MathUtil.ToByte(a));
+        }
+
+        /// <summary>Per-pixel reference: composites a plan level over a backdrop. Isolated groups composite their contents from
+        /// transparent and blend the result like a layer; pass-through groups composite their contents onto the backdrop and
+        /// fade by the group's opacity × mask. A group with clipped layers is treated as isolated (Normal for pass-through).</summary>
+        static Rgba32 EvaluatePixel(System.Collections.Generic.IReadOnlyList<StackEntry> plan, Rgba32 backdrop, PaintChannel channel, int x, int y)
+        {
+            Rgba32 result = backdrop;
+            foreach (var entry in plan)
+            {
+                var layer = entry.Base;
+                double amount = layer.Opacity * (layer.Mask == null ? 1 : layer.Mask.FactorAt(x, y));
+                if (layer.Kind == LayerKind.Adjustment) { result = layer.Adjustment.Composite(result, amount, layer.BlendMode); continue; }
+                if (entry.PassesThrough) { result = Fade(result, EvaluatePixel(entry.Children, result, channel, x, y), amount); continue; }
+                Rgba32 group = layer.IsGroup ? EvaluatePixel(entry.Children, Rgba32.Transparent, channel, x, y) : layer.GetPixel(channel, x, y);
+                foreach (var clip in entry.ClipEntries)
+                {
+                    var c = clip.Base;
+                    double clipAmount = c.Opacity * (c.Mask == null ? 1 : c.Mask.FactorAt(x, y));
+                    if (c.Kind == LayerKind.Adjustment) group = c.Adjustment.Composite(group, clipAmount, c.BlendMode);
+                    else group = ClipOnto(group, c.IsGroup ? EvaluatePixel(clip.Children, Rgba32.Transparent, channel, x, y) : c.GetPixel(channel, x, y), clipAmount, ModeOf(c));
+                }
+                result = Blend(result, group, amount, ModeOf(layer));
+            }
+            return result;
         }
 
         public static Rgba32 CompositePixel(PaintDocument document, PaintChannel channel, int x, int y)
@@ -153,22 +215,7 @@ namespace Yozolab.YoluPainter.Core
             if (document == null) throw new ArgumentNullException(nameof(document));
             PaintLayer.ValidateChannel(channel);
             if (x < 0 || y < 0 || x >= document.Width || y >= document.Height) throw new ArgumentOutOfRangeException("pixel");
-            Rgba32 result = Rgba32.Transparent;
-            foreach (var entry in Plan(document, channel))
-            {
-                var layer = entry.Base;
-                double amount = layer.Opacity * (layer.Mask == null ? 1 : layer.Mask.FactorAt(x, y));
-                if (layer.Kind == LayerKind.Adjustment) { result = layer.Adjustment.Composite(result, amount, layer.BlendMode); continue; }
-                Rgba32 group = layer.GetPixel(channel, x, y);
-                foreach (var clip in entry.Clips)
-                {
-                    double clipAmount = clip.Opacity * (clip.Mask == null ? 1 : clip.Mask.FactorAt(x, y));
-                    group = clip.Kind == LayerKind.Adjustment ? clip.Adjustment.Composite(group, clipAmount, clip.BlendMode)
-                        : ClipOnto(group, clip.GetPixel(channel, x, y), clipAmount, clip.BlendMode);
-                }
-                result = Blend(result, group, amount, layer.BlendMode);
-            }
-            return result;
+            return EvaluatePixel(Plan(document, channel), Rgba32.Transparent, channel, x, y);
         }
         /// <summary>Explicit full-frame reference output; use CompositeRegion/CompositePixel for narrow inspection.
         /// It deliberately does not allocate persistent full-frame buffers per layer.</summary>
@@ -184,17 +231,70 @@ namespace Yozolab.YoluPainter.Core
             public LayerTile(PaintLayer layer, int tileBytes)
             {
                 Layer = layer;
-                if (layer.Kind != LayerKind.Adjustment) Pixels = new byte[tileBytes];
+                if (layer.Kind != LayerKind.Adjustment && !layer.IsGroup) Pixels = new byte[tileBytes];
                 // A neutral mask multiplies by exactly 1, so skipping it is exact.
                 if (layer.Mask != null && !layer.Mask.IsNeutral) { MaskSource = layer.Mask; Mask = new byte[tileBytes]; }
             }
             public void Load(PaintChannel channel, TileCoord coord)
             {
                 Present = Layer.Kind == LayerKind.Adjustment || Layer.CopyTile(channel, coord, Pixels);
-                if (Present && MaskSource != null) MaskSource.Surface.CopyTile(coord, Mask);
+                LoadMask(coord);
             }
+            public void LoadMask(TileCoord coord) { if (Present && MaskSource != null) MaskSource.Surface.CopyTile(coord, Mask); }
             public double Amount(int offset) { return MaskSource == null ? Layer.Opacity : Layer.Opacity * MaskSource.Factor(Mask[offset + 3]); }
             public Rgba32 Pixel(int offset) { return new Rgba32(Pixels[offset], Pixels[offset + 1], Pixels[offset + 2], Pixels[offset + 3]); }
+        }
+        /// <summary>The plan with one tile buffer per layer, mirroring StackEntry.</summary>
+        sealed class Node
+        {
+            public StackEntry Entry; public LayerTile Tile; public Node[] Children, Clips;
+            public static Node[] Build(System.Collections.Generic.IReadOnlyList<StackEntry> plan, int tileBytes)
+            {
+                var nodes = new Node[plan.Count];
+                for (int i = 0; i < plan.Count; i++)
+                {
+                    var e = plan[i];
+                    nodes[i] = new Node { Entry = e, Tile = new LayerTile(e.Base, tileBytes), Children = Build(e.Children, tileBytes), Clips = Build(e.ClipEntries, tileBytes) };
+                }
+                return nodes;
+            }
+            /// <summary>Loads the tile for every node; returns true when any raster or fill pixels are present below it.</summary>
+            public static bool Load(Node[] nodes, PaintChannel channel, TileCoord coord)
+            {
+                bool any = false;
+                foreach (var n in nodes)
+                {
+                    bool pixels;
+                    if (n.Entry.Base.IsGroup) { pixels = Load(n.Children, channel, coord); n.Tile.Present = pixels || HasAdjustment(n.Children); n.Tile.LoadMask(coord); }
+                    else { n.Tile.Load(channel, coord); pixels = n.Entry.Base.Kind != LayerKind.Adjustment && n.Tile.Present; }
+                    if (n.Tile.Present) pixels |= Load(n.Clips, channel, coord);
+                    any |= pixels;
+                }
+                return any;
+            }
+            static bool HasAdjustment(Node[] nodes) { foreach (var n in nodes) if (n.Tile.Present && n.Entry.Base.Kind == LayerKind.Adjustment || n.Entry.Base.IsGroup && n.Tile.Present) return true; return false; }
+        }
+        /// <summary>Tile variant of EvaluatePixel (the same arithmetic in the same order).</summary>
+        static Rgba32 EvaluateTile(Node[] nodes, Rgba32 backdrop, int offset)
+        {
+            Rgba32 result = backdrop;
+            foreach (var n in nodes)
+            {
+                var b = n.Tile; if (!b.Present) continue;
+                var layer = b.Layer; double amount = b.Amount(offset);
+                if (layer.Kind == LayerKind.Adjustment) { result = layer.Adjustment.Composite(result, amount, layer.BlendMode); continue; }
+                if (n.Entry.PassesThrough) { result = Fade(result, EvaluateTile(n.Children, result, offset), amount); continue; }
+                Rgba32 group = layer.IsGroup ? EvaluateTile(n.Children, Rgba32.Transparent, offset) : b.Pixel(offset);
+                foreach (var clip in n.Clips)
+                {
+                    if (!clip.Tile.Present) continue;
+                    var c = clip.Tile.Layer; double clipAmount = clip.Tile.Amount(offset);
+                    if (c.Kind == LayerKind.Adjustment) group = c.Adjustment.Composite(group, clipAmount, c.BlendMode);
+                    else group = ClipOnto(group, c.IsGroup ? EvaluateTile(clip.Children, Rgba32.Transparent, offset) : clip.Tile.Pixel(offset), clipAmount, ModeOf(c));
+                }
+                result = BlendUnchecked(result, group, amount, ModeOf(layer));
+            }
+            return result;
         }
         public static byte[] CompositeRegion(PaintDocument document, PaintChannel channel, int x, int y, int width, int height)
         {
@@ -207,46 +307,19 @@ namespace Yozolab.YoluPainter.Core
             // Same per-pixel arithmetic as CompositePixel, but each layer's tile is read once instead of one dictionary
             // lookup per pixel per layer.
             int tile = document.TileSize, tileBytes = checked(tile * tile * 4);
-            var plan = Plan(document, channel);
-            var bases = new LayerTile[plan.Count]; var clips = new LayerTile[plan.Count][];
-            for (int e = 0; e < plan.Count; e++)
-            {
-                bases[e] = new LayerTile(plan[e].Base, tileBytes);
-                clips[e] = new LayerTile[plan[e].Clips.Count];
-                for (int c = 0; c < clips[e].Length; c++) clips[e][c] = new LayerTile(plan[e].Clips[c], tileBytes);
-            }
+            var nodes = Node.Build(Plan(document, channel), tileBytes);
             for (int ty = y / tile; ty <= (y + height - 1) / tile; ty++)
                 for (int tx = x / tile; tx <= (x + width - 1) / tile; tx++)
                 {
-                    var coord = new TileCoord(tx, ty); bool any = false;
-                    for (int e = 0; e < plan.Count; e++)
-                    {
-                        bases[e].Load(channel, coord);
-                        if (plan[e].Base.Kind != LayerKind.Adjustment) any |= bases[e].Present;
-                        if (bases[e].Present) foreach (var clip in clips[e]) clip.Load(channel, coord);
-                    }
+                    var coord = new TileCoord(tx, ty);
                     // Nothing with pixels here: the result stays transparent, and adjustments leave transparent pixels alone.
-                    if (!any) continue;
+                    if (!Node.Load(nodes, channel, coord)) continue;
                     int x0 = Math.Max(x, tx * tile), x1 = Math.Min(x + width, (tx + 1) * tile);
                     int y0 = Math.Max(y, ty * tile), y1 = Math.Min(y + height, (ty + 1) * tile);
                     for (int py = y0; py < y1; py++) for (int px = x0; px < x1; px++)
                     {
                         int source = ((py - ty * tile) * tile + (px - tx * tile)) * 4;
-                        Rgba32 result = Rgba32.Transparent;
-                        for (int e = 0; e < plan.Count; e++)
-                        {
-                            var b = bases[e]; if (!b.Present) continue;
-                            var layer = b.Layer; double amount = b.Amount(source);
-                            if (layer.Kind == LayerKind.Adjustment) { result = layer.Adjustment.Composite(result, amount, layer.BlendMode); continue; }
-                            Rgba32 group = b.Pixel(source);
-                            foreach (var clip in clips[e])
-                            {
-                                if (!clip.Present) continue;
-                                group = clip.Layer.Kind == LayerKind.Adjustment ? clip.Layer.Adjustment.Composite(group, clip.Amount(source), clip.Layer.BlendMode)
-                                    : ClipOnto(group, clip.Pixel(source), clip.Amount(source), clip.Layer.BlendMode);
-                            }
-                            result = BlendUnchecked(result, group, amount, layer.BlendMode);
-                        }
+                        var result = EvaluateTile(nodes, Rgba32.Transparent, source);
                         int offset = ((py - y) * width + (px - x)) * 4;
                         bytes[offset] = result.R; bytes[offset + 1] = result.G; bytes[offset + 2] = result.B; bytes[offset + 3] = result.A;
                     }

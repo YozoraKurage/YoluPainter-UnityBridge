@@ -8,10 +8,11 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// <summary>Versioned, bounded, lossless native sparse source archive. No GPU cache is persisted.
     /// Version 2 adds an optional raster mask block after each layer's channels. Version 3 adds the layer kind and fill
     /// values after the layer attributes. Version 4 adds adjustment parameters after the fill values. Version 5 adds the
-    /// clipping flag after the blend mode. Older archives still load.</summary>
+    /// clipping flag after the blend mode. Version 6 adds groups: layer kind 3, the PassThrough blend mode, and each layer's
+    /// parent group id after the layer kind. Older archives still load.</summary>
     public static class DocumentBinary
     {
-        const int Version = 5;
+        const int Version = 6;
         const long MaxArchiveBytes = 512L * 1024 * 1024;
         static readonly byte[] Magic = Encoding.ASCII.GetBytes("DOTPAINT");
 
@@ -32,6 +33,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     writer.Write(layer.Visible); writer.Write(layer.Opacity); writer.Write((int)layer.BlendMode);
                     writer.Write(layer.Clipping);
                     writer.Write((int)layer.Kind);
+                    writer.Write(layer.ParentId.ToByteArray());
                     var fills = layer.FillValues.Keys.OrderBy(c => c).ToArray();
                     writer.Write(fills.Length);
                     foreach (var channel in fills)
@@ -98,7 +100,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
                             throw new InvalidDataException("Invalid layer attributes.");
                         bool clipping = version >= 5 && reader.ReadBoolean();
                         int kind = version >= 3 ? reader.ReadInt32() : (int)LayerKind.Raster;
-                        if (!Enum.IsDefined(typeof(LayerKind), kind)) throw new InvalidDataException("Unknown layer kind; a newer reader is required.");
+                        if (!Enum.IsDefined(typeof(LayerKind), kind) || kind == (int)LayerKind.Group && version < 6) throw new InvalidDataException("Unknown layer kind; a newer reader is required.");
+                        if (blend == (int)LayerBlendMode.PassThrough && kind != (int)LayerKind.Group) throw new InvalidDataException("Pass through applies to groups only.");
+                        var parentId = version >= 6 ? new Guid(ReadExact(reader, 16)) : Guid.Empty;
                         PaintLayer layer;
                         if (version >= 3)
                         {
@@ -139,10 +143,12 @@ namespace Yozolab.YoluPainter.Core.Persistence
                                 }
                                 layer = doc.AddAdjustmentLayer(layerName, settings, targets, layerId);
                             }
+                            else if (kind == (int)LayerKind.Group) layer = doc.AddGroup(layerName, layerId);
                             else layer = kind == (int)LayerKind.Fill ? doc.AddFillLayer(layerName, values, layerId) : doc.AddLayer(layerName, layerId);
                             foreach (var channel in disabled) doc.SetChannelEnabled(layer.Id, channel, false);
                         }
                         else layer = doc.AddLayer(layerName, layerId);
+                        doc.SetParentForLoad(layer, parentId);
                         doc.SetLayerVisibility(layer.Id, visible); doc.SetLayerOpacity(layer.Id, opacity); doc.SetLayerBlendMode(layer.Id, (LayerBlendMode)blend);
                         doc.SetLayerClipping(layer.Id, clipping);
                         int channelCount = ReadCount(reader, 6, "channels");
@@ -176,6 +182,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         }
                     }
                     if (stream.Position != stream.Length) throw new InvalidDataException("Trailing native data requires a newer reader.");
+                    try { doc.ValidateStructure(); }
+                    catch (InvalidOperationException ex) { throw new InvalidDataException("Invalid layer groups: " + ex.Message, ex); }
                     doc.ClearHistory(); return doc;
                 }
                 catch (EndOfStreamException ex) { throw new InvalidDataException("Native archive is truncated.", ex); }

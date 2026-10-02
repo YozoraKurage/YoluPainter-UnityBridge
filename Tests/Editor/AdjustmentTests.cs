@@ -138,14 +138,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.Throws<InvalidDataException>(() => DocumentBinary.Read(AsVersion3(DocumentBinary.Write(adjusted), "A")), "a version 3 archive cannot contain adjustment layers");
         }
 
-        /// <summary>1 レイヤーの版 5 アーカイブから、クリッピングの 1 バイトを抜いて版 3 にする。</summary>
-        static byte[] AsVersion3(byte[] v5, string layerName)
-        {
-            int clippingByte = 8 + 4 + 16 + 12 + 4 + 16 + 4 + System.Text.Encoding.UTF8.GetByteCount(layerName) + 1 + 8 + 4;
-            Assert.That(v5[clippingByte], Is.EqualTo(0));
-            var v3 = v5.Take(clippingByte).Concat(v5.Skip(clippingByte + 1)).ToArray(); BitConverter.GetBytes(3).CopyTo(v3, 8);
-            return v3;
-        }
+        static byte[] AsVersion3(byte[] current, string layerName) => ArchiveTestUtil.AsVersion(current, layerName, 3);
 
         [Test] public void UnknownAdjustmentAlgorithmVersionsAreRefused()
         {
@@ -158,11 +151,11 @@ namespace Yozolab.YoluPainter.Tests
 
         static int FindAdjustmentBlock(byte[] bytes)
         {
-            // 種類 = 2、Fill の値の数 = 0、調整の種類 = 0（反転）、アルゴリズム版 = 1 が続く並びを探す。
-            var pattern = new List<byte>();
-            foreach (int v in new[] { (int)LayerKind.Adjustment, 0, (int)AdjustmentType.Invert, AdjustmentSettings.AlgorithmVersion }) pattern.AddRange(BitConverter.GetBytes(v));
+            // 種類 = 2、親グループ ID（最上位なので 0 が 16 バイト）、Fill の値の数 = 0、調整の種類 = 0（反転）、アルゴリズム版 = 1 が続く並びを探す。
+            var pattern = new List<byte>(BitConverter.GetBytes((int)LayerKind.Adjustment)); pattern.AddRange(new byte[16]);
+            foreach (int v in new[] { 0, (int)AdjustmentType.Invert, AdjustmentSettings.AlgorithmVersion }) pattern.AddRange(BitConverter.GetBytes(v));
             for (int i = 0; i + pattern.Count <= bytes.Length; i++)
-                if (bytes.Skip(i).Take(pattern.Count).SequenceEqual(pattern)) return i + 8; // 調整の種類の位置
+                if (bytes.Skip(i).Take(pattern.Count).SequenceEqual(pattern)) return i + 24; // 調整の種類の位置
             throw new InvalidOperationException("adjustment block not found");
         }
 

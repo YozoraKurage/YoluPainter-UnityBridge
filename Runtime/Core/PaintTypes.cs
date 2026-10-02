@@ -9,6 +9,8 @@ namespace Yozolab.YoluPainter.Core
         Normal, Multiply, Screen, Overlay, Darken, Lighten, ColorDodge, ColorBurn, LinearDodge, LinearBurn,
         HardLight, SoftLight, VividLight, LinearLight, PinLight, HardMix, Difference, Exclusion, Subtract, Divide,
         Hue, Saturation, Color, Luminosity, DarkerColor, LighterColor,
+        /// <summary>Groups only: the children composite into what is below as if they were not grouped.</summary>
+        PassThrough,
     }
 
     /// <summary>Unassociated (straight) RGBA8. Alpha is linear coverage; RGB is stored without color conversion.</summary>
