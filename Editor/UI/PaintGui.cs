@@ -153,6 +153,7 @@ namespace Yozolab.YoluPainter.Editor
         public static float Slider(Rect r, string label, float value, float min, float max, string format = "0.##", string suffix = "", string tooltip = null, bool enabled = true)
         {
             int id = GUIUtility.GetControlID(FocusType.Keyboard, r);
+            enabled &= GUI.enabled; // ストロークの間など、GUI が止められているときは動かさない
             if (s_editingId == id) return EditNumber(r, id, value, min, max);
             bool hover = enabled && Hover(r);
             float t = max > min ? Mathf.Clamp01((value - min) / (max - min)) : 0;
