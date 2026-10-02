@@ -42,30 +42,32 @@ namespace Yozolab.YoluPainter.Tests
             CollectionAssert.AreEquivalent(new[] { new TileCoord(1, 1) }, Changed(doc, PaintChannel.Color, s3), "a cancelled stroke must report the tiles it restored");
         }
 
-        [Test] public void CompositeAffectingStructureChangesForceFullRecomposite()
+        [Test] public void StructureChangesReportOnlyTheAffectedLayersTiles()
         {
-            var doc = new PaintDocument(32, 32, 16); var a = doc.AddLayer("A").Id; var b = doc.AddLayer("B").Id; doc.ClearHistory();
-            Dot(doc, a, 3, 3);
-            var edits = new (string, Action)[]
+            var doc = new PaintDocument(64, 64, 16); var a = doc.AddLayer("A").Id; var b = doc.AddLayer("B").Id; doc.ClearHistory();
+            Dot(doc, a, 3, 3); Dot(doc, b, 40, 40); Dot(doc, b, 40, 40, PaintChannel.Roughness);
+            var aTiles = new[] { new TileCoord(0, 0) }; var bTiles = new[] { new TileCoord(2, 2) };
+            var edits = new (string, Action, TileCoord[], TileCoord[])[]
             {
-                ("visibility", () => doc.SetLayerVisibility(a, false)),
-                ("opacity", () => doc.SetLayerOpacity(a, .5)),
-                ("blend", () => doc.SetLayerBlendMode(a, LayerBlendMode.Screen)),
-                ("move", () => doc.MoveLayer(a, 1)),
-                ("channel", () => doc.SetChannelEnabled(b, PaintChannel.Color, false)),
-                ("add", () => doc.AddLayer("C")),
-                ("remove", () => doc.RemoveLayer(b)),
-                ("undo of structure", () => doc.Undo()),
-                ("external pixel", () => doc.GetLayer(a).GetChannel(PaintChannel.Color).SetPixel(9, 9, new Rgba32(1, 2, 3))),
+                // 名前, 操作, Color で変わったと報告されるべきタイル, Roughness で報告されるべきタイル
+                ("visibility", () => doc.SetLayerVisibility(a, false), aTiles, new TileCoord[0]),
+                ("opacity", () => doc.SetLayerOpacity(a, .5), aTiles, new TileCoord[0]),
+                ("blend", () => doc.SetLayerBlendMode(b, LayerBlendMode.Screen), bTiles, bTiles),
+                ("move", () => doc.MoveLayer(a, 1), aTiles, new TileCoord[0]),
+                ("channel enable is per channel", () => doc.SetChannelEnabled(b, PaintChannel.Roughness, false), new TileCoord[0], bTiles),
+                ("add empty layer", () => doc.AddLayer("C"), new TileCoord[0], new TileCoord[0]),
+                ("remove", () => doc.RemoveLayer(b), bTiles, bTiles),
+                ("undo of remove", () => doc.Undo(), bTiles, bTiles),
+                ("external pixel", () => doc.GetLayer(a).GetChannel(PaintChannel.Color).SetPixel(9, 9, new Rgba32(1, 2, 3)), aTiles, new TileCoord[0]),
+                ("external clear", () => doc.GetLayer(b).GetChannel(PaintChannel.Color).Clear(), bTiles, new TileCoord[0]),
+                ("rename", () => doc.SetLayerName(a, "renamed"), new TileCoord[0], new TileCoord[0]),
             };
-            foreach (var (name, edit) in edits)
+            foreach (var (name, edit, color, roughness) in edits)
             {
                 long since = doc.ChangeSerial; edit();
-                Assert.That(doc.TryGetChangedTiles(PaintChannel.Color, since, new List<TileCoord>()), Is.False, name);
-                Assert.That(doc.TryGetChangedTiles(PaintChannel.Color, doc.ChangeSerial, new List<TileCoord>()), Is.True, name + ": a fresh serial is incremental again");
+                CollectionAssert.AreEquivalent(color, Changed(doc, PaintChannel.Color, since), name + " (Color)");
+                CollectionAssert.AreEquivalent(roughness, Changed(doc, PaintChannel.Roughness, since), name + " (Roughness)");
             }
-            long beforeRename = doc.ChangeSerial; doc.SetLayerName(a, "renamed");
-            Assert.That(Changed(doc, PaintChannel.Color, beforeRename), Is.Empty, "renaming does not affect pixels");
         }
 
         [Test] public void SerialsFromElsewhereAreNotTrusted()

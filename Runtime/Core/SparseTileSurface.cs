@@ -11,8 +11,8 @@ namespace Yozolab.YoluPainter.Core
         internal Action BeforeExternalMutation;
         internal Action AfterExternalMutation;
         internal Action<long> BeforeSourceGrowth;
-        /// <summary>Raised after a history-tracked pixel write or tile restore changes a tile. External mutations
-        /// (SetPixel/ImportTile/Clear) are reported through AfterExternalMutation instead.</summary>
+        /// <summary>Raised after any pixel write, tile restore, import or clear changes a tile, whether the change is
+        /// history-tracked (strokes, undo) or external (SetPixel/ImportTile/Clear, which also raise AfterExternalMutation).</summary>
         internal Action<TileCoord> TileChanged;
         public int Width { get; private set; }
         public int Height { get; private set; }
@@ -114,7 +114,9 @@ namespace Yozolab.YoluPainter.Core
         {
             if (tiles.Count == 0) return;
             if (BeforeExternalMutation != null) BeforeExternalMutation();
+            var cleared = new List<TileCoord>(tiles.Keys);
             tiles.Clear();
+            if (TileChanged != null) foreach (var coord in cleared) TileChanged(coord);
             if (AfterExternalMutation != null) AfterExternalMutation();
         }
         internal long TileBytesAt(TileCoord coord) { TileStorage tile; return tiles.TryGetValue(coord, out tile) ? tile.ByteSize : 0; }

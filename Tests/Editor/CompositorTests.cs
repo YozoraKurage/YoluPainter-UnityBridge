@@ -30,9 +30,9 @@ namespace Yozolab.YoluPainter.Tests
             Step("no change", 0);
             doc.Undo(); Step("undo", 2);
             Stroke(b.Id, 8, 10); Step("overlapping stroke on upper layer", 2);
-            doc.SetLayerBlendMode(b.Id, LayerBlendMode.Multiply); Step("blend change (full)", null);
-            doc.SetLayerOpacity(a.Id, .3); Step("opacity change (full)", null);
-            doc.SetLayerVisibility(b.Id, false); Step("hide (full)", null);
+            doc.SetLayerBlendMode(b.Id, LayerBlendMode.Multiply); Step("blend change", 4);
+            doc.SetLayerOpacity(a.Id, .3); Step("opacity change", 4);
+            doc.SetLayerVisibility(b.Id, false); Step("hide", 4);
             using (var s = doc.BeginStroke(a.Id, PaintChannel.Color, brush)) { s.Add(new BrushSample(40, 24)); Step("mid-stroke preview", 2); s.Cancel(); }
             Step("after cancel", 2);
             compositor.Update(doc, PaintChannel.Roughness); assertMatches(doc.Composite(PaintChannel.Roughness), read(), "channel switch");
