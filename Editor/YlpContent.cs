@@ -14,6 +14,8 @@ namespace Yozolab.YoluPainter.Editor
     /// 上下は正しい。正本から作った派生物で、読み込み時の正本にはしない。Normal は Unity 向けの出力（<see cref="Image"/>）</item>
     /// <item>thumbnail.png: Color（無ければ最初のチャンネル）の合成を長辺 256px 以下に縮めたもの</item>
     /// <item>view.json / brush.json / imported-original.psd（PSD から取り込んだときの原本のバイト列）</item>
+    /// <item>meshmap-&lt;種類&gt;.bin: ベイクした mesh map と由来（Core の MeshMapBinary。派生物で、読めなければ焼き直す。
+    /// 知らない版のウィンドウは読み飛ばし、そのウィンドウで保存し直すと落ちる）</item>
     /// </list></summary>
     internal static class YlpContent
     {

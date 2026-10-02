@@ -137,6 +137,7 @@ namespace Yozolab.YoluPainter.Editor
             var budgetNote=ApplyBudgets(); if(budgetNote!=null)message=budgetNote;
             document.HistoryTrimming += bytes => message="Undo budget reached; dropping "+(bytes/1024)+" KiB of the oldest history (the newest "+document.MinimumUndoSteps+" steps are always kept). Current source remains intact.";
             repaintPixels=true; renderedRevision=-1; recoveredRevision=-1;
+            ClearMeshMaps();
         }
         void CreateDocument(int size)
         {
@@ -152,7 +153,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             FinishStroke(false); preview?.CancelNavigation(); SaveRecovery();
             EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
-            DisposeNormalOutput(); DisposeLighting(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
+            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
             if(selectionOverlay!=null){DestroyImmediate(selectionOverlay);selectionOverlay=null;overlayFor=null;}
         }
         void Tick()
@@ -330,6 +331,7 @@ namespace Yozolab.YoluPainter.Editor
                 if(BrushLibrary.IsLibraryPreset(brush.presetId)&&GUILayout.Button("Delete imported brush")) DeleteImportedBrush();
             }
             DrawNormalPanel();
+            DrawMeshMapPanel();
             GUILayout.Space(12);
             GUILayout.Label("Input",EditorStyles.boldLabel);
             GUILayout.Label("LMB: use the tool (brush also on 3D)\nAlt / RMB: orbit 3D\nMMB: pan 2D / 3D\nWheel: zoom\nEsc: cancel stroke or drag\nCtrl/Cmd Z: undo · Shift: redo\nCtrl/Cmd A: select all · D: deselect\nCtrl/Cmd Shift I: invert selection\nFocus loss: cancel active stroke",EditorStyles.wordWrappedMiniLabel);
@@ -483,6 +485,7 @@ namespace Yozolab.YoluPainter.Editor
             GUI.BeginClip(canvasRect);
             var image=ImageRect(); image.position-=canvasRect.position;
             if(DisplayTexture!=null) EditorGUI.DrawTextureTransparent(image,DisplayTexture,ScaleMode.StretchToFill);
+            DrawMeshMapOverlay(image);
             if(document.Selection!=null){EnsureSelectionOverlay(); GUI.DrawTexture(image,selectionOverlay,ScaleMode.StretchToFill,true);}
             if(toolDragging&&Event.current.type==EventType.Repaint) DrawToolPreview(image);
             else if(tool==PaintTool.Move&&!toolDragging&&Event.current.type==EventType.Repaint) DrawTransformHandles(image);
@@ -979,8 +982,9 @@ namespace Yozolab.YoluPainter.Editor
                 files.Add(YlpContent.ViewName,System.Text.Encoding.UTF8.GetBytes(JsonUtility.ToJson(state,true)));
                 files.Add(YlpContent.BrushName,System.Text.Encoding.UTF8.GetBytes(JsonUtility.ToJson(brush,true)));
                 if(importedOriginal!=null)files.Add(YlpContent.ImportedOriginalName,importedOriginal);
+                AddMeshMapFiles(files);
                 var saved=YlpStore.Save(target,files,sameFile?projectToken:null,!sameFile,keep);
-                projectPath=saved.Path;projectToken=saved.Token;savedRevision=document.Revision;externalConflict=false;
+                projectPath=saved.Path;projectToken=saved.Token;savedRevision=document.Revision;externalConflict=false;MeshMapsWereSaved();
                 message="Saved "+Path.GetFileName(saved.Path)+(saved.Backup!=null?"; the previous version is kept in "+Path.GetFileName(Path.GetDirectoryName(saved.Backup))+".":".");
                 string asset=AssetPathOf(saved.Path);
                 if(asset!=null)AssetDatabase.ImportAsset(asset,ImportAssetOptions.ForceUpdate);
@@ -1024,6 +1028,7 @@ namespace Yozolab.YoluPainter.Editor
                     var loaded=AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(state.modelAssetGuid));
                     if(loaded!=null){model=loaded;preview.Load(model);materialSlot=Mathf.Clamp(materialSlot,0,Mathf.Max(0,preview.MaterialSlotCount-1));}else if(!String.IsNullOrEmpty(state.modelAssetGuid))notes.Add("Model asset is unavailable; assign it explicitly.");
                 }
+                LoadMeshMapFiles(snapshot.Files,notes);
                 message="Opened "+Path.GetFileName(path)+" (verified)"+(notes.Count>0?". "+String.Join(" ",notes):"");
             });
         }
