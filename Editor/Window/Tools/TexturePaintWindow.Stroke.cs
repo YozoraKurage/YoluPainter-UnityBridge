@@ -124,7 +124,9 @@ namespace Yozolab.YoluPainter.Editor
                 if(brush.pressureSize && pressure<=0)return;
                 if(!surfaceRect.Contains(pointer)||!preview.TryPick(surfaceRect,pointer,out var hit)||hit.MaterialSlot!=materialSlot)return;
                 float radius=Mathf.Max(.000001f,preview.Bounds.size.magnitude)*brush.radius/document.Width*(brush.pressureSize?Mathf.Max(.001f,pressure):1);
-                var dab=preview.BuildSurfaceDabs(hit,radius,document.Width,document.Height,brush.hardness);
+                // ストロークの間はカメラもモデルも動かないので、テクセルの見え方を覚えて、重なる次のダブで撃ち直さない
+                if(surfaceVisibility==null)surfaceVisibility=new Preview.SurfaceVisibilityCache();
+                var dab=preview.BuildSurfaceDabs(hit,radius,document.Width,document.Height,brush.hardness,surfaceVisibility);
                 if(dab.WasClipped)throw new InvalidOperationException(dab.Diagnostic);
                 if(!String.IsNullOrEmpty(dab.Diagnostic))message=dab.Diagnostic;
                 foreach(var pixel in dab.Pixels)stroke.ApplyPixel(pixel.X,pixel.Y,pixel.Coverage,pressure);
@@ -145,7 +147,10 @@ namespace Yozolab.YoluPainter.Editor
                 if(commit)stroke.Commit();else stroke.Cancel();
             }
             catch(Exception ex){message=ex.Message;stroke.Cancel();}
-            finally{stroke.Dispose();stroke=null;GUIUtility.hotControl=0;repaintPixels=true;surfaceHasHeld=surfaceHasBefore=false;}
+            finally{stroke.Dispose();stroke=null;GUIUtility.hotControl=0;repaintPixels=true;surfaceHasHeld=surfaceHasBefore=false;surfaceVisibility=null;}
         }
+        /// <summary>今の 3D のストロークのあいだ覚えておく、テクセルの見え方（ストロークが終われば捨てる）。</summary>
+        Preview.SurfaceVisibilityCache surfaceVisibility;
+        internal Preview.SurfaceVisibilityCache SurfaceVisibilityForTests => surfaceVisibility;
     }
 }

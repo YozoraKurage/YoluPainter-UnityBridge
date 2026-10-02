@@ -54,6 +54,30 @@ namespace Yozolab.YoluPainter.Tests
             }
         }
 
+        /// <summary>ストロークのように重なり合うダブを並べると、見え方を覚えても画素は覚えないときと同じで、2 つ目からは覚えた結果を使う。
+        /// カメラが変わると覚えたものは捨てる。</summary>
+        [Test] public void TheVisibilityCacheGivesTheSamePixelsAndIsReused()
+        {
+            var geometry = Scene(); var cache = new SurfaceVisibilityCache();
+            for (int n = 0; n < 12; n++)
+            {
+                var target = new Vector3(.3f + n * .02f, -.35f, -.8f);
+                Assert.That(geometry.TryRaycast(new Ray(Camera, target - Camera), out var hit), Is.True);
+                if (hit.RendererIndex != 0) continue;
+                var plain = geometry.BuildSurfaceDabs(hit, .15f, 1024, 1024, Camera, .8f);
+                var cached = geometry.BuildSurfaceDabs(hit, .15f, 1024, 1024, Camera, .8f, null, cache);
+                Assert.That(cached.Pixels.Select(p => (p.X, p.Y, p.Coverage)), Is.EqualTo(plain.Pixels.Select(p => (p.X, p.Y, p.Coverage))), "dab " + n);
+                Assert.That(cached.Diagnostic, Is.EqualTo(plain.Diagnostic));
+            }
+            Assert.That(cache.Hits, Is.GreaterThan(cache.Count), "overlapping dabs reuse most rays");
+            var moved = Camera + Vector3.right * .1f;
+            Assert.That(geometry.TryRaycast(new Ray(moved, new Vector3(.3f, -.35f, -.8f) - moved), out var other), Is.True);
+            long hits = cache.Hits;
+            var afterMove = geometry.BuildSurfaceDabs(other, .15f, 1024, 1024, moved, .8f, null, cache);
+            Assert.That(cache.Hits, Is.EqualTo(hits), "a moved camera starts over");
+            Assert.That(afterMove.Pixels.Select(p => (p.X, p.Y, p.Coverage)), Is.EqualTo(geometry.BuildSurfaceDabs(other, .15f, 1024, 1024, moved, .8f).Pixels.Select(p => (p.X, p.Y, p.Coverage))));
+        }
+
         [Test] public void TheParallelDabMatchesTheSequentialOneExactly()
         {
             var geometry = Scene(); var random = new System.Random(7); int compared = 0, occluded = 0, refused = 0, multiChunk = 0;

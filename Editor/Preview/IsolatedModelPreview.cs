@@ -661,10 +661,11 @@ namespace Yozolab.YoluPainter.Editor.Preview
             // Normalized viewport coordinates are independent of EditorGUIUtility.pixelsPerPoint.
             return geometry.TryRaycast(preview.camera.ViewportPointToRay(viewport), out hit, true);
         }
-        public SurfaceDabResult BuildSurfaceDabs(SurfaceHit hit, float radiusWorld, int width, int height, float hardness = 0.8f)
+        /// <param name="cache">1 回のストロークのあいだテクセルの見え方を覚えるもの（ストロークごとに 1 つ。null なら覚えない）。</param>
+        public SurfaceDabResult BuildSurfaceDabs(SurfaceHit hit, float radiusWorld, int width, int height, float hardness = 0.8f, SurfaceVisibilityCache cache = null)
         {
             if (!CanPaint) return new SurfaceDabResult { Diagnostic = "Load a complete supported static mesh snapshot before surface painting." };
-            return geometry.BuildSurfaceDabs(hit, radiusWorld, width, height, preview.camera.transform.position, hardness, BrushBudget);
+            return geometry.BuildSurfaceDabs(hit, radiusWorld, width, height, preview.camera.transform.position, hardness, BrushBudget, cache);
         }
         /// <summary>Perspective estimate for screen-space resampling; geometry still determines the actual footprint.</summary>
         public float WorldRadiusToGuiPoints(Vector3 worldPosition, float radiusWorld)

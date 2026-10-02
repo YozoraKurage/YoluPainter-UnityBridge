@@ -44,6 +44,27 @@ namespace Yozolab.YoluPainter.Editor.Preview
         }
     }
 
+    /// <summary>
+    /// 1 回のストロークのあいだ、テクセルがカメラから見えるか（可視のレイの結果）を覚えておく。ストロークの間はカメラもスナップショットも
+    /// 動かないので、重なり合う次のダブで同じテクセルのレイを撃ち直さなくてよい。カメラ・スナップショットの世代・キャンバスの大きさが
+    /// 変わったら空にする。覚えたレイは撃たないので、BVH の仕事量の予算にも数えない（画素の結果は変わらない）。上限を超えたら空にする。
+    /// </summary>
+    public sealed class SurfaceVisibilityCache
+    {
+        public const int MaxEntries = 1 << 21;
+        internal readonly Dictionary<long, CachedRay> Rays = new Dictionary<long, CachedRay>();
+        internal int Revision = -1, Width, Height; internal Vector3 Camera;
+        /// <summary>覚えていた結果を使った数（試験と計測用）。</summary>
+        public long Hits { get; internal set; }
+        public int Count => Rays.Count;
+        internal struct CachedRay { public bool Skipped, HasHit; public int HitTriangle; public float HitDistance, CameraDistance; public Vector3 HitPosition; }
+        internal void Prepare(int revision, Vector3 camera, int width, int height)
+        {
+            if (revision == Revision && camera == Camera && width == Width && height == Height && Rays.Count < MaxEntries) return;
+            Rays.Clear(); Revision = revision; Camera = camera; Width = width; Height = height;
+        }
+    }
+
     public sealed class SurfaceBrushBudget
     {
         public int MaxTriangles = 2048;
@@ -271,7 +292,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <see cref="BuildSurfaceDabsReference"/> at any degree of parallelism (Core's CoreParallelism).
         /// </summary>
         public SurfaceDabResult BuildSurfaceDabs(SurfaceHit hit, float radiusWorld, int width, int height, Vector3 cameraPosition,
-            float hardness = 0.8f, SurfaceBrushBudget budget = null)
+            float hardness = 0.8f, SurfaceBrushBudget budget = null, SurfaceVisibilityCache cache = null)
         {
             var result = new SurfaceDabResult();
             if (hit.SnapshotRevision != SnapshotRevision || hit.TriangleIndex < 0 || hit.TriangleIndex >= triangles.Length)
@@ -323,9 +344,18 @@ namespace Yozolab.YoluPainter.Editor.Preview
             var outcomes = new RayOutcome[Math.Min(rays, Chunk)];
             var options = new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Yozolab.YoluPainter.Core.CoreParallelism.Degree };
             int chunkStart = 0, chunkEnd = 0;
+            cache?.Prepare(SnapshotRevision, cameraPosition, width, height);
+            long Key(DabCandidate c) => (long)c.Triangle << 31 | (long)c.Y * width + c.X;
             void Shoot(int k)
             {
-                var c = candidates[chunkStart + k]; var direction = c.Position - cameraPosition; float distance = direction.magnitude;
+                var c = candidates[chunkStart + k];
+                if (cache != null && cache.Rays.TryGetValue(Key(c), out var known)) // 覚えた結果（組を撃つあいだキャッシュは読むだけ）
+                {
+                    outcomes[k] = new RayOutcome { Cached = true, Skipped = known.Skipped, HasHit = known.HasHit, CameraDistance = known.CameraDistance,
+                        Hit = new SurfaceHit { TriangleIndex = known.HitTriangle, Distance = known.HitDistance, Position = known.HitPosition } };
+                    return;
+                }
+                var direction = c.Position - cameraPosition; float distance = direction.magnitude;
                 if (distance <= visibilityEpsilon) { outcomes[k] = new RayOutcome { Skipped = true }; return; }
                 var work = new RayQueryBudget { RemainingTriangleTests = budget.MaxRayTriangleTests, RemainingNodeVisits = budget.MaxRayNodeVisits };
                 bool hasHit = TryRaycastInternal(new Ray(cameraPosition, direction / distance), out var visible, false, distance + visibilityEpsilon * 2, work);
@@ -344,6 +374,15 @@ namespace Yozolab.YoluPainter.Editor.Preview
                     chunkStart = i; int count = Math.Min(Chunk, rays - i); chunkEnd = i + count;
                     if (count < 64 || options.MaxDegreeOfParallelism == 1) for (int k = 0; k < count; k++) Shoot(k);
                     else System.Threading.Tasks.Parallel.For(0, count, options, Shoot);
+                    if (cache != null)
+                        for (int k = 0; k < count; k++)
+                        {
+                            var o2 = outcomes[k];
+                            if (o2.Cached) { cache.Hits++; continue; }
+                            if (o2.Exceeded) continue; // 予算で途中まで撃ったレイは覚えない
+                            cache.Rays[Key(candidates[chunkStart + k])] = new SurfaceVisibilityCache.CachedRay { Skipped = o2.Skipped, HasHit = o2.HasHit,
+                                HitTriangle = o2.Hit.TriangleIndex, HitDistance = o2.Hit.Distance, HitPosition = o2.Hit.Position, CameraDistance = o2.CameraDistance };
+                        }
                 }
                 var o = outcomes[i - chunkStart];
                 if (o.Skipped) continue;
@@ -374,7 +413,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         }
 
         struct DabCandidate { public int Triangle, X, Y, CandidatesSoFar; public Vector3 Bary, Position; public float Distance; }
-        struct RayOutcome { public bool Skipped, HasHit, Exceeded; public SurfaceHit Hit; public float CameraDistance; public long Tests, Visits; }
+        struct RayOutcome { public bool Skipped, HasHit, Exceeded, Cached; public SurfaceHit Hit; public float CameraDistance; public long Tests, Visits; }
 
         /// <summary>The sequential original of <see cref="BuildSurfaceDabs"/>, kept to test that the parallel version gives the same pixels,
         /// counts and refusals.</summary>
