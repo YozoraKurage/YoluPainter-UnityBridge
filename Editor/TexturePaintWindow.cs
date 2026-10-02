@@ -71,6 +71,7 @@ namespace Yozolab.YoluPainter.Editor
         internal PaintDocument Document => document;
         internal bool IsStroking => stroke != null;
         internal IsolatedModelPreview Preview => preview;
+        internal TileGpuCompositor Compositor => compositor;
         internal Rect SurfaceRect => surfaceRect;
         internal string StatusMessage => message;
         internal string RecoveryRoot => recoveryRoot;
@@ -120,6 +121,7 @@ namespace Yozolab.YoluPainter.Editor
         internal string ApplyBudgets()
         {
             if(document==null||stroke!=null)return null;
+            if(compositor!=null)compositor.ResidentBudgetBytes=PainterSettings.GpuCacheBytes;
             document.MinimumUndoSteps=PainterSettings.MinUndoSteps; document.UndoBudgetBytes=PainterSettings.UndoBudgetBytes; document.ActiveStrokeBudgetBytes=PainterSettings.StrokeBudgetBytes;
             long source=PainterSettings.SourceBudgetBytes;
             if(source>=document.AllocatedBytes){document.SourceBudgetBytes=source;return null;}
@@ -156,7 +158,11 @@ namespace Yozolab.YoluPainter.Editor
             if(document==null) return;
             if(stroke==null && document.Revision!=recoveredRevision && EditorApplication.timeSinceStartup-lastRecovery>PainterSettings.RecoveryIntervalSeconds) SaveRecovery();
             if(!String.IsNullOrEmpty(projectPath) && EditorApplication.timeSinceStartup-lastExternalCheck>3) CheckExternalChange();
+            // 描いていないあいだは GPU の写しを手放す（Update が来ないと合成器は古い写しを捨てられない）
+            if(compositor!=null && compositor.ResidentBytes>0 && EditorApplication.timeSinceStartup-lastComposite>GpuCacheIdleSeconds) compositor.ReleaseResidentCaches();
         }
+        internal const double GpuCacheIdleSeconds=120;
+        double lastComposite;
         internal void CheckExternalChange()
         {
             if(String.IsNullOrEmpty(projectPath)) return;
@@ -174,6 +180,7 @@ namespace Yozolab.YoluPainter.Editor
             if(repaintPixels || renderedRevision!=document.Revision)
             {
                 TryAction(()=> { compositor.Update(document,channel); preview.SetPaintTexture(compositor.Texture, materialSlot); });
+                lastComposite=EditorApplication.timeSinceStartup;
                 renderedRevision=document.Revision; repaintPixels=false;
             }
             Rect main=new Rect(0,48,position.width,position.height-102);

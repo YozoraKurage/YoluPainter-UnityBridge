@@ -16,12 +16,12 @@
 | 8 PSD保持と再現 | 未知ブロック等の編集拒否、ガード付き書戻し、merged整合検査、RGBA/Unicode/IDs | 純C#/外部decoder、最大合成差1byteのfixture | 未編集ブロック単位パススルー・部分編集、高bit、色管理、検証済ネイティブ調整、Photoshop/CSP6工程 |
 | 9 データモデル | UUID、schema（ネイティブ版 6: レイヤー種類・Fill 値・マスク・調整・クリッピング・グループ（親 ID）。版 1〜5 も読める）、channel、layer、tile archive。view/brush補助JSON。チャンネル別PSD | 独自保存往復byte一致、版 1〜5 の読み込み、入れ子の不正の拒否 | path/model binding指紋、procedural graph/資産保存、複数Texture Set、複雑な正本選択 |
 | 10 保存・外部変更 | 1 ファイル形式 .ylp（zip。先頭に無圧縮の mimetype、全エントリーの SHA-256 と CRC、予算、新しい版の拒否）。保存はメモリで作って検証 → 協調ロック → 印の確認 → 一時ファイル（~ 付き）に書いて Flush・再検証 → 再確認 → 最後に 1 回だけ置換。直前の版を <名前>.ylp-backups~ に退避（保持数は設定、既定はすべて）。外部改変は印（長さ・時刻、違えば SHA-256）で検出して通常保存を拒否。Assets の中の .ylp はインポーターがチャンネルごとのテクスチャを出す。復旧 checkpoint は世代/manifest/current最後 | YlpArchiveTests（66、別のエージェントによる敵対的テスト）・YlpStoreTests（40、中断点・保持数・改名したバックアップを消さない等）・YlpImporterTests・ウィンドウの保存まわり（GUI） | OS電源断fsync、低ディスク/プロセス間ロック、非同期UI保存、debounceウォッチ、差分表示と競合解決Undo。世代フォルダ形式のプロジェクトはウィンドウから開けない（未リリースのため移行なし） |
-| 11 Unity責務 | CPU純C#ソース + GPUタイル合成（変わったタイルだけ再合成、入れ子のグループは深さごとの作業タイル、最大 8 段・32 MiB）、PreviewRenderUtility、リロード/閉じる処理、壊れたシェーダーでの CPU フォールバック | Unity で全アセンブリのコンパイル警告 0、GPU ブラシ誤差 0・GPU 合成誤差 1 以内（RTX 3070 / OpenGL 4.6。合成モードとグループは RTX 3070 のみ、llvmpipe は以前の範囲）、8 bit への丸めを CPU と同じ半分切り上げに揃えた、CopyTexture の無い GPU 向けの描き込み経路 | D3D11 での整合、Jobs/Burst、AsyncGPUReadbackによるGPU正本、正確な色表示/各API |
+| 11 Unity責務 | CPU純C#ソース + GPUタイル合成（約 512px のブロック単位。ブロックごとの署名で変わらないブロックは合成しない、最初に変わった層の下の合成結果の写しから合成し直す、層・マスクのブロックは書き換え番号が同じ間 GPU に残す。写しの予算は設定（自動 = VRAM の 1/8）で、2 分描かなければ手放す。入れ子のグループは深さごとの作業タイル、最大 8 段・32 MiB）、PreviewRenderUtility、リロード/閉じる処理、壊れたシェーダーでの CPU フォールバック | Unity で全アセンブリのコンパイル警告 0、GPU ブラシ誤差 0・GPU 合成誤差 1 以内（RTX 3070 / OpenGL 4.6。合成モードとグループは RTX 3070 のみ、llvmpipe は以前の範囲）、8 bit への丸めを CPU と同じ半分切り上げに揃えた、CopyTexture の無い GPU 向けの描き込み経路、ブロック合成と全面の合成のバイト一致（GpuInteractionTests、RTX 4080 SUPER）、4096²・全面 8 層で不透明度 1 回 7〜42 ms（古い合成器は 506〜527 ms） | D3D11 での整合、Jobs/Burst、AsyncGPUReadbackによるGPU正本、正確な色表示/各API |
 | 12 表面・UV | CPU triangle ray、隣接seam、material、連結、表向き/可視性、重複pixel合併、過予算全拒否 | 同じ実装を数学アダプターで実行、細小三角形/近接衣服回帰 | 実画面、BVH/JOB高速化、padding、dilation、3D対称、重複UV制作UI、複雑な非多様体実物 |
 | 13 ポーズ/3Dパス | 静的不変snapshot世代の判定。skinnedを除外した不完全モデルは塗れない | 幾何の世代・所有権試験 | ポーズ、BlendShape、BakeMesh、BVH refit、編集可能surface path、再結合、Filled/Ribbon |
 | 14 色と精度 | straight RGBA8/隠れRGB保持、データ分離、CPU/GPU ping-pong、encoded-space明記 | 純C#byteテスト、PSDレイヤー一致 | ICC、線形/ガンマ実機表示、16/32bit、HDR、CMYK/Lab、専用法線合成/packing、PSD完全合成 |
 | 15 4K/メモリ | 疎/一様タイル、source/rollback/history予算（既定は自動: 物理メモリから決める。16 GB で Undo 1 GiB・画素 2 GiB・1 回の操作 512 MiB。Project Settings の個人設定で数値に変えられ、開いているウィンドウにも反映。今の画素が予算を超えるドキュメントは画素を捨てず予算を広げて知らせる）、layer全面GPU非常駐、PSD/staging上限 | core予算atomic拒否/undo、自動の予算の値（4〜128 GB）と明示値の維持、16 GB の自動の値で 4K 全面の移動 8 回（直近 7 回が残り全部戻せる）、4K sparseケース、4K 4 レイヤー全面でドラッグ中の表示更新 中央値 1.2ms（RTX 3070） | 実RSS/VRAM、disk spill、LRU、低精度preview明示、codec streaming、4K dense大量レイヤー性能 |
-| 16 scheduler/履歴 | 確定stroke単位のexact tile Undo/Redo、構造history、取消、予算通知、Undo の最小段数（既定 5。GIMP と同じく、予算を超えても直近の段は残す）、表示用のタイル変更追跡（ChangeSerial / TryGetChangedTiles） | core回帰・結合試験、変更追跡と差分合成の参照一致 | スライダー操作など構造変更の高速化（wip ブランチ: ブロック単位・下の合成のコピー・入力の使い回し。速度は未計測）。2048² の入れ子グループの全タイル再合成は GPU で約 0.22 秒、effect 用の依存 scheduler、halo、global filters、disk history、checkpoint pruning、永続操作ジャーナル |
+| 16 scheduler/履歴 | 確定stroke単位のexact tile Undo/Redo、構造history、取消、予算通知、Undo の最小段数（既定 5。GIMP と同じく、予算を超えても直近の段は残す）、表示用のタイル変更追跡（ChangeSerial / TryGetChangedTiles） | core回帰・結合試験、変更追跡と差分合成の参照一致 | グループの中の境目での下の写し（今は最上位の境目だけ）、CPU フォールバックの高速化（Jobs/Burst が候補）、2048² の入れ子グループの全タイル再合成は GPU で約 0.22 秒、effect 用の依存 scheduler、halo、global filters、disk history、checkpoint pruning、永続操作ジャーナル |
 | 17 実測計画・性能 | 実行環境とテスト結果を分離して記録 | 取得可能なcore実行のみ | 仕様の応答/メモリ/保存workloadの実Unity計測。推測値を合格値にしない |
 | 18 受入・故障 | 破損入力/未知PSD/予算超過/中断/改変拒否、元asset保護 | Unity の EditMode で全件、元アセット非変更をウィンドウ経由で確認 | 実device、driver、Play/Reload/複数Window/source scene、ディスク/permission/lock/電源断 |
 | 19 gate | 機能するcoreとcodecの検証結果、結合Editorプロトタイプ | Unity 実行で G1 の「元アセット非変更」「保存中断試験」は通過 | G0/G1未合格。実 GPU / Windows、ペンタブ、4K の実メモリ、実外部アプリの確認後に判断 |
@@ -41,8 +41,8 @@
 
 - ~~PSD の調整レイヤー（レベル補正・色相/彩度・反転）の読み書き、クリッピングされたグループの書き出し拒否~~:
   新しい PC でテストの誤り 5 件を直し、文書と psd-tools の照合を済ませて 0.0.0 に取り込んだ
-- 構造変更（スライダー操作など）の高速化（別のエージェントの作業。TileGpuCompositor.cs、
-  TileComposite.shader、Runtime/Core/SurfaceChangeTracker.cs、GpuInteractionTests、SurfaceChangeTrackerTests）
+- ~~構造変更（スライダー操作など）の高速化~~: 新しい PC で速度を測り、書き換え番号を SparseTileSurface に移して
+  （SurfaceChangeTracker は消した）、写しの予算を設定に出して 0.0.0 に取り込んだ。wip ブランチの中身はすべて取り込み済み
 - ~~変形（移動・回転・拡大縮小）~~: 新しい PC で Core を見直し、テストとウィンドウの UI を足して 0.0.0 に取り込んだ。
   wip ブランチに残っているのは上の 2 つ（WIP~/README.md の 1 と 2）
 
@@ -63,7 +63,7 @@
 
 1. ユーザーの実環境（Windows の Unity・D3D11、実 GPU、ペンタブ）での G0 確認、Photoshop/CLIP STUDIO で書き出した PSD を開いて描画を確かめる、4K の実メモリ計測
 2. ~~PSD の調整レイヤー（レベル補正・色相/彩度・反転）の読み書き~~（済）
-3. 構造変更（スライダー操作・並べ替え）の高速化（wip ブランチ。正しさは確認済み、速度が未計測）
+3. ~~構造変更（スライダー操作・並べ替え）の高速化~~（済。4K・8 層で 1 回 7〜42 ms）
 4. 描画ツールの残り（変形は済み。自由変形のハンドル、選択範囲のぼかし/拡張/縮小、3D ビューでの選択）
 5. ノーマルマップ専用の合成、Height からノーマルマップ
 6. lilToon への割り当て（ユーザーの確認を挟む、版固定）

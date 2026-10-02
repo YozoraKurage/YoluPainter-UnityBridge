@@ -34,12 +34,12 @@ namespace Yozolab.YoluPainter.Tests
             project = Path.Combine(Path.GetTempPath(), "yolupainter-settings-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(project);
             PainterSettings.ProjectRoot = project;
-            PainterSettings.SystemMemoryMiBOverride = 16384; // 自動の予算をマシンに依らず確かめる
+            PainterSettings.SystemMemoryMiBOverride = 16384; PainterSettings.GraphicsMemoryMiBOverride = 8192; // 自動の予算をマシンに依らず確かめる
         }
 
         [TearDown] public void RestoreProject()
         {
-            PainterSettings.SystemMemoryMiBOverride = null;
+            PainterSettings.SystemMemoryMiBOverride = null; PainterSettings.GraphicsMemoryMiBOverride = null;
             PainterSettings.ProjectRoot = null; BrushLibrary.Personal.Folder = null; BrushLibrary.Project.Folder = null;
             if (Directory.Exists(project)) Directory.Delete(project, true);
         }
@@ -111,6 +111,8 @@ namespace Yozolab.YoluPainter.Tests
                 Assert.That((PainterSettings.UndoBudgetBytes >> 20, PainterSettings.SourceBudgetBytes >> 20, PainterSettings.StrokeBudgetBytes >> 20), Is.EqualTo(((long)undo, (long)source, (long)stroke)), ram + " MiB");
             }
             PainterSettings.SystemMemoryMiBOverride = 16384;
+            foreach (var (vram, cache) in new[] { (512, 128), (4096, 512), (8192, 1024), (24576, 1024) })
+            { PainterSettings.GraphicsMemoryMiBOverride = vram; Assert.That(PainterSettings.GpuCacheBytes >> 20, Is.EqualTo((long)cache), vram + " MiB of video memory"); }
             // 以前の版が書いた明示の値（自動が無かったころの既定 64 / 256 / 64）はそのまま使う
             Directory.CreateDirectory(Path.GetDirectoryName(PainterSettings.PersonalPath));
             File.WriteAllText(PainterSettings.PersonalPath, "{\"schema\":1,\"undoBudgetMiB\":64,\"sourceBudgetMiB\":256,\"strokeBudgetMiB\":64}");
@@ -123,6 +125,8 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(PainterSettings.StrokeBudgetBytes, Is.EqualTo(512L << 20)); Assert.That(PainterSettings.MinUndoSteps, Is.EqualTo(0));
             personal.minUndoSteps = 101;
             Assert.That(() => PainterSettings.Save(null, personal), Throws.ArgumentException.With.Message.Contains("Minimum undo steps"));
+            personal.minUndoSteps = 5; personal.gpuCacheMiB = 0; PainterSettings.Save(null, personal);
+            Assert.That(PainterSettings.GpuCacheBytes, Is.Zero, "0 keeps no GPU copies");
             personal.minUndoSteps = 3; personal.undoBudgetMiB = -2;
             Assert.That(() => PainterSettings.Save(null, personal), Throws.ArgumentException.With.Message.Contains("automatic"));
         }

@@ -14,6 +14,30 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>Raised after any pixel write, tile restore, import or clear changes a tile, whether the change is
         /// history-tracked (strokes, undo) or external (SetPixel/ImportTile/Clear, which also raise AfterExternalMutation).</summary>
         internal Action<TileCoord> TileChanged;
+        private static long nextId;
+        private long revision;
+        private readonly Dictionary<TileCoord, long> tileRevisions = new Dictionary<TileCoord, long>();
+        /// <summary>A number unique to this surface in this process (caches key copies of its tiles by it).</summary>
+        public long Id { get; private set; }
+        /// <summary>Increases on every tile change of any kind (the same events as TileChanged), from creation on. A cache of
+        /// some tiles is still valid while their <see cref="TileRevision"/> values are unchanged; no pixel has to be read.</summary>
+        public long Revision { get { return revision; } }
+        /// <summary>The <see cref="Revision"/> at which the tile last changed; 0 if it never changed.</summary>
+        public long TileRevision(TileCoord coord) { long r; return tileRevisions.TryGetValue(coord, out r) ? r : 0; }
+        /// <summary>The latest <see cref="TileRevision"/> among the tiles [x0, x1) × [y0, y1) (tile coordinates).</summary>
+        public long MaxTileRevision(int x0, int y0, int x1, int y1)
+        {
+            if (tileRevisions.Count == 0) return 0;
+            long max = 0, r;
+            for (int y = y0; y < y1; y++) for (int x = x0; x < x1; x++)
+                if (tileRevisions.TryGetValue(new TileCoord(x, y), out r) && r > max) max = r;
+            return max;
+        }
+        private void Touched(TileCoord coord)
+        {
+            tileRevisions[coord] = ++revision;
+            if (TileChanged != null) TileChanged(coord);
+        }
         public int Width { get; private set; }
         public int Height { get; private set; }
         public int TileSize { get; private set; }
@@ -30,6 +54,7 @@ namespace Yozolab.YoluPainter.Core
             if (height <= 0 || height > 32768) throw new ArgumentOutOfRangeException(nameof(height));
             if (tileSize < 1 || tileSize > 1024) throw new ArgumentOutOfRangeException(nameof(tileSize));
             Width = width; Height = height; TileSize = tileSize;
+            Id = System.Threading.Interlocked.Increment(ref nextId);
         }
         public Rgba32 GetPixel(int x, int y)
         {
@@ -62,7 +87,7 @@ namespace Yozolab.YoluPainter.Core
             if (tile.Get(index) == color) return false;
             if (tile.ByteSize == 4) EnsureGrowth(checked(TileSize * TileSize * 4) - 4);
             tile.Set(index, color, checked(TileSize * TileSize * 4));
-            if (TileChanged != null) TileChanged(coord);
+            Touched(coord);
             return true;
         }
         /// <summary>Imports a complete tile. Padding outside the canvas must be zero; caller buffers are copied.</summary>
@@ -118,7 +143,7 @@ namespace Yozolab.YoluPainter.Core
             if (BeforeExternalMutation != null) BeforeExternalMutation();
             var cleared = new List<TileCoord>(tiles.Keys);
             tiles.Clear();
-            if (TileChanged != null) foreach (var coord in cleared) TileChanged(coord);
+            foreach (var coord in cleared) Touched(coord);
             if (AfterExternalMutation != null) AfterExternalMutation();
         }
         internal long TileBytesAt(TileCoord coord) { TileStorage tile; return tiles.TryGetValue(coord, out tile) ? tile.ByteSize : 0; }
@@ -130,7 +155,7 @@ namespace Yozolab.YoluPainter.Core
         {
             if (snapshot == null) tiles.Remove(coord);
             else tiles[coord] = snapshot.Clone();
-            if (TileChanged != null) TileChanged(coord);
+            Touched(coord);
         }
         internal void Compact(TileCoord coord)
         {
