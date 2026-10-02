@@ -37,6 +37,14 @@ readonly PACKAGE_ROOT="/workspace"
 if [[ "${YOLUPAINTER_GPU:-1}" != 0 && -e /dev/dxg && -d /usr/lib/wsl/lib ]]; then
   export GALLIUM_DRIVER=d3d12
   export LD_LIBRARY_PATH="/usr/lib/wsl/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  # Dockerfile でビルドした新しい Mesa（d3d12 が OpenGL 4.6 を出す）があれば優先する。
+  # システムの Mesa 23.2 は 4.2 止まりで、Unity が CopyTexture と compute shader を無効にする。
+  # YOLUPAINTER_MESA=system でシステムの Mesa に戻せる。
+  if [[ "${YOLUPAINTER_MESA:-bundled}" != system && -f /opt/mesa-d3d12/lib/libGLX_mesa.so.0 ]]; then
+    export LD_LIBRARY_PATH="/opt/mesa-d3d12/lib:$LD_LIBRARY_PATH"
+    export LIBGL_DRIVERS_PATH=/opt/mesa-d3d12/lib/dri
+    export __GLX_VENDOR_LIBRARY_NAME=mesa
+  fi
   # 複数の GPU があるときは MESA_D3D12_DEFAULT_ADAPTER_NAME（部分一致）で選べる。
 fi
 

@@ -10,6 +10,18 @@
 
 ARG UNITY_VERSION=2022.3.22f1
 ARG UNITY_IMAGE_VERSION=3
+
+# --- 新しい Mesa（d3d12）を別ステージでビルドする ------------------------------------------
+# 22.04 の Mesa 23.2 の d3d12 は OpenGL 4.2 止まりで、Unity が CopyTexture と compute shader を
+# 無効にする。ビルド道具を最終イメージに残さないよう別ステージにし、成果物の /opt/mesa-d3d12
+# だけを持ち込む。ビルドに失敗してもイメージは作れる（BUILD_FAILED が残るだけ）。
+FROM ubuntu:22.04 AS mesa-builder
+ARG MESA_VERSION=24.2.8
+ENV DEBIAN_FRONTEND=noninteractive
+COPY mesa/build-mesa-d3d12.sh /tmp/build-mesa-d3d12.sh
+RUN MESA_VERSION="${MESA_VERSION}" bash /tmp/build-mesa-d3d12.sh
+
+# --- 本体 ---------------------------------------------------------------------------------
 FROM unityci/editor:ubuntu-${UNITY_VERSION}-base-${UNITY_IMAGE_VERSION}
 
 # FROM をまたぐと ARG は消えるので、使う分だけ宣言し直して ENV に焼く。
@@ -56,6 +68,9 @@ RUN apt-get -q update \
        ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone; \
      fi \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# WSL2 の GPU 用の Mesa（common.sh が /dev/dxg のあるときだけ使う。システムの Mesa は置き換えない）。
+COPY --from=mesa-builder /opt/mesa-d3d12 /opt/mesa-d3d12
 
 # Node.js 20 (NodeSource)。ベースが Ubuntu なので node イメージの代わりに自前で入れる。
 RUN mkdir -p /etc/apt/keyrings \
