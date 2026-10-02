@@ -26,9 +26,14 @@ namespace Yozolab.YoluPainter.Core
         public bool IsNeutral { get { return !Enabled || Density == 0 || (!Inverted && Surface.TileCount == 0); } }
     }
 
+    /// <summary>Raster layers own pixels. Fill layers own one value per channel and generate their tiles on demand
+    /// (the value is the source; nothing is allocated per pixel).</summary>
+    public enum LayerKind { Raster = 0, Fill = 1 }
+
     public sealed class PaintLayer
     {
         private readonly PaintDocument document;
+        private readonly Dictionary<PaintChannel, Rgba32> fillValues = new Dictionary<PaintChannel, Rgba32>();
         private readonly Dictionary<PaintChannel, SparseTileSurface> channels = new Dictionary<PaintChannel, SparseTileSurface>();
         private readonly HashSet<PaintChannel> enabled = new HashSet<PaintChannel>();
         public Guid Id { get; private set; }
@@ -36,7 +41,11 @@ namespace Yozolab.YoluPainter.Core
         public bool Visible { get; internal set; }
         public double Opacity { get; internal set; }
         public LayerBlendMode BlendMode { get; internal set; }
+        public LayerKind Kind { get; private set; }
+        /// <summary>Raster layers' pixel surfaces. Always empty for fill layers.</summary>
         public IReadOnlyDictionary<PaintChannel, SparseTileSurface> Channels { get; private set; }
+        /// <summary>Fill layers' value per channel. Always empty for raster layers.</summary>
+        public IReadOnlyDictionary<PaintChannel, Rgba32> FillValues { get; private set; }
         /// <summary>The layer's raster mask, or null when it has none.</summary>
         public LayerMask Mask { get; internal set; }
         public IReadOnlyList<PaintChannel> EnabledChannels
@@ -47,15 +56,18 @@ namespace Yozolab.YoluPainter.Core
         {
             get { long bytes = Mask == null ? 0 : Mask.Surface.AllocatedBytes; foreach (var s in channels.Values) bytes += s.AllocatedBytes; return bytes; }
         }
-        internal PaintLayer(PaintDocument owner, string name, Guid id)
+        internal PaintLayer(PaintDocument owner, string name, Guid id, LayerKind kind = LayerKind.Raster)
         {
-            document = owner; Name = name; Id = id; Visible = true; Opacity = 1;
+            document = owner; Name = name; Id = id; Visible = true; Opacity = 1; Kind = kind;
             Channels = new ReadOnlyDictionary<PaintChannel, SparseTileSurface>(channels);
+            FillValues = new ReadOnlyDictionary<PaintChannel, Rgba32>(fillValues);
         }
-        /// <summary>Gets (or creates and enables) a channel. For side-effect-free reads use TryGetChannel.</summary>
+        /// <summary>Gets (or creates and enables) a raster channel. For side-effect-free reads use TryGetChannel.
+        /// Fill layers have no pixel surfaces; set their values with PaintDocument.SetFillValue.</summary>
         public SparseTileSurface GetChannel(PaintChannel channel)
         {
             ValidateChannel(channel);
+            if (Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers have no pixel surface. Change the fill value, or paint on the layer's mask.");
             SparseTileSurface surface;
             if (!channels.TryGetValue(channel, out surface))
             {
@@ -72,7 +84,52 @@ namespace Yozolab.YoluPainter.Core
         public bool TryGetChannel(PaintChannel channel, out SparseTileSurface surface) { return channels.TryGetValue(channel, out surface); }
         public bool IsChannelEnabled(PaintChannel channel) { return enabled.Contains(channel); }
         internal void Enable(PaintChannel channel, bool value)
-        { if (value) { GetChannel(channel); enabled.Add(channel); } else enabled.Remove(channel); }
+        { if (value) { if (Kind == LayerKind.Raster) GetChannel(channel); enabled.Add(channel); } else enabled.Remove(channel); }
+        internal void SetFillValueInternal(PaintChannel channel, Rgba32? value)
+        { if (value.HasValue) fillValues[channel] = value.Value; else fillValues.Remove(channel); }
+
+        /// <summary>True when the layer has its own pixels in the channel (a surface, or a fill value).</summary>
+        public bool HasContent(PaintChannel channel)
+        { return Kind == LayerKind.Fill ? fillValues.ContainsKey(channel) : channels.ContainsKey(channel); }
+        /// <summary>The layer's own pixel (before mask, opacity and blending). Transparent where it has no content.</summary>
+        public Rgba32 GetPixel(PaintChannel channel, int x, int y)
+        {
+            if (Kind == LayerKind.Fill)
+            {
+                if (x < 0 || y < 0 || x >= document.Width || y >= document.Height) throw new ArgumentOutOfRangeException("pixel");
+                return fillValues.TryGetValue(channel, out var value) ? value : Rgba32.Transparent;
+            }
+            return channels.TryGetValue(channel, out var surface) ? surface.GetPixel(x, y) : Rgba32.Transparent;
+        }
+        /// <summary>Copies the layer's own pixels for one tile into a caller buffer (TileSize²×4, padding zero).
+        /// Returns false (and writes zeros) where the layer has nothing. Fill tiles are generated, never stored.</summary>
+        public bool CopyTile(PaintChannel channel, TileCoord coord, byte[] destination)
+        {
+            if (Kind == LayerKind.Raster)
+            {
+                if (channels.TryGetValue(channel, out var surface)) return surface.CopyTile(coord, destination);
+                if (destination == null) throw new ArgumentNullException(nameof(destination));
+                Array.Clear(destination, 0, destination.Length); return false;
+            }
+            int tile = document.TileSize, length = checked(tile * tile * 4);
+            if (destination == null) throw new ArgumentNullException(nameof(destination));
+            if (destination.Length != length) throw new ArgumentException("Incorrect tile byte length.", nameof(destination));
+            if (coord.X < 0 || coord.Y < 0 || (long)coord.X * tile >= document.Width || (long)coord.Y * tile >= document.Height) throw new ArgumentOutOfRangeException(nameof(coord));
+            Array.Clear(destination, 0, length);
+            if (!fillValues.TryGetValue(channel, out var fill) || fill == Rgba32.Transparent) return false;
+            int w = Math.Min(tile, document.Width - coord.X * tile), h = Math.Min(tile, document.Height - coord.Y * tile);
+            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++)
+            { int i = (y * tile + x) * 4; destination[i] = fill.R; destination[i + 1] = fill.G; destination[i + 2] = fill.B; destination[i + 3] = fill.A; }
+            return true;
+        }
+        /// <summary>Tiles where the layer may have pixels in the channel: a raster surface's occupied tiles, or every
+        /// canvas tile for a fill value.</summary>
+        public IEnumerable<TileCoord> EnumerateContentTiles(PaintChannel channel)
+        {
+            if (Kind == LayerKind.Raster)
+                return channels.TryGetValue(channel, out var surface) ? surface.EnumerateTileCoordinates() : new TileCoord[0];
+            return fillValues.ContainsKey(channel) ? document.EnumerateCanvasTiles() : new TileCoord[0];
+        }
         internal static void ValidateChannel(PaintChannel channel)
         { if (!Enum.IsDefined(typeof(PaintChannel), channel)) throw new ArgumentOutOfRangeException(nameof(channel)); }
     }
@@ -152,6 +209,37 @@ namespace Yozolab.YoluPainter.Core
             int index = layers.Count;
             Execute(LayerScoped(layer, null, () => { EnsureSourceGrowth(layer.AllocatedBytes); layers.Insert(index, layer); }, () => layers.Remove(layer), 128));
             return layer;
+        }
+        /// <summary>Adds a fill layer on top. values sets the initial value per channel (each one enabled); the layer
+        /// covers the whole canvas wherever its channel has a value. Use a mask to limit where it shows.</summary>
+        public PaintLayer AddFillLayer(string name, IDictionary<PaintChannel, Rgba32> values = null, Guid? id = null)
+        {
+            EnsureNoStroke(); Guid layerId = id ?? Guid.NewGuid();
+            if (layerId == Guid.Empty) throw new ArgumentException("Layer ID must not be empty.", nameof(id));
+            foreach (var existing in layers) if (existing.Id == layerId) throw new ArgumentException("Duplicate layer ID.", nameof(id));
+            var layer = new PaintLayer(this, name ?? "Fill", layerId, LayerKind.Fill);
+            if (values != null) foreach (var entry in values) { PaintLayer.ValidateChannel(entry.Key); layer.SetFillValueInternal(entry.Key, entry.Value); layer.Enable(entry.Key, true); }
+            int index = layers.Count;
+            Execute(LayerScoped(layer, null, () => layers.Insert(index, layer), () => layers.Remove(layer), 128));
+            return layer;
+        }
+        /// <summary>Sets (or with null removes) a fill layer's value for one channel. Setting a value enables the channel.</summary>
+        public void SetFillValue(Guid id, PaintChannel channel, Rgba32? value)
+        {
+            EnsureNoStroke(); PaintLayer.ValidateChannel(channel); var layer = GetLayer(id);
+            if (layer.Kind != LayerKind.Fill) throw new InvalidOperationException("Only fill layers have fill values.");
+            Rgba32? old = layer.FillValues.TryGetValue(channel, out var current) ? current : (Rgba32?)null;
+            bool wasEnabled = layer.IsChannelEnabled(channel);
+            if (Nullable.Equals(old, value) && (value == null || wasEnabled)) return;
+            Execute(LayerScoped(layer, channel,
+                () => { layer.SetFillValueInternal(channel, value); if (value.HasValue) layer.Enable(channel, true); },
+                () => { layer.SetFillValueInternal(channel, old); layer.Enable(channel, wasEnabled); }, 64));
+        }
+        /// <summary>Every tile coordinate of the canvas, Y then X.</summary>
+        public IEnumerable<TileCoord> EnumerateCanvasTiles()
+        {
+            int columns = (Width + TileSize - 1) / TileSize, rows = (Height + TileSize - 1) / TileSize;
+            for (int y = 0; y < rows; y++) for (int x = 0; x < columns; x++) yield return new TileCoord(x, y);
         }
         public PaintLayer GetLayer(Guid id)
         {
@@ -257,7 +345,9 @@ namespace Yozolab.YoluPainter.Core
         public BrushStroke BeginStroke(Guid layerId, PaintChannel channel, BrushSettings settings)
         {
             EnsureNoStroke(); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
-            var layer = GetLayer(layerId); var surface = layer.GetChannel(channel);
+            var layer = GetLayer(layerId);
+            if (layer.Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers are generated from their values and cannot be painted. Paint on the layer's mask, or add a paint layer.");
+            var surface = layer.GetChannel(channel);
             if (!layer.IsChannelEnabled(channel)) throw new InvalidOperationException("Enable the target channel before painting.");
             activeStroke = new BrushStroke(this, surface, settings.Clone()); return activeStroke;
         }
@@ -305,10 +395,21 @@ namespace Yozolab.YoluPainter.Core
         }
         /// <summary>A mask tile can change the composite of every channel the layer has.</summary>
         internal void MarkMaskTileChanged(PaintLayer layer, TileCoord coord)
-        { foreach (var channel in layer.Channels.Keys) MarkTileChanged(channel, coord); }
+        {
+            foreach (var channel in layer.Channels.Keys) MarkTileChanged(channel, coord);
+            foreach (var channel in layer.FillValues.Keys) MarkTileChanged(channel, coord);
+        }
         /// <summary>Marks every tile the layer holds (in one channel, or all when channel is null) as changed.</summary>
         private void MarkLayerChanged(PaintLayer layer, PaintChannel? channel)
         {
+            if (layer.Kind == LayerKind.Fill)
+            {
+                // A fill covers the whole canvas. Mark every tile for the channel (or all channels): the value may just
+                // have been removed, so the layer's current content cannot tell which channels it used to cover.
+                var targets = channel.HasValue ? new[] { channel.Value } : (PaintChannel[])Enum.GetValues(typeof(PaintChannel));
+                foreach (var target in targets) foreach (var coord in EnumerateCanvasTiles()) MarkTileChanged(target, coord);
+                return;
+            }
             foreach (var entry in layer.Channels)
                 if (channel == null || entry.Key == channel.Value)
                     foreach (var coord in entry.Value.EnumerateTileCoordinates()) MarkTileChanged(entry.Key, coord);

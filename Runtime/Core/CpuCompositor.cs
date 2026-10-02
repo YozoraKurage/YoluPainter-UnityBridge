@@ -41,10 +41,9 @@ namespace Yozolab.YoluPainter.Core
             Rgba32 result = Rgba32.Transparent;
             foreach (PaintLayer layer in document.Layers)
             {
-                SparseTileSurface surface;
-                if (!layer.Visible || layer.Opacity <= 0 || !layer.IsChannelEnabled(channel) || !layer.TryGetChannel(channel, out surface)) continue;
+                if (!layer.Visible || layer.Opacity <= 0 || !layer.IsChannelEnabled(channel) || !layer.HasContent(channel)) continue;
                 double maskFactor = layer.Mask == null ? 1 : layer.Mask.FactorAt(x, y);
-                result = Blend(result, surface.GetPixel(x, y), layer.Opacity * maskFactor, layer.BlendMode);
+                result = Blend(result, layer.GetPixel(channel, x, y), layer.Opacity * maskFactor, layer.BlendMode);
             }
             return result;
         }
@@ -65,35 +64,30 @@ namespace Yozolab.YoluPainter.Core
             if (width == 0 || height == 0) return bytes;
             // Same per-pixel arithmetic as CompositePixel, but each layer's tile is read once instead of one dictionary
             // lookup per pixel per layer. Layers without a tile contribute transparent pixels, which Blend leaves unchanged.
-            var surfaces = new System.Collections.Generic.List<SparseTileSurface>();
             var layers = new System.Collections.Generic.List<PaintLayer>();
             foreach (PaintLayer layer in document.Layers)
-            {
-                SparseTileSurface surface;
-                if (!layer.Visible || layer.Opacity <= 0 || !layer.IsChannelEnabled(channel) || !layer.TryGetChannel(channel, out surface)) continue;
-                surfaces.Add(surface); layers.Add(layer);
-            }
+                if (layer.Visible && layer.Opacity > 0 && layer.IsChannelEnabled(channel) && layer.HasContent(channel)) layers.Add(layer);
             int tile = document.TileSize, tileBytes = checked(tile * tile * 4);
-            var buffers = new byte[surfaces.Count][]; var present = new bool[surfaces.Count];
+            var buffers = new byte[layers.Count][]; var present = new bool[layers.Count];
             for (int i = 0; i < buffers.Length; i++) buffers[i] = new byte[tileBytes];
             // Masks that can change a pixel. A neutral mask multiplies by exactly 1, so skipping it is exact.
-            var masks = new LayerMask[surfaces.Count]; var maskBuffers = new byte[surfaces.Count][];
+            var masks = new LayerMask[layers.Count]; var maskBuffers = new byte[layers.Count][];
             for (int i = 0; i < masks.Length; i++)
                 if (layers[i].Mask != null && !layers[i].Mask.IsNeutral) { masks[i] = layers[i].Mask; maskBuffers[i] = new byte[tileBytes]; }
             for (int ty = y / tile; ty <= (y + height - 1) / tile; ty++)
                 for (int tx = x / tile; tx <= (x + width - 1) / tile; tx++)
                 {
                     var coord = new TileCoord(tx, ty); bool any = false;
-                    for (int i = 0; i < surfaces.Count; i++) any |= present[i] = surfaces[i].CopyTile(coord, buffers[i]);
+                    for (int i = 0; i < layers.Count; i++) any |= present[i] = layers[i].CopyTile(channel, coord, buffers[i]);
                     if (!any) continue; // region bytes are already transparent
-                    for (int i = 0; i < surfaces.Count; i++) if (present[i] && masks[i] != null) masks[i].Surface.CopyTile(coord, maskBuffers[i]);
+                    for (int i = 0; i < layers.Count; i++) if (present[i] && masks[i] != null) masks[i].Surface.CopyTile(coord, maskBuffers[i]);
                     int x0 = Math.Max(x, tx * tile), x1 = Math.Min(x + width, (tx + 1) * tile);
                     int y0 = Math.Max(y, ty * tile), y1 = Math.Min(y + height, (ty + 1) * tile);
                     for (int py = y0; py < y1; py++) for (int px = x0; px < x1; px++)
                     {
                         int source = ((py - ty * tile) * tile + (px - tx * tile)) * 4;
                         Rgba32 result = Rgba32.Transparent;
-                        for (int i = 0; i < surfaces.Count; i++)
+                        for (int i = 0; i < layers.Count; i++)
                         {
                             if (!present[i]) continue;
                             var b = buffers[i];

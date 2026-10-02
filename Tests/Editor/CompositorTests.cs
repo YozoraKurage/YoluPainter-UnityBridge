@@ -37,6 +37,11 @@ namespace Yozolab.YoluPainter.Tests
             using (var s = doc.BeginMaskStroke(a.Id, brush)) { s.Add(new BrushSample(10, 8)); s.Add(new BrushSample(14, 8)); s.Commit(); }
             Step("mask stroke", 2);
             doc.SetLayerMaskInverted(a.Id, true); doc.SetLayerMaskDensity(a.Id, .6); Step("invert and density", 4);
+            var fill = doc.AddFillLayer("Fill", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(40, 160, 90, 200) } });
+            doc.SetLayerBlendMode(fill.Id, LayerBlendMode.Multiply); Step("fill over everything", null);
+            doc.AddLayerMask(fill.Id); doc.SetLayerMaskInverted(fill.Id, true); Step("fill hidden by an inverted mask", null);
+            using (var s = doc.BeginMaskStroke(fill.Id, brush)) { s.Add(new BrushSample(60, 20)); s.Commit(); }
+            Step("reveal the fill with the mask", 2);
             using (var s = doc.BeginStroke(a.Id, PaintChannel.Color, brush)) { s.Add(new BrushSample(40, 24)); Step("mid-stroke preview", 2); s.Cancel(); }
             Step("after cancel", 2);
             compositor.Update(doc, PaintChannel.Roughness); assertMatches(doc.Composite(PaintChannel.Roughness), read(), "channel switch");

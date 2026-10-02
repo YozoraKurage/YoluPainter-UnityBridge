@@ -210,6 +210,27 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.Document.CompositePixel(PaintChannel.Color, 330, 300).A, Is.GreaterThan((byte)0), "undo reveals again");
         }
 
+        [Test] public void AFillLayerIsPaintedThroughItsMaskOnly()
+        {
+            var fill = window.Document.AddFillLayer("Fill", new System.Collections.Generic.Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(0, 200, 0) } });
+            window.SelectedLayer = fill.Id;
+            var before = window.Document.ChangeSerial;
+            BeginLineExpectingRefusal(200, 200);
+            Assert.That(window.StatusMessage, Does.Contain("Fill layers"));
+            Assert.That(window.Document.ChangeSerial, Is.EqualTo(before), "a refused stroke changes nothing");
+            window.Document.AddLayerMask(fill.Id); window.Document.SetLayerMaskInverted(fill.Id, true); window.EditMask = true;
+            Assert.That(window.Document.CompositePixel(PaintChannel.Color, 230, 200).A, Is.Zero);
+            BeginLine(200, 200); Mouse(window, EventType.MouseUp, At(window, 260, 200));
+            Assert.That(window.Document.CompositePixel(PaintChannel.Color, 230, 200), Is.EqualTo(new Rgba32(0, 200, 0)), window.StatusMessage);
+        }
+
+        void BeginLineExpectingRefusal(int x, int y)
+        {
+            Mouse(window, EventType.MouseDown, At(window, x, y));
+            Assert.That(window.IsStroking, Is.False);
+            Mouse(window, EventType.MouseUp, At(window, x, y));
+        }
+
         [Test] public void WindowsKeepIndependentDocuments()
         {
             var other = Open();

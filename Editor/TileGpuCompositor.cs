@@ -51,7 +51,7 @@ namespace Yozolab.YoluPainter.Editor
             bool incremental = ReferenceEquals(doc, lastDocument) && channel == lastChannel && doc.TryGetChangedTiles(channel, lastSerial, dirty);
             var occupied = new HashSet<TileCoord>();
             foreach (var layer in doc.Layers)
-                if (layer.TryGetChannel(channel, out var present)) foreach (var coord in present.EnumerateTileCoordinates()) occupied.Add(coord);
+                foreach (var coord in layer.EnumerateContentTiles(channel)) occupied.Add(coord);
             if (!incremental) { dirty.Clear(); dirty.UnionWith(previous); dirty.UnionWith(occupied); }
             LastUpdatedTileCount = dirty.Count;
 
@@ -78,9 +78,9 @@ namespace Yozolab.YoluPainter.Editor
             Clear(ping);
             foreach (var layer in doc.Layers)
             {
-                if (!layer.Visible || layer.Opacity <= 0 || !layer.IsChannelEnabled(channel) || !layer.TryGetChannel(channel, out var surface)) continue;
+                if (!layer.Visible || layer.Opacity <= 0 || !layer.IsChannelEnabled(channel) || !layer.HasContent(channel)) continue;
                 // A layer without this tile contributes transparent pixels; skipping it is exact and saves a pass.
-                if (!surface.CopyTile(coord, uploadPixels)) continue;
+                if (!layer.CopyTile(channel, coord, uploadPixels)) continue;
                 upload.LoadRawTextureData(uploadPixels); upload.Apply(false, false);
                 material.SetTexture("_LayerTex", upload); material.SetFloat("_Opacity", (float)layer.Opacity); material.SetInt("_BlendMode", (int)layer.BlendMode);
                 var mask = layer.Mask;

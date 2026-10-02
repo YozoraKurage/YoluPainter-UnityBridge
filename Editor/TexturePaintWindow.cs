@@ -58,6 +58,7 @@ namespace Yozolab.YoluPainter.Editor
         internal PaintChannel Channel { get => channel; set { channel = value; repaintPixels = true; } }
         /// <summary>true のあいだ、ストロークは選択レイヤーの画素ではなくマスクに入る。</summary>
         internal bool EditMask { get => editMask; set => editMask = value; }
+        internal Guid SelectedLayer { get => selectedLayer; set => selectedLayer = value; }
         /// <summary>モーダルダイアログの差し替え口（テスト用）。</summary>
         internal IPainterDialogs Dialogs { get; set; } = EditorPainterDialogs.Instance;
         /// <summary>PaintAt の 2D 写像の逆。ピクセル中心 (x+0.5, y+0.5) の GUI 座標を返す。</summary>
@@ -210,6 +211,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 GUILayout.BeginHorizontal();
                 if(GUILayout.Button("+")) selectedLayer=document.AddLayer("Paint "+(document.Layers.Count+1)).Id;
+                if(GUILayout.Button("+ Fill")) selectedLayer=document.AddFillLayer("Fill "+(document.Layers.Count+1),new Dictionary<PaintChannel,Rgba32>{{channel,GetBrush().Color}}).Id;
                 using(new EditorGUI.DisabledScope(document.Layers.Count<2)) if(GUILayout.Button("−")){document.RemoveLayer(selectedLayer);selectedLayer=document.Layers[document.Layers.Count-1].Id;}
                 GUILayout.EndHorizontal();
                 layerScroll=GUILayout.BeginScrollView(layerScroll);
@@ -217,7 +219,7 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     var layer=document.Layers[i]; GUILayout.BeginHorizontal();
                     bool visible=GUILayout.Toggle(layer.Visible,"",GUILayout.Width(18)); if(visible!=layer.Visible) document.SetLayerVisibility(layer.Id,visible);
-                    if(GUILayout.Toggle(selectedLayer==layer.Id,layer.Name,"Button")) selectedLayer=layer.Id;
+                    if(GUILayout.Toggle(selectedLayer==layer.Id,(layer.Kind==LayerKind.Fill?"[Fill] ":"")+layer.Name,"Button")) selectedLayer=layer.Id;
                     GUILayout.EndHorizontal();
                 }
                 GUILayout.EndScrollView();
@@ -232,10 +234,27 @@ namespace Yozolab.YoluPainter.Editor
                     using(new EditorGUI.DisabledScope(index>=document.Layers.Count-1)) if(GUILayout.Button("Up"))document.MoveLayer(active.Id,index+1);
                     using(new EditorGUI.DisabledScope(index<=0)) if(GUILayout.Button("Down"))document.MoveLayer(active.Id,index-1);
                     GUILayout.EndHorizontal();
+                    if(active.Kind==LayerKind.Fill) DrawFill(active);
                     DrawMask(active);
                 }
             }
             GUILayout.EndArea();
+        }
+        void DrawFill(PaintLayer active)
+        {
+            GUILayout.Space(6);
+            GUILayout.Label("Fill value ("+channel+")",EditorStyles.miniBoldLabel);
+            if(active.FillValues.TryGetValue(channel,out var value))
+            {
+                Rgba32 next;
+                if(channel==PaintChannel.Roughness||channel==PaintChannel.Metallic||channel==PaintChannel.Height)
+                {byte v=(byte)Mathf.RoundToInt(EditorGUILayout.Slider("Value",value.R/255f,0,1)*255);next=new Rgba32(v,v,v,value.A);}
+                else{var c=EditorGUILayout.ColorField("Value",new Color32(value.R,value.G,value.B,value.A));var c32=(Color32)c;next=new Rgba32(c32.r,c32.g,c32.b,c32.a);}
+                if(next!=value) document.SetFillValue(active.Id,channel,next);
+                if(GUILayout.Button("Remove value for "+channel)) document.SetFillValue(active.Id,channel,null);
+            }
+            else if(GUILayout.Button("Add value for "+channel)) document.SetFillValue(active.Id,channel,GetBrush().Color);
+            EditorGUILayout.HelpBox("A fill covers the whole canvas. Paint its mask to choose where it shows.",MessageType.None);
         }
         bool EditingMask => editMask && document.Layers.Any(l => l.Id == selectedLayer && l.Mask != null);
         void DrawMask(PaintLayer active)

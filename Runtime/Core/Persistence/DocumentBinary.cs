@@ -6,10 +6,11 @@ using System.Linq;
 namespace Yozolab.YoluPainter.Core.Persistence
 {
     /// <summary>Versioned, bounded, lossless native sparse source archive. No GPU cache is persisted.
-    /// Version 2 adds an optional raster mask block after each layer's channels; version 1 archives (no masks) still load.</summary>
+    /// Version 2 adds an optional raster mask block after each layer's channels. Version 3 adds the layer kind and fill
+    /// values after the layer attributes. Older archives still load.</summary>
     public static class DocumentBinary
     {
-        const int Version = 2;
+        const int Version = 3;
         const long MaxArchiveBytes = 512L * 1024 * 1024;
         static readonly byte[] Magic = Encoding.ASCII.GetBytes("DOTPAINT");
 
@@ -28,6 +29,15 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 {
                     writer.Write(layer.Id.ToByteArray()); WriteString(writer, layer.Name);
                     writer.Write(layer.Visible); writer.Write(layer.Opacity); writer.Write((int)layer.BlendMode);
+                    writer.Write((int)layer.Kind);
+                    var fills = layer.FillValues.Keys.OrderBy(c => c).ToArray();
+                    writer.Write(fills.Length);
+                    foreach (var channel in fills)
+                    {
+                        var value = layer.FillValues[channel];
+                        writer.Write((int)channel); writer.Write(layer.IsChannelEnabled(channel));
+                        writer.Write(value.R); writer.Write(value.G); writer.Write(value.B); writer.Write(value.A);
+                    }
                     var channels = layer.Channels.Keys.OrderBy(c => c).ToArray();
                     writer.Write(channels.Length);
                     foreach (var channel in channels)
@@ -63,7 +73,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 {
                     for (int i = 0; i < Magic.Length; i++) if (reader.ReadByte() != Magic[i]) throw new InvalidDataException("Not a dot paint archive.");
                     int version = reader.ReadInt32();
-                    if (version != 1 && version != Version) throw new InvalidDataException("Unsupported archive version; source retained unchanged.");
+                    if (version < 1 || version > Version) throw new InvalidDataException("Unsupported archive version; source retained unchanged.");
                     var id = new Guid(ReadExact(reader, 16));
                     int width = reader.ReadInt32(), height = reader.ReadInt32(), tileSize = reader.ReadInt32();
                     if (width < 1 || height < 1 || width > 4096 || height > 4096 || tileSize < 8 || tileSize > 512 || (tileSize & (tileSize - 1)) != 0)
@@ -73,12 +83,32 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     for (int l = 0; l < layers; l++)
                     {
                         var layerId = new Guid(ReadExact(reader, 16));
-                        var layer = doc.AddLayer(ReadString(reader), layerId);
+                        string layerName = ReadString(reader);
                         bool visible = reader.ReadBoolean(); double opacity = reader.ReadDouble(); int blend = reader.ReadInt32();
                         if (double.IsNaN(opacity) || double.IsInfinity(opacity) || opacity < 0 || opacity > 1 || !Enum.IsDefined(typeof(LayerBlendMode), blend))
                             throw new InvalidDataException("Invalid layer attributes.");
+                        int kind = version >= 3 ? reader.ReadInt32() : (int)LayerKind.Raster;
+                        if (!Enum.IsDefined(typeof(LayerKind), kind)) throw new InvalidDataException("Unknown layer kind; a newer reader is required.");
+                        PaintLayer layer;
+                        if (version >= 3)
+                        {
+                            int fillCount = ReadCount(reader, 6, "fill values");
+                            if (kind != (int)LayerKind.Fill && fillCount != 0) throw new InvalidDataException("Only fill layers have fill values.");
+                            var values = new System.Collections.Generic.Dictionary<PaintChannel, Rgba32>(); var disabled = new System.Collections.Generic.List<PaintChannel>();
+                            for (int f = 0; f < fillCount; f++)
+                            {
+                                int channelValue = reader.ReadInt32(); bool channelEnabled = reader.ReadBoolean();
+                                if (!Enum.IsDefined(typeof(PaintChannel), channelValue) || values.ContainsKey((PaintChannel)channelValue)) throw new InvalidDataException("Invalid or duplicate fill channel.");
+                                values.Add((PaintChannel)channelValue, new Rgba32(reader.ReadByte(), reader.ReadByte(), reader.ReadByte(), reader.ReadByte()));
+                                if (!channelEnabled) disabled.Add((PaintChannel)channelValue);
+                            }
+                            layer = kind == (int)LayerKind.Fill ? doc.AddFillLayer(layerName, values, layerId) : doc.AddLayer(layerName, layerId);
+                            foreach (var channel in disabled) doc.SetChannelEnabled(layer.Id, channel, false);
+                        }
+                        else layer = doc.AddLayer(layerName, layerId);
                         doc.SetLayerVisibility(layer.Id, visible); doc.SetLayerOpacity(layer.Id, opacity); doc.SetLayerBlendMode(layer.Id, (LayerBlendMode)blend);
                         int channelCount = ReadCount(reader, 6, "channels");
+                        if (layer.Kind == LayerKind.Fill && channelCount != 0) throw new InvalidDataException("Fill layers have no pixel channels.");
                         var seenChannels = new System.Collections.Generic.HashSet<int>();
                         for (int c = 0; c < channelCount; c++)
                         {
