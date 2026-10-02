@@ -12,7 +12,7 @@ namespace Yozolab.YoluPainter.Editor
     /// 文字はここでは訳さない（呼ぶ側が <see cref="L.Tr(string)"/> で訳したものを渡す）。マウスの乗った見た目には、ウィンドウの
     /// wantsMouseMove と MouseMove での Repaint が要る。
     /// </summary>
-    internal static class PaintGui
+    internal static partial class PaintGui
     {
         static Event E => Event.current;
         static bool Repainting => E.type == EventType.Repaint;
