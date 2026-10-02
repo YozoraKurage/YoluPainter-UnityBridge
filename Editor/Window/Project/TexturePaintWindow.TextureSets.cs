@@ -206,11 +206,11 @@ namespace Yozolab.YoluPainter.Editor
             return set;
         }
 
-        /// <summary>今のセットに合わせた空のセット（履歴なし。作った直後の版を覚える）。</summary>
-        TextureSet NewEmptySet(int slot, string name)
+        /// <summary>今のセットに合わせた空のセット（履歴なし。作った直後の版を覚える）。大きさは width × height（0 なら今のセットと同じ）。</summary>
+        TextureSet NewEmptySet(int slot, string name, int width = 0, int height = 0)
         {
             var like = document;
-            var d = new PaintDocument(like.Width, like.Height, like.TileSize, PainterSettings.UndoBudgetBytes);
+            var d = new PaintDocument(width > 0 ? width : like.Width, height > 0 ? height : like.Height, like.TileSize, PainterSettings.UndoBudgetBytes);
             var layer = d.AddLayer(L.Tr("Layer") + " 1");
             foreach (var c in YlpContent.UsedChannels(like)) if (!layer.IsChannelEnabled(c)) d.SetChannelEnabled(layer.Id, c, true);
             if (!d.NormalSettings.Equals(like.NormalSettings)) d.SetNormalSettings(like.NormalSettings);

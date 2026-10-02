@@ -18,7 +18,14 @@ namespace Yozolab.YoluPainter.Editor
         public Guid Id;
         public string Name;
         public int Slot;
+        /// <summary>セットの大きさ（画素）。今と違えば、適用でセットの画素を新しい大きさに再標本化する（<see cref="NewProjectSettings.Resampling"/>）。
+        /// 0 × 0 は「変えない」（足すセットなら開いているセットと同じ大きさ）。</summary>
+        public int Width, Height;
+        /// <summary>設定を開いたときのセットの大きさ（足すセットは 0）。正方形の選択肢に無い大きさ（取り込んだ PSD など）も、そのままなら通す。</summary>
+        public int CurrentWidth, CurrentHeight;
         public TextureSetDraft Clone() => (TextureSetDraft)MemberwiseClone();
+        /// <summary>大きさを変えるか（今の大きさと違う、0 でない大きさ）。</summary>
+        public bool Resizes => Id != Guid.Empty && (Width != 0 || Height != 0) && (Width != CurrentWidth || Height != CurrentHeight);
     }
 
     /// <summary>新規プロジェクト（とプロジェクト設定）で尋ねること。Substance Painter の New Project と同じく、モデルとテクスチャセット
@@ -36,6 +43,8 @@ namespace Yozolab.YoluPainter.Editor
         public int Resolution = 2048;
         public NormalYDirection NormalFormat = NormalYDirection.OpenGL;
         public bool BakeMeshMaps;
+        /// <summary>プロジェクト設定: セットの大きさを変えるときの再標本化。null は自動（縮めるなら面積平均、広げるならバイリニア）。</summary>
+        public CanvasResampling? Resampling;
 
         public NewProjectSettings Clone()
         {
@@ -69,6 +78,7 @@ namespace Yozolab.YoluPainter.Editor
             if (!Resolutions.Contains(Resolution)) throw new ArgumentOutOfRangeException(nameof(Resolution), "Resolution must be one of " + string.Join(", ", Resolutions) + ".");
             if (!Enum.IsDefined(typeof(ProjectTemplate), Template)) throw new ArgumentOutOfRangeException(nameof(Template));
             if (!Enum.IsDefined(typeof(NormalYDirection), NormalFormat)) throw new ArgumentOutOfRangeException(nameof(NormalFormat));
+            if (Resampling.HasValue && !Enum.IsDefined(typeof(CanvasResampling), Resampling.Value)) throw new ArgumentOutOfRangeException(nameof(Resampling));
             if (Slots != null)
             {
                 if (Slots.Length == 0) throw new ArgumentException(L.Tr("Choose at least one texture set."), nameof(Slots));
@@ -83,6 +93,9 @@ namespace Yozolab.YoluPainter.Editor
                     try { YlpFormat.CheckSetName(set.Name); }
                     catch (ArgumentException) { throw new ArgumentException(L.Tr("Every texture set needs a name (at most {0} characters, no control characters).", YlpFormat.MaxTextureSetNameLength), nameof(Sets)); }
                     if (set.Slot < 0 || set.Slot > YlpFormat.MaxMaterialSlot) throw new ArgumentOutOfRangeException(nameof(Sets));
+                    bool keep = set.Width == 0 && set.Height == 0 || set.Width == set.CurrentWidth && set.Height == set.CurrentHeight;
+                    if (!keep && !(set.Width == set.Height && Resolutions.Contains(set.Width)))
+                        throw new ArgumentException(L.Tr("A texture set's size must be one of {0}.", string.Join(", ", Resolutions.Select(r => r + " × " + r))), nameof(Sets));
                 }
                 var name = Sets.GroupBy(s => s.Name.Trim(), StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
                 if (name != null) throw new ArgumentException(L.Tr("Two texture sets are named {0}.", name.Key), nameof(Sets));
@@ -103,7 +116,7 @@ namespace Yozolab.YoluPainter.Editor
     internal sealed class NewProjectWindow : EditorWindow, IPainterShortcutScope
     {
         internal NewProjectSettings Settings = new NewProjectSettings();
-        /// <summary>開いているプロジェクトの設定を変える（解像度は変えられない）。</summary>
+        /// <summary>開いているプロジェクトの設定を変える（大きさはテクスチャセットごとに並びの欄で変える）。</summary>
         internal bool Configure;
         Action<NewProjectSettings> accept;
         IsolatedModelPreview preview; GameObject loadedFor; bool loaded;
@@ -195,7 +208,14 @@ namespace Yozolab.YoluPainter.Editor
             rows.Space(8);
 
             PaintGui.Text(rows.Row(18), L.Tr("Document"), PaintTheme.Header);
-            PaintGui.EnumDropdown(rows.Row(24), L.Tr("Resolution"), Settings.Resolution, NewProjectSettings.Resolutions, v => v + " × " + v, v => Settings.Resolution = v, !Configure, labelWidth);
+            if (Configure)
+            {
+                // 大きさはセットごと（上の並びの欄）。ここでは変えるときの再標本化を選ぶ
+                bool resizing = Settings.Sets != null && Settings.Sets.Any(d => d.Resizes);
+                PaintGui.EnumDropdown(rows.Row(24), L.Tr("Resampling"), Settings.Resampling, ResamplingChoices, ResamplingName, v => Settings.Resampling = v, resizing, labelWidth);
+                PaintGui.Paragraph(rows, resizing ? L.Tr("Resized texture sets are resampled when you apply; their undo history is cleared.") : L.Tr("Choose a texture set's size in its row above."), PaintTheme.TextDim);
+            }
+            else PaintGui.EnumDropdown(rows.Row(24), L.Tr("Resolution"), Settings.Resolution, NewProjectSettings.Resolutions, v => v + " × " + v, v => Settings.Resolution = v, true, labelWidth);
             PaintGui.EnumDropdown(rows.Row(24), L.Tr("Normal map format"), Settings.NormalFormat, (NormalYDirection[])Enum.GetValues(typeof(NormalYDirection)),
                 v => v == NormalYDirection.OpenGL ? L.Tr("OpenGL (Y+, Unity)") : L.Tr("DirectX (Y−)"), v => Settings.NormalFormat = v, true, labelWidth);
             PaintGui.Text(rows.Row(16, 10), L.Tr("Unity reads normal maps as OpenGL. The format is used when exporting files."), PaintTheme.LabelSmall);
@@ -255,8 +275,9 @@ namespace Yozolab.YoluPainter.Editor
                 var d = sets[i];
                 var row = new Rect(0, i * SetRow, list.width - (sets.Count > SetRowsShown - 1 ? 8 : 0), SetRow - 2);
                 var removeRect = new Rect(row.xMax - 22, row.y, 22, row.height);
-                var slotRect = new Rect(removeRect.x - 4 - 128, row.y, 128, row.height);
-                var nameRect = new Rect(row.x, row.y, slotRect.x - 4 - row.x, row.height);
+                var slotRect = new Rect(removeRect.x - 4 - 96, row.y, 96, row.height);
+                var sizeRect = new Rect(slotRect.x - 4 - 96, row.y, 96, row.height);
+                var nameRect = new Rect(row.x, row.y, sizeRect.x - 4 - row.x, row.height);
                 string name = PaintGui.TextField(nameRect, d.Name, d.Id == Guid.Empty ? L.Tr("A new, empty texture set") : L.Tr("Texture set name"));
                 if (name != d.Name) { d.Name = name; error = null; }
                 PaintGui.FitDropdown(slotRect, null, ShortSlotLabel(d.Slot), at =>
@@ -270,6 +291,7 @@ namespace Yozolab.YoluPainter.Editor
                     }
                     menu.DropDown(at);
                 }, L.Tr("The material slot this texture set paints") + "\n" + SlotLabel(d.Slot), true, 0, true);
+                DrawSizeChoice(sizeRect, d);
                 if (PaintGui.IconButton(removeRect, "delete", sets.Count > 1 ? L.Tr("Remove this texture set (asked again when you apply; its work is lost)") : L.Tr("A project keeps at least one texture set."), false, sets.Count > 1, 15)) remove = d;
             });
             if (remove != null) { sets.Remove(remove); error = null; }
@@ -280,8 +302,45 @@ namespace Yozolab.YoluPainter.Editor
             {
                 string baseName = preview.HasModel && preview.SourceMaterial(free) != null ? preview.SourceMaterial(free).name : L.Tr("Texture Set") + " " + (free + 1);
                 string unique = baseName; for (int n = 2; sets.Any(o => string.Equals(o.Name, unique, StringComparison.OrdinalIgnoreCase)); n++) unique = baseName + " " + n;
-                sets.Add(new TextureSetDraft { Id = Guid.Empty, Name = unique, Slot = free }); Settings.Sets = sets; error = null;
+                sets.Add(new TextureSetDraft { Id = Guid.Empty, Name = unique, Slot = free, Width = Settings.Resolution, Height = Settings.Resolution }); Settings.Sets = sets; error = null;
             }
+        }
+
+        static readonly CanvasResampling?[] ResamplingChoices = { null, CanvasResampling.Bilinear, CanvasResampling.Area, CanvasResampling.Nearest };
+        internal static string ResamplingName(CanvasResampling? resampling)
+        {
+            switch (resampling)
+            {
+                case CanvasResampling.Bilinear: return L.Tr("Bilinear");
+                case CanvasResampling.Area: return L.Tr("Area average");
+                case CanvasResampling.Nearest: return L.Tr("Nearest");
+                default: return L.Tr("Automatic");
+            }
+        }
+        /// <summary>大きさの表示（正方形は一辺、ほかは 幅×高さ）。</summary>
+        internal static string SizeText(int width, int height) => width == height ? width.ToString() : width + "×" + height;
+
+        /// <summary>セットの大きさのドロップダウン: 新規プロジェクトと同じ正方形の大きさ（と、選択肢に無い今の大きさ）。変えると「→」が付く。</summary>
+        void DrawSizeChoice(Rect r, TextureSetDraft d)
+        {
+            int w = d.Width != 0 || d.Height != 0 ? d.Width : d.CurrentWidth, h = d.Width != 0 || d.Height != 0 ? d.Height : d.CurrentHeight;
+            bool known = w > 0 && h > 0;
+            string text = !known ? "—" : (d.Resizes ? "→ " : "") + SizeText(w, h);
+            string tip = d.Id == Guid.Empty ? L.Tr("Size of the new texture set") : L.Tr("Size of this texture set (now {0} × {1}). A new size resamples its layers when you apply.", d.CurrentWidth, d.CurrentHeight);
+            PaintGui.FitDropdown(r, null, text, at =>
+            {
+                var menu = new GenericMenu();
+                bool standard = d.CurrentWidth == d.CurrentHeight && NewProjectSettings.Resolutions.Contains(d.CurrentWidth);
+                if (d.Id != Guid.Empty && !standard)
+                    menu.AddItem(new GUIContent(d.CurrentWidth + " × " + d.CurrentHeight + " (" + L.TrIn("size", "current") + ")"), w == d.CurrentWidth && h == d.CurrentHeight, () => { d.Width = d.CurrentWidth; d.Height = d.CurrentHeight; error = null; });
+                foreach (int size in NewProjectSettings.Resolutions)
+                {
+                    int chosen = size;
+                    string label = size + " × " + size + (d.Id != Guid.Empty && size == d.CurrentWidth && size == d.CurrentHeight ? " (" + L.TrIn("size", "current") + ")" : "");
+                    menu.AddItem(new GUIContent(label), w == size && h == size, () => { d.Width = chosen; d.Height = chosen; error = null; });
+                }
+                menu.DropDown(at);
+            }, tip, true, 0, true);
         }
 
         /// <summary>スロットのドロップダウンに出す数（モデルのスロット。モデルに無いスロットを描くセットがあればそこまで、モデルが無ければ並びより 1 つ多く）。</summary>

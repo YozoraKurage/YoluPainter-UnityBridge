@@ -204,6 +204,8 @@ namespace Yozolab.YoluPainter.Core
         private bool shared;
         private Rgba32 uniform;
         internal long ByteSize { get { return data == null ? 4 : data.Length; } }
+        /// <summary>True when the tile holds one colour for every pixel (four bytes).</summary>
+        internal bool IsUniform { get { return data == null; } }
         /// <summary>True when Set writes straight into the tile's own buffer (no allocation, no copy-on-write).</summary>
         internal bool Writable { get { return data != null && !shared; } }
         private TileStorage() { }

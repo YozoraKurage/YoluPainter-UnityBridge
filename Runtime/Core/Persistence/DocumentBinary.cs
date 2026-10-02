@@ -124,7 +124,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     if (version < 1 || version > Version) throw new InvalidDataException("Unsupported archive version; source retained unchanged.");
                     var id = new Guid(ReadExact(reader, 16));
                     int width = reader.ReadInt32(), height = reader.ReadInt32(), tileSize = reader.ReadInt32();
-                    if (width < 1 || height < 1 || width > 4096 || height > 4096 || tileSize < 8 || tileSize > 512 || (tileSize & (tileSize - 1)) != 0)
+                    if (width < 1 || height < 1 || width > PaintDocument.MaxNativeSide || height > PaintDocument.MaxNativeSide || tileSize < 8 || tileSize > 512 || (tileSize & (tileSize - 1)) != 0)
                         throw new InvalidDataException("Unsupported native canvas dimensions or tile size.");
                     var doc = new PaintDocument(width, height, tileSize, 64L * 1024 * 1024, id);
                     if (version >= 7)

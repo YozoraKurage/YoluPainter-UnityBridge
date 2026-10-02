@@ -28,7 +28,7 @@ namespace Yozolab.YoluPainter.Editor
                 Model = model,
                 Resolution = NewProjectSettings.Resolutions.Contains(document.Width) && document.Width == document.Height ? document.Width : NewProjectSettings.Resolutions.OrderBy(r => Math.Abs(r - document.Width)).First(),
                 NormalFormat = document.NormalSettings.FileDirection,
-                Sets = textureSets.Select(s => new TextureSetDraft { Id = s.Id, Name = s.Name, Slot = s.MaterialSlot }).ToList(),
+                Sets = textureSets.Select(s => new TextureSetDraft { Id = s.Id, Name = s.Name, Slot = s.MaterialSlot, Width = s.Document.Width, Height = s.Document.Height, CurrentWidth = s.Document.Width, CurrentHeight = s.Document.Height }).ToList(),
             };
         }
 
@@ -82,24 +82,32 @@ namespace Yozolab.YoluPainter.Editor
             if (s.BakeMeshMaps && preview.CanPaint) BakeMeshMaps();
         }
 
-        /// <summary>モデル・テクスチャセット（名前・スロット・足す・消す）・ノーマルマップの形式を変える（解像度は変えない）。消すセットがあれば
-        /// 先に確かめ、断られたら何も変えない（セットを消すのは Undo できない）。ノーマルの形式は全部のセットに入れ、それぞれの文書の Undo に入る。</summary>
+        /// <summary>モデル・テクスチャセット（名前・スロット・大きさ・足す・消す）・ノーマルマップの形式を変える。消すセット・大きさを変えるセットが
+        /// あれば先に確かめ、断られたら何も変えない（どちらも Undo できない）。大きさを変えるセットは、ほかを何も変える前に新しい大きさの写しを
+        /// 作り（<see cref="PaintDocument.Resampled"/>。予算を超えるなどで作れなければ例外で、何も変えない）、最後に文書を入れ替える。
+        /// ノーマルの形式は全部のセットに入れ、それぞれの文書の Undo に入る。</summary>
         internal void ApplyProjectConfiguration(NewProjectSettings s)
         {
             if (s == null) throw new ArgumentNullException(nameof(s));
             s.Validate();
             if (stroke != null) throw new InvalidOperationException(L.Tr("Finish the stroke first."));
             SyncCurrentSet();
-            var removed = new List<TextureSet>();
+            var removed = new List<TextureSet>(); var resizes = new List<SetResize>();
             if (s.Sets != null)
             {
                 foreach (var draft in s.Sets) if (draft.Id != Guid.Empty && textureSets.All(t => t.Id != draft.Id)) throw new ArgumentException("This project has no texture set " + draft.Id + ".");
                 removed = textureSets.Where(t => s.Sets.All(d => d.Id != t.Id)).ToList();
+                resizes = PlanResizes(s.Sets, removed);
                 if (removed.Count > 0 && !Dialogs.Confirm(L.Tr("Remove texture sets?"), RemovalWarning(removed), L.Tr("Remove"), L.Tr("Cancel")))
                 { message = L.Tr("The project configuration was not applied; nothing changed."); return; }
+                if (resizes.Count > 0 && !Dialogs.Confirm(L.Tr("Resize texture sets?"), ResizeWarning(resizes, s.Resampling), L.Tr("Resize"), L.Tr("Cancel")))
+                { message = L.Tr("The project configuration was not applied; nothing changed."); return; }
             }
+            var resampled = Resample(resizes, s.Resampling, removed); // 作れなければここで例外（まだ何も変えていない）
+            if (resampled.Count > 0) { FinishStroke(false); CancelToolDrag(); pathDrag = -1; document?.EndCoalescing(); }
             if (s.Model != model) SetModel(s.Model);
             if (s.Sets != null) ApplySetDrafts(s.Sets, removed);
+            var notes = InstallResampled(resampled);
             foreach (var set in textureSets.ToList())
             {
                 var d = set == currentSet ? document : set.Document;
@@ -109,10 +117,110 @@ namespace Yozolab.YoluPainter.Editor
             }
             if (projectPath == null) SuggestSaveLocation();
             repaintPixels = true;
-            message = L.Tr("Project configuration applied.");
+            message = L.Tr("Project configuration applied.") + (resampled.Count > 0 ? " " + string.Join(" ", resampled.Select(r => L.Tr("{0} is now {1} × {2}.", r.Set.Name, r.Result.Document.Width, r.Result.Document.Height))) : "")
+                + (notes.Count > 0 ? " " + string.Join(" ", notes) : "");
         }
 
-        /// <summary>プロジェクト設定のセットの並びを入れる: 消す（確かめは済み）・名前とスロット・足す（空のセット）・並びの順。</summary>
+        // ───────── テクスチャセットの大きさ ─────────
+
+        /// <summary>大きさを変えるセットと新しい大きさ。</summary>
+        sealed class SetResize { public TextureSet Set; public int Width, Height; }
+
+        /// <summary>並びのうち大きさが今と違うセット（消すセットは除く）。新しい大きさは新規プロジェクトと同じ正方形の大きさだけ。</summary>
+        List<SetResize> PlanResizes(List<TextureSetDraft> drafts, List<TextureSet> removed)
+        {
+            var plan = new List<SetResize>();
+            foreach (var draft in drafts)
+            {
+                if (draft.Id == Guid.Empty || draft.Width == 0 && draft.Height == 0) continue;
+                var set = textureSets.First(t => t.Id == draft.Id);
+                if (removed.Contains(set) || draft.Width == set.Document.Width && draft.Height == set.Document.Height) continue;
+                if (draft.Width != draft.Height || !NewProjectSettings.Resolutions.Contains(draft.Width))
+                    throw new ArgumentException(L.Tr("A texture set's size must be one of {0}.", string.Join(", ", NewProjectSettings.Resolutions.Select(r => r + " × " + r))));
+                plan.Add(new SetResize { Set = set, Width = draft.Width, Height = draft.Height });
+            }
+            return plan;
+        }
+
+        /// <summary>選んだ再標本化（null は自動: 面積が減るなら面積平均、ほかはバイリニア）。</summary>
+        static CanvasResampling ResamplingFor(CanvasResampling? chosen, PaintDocument d, int width, int height)
+            => chosen ?? ((long)width * height < (long)d.Width * d.Height ? CanvasResampling.Area : CanvasResampling.Bilinear);
+
+        /// <summary>大きさを変えるときの確かめの文。</summary>
+        static string ResizeWarning(List<SetResize> resizes, CanvasResampling? chosen)
+        {
+            var lines = resizes.Select(r => "• " + r.Set.Name + ": " + r.Set.Document.Width + " × " + r.Set.Document.Height + " → " + r.Width + " × " + r.Height
+                + " (" + NewProjectWindow.ResamplingName(ResamplingFor(chosen, r.Set.Document, r.Width, r.Height)) + ")");
+            return string.Join("\n", lines) + "\n\n" + L.Tr("Every layer, mask and the selection are resampled. The undo history of these texture sets is cleared, and the resize cannot be undone (the saved file keeps the old size until you save). Their baked mesh maps become stale.");
+        }
+
+        /// <summary>新しい大きさの写しを作る（まだ入れ替えない）。予算はプロジェクト全体: 写しの層の画素は、設定の予算から残るセット（消すセットは
+        /// 数えない）の量を引いた分まで。縮めるセットから先に作る（広げるセットに残りを回す）。作れなければ例外で、何も変えない。</summary>
+        List<(TextureSet Set, ResampledDocument Result)> Resample(List<SetResize> resizes, CanvasResampling? chosen, List<TextureSet> removed)
+        {
+            var results = new List<(TextureSet, ResampledDocument)>();
+            if (resizes.Count == 0) return results;
+            var bytes = textureSets.Where(t => !removed.Contains(t)).ToDictionary(t => t, t => t.Document.AllocatedBytes);
+            long budget = PainterSettings.SourceBudgetBytes;
+            var ordered = resizes.OrderBy(r => (double)r.Width * r.Height / ((double)r.Set.Document.Width * r.Set.Document.Height)).ToList();
+            try
+            {
+                for (int i = 0; i < ordered.Count; i++)
+                {
+                    var r = ordered[i]; var d = r.Set.Document;
+                    Dialogs.Progress("YoluPainter", L.Tr("Resampling {0} to {1} × {2}…", r.Set.Name, r.Width, r.Height), (i + .5f) / ordered.Count);
+                    long others = bytes.Where(e => e.Key != r.Set).Sum(e => e.Value);
+                    ResampledDocument result;
+                    try { result = d.Resampled(r.Width, r.Height, ResamplingFor(chosen, d, r.Width, r.Height), Math.Max(0, budget - others)); }
+                    catch (InvalidOperationException ex) { throw new InvalidOperationException(SetNotePrefix(r.Set) + ex.Message, ex); }
+                    bytes[r.Set] = result.Document.AllocatedBytes;
+                    results.Add((r.Set, result));
+                }
+            }
+            finally { Dialogs.ClearProgress(); }
+            return results;
+        }
+
+        /// <summary>作った写しをセットの文書と入れ替える: 3D のパスを今のモデルで描き直し（描けなければ再標本化した画素のまま知らせる）、
+        /// そのセットの履歴を捨て（写しは履歴を持たない）、表示を作り直させる。焼いたメッシュマップは残る（大きさが違うので古いと出る）。</summary>
+        List<string> InstallResampled(List<(TextureSet Set, ResampledDocument Result)> resampled)
+        {
+            var notes = new List<string>();
+            if (resampled.Count == 0) return notes;
+            SyncCurrentSet();
+            foreach (var (set, result) in resampled)
+            {
+                var d = result.Document;
+                notes.AddRange(result.Notes.Select(n => SetNotePrefix(set) + n));
+                RedrawSurfacePaths(set, d, result.SurfacePathLayers, notes);
+                d.ClearHistory();
+                set.DisposeTextures();
+                set.Document = d; set.HistoryWatched = false;
+                if (set == currentSet) { document = d; LoadSet(set); } else WatchHistory(set);
+            }
+            DisposeThumbnails(); // 層のサムネイルは層の ID と面の版で覚えている。新しい面の版は 0 から数え直すので、古い絵が残らないように捨てる
+            var budgetNote = ApplyBudgets(); if (budgetNote != null) notes.Add(budgetNote);
+            repaintPixels = true; renderedRevision = -1; RepaintPanelWindowsSoon();
+            return notes;
+        }
+
+        /// <summary>3D のパスで描いた層を、今のモデルで新しい大きさに描き直す。</summary>
+        void RedrawSurfacePaths(TextureSet set, PaintDocument d, IReadOnlyList<Guid> layers, List<string> notes)
+        {
+            foreach (var id in layers)
+            {
+                var layer = d.GetLayer(id); var path = (Core.Paths.SurfacePath)layer.Path;
+                var geometry = preview != null ? preview.Geometry : null;
+                if (geometry == null || Yozolab.YoluPainter.Editor.Preview.SurfacePathRenderer.Fingerprint(geometry) != path.ModelFingerprint)
+                { notes.Add(SetNotePrefix(set) + L.Tr("The path on the layer {0} was resampled, not redrawn: its model is not loaded. Redraw it in the Path section when it is.", layer.Name)); continue; }
+                try { var render = Yozolab.YoluPainter.Editor.Preview.SurfacePathRenderer.Render(d, geometry, path, preview.BrushBudget); d.SetPath(id, path, render.Surface); }
+                catch (Exception ex) when (ex is InvalidOperationException || ex is ArgumentException)
+                { notes.Add(SetNotePrefix(set) + L.Tr("The path on the layer {0} was resampled, not redrawn: {1}", layer.Name, ex.Message)); }
+            }
+        }
+
+        /// <summary>プロジェクト設定のセットの並びを入れる: 消す（確かめは済み）・名前とスロット・足す（空のセット。大きさは下書きの大きさ、0 なら開いている
+        /// セットと同じ）・並びの順。大きさの変更は <see cref="InstallResampled"/> が入れる。</summary>
         void ApplySetDrafts(List<TextureSetDraft> drafts, List<TextureSet> removed)
         {
             RemoveSets(removed);
@@ -128,7 +236,7 @@ namespace Yozolab.YoluPainter.Editor
                 ordered.Add(set);
             }
             for (int i = 0; i < drafts.Count; i++)
-                if (ordered[i] == null) { ordered[i] = NewEmptySet(drafts[i].Slot, drafts[i].Name.Trim()); changed = true; }
+                if (ordered[i] == null) { ordered[i] = NewEmptySet(drafts[i].Slot, drafts[i].Name.Trim(), drafts[i].Width, drafts[i].Height); changed = true; }
             if (!ordered.SequenceEqual(textureSets)) { textureSets.Clear(); textureSets.AddRange(ordered); changed = true; }
             if (!changed) return;
             setsRevision++;
