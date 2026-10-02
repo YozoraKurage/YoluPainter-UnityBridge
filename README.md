@@ -7,6 +7,10 @@ Unity Editor 内の専用ウィンドウで、同じレイヤーへ 2D と 3D �
 
 ## 今あるもの
 
+- ペイントソフトの画面: メニューバー（ファイル・編集・レイヤー・選択範囲・フィルター・3D・表示・ウィンドウ・ヘルプ）、ツールの帯と描画色/背景色、ツールのオプションバー、2D と 3D を並べる・切り替える表示域、テクスチャセット・レイヤー・プロパティのドック、ステータスバー。Photoshop と同じ 1 文字のショートカット（B・E・G・M・L・W・V・P・I・[ ]・X・D、F1〜F3 で表示）
+- 日本語と英語（ウィンドウ ▸ 言語。既定は Unity の言語に従う）。訳は `Editor/Localization/ja.po`（gettext の形式。DaerD と同じ作り）
+- アイコンは Microsoft Fluent UI System Icons と Phosphor Icons（どちらも MIT、`Editor/Icons/THIRD-PARTY-NOTICES.md`）。ツールのアイコンは、ツールの帯を右クリックして自分の PNG に差し替えられる（`UserSettings/YoluPainter/ToolIcons/`）。プラグインからは `PainterToolIcons.Register`
+
 - 疎な RGBA8 タイルを正本にした描画、ストローク単位の正確な Undo/Redo/取消
 - ブラシ: 丸/画像の筆先、筆圧・硬さ・間隔・角度・丸さ・ゆらぎ・散布・紙の質感、ストローク内で不透明度を超えない濃さ。内蔵 13 種と Krita 4 既定の筆先 76 種（CC0、`BrushSets~/`）を同梱。GIMP（.gbr / .gih / .vbr）、Photoshop（.abr）、PNG の筆先を取り込める（取り込んだものは Unity プロジェクトの `UserSettings/YoluPainter/Brushes/` に保存。対応しない設定は取り込み時に一覧で知らせる）。CLIP STUDIO の .sut は未対応
 - 2D キャンバス、隔離した静的メッシュの 3D プレビュー、可視性・連結性・UV 継ぎ目を調べる表面描画
@@ -48,7 +52,7 @@ YoluPainter のファイルは `.ylp` です（CLIP STUDIO の .clip、Photoshop
 
 ## 設定
 
-ウィンドウの Settings ボタン、または Project Settings > YoluPainter で開きます。
+ウィンドウのメニューの ファイル ▸ プロジェクト設定… / 編集 ▸ 環境設定…、または Project Settings > YoluPainter で開きます。
 
 - **プロジェクトで共有**（`ProjectSettings/Packages/net.yozolab.yolupainter/Settings.json`、バージョン管理に入る）: 新規ドキュメントの既定の大きさ、共有のブラシ置き場（プロジェクト内のフォルダ。ここへ取り込んだブラシはバージョン管理で全員に渡る）
 - **自分だけ**（`UserSettings/YoluPainter/Settings.json`）: 取り込んだブラシの置き場（プロジェクトの外も可。変えるときは今のブラシを複写するか尋ね、元は残す）、同梱ブラシの表示、`.ylp` のバックアップを残す数、復旧 checkpoint の間隔、メモリ予算（Undo 履歴・レイヤーの画素・1 ストローク）

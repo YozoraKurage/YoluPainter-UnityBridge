@@ -1,0 +1,750 @@
+# Japanese translation for YoluPainter.
+# msgid is the English source string as it appears in the code (L.Tr("...")).
+# An empty or missing msgstr falls back to the English text. msgctxt separates the same English used in two places.
+msgid ""
+msgstr ""
+"Project-Id-Version: YoluPainter\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+# ---- menu bar ----
+
+msgid "File"
+msgstr "ファイル"
+
+msgid "Edit"
+msgstr "編集"
+
+msgid "Layer"
+msgstr "レイヤー"
+
+msgid "Select"
+msgstr "選択範囲"
+
+msgid "Filter"
+msgstr "フィルター"
+
+msgid "3D"
+msgstr "3D"
+
+msgid "View"
+msgstr "表示"
+
+msgid "Window"
+msgstr "ウィンドウ"
+
+msgid "Help"
+msgstr "ヘルプ"
+
+msgid "New Project…"
+msgstr "新規プロジェクト…"
+
+msgid "Open…"
+msgstr "開く…"
+
+msgid "Save"
+msgstr "保存"
+
+msgid "Save As…"
+msgstr "別名で保存…"
+
+msgid "Import PSD…"
+msgstr "PSD を読み込む…"
+
+msgid "Export"
+msgstr "書き出し"
+
+msgid "Channel as PNG…"
+msgstr "チャンネルを PNG で…"
+
+msgid "All Channels as Images…"
+msgstr "すべてのチャンネルを画像で…"
+
+msgid "Channel as PSD…"
+msgstr "チャンネルを PSD で…"
+
+msgid "Assign to lilToon Material…"
+msgstr "lilToon のマテリアルに割り当て…"
+
+msgid "Project Settings…"
+msgstr "プロジェクト設定…"
+
+msgid "Undo"
+msgstr "取り消し"
+
+msgid "Redo"
+msgstr "やり直し"
+
+msgid "Free Transform"
+msgstr "自由変形"
+
+msgid "Flip Horizontal"
+msgstr "左右に反転"
+
+msgid "Flip Vertical"
+msgstr "上下に反転"
+
+msgid "Rotate 90° Clockwise"
+msgstr "90° 時計回りに回転"
+
+msgid "Rotate 90° Counter-clockwise"
+msgstr "90° 反時計回りに回転"
+
+msgid "Preferences…"
+msgstr "環境設定…"
+
+msgid "New Layer"
+msgstr "新規レイヤー"
+
+msgid "New Fill Layer"
+msgstr "新規塗りつぶしレイヤー"
+
+msgid "New Adjustment Layer"
+msgstr "新規調整レイヤー"
+
+msgid "Group Layers"
+msgstr "レイヤーをグループ化"
+
+msgid "Group"
+msgstr "グループ"
+
+msgid "Ungroup"
+msgstr "グループ解除"
+
+msgid "Add Layer Mask"
+msgstr "レイヤーマスクを追加"
+
+msgid "Edit Layer Mask"
+msgstr "レイヤーマスクを編集"
+
+msgid "Delete Layer Mask"
+msgstr "レイヤーマスクを削除"
+
+msgid "Clip to Layer Below"
+msgstr "下のレイヤーでクリッピング"
+
+msgid "Rasterize Path"
+msgstr "パスをラスタライズ"
+
+msgid "Bake Filters into Pixels"
+msgstr "フィルターを画素に焼き込む"
+
+msgid "Move Layer Up"
+msgstr "レイヤーを上へ"
+
+msgid "Move Layer Down"
+msgstr "レイヤーを下へ"
+
+msgid "Delete Layer"
+msgstr "レイヤーを削除"
+
+msgid "All"
+msgstr "すべてを選択"
+
+msgid "Deselect"
+msgstr "選択を解除"
+
+msgid "Inverse"
+msgstr "選択範囲を反転"
+
+msgid "Grow"
+msgstr "拡張"
+
+msgid "Shrink"
+msgstr "縮小"
+
+msgid "Border"
+msgstr "境界線"
+
+msgid "Feather"
+msgstr "ぼかし"
+
+msgid "Sharpen Edge"
+msgstr "境界をくっきり"
+
+msgid "On Mask"
+msgstr "マスクに"
+
+msgid "no layer"
+msgstr "レイヤーがありません"
+
+msgid "Gaussian blur"
+msgstr "ぼかし（ガウス）"
+
+msgid "Sharpen"
+msgstr "シャープ"
+
+msgid "Noise (monochrome)"
+msgstr "ノイズ（モノクロ）"
+
+msgid "Noise (colour)"
+msgstr "ノイズ（カラー）"
+
+msgid "Levels"
+msgstr "レベル補正"
+
+msgid "Invert"
+msgstr "階調の反転"
+
+msgid "Normalize (whole layer)"
+msgstr "正規化（レイヤー全体）"
+
+msgid "Hue / Saturation"
+msgstr "色相・彩度"
+
+msgid "Choose Model…"
+msgstr "モデルを選ぶ…"
+
+msgid "Demo Cube"
+msgstr "デモのキューブ"
+
+msgid "Light with Normal Output"
+msgstr "ノーマルの出力で照らす"
+
+msgid "2D Canvas"
+msgstr "2D キャンバス"
+
+msgid "3D View"
+msgstr "3D ビュー"
+
+msgid "2D + 3D"
+msgstr "2D + 3D"
+
+msgid "Zoom In"
+msgstr "ズームイン"
+
+msgid "Zoom Out"
+msgstr "ズームアウト"
+
+msgid "Fit on Screen"
+msgstr "画面サイズに合わせる"
+
+msgid "Texture Set"
+msgstr "テクスチャセット"
+
+msgid "Layers"
+msgstr "レイヤー"
+
+msgid "Properties"
+msgstr "プロパティ"
+
+msgid "Language"
+msgstr "言語"
+
+msgid "Automatic (Unity's language)"
+msgstr "自動（Unity の言語）"
+
+msgid "Keyboard Shortcuts"
+msgstr "キーボードショートカット"
+
+msgid "Implementation Limits"
+msgstr "実装の制限"
+
+# ---- tools ----
+
+msgid "Brush"
+msgstr "ブラシ"
+
+msgid "Eraser"
+msgstr "消しゴム"
+
+msgid "Fill"
+msgstr "塗りつぶし"
+
+msgid "Gradient"
+msgstr "グラデーション"
+
+msgid "Rectangle Select"
+msgstr "長方形選択"
+
+msgid "Ellipse Select"
+msgstr "楕円形選択"
+
+msgid "Lasso"
+msgstr "なげなわ"
+
+msgid "Magic Wand"
+msgstr "自動選択"
+
+msgid "Move / Transform"
+msgstr "移動・変形"
+
+msgid "Path"
+msgstr "パス"
+
+msgid "Eyedropper"
+msgstr "スポイト"
+
+msgid "Background color"
+msgstr "背景色"
+
+msgid "Foreground color (the brush value)"
+msgstr "描画色（ブラシの値）"
+
+msgid "Swap colors (X)"
+msgstr "描画色と背景色を入れ替え（X）"
+
+# ---- options bar ----
+
+msgid "Brush preset"
+msgstr "ブラシプリセット"
+
+msgid "Size"
+msgstr "直径"
+
+msgid "Brush diameter ([ and ])"
+msgstr "ブラシの直径（[ と ]）"
+
+msgid "Hardness"
+msgstr "硬さ"
+
+msgid "Opacity"
+msgstr "不透明度"
+
+msgid "Flow"
+msgstr "流量"
+
+msgid "Pressure controls size"
+msgstr "筆圧で直径を変える"
+
+msgid "Pressure controls opacity"
+msgstr "筆圧で不透明度を変える"
+
+msgid "Painting the layer mask (paint hides, erase reveals)"
+msgstr "レイヤーマスクを描画中（描くと隠れ、消すと現れる）"
+
+msgid "Tolerance"
+msgstr "許容値"
+
+msgid "Contiguous"
+msgstr "隣接"
+
+msgid "Sample All Layers"
+msgstr "全レイヤーを対象"
+
+msgid "Use the composite instead of the selected layer"
+msgstr "選んだレイヤーではなく、合成結果で判定する"
+
+msgid "Shape"
+msgstr "形状"
+
+msgid "From"
+msgstr "開始"
+
+msgid "Start color (the brush color)"
+msgstr "開始の色（ブラシの色）"
+
+msgid "To"
+msgstr "終了"
+
+msgid "End color"
+msgstr "終了の色"
+
+msgid "Linear"
+msgstr "線形"
+
+msgid "Radial"
+msgstr "円形"
+
+msgid "Select All (Ctrl+A)"
+msgstr "すべてを選択（Ctrl+A）"
+
+msgid "Deselect (Ctrl+D)"
+msgstr "選択を解除（Ctrl+D）"
+
+msgid "Inverse (Ctrl+Shift+I)"
+msgstr "選択範囲を反転（Ctrl+Shift+I）"
+
+msgid "Shift adds · Ctrl subtracts · Shift+Ctrl intersects"
+msgstr "Shift で追加 · Ctrl で削除 · Shift+Ctrl で共通部分"
+
+msgid "Drag to move, corners to scale, outside to rotate. Arrow keys nudge."
+msgstr "ドラッグで移動、角で拡大・縮小、外側で回転。矢印キーで少しずつ動かす。"
+
+msgid "Resampling"
+msgstr "補間方法"
+
+msgid "Bilinear"
+msgstr "バイリニア"
+
+msgid "Nearest"
+msgstr "ニアレストネイバー"
+
+msgid "Click the 2D canvas or the model to add points; drag a point to move it; Delete removes the last one."
+msgstr "2D キャンバスかモデルをクリックして点を追加。点はドラッグで移動、Delete で最後の点を削除。"
+
+msgid "Pick from the composite instead of the selected layer"
+msgstr "選んだレイヤーではなく、合成結果から拾う"
+
+msgid "Click the 2D canvas to pick the brush color."
+msgstr "2D キャンバスをクリックしてブラシの色を拾う。"
+
+# ---- view ----
+
+msgid "2D Canvas (F1)"
+msgstr "2D キャンバス（F1）"
+
+msgid "3D View (F2)"
+msgstr "3D ビュー（F2）"
+
+msgid "2D + 3D (F3)"
+msgstr "2D + 3D（F3）"
+
+msgid "Layer mask"
+msgstr "レイヤーマスク"
+
+msgid "No model"
+msgstr "モデルなし"
+
+msgid ""
+"Choose a model in Texture Set, or 3D ▸ Demo Cube.\n"
+"The original prefab is never instantiated."
+msgstr ""
+"テクスチャセットでモデルを選ぶか、3D ▸ デモのキューブ を使ってください。\n"
+"元のプレハブはインスタンス化しません。"
+
+msgid "Untitled"
+msgstr "名称未設定"
+
+msgid "History"
+msgstr "履歴"
+
+# ---- texture set ----
+
+msgid "Model"
+msgstr "モデル"
+
+msgid "Demo cube"
+msgstr "デモのキューブ"
+
+msgid "None (drop a model here)"
+msgstr "なし（ここにモデルをドロップ）"
+
+msgid "Choose a model…"
+msgstr "モデルを選ぶ…"
+
+msgid "Material"
+msgstr "マテリアル"
+
+msgid "The material slot this document paints"
+msgstr "このドキュメントが描くマテリアルのスロット"
+
+msgid "Color"
+msgstr "カラー"
+
+msgid "Roughness"
+msgstr "ラフネス"
+
+msgid "Metallic"
+msgstr "メタリック"
+
+msgid "Height"
+msgstr "ハイト"
+
+msgid "Normal"
+msgstr "ノーマル"
+
+msgid "Emission"
+msgstr "エミッション"
+
+msgid "Normal channel: layers composite as unit normals (Overlay adds detail, other modes replace)."
+msgstr "ノーマルのチャンネル: レイヤーは単位ベクトルとして合成します（オーバーレイは細部を足し、ほかのモードは置き換え）。"
+
+msgid "Painting only the selected channel; the other channels stay as they are."
+msgstr "選んだチャンネルだけを描きます。ほかのチャンネルはそのままです。"
+
+# ---- layers ----
+
+msgid "Add Filter"
+msgstr "フィルターを追加"
+
+msgid "Layer mask (click to paint on it)"
+msgstr "レイヤーマスク（クリックでマスクを描く）"
+
+msgid "This layer has no pixels in the selected channel yet"
+msgstr "このレイヤーには、選んだチャンネルの画素がまだありません"
+
+msgid "Hide"
+msgstr "非表示にする"
+
+msgid "Show"
+msgstr "表示する"
+
+msgid "Paint this channel"
+msgstr "このチャンネルを描く"
+
+msgid "Pass through: the contents blend with the layers below as if they were not grouped."
+msgstr "通過: 中身はグループが無いかのように下のレイヤーと合成されます。"
+
+msgid "Isolated: the contents are composited together first, then blended."
+msgstr "分離: 中身を先にまとめて合成してから、下のレイヤーと合成します。"
+
+# ---- brush details ----
+
+msgid "Value"
+msgstr "値"
+
+msgid "Spacing"
+msgstr "間隔"
+
+msgid "Pressure flow"
+msgstr "筆圧で流量を変える"
+
+msgid "Pressure curve"
+msgstr "筆圧のカーブ"
+
+msgid "Tip & dynamics"
+msgstr "ブラシ先端とダイナミクス"
+
+msgid "Tip"
+msgstr "先端"
+
+msgid "Round (hardness)"
+msgstr "円形（硬さ）"
+
+msgid "Missing"
+msgstr "見つかりません"
+
+msgid "Angle"
+msgstr "角度"
+
+msgid "Roundness"
+msgstr "真円率"
+
+msgid "Follow direction"
+msgstr "進行方向に合わせる"
+
+msgid "Size jitter"
+msgstr "直径のジッター"
+
+msgid "Angle jitter"
+msgstr "角度のジッター"
+
+msgid "Roundness jitter"
+msgstr "真円率のジッター"
+
+msgid "Opacity jitter"
+msgstr "不透明度のジッター"
+
+msgid "Flow jitter"
+msgstr "流量のジッター"
+
+msgid "Scatter"
+msgstr "散布"
+
+msgid "Count"
+msgstr "数"
+
+msgid "Texture"
+msgstr "テクスチャ"
+
+msgid "None"
+msgstr "なし"
+
+msgid "Texture depth"
+msgstr "テクスチャの深さ"
+
+msgid "Texture scale"
+msgstr "テクスチャの比率"
+
+msgid "Save Preset…"
+msgstr "プリセットを保存…"
+
+msgid "Load Preset…"
+msgstr "プリセットを読み込む…"
+
+msgid "Import Brushes…"
+msgstr "ブラシを読み込む…"
+
+msgid "Delete Imported Brush"
+msgstr "読み込んだブラシを削除"
+
+# ---- messages ----
+
+msgid "Flipped horizontally."
+msgstr "左右に反転しました。"
+
+msgid "Flipped vertically."
+msgstr "上下に反転しました。"
+
+msgid "Rotated 90° clockwise."
+msgstr "90° 時計回りに回転しました。"
+
+msgid "Rotated 90° counter-clockwise."
+msgstr "90° 反時計回りに回転しました。"
+
+msgid "Loaded the tool's seam-test cube. No scene or source asset changed."
+msgstr "継ぎ目の確認用のキューブを読み込みました。シーンと元のアセットは変えていません。"
+
+msgid "Nothing to pick there (transparent)."
+msgstr "そこには拾える色がありません（透明）。"
+
+msgid "Picked"
+msgstr "拾った色:"
+
+# ---- help ----
+
+msgid ""
+"Tools: B brush · E eraser · G fill · Shift+G gradient · M rectangle select · Shift+M ellipse select · L lasso · W magic wand · V move · P path · I eyedropper\n"
+"[ / ] brush size · X swap colors · D default colors\n"
+"Ctrl+Z undo · Ctrl+Shift+Z redo · Ctrl+S save · Ctrl+Shift+S save as · Ctrl+O open · Ctrl+N new\n"
+"Ctrl+A select all · Ctrl+D deselect · Ctrl+Shift+I inverse\n"
+"F1 2D · F2 3D · F3 2D + 3D · Ctrl+0 fit · wheel zoom · middle drag pan\n"
+"3D: Alt or right drag orbits, middle drag pans, wheel zooms\n"
+"Esc cancels a stroke or a drag"
+msgstr ""
+"ツール: B ブラシ · E 消しゴム · G 塗りつぶし · Shift+G グラデーション · M 長方形選択 · Shift+M 楕円形選択 · L なげなわ · W 自動選択 · V 移動 · P パス · I スポイト\n"
+"[ / ] ブラシの直径 · X 描画色と背景色を入れ替え · D 初期設定の色\n"
+"Ctrl+Z 取り消し · Ctrl+Shift+Z やり直し · Ctrl+S 保存 · Ctrl+Shift+S 別名で保存 · Ctrl+O 開く · Ctrl+N 新規\n"
+"Ctrl+A すべてを選択 · Ctrl+D 選択を解除 · Ctrl+Shift+I 選択範囲を反転\n"
+"F1 2D · F2 3D · F3 2D + 3D · Ctrl+0 画面に合わせる · ホイールでズーム · 中ボタンのドラッグで移動\n"
+"3D: Alt か右ドラッグで回転、中ドラッグで移動、ホイールでズーム\n"
+"Esc で描画中のストロークやドラッグを取り消し"
+
+msgid "Prototype: the CPU paints the source and the GPU composites tiles. Readable static and skinned meshes (posed on a copy). One channel is painted at a time. .ylp saves; PSD with 8-bit RGB layers, groups, masks, fills and three adjustment types. Generators and anchors are not finished, and the 3D preview does not reproduce lilToon exactly. See Documentation~/STATUS.md in the package."
+msgstr "試作版です。元の画素は CPU が描き、タイルの合成は GPU が行います。読み取りできる静的メッシュとスキンメッシュ（複製にポーズを付けて表示）に対応。描けるのは一度に 1 チャンネルです。.ylp で保存し、PSD は 8 bit RGB のレイヤー・グループ・マスク・塗りつぶし・3 種類の調整レイヤーを読み書きします。ジェネレーターとアンカーは未完成で、3D プレビューは lilToon の見た目を正確には再現しません。詳しくはパッケージの Documentation~/STATUS.md を見てください。"
+
+msgid "Custom"
+msgstr "カスタム"
+
+msgid "GPU compositing"
+msgstr "GPU で合成"
+
+msgid "CPU compositing"
+msgstr "CPU で合成"
+
+msgid "Default colors (D)"
+msgstr "初期設定の描画色と背景色（D）"
+
+msgid "Change Icon…"
+msgstr "アイコンを変更…"
+
+msgid "Change Selected Icon…"
+msgstr "選択中のアイコンを変更…"
+
+msgid "Reset Icon"
+msgstr "アイコンを元に戻す"
+
+msgid "Open Icon Folder"
+msgstr "アイコンのフォルダを開く"
+
+msgid "Choose a tool icon (PNG, up to 256 px)"
+msgstr "ツールのアイコンを選ぶ（PNG、256 px まで）"
+
+msgid "The tool icon was changed. Right-click the tool to reset it."
+msgstr "ツールのアイコンを変更しました。ツールを右クリックすると元に戻せます。"
+
+msgid "The tool icon is back to the bundled one."
+msgstr "ツールのアイコンを元に戻しました。"
+
+# ---- blend modes (msgctxt "blend mode") ----
+
+msgctxt "blend mode"
+msgid "Normal"
+msgstr "通常"
+
+msgctxt "blend mode"
+msgid "Multiply"
+msgstr "乗算"
+
+msgctxt "blend mode"
+msgid "Screen"
+msgstr "スクリーン"
+
+msgctxt "blend mode"
+msgid "Overlay"
+msgstr "オーバーレイ"
+
+msgctxt "blend mode"
+msgid "Darken"
+msgstr "比較（暗）"
+
+msgctxt "blend mode"
+msgid "Lighten"
+msgstr "比較（明）"
+
+msgctxt "blend mode"
+msgid "Color Dodge"
+msgstr "覆い焼きカラー"
+
+msgctxt "blend mode"
+msgid "Color Burn"
+msgstr "焼き込みカラー"
+
+msgctxt "blend mode"
+msgid "Linear Dodge (Add)"
+msgstr "覆い焼き（リニア）- 加算"
+
+msgctxt "blend mode"
+msgid "Linear Burn"
+msgstr "焼き込み（リニア）"
+
+msgctxt "blend mode"
+msgid "Hard Light"
+msgstr "ハードライト"
+
+msgctxt "blend mode"
+msgid "Soft Light"
+msgstr "ソフトライト"
+
+msgctxt "blend mode"
+msgid "Vivid Light"
+msgstr "ビビッドライト"
+
+msgctxt "blend mode"
+msgid "Linear Light"
+msgstr "リニアライト"
+
+msgctxt "blend mode"
+msgid "Pin Light"
+msgstr "ピンライト"
+
+msgctxt "blend mode"
+msgid "Hard Mix"
+msgstr "ハードミックス"
+
+msgctxt "blend mode"
+msgid "Difference"
+msgstr "差の絶対値"
+
+msgctxt "blend mode"
+msgid "Exclusion"
+msgstr "除外"
+
+msgctxt "blend mode"
+msgid "Subtract"
+msgstr "減算"
+
+msgctxt "blend mode"
+msgid "Divide"
+msgstr "除算"
+
+msgctxt "blend mode"
+msgid "Hue"
+msgstr "色相"
+
+msgctxt "blend mode"
+msgid "Saturation"
+msgstr "彩度"
+
+msgctxt "blend mode"
+msgid "Color"
+msgstr "カラー"
+
+msgctxt "blend mode"
+msgid "Luminosity"
+msgstr "輝度"
+
+msgctxt "blend mode"
+msgid "Darker Color"
+msgstr "カラー比較（暗）"
+
+msgctxt "blend mode"
+msgid "Lighter Color"
+msgstr "カラー比較（明）"
+
+msgctxt "blend mode"
+msgid "Pass Through"
+msgstr "通過"

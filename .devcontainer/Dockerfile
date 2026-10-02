@@ -61,6 +61,10 @@ RUN apt-get -q update \
   x11-apps \
   # GPU が通っているかの確認（gpu-check.sh の glxinfo）。
   mesa-utils \
+  # UI の見た目の確認: ウィンドウを batch-gl でオフスクリーンに描いたとき日本語が出るフォント
+  # （Editor/UI/OffscreenGui.cs）と、アイコンの SVG を PNG にする rsvg-convert（Documentation~/tools/fetch-icons.sh）。
+  fonts-noto-cjk \
+  librsvg2-bin \
   # VS Code / Claude Code が LANG=en_US.UTF-8 を送ってくるのに、ベースイメージには
   # C.UTF-8 しか無くて毎コマンド setlocale 警告が出る。生成しておく。
   && sed -i 's/^# *\(en_US.UTF-8\)/\1/' /etc/locale.gen && locale-gen \

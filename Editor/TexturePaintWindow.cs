@@ -43,13 +43,13 @@ namespace Yozolab.YoluPainter.Editor
         BrushStroke stroke;
         TileGpuCompositor compositor;
         IsolatedModelPreview preview;
-        string projectPath, projectToken, recoveryToken, message = "G0/G1 prototype: CPU source brush, GPU compositor; no production validation yet";
+        string projectPath, projectToken, recoveryToken, message = "";
         long renderedRevision = -1, savedRevision = -1, recoveredRevision = -1;
         bool repaintPixels = true, surfaceStroke, externalConflict, editMask;
         Vector2 previousPointer, layerScroll, brushScroll, canvasPan;
         float canvasZoom = 1, previousPressure = 1;
         /// <summary>キャンバスでの左ボタンの働き。</summary>
-        internal enum PaintTool { Brush, Fill, Gradient, SelectRectangle, SelectEllipse, Lasso, MagicWand, Move, Path }
+        internal enum PaintTool { Brush, Fill, Gradient, SelectRectangle, SelectEllipse, Lasso, MagicWand, Move, Path, Eyedropper }
         PaintTool tool;
         int wandTolerance = 32; bool wandContiguous = true, wandSampleAll;
         Color gradientTo = new Color(0, 0, 0, 0); GradientShape gradientShape;
@@ -97,7 +97,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void OnEnable()
         {
-            minSize = new Vector2(980,640);
+            minSize = new Vector2(980,640); wantsMouseMove = true; L.LanguageChanged += Repaint; PainterToolIcons.Changed += Repaint;
             compositor = new TileGpuCompositor(); preview = new IsolatedModelPreview();
             if (String.IsNullOrEmpty(recoveryRoot)) recoveryRoot=Path.GetFullPath(Path.Combine("Library","YoluPainter","recovery-"+Guid.NewGuid().ToString("N")));
             try
@@ -145,7 +145,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             document=new PaintDocument(size,size,128,PainterSettings.UndoBudgetBytes);
             ApplyBudgets();
-            selectedLayer=document.AddLayer("Paint 1").Id; document.ClearHistory(); pristineRevision=document.Revision;
+            selectedLayer=document.AddLayer(L.Tr("Layer")+" 1").Id; document.ClearHistory(); pristineRevision=document.Revision;
             projectPath=null; projectToken=null; savedRevision=-1; importedOriginal=null; importedPsdPath=null; externalConflict=false; canvasZoom=1; canvasPan=Vector2.zero;
         }
         void OnLostFocus() { FinishStroke(false); CancelToolDrag(); preview?.CancelNavigation(); SaveRecovery(); }
@@ -154,7 +154,7 @@ namespace Yozolab.YoluPainter.Editor
         void OnDisable()
         {
             FinishStroke(false); preview?.CancelNavigation(); SaveRecovery();
-            EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
+            EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
             DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
             if(selectionOverlay!=null){DestroyImmediate(selectionOverlay);selectionOverlay=null;overlayFor=null;}
         }
@@ -178,10 +178,13 @@ namespace Yozolab.YoluPainter.Editor
         void OnGUI()
         {
             if(document==null) return;
+            var e=Event.current;
+            if(e.type==EventType.MouseMove) Repaint(); // マウスの乗った部品の見た目
             // スライダーのドラッグ中の変更は 1 つの Undo にまとめる。離したところで区切る。
-            if(Event.current.rawType==EventType.MouseUp) document.EndCoalescing();
-            HandleKeys(Event.current);
-            using(new EditorGUI.DisabledScope(stroke!=null)) DrawToolbar();
+            if(e.rawType==EventType.MouseUp) document.EndCoalescing();
+            HandleModelPicker(e);
+            HandleKeys(e);
+            if(e.type==EventType.KeyDown&&HandleToolKeys(e))return;
             if(repaintPixels || renderedRevision!=document.Revision)
             {
                 TryAction(()=> { compositor.Update(document,channel); UpdateNormalOutput(); preview.SetPaintTexture(DisplayTexture, materialSlot); });
@@ -189,231 +192,12 @@ namespace Yozolab.YoluPainter.Editor
                 lastComposite=EditorApplication.timeSinceStartup;
                 renderedRevision=document.Revision; repaintPixels=false;
             }
-            Rect main=new Rect(0,48,position.width,position.height-102);
-            Rect left=new Rect(0,main.y,220,main.height), right=new Rect(position.width-235,main.y,235,main.height);
-            DrawBrush(left); DrawLayers(right);
-            float centerWidth=position.width-455;
-            canvasRect=new Rect(224,main.y+22,(centerWidth-12)*.5f,main.height-28);
-            surfaceRect=new Rect(canvasRect.xMax+8,canvasRect.y,canvasRect.width,canvasRect.height);
-            GUI.Label(new Rect(canvasRect.x,main.y,canvasRect.width,20),"2D / "+channel+(EditingMask?" — painting MASK (erase = reveal)":" (bottom-left UV origin)"),EditorStyles.boldLabel);
-            GUI.Label(new Rect(surfaceRect.x,main.y,surfaceRect.width,20),"3D / isolated static mesh",EditorStyles.boldLabel);
-            DrawCanvas();
-            if(Event.current.type==EventType.Repaint) preview.Render(surfaceRect);
-            if(Event.current.type==EventType.Repaint) DrawPathMarkers();
-            if(!preview.HasModel) GUI.Label(surfaceRect,"Assign a readable static mesh object above\nNo source prefab is instantiated",EditorStyles.centeredGreyMiniLabel);
-            HandleCanvasInput(Event.current);
-            GUI.Label(new Rect(8,position.height-50,position.width-16,20),$"{document.Width} × {document.Height} | Tiles {document.AllocatedBytes/1048576.0:F2} MiB | History {document.HistoryBytes/1048576.0:F2} MiB | {compositor.Backend}",EditorStyles.miniLabel);
-            EditorGUI.HelpBox(new Rect(8,position.height-29,position.width-16,25),message,externalConflict?MessageType.Warning:MessageType.None);
-        }
-        void DrawToolbar()
-        {
-            GUILayout.BeginHorizontal(EditorStyles.toolbar);
-            resolution=EditorGUILayout.IntPopup(resolution,new[]{"256","512","1024","2048","4096"},new[]{256,512,1024,2048,4096},GUILayout.Width(65));
-            if(GUILayout.Button("New",EditorStyles.toolbarButton,GUILayout.Width(38)) && ConfirmDiscard()) { CreateDocument(resolution); BindDocument(); }
-            if(GUILayout.Button("Open",EditorStyles.toolbarButton,GUILayout.Width(42))) OpenProject();
-            if(GUILayout.Button("Save",EditorStyles.toolbarButton,GUILayout.Width(42))) SaveProject(false);
-            if(GUILayout.Button("Save As",EditorStyles.toolbarButton,GUILayout.Width(55))) SaveProject(true);
-            if(GUILayout.Button("Import PSD",EditorStyles.toolbarButton,GUILayout.Width(78))) ImportPsd();
-            if(GUILayout.Button(new GUIContent("Export Images","Write every channel in use as PNG into a folder"),EditorStyles.toolbarButton,GUILayout.Width(90))) ExportImages();
-            if(GUILayout.Button(new GUIContent("lilToon…","Write lilToon-ready textures and assign them to this slot's lilToon material (asks first)"),EditorStyles.toolbarButton,GUILayout.Width(62))) TryAction(AssignToLilToon);
-            if(GUILayout.Button(new GUIContent("Export PNG","Write the selected channel as one PNG"),EditorStyles.toolbarButton,GUILayout.Width(78))) ExportPng();
-            if(GUILayout.Button("Export PSD",EditorStyles.toolbarButton,GUILayout.Width(78))) ExportPsd();
-            GUILayout.Space(8);
-            using(new EditorGUI.DisabledScope(!document.CanUndo)) if(GUILayout.Button("Undo",EditorStyles.toolbarButton,GUILayout.Width(45))) document.Undo();
-            using(new EditorGUI.DisabledScope(!document.CanRedo)) if(GUILayout.Button("Redo",EditorStyles.toolbarButton,GUILayout.Width(45))) document.Redo();
-            DrawLightingToggle();
-            if(GUILayout.Button("Demo cube",EditorStyles.toolbarButton,GUILayout.Width(75)))TryAction(()=>{model=null;preview.LoadDemoMesh();materialSlot=0;repaintPixels=true;message="Loaded tool-owned seam-test cube. No scene or source assets changed.";});
-            GUILayout.FlexibleSpace(); GUILayout.Label(document.Revision==savedRevision?"Saved":"Unsaved",EditorStyles.miniLabel);
-            if(GUILayout.Button(new GUIContent("Settings","Project Settings > YoluPainter (shared with the project / only for you)"),EditorStyles.toolbarButton,GUILayout.Width(60))) OpenSettings();
-            GUILayout.EndHorizontal();
-            GUILayout.BeginHorizontal();
-            var next=(GameObject)EditorGUILayout.ObjectField("Preview model",model,typeof(GameObject),true,GUILayout.MinWidth(260));
-            if(next!=model){ model=next; TryAction(()=>{preview.Load(model); materialSlot=Mathf.Clamp(materialSlot,0,Mathf.Max(0,preview.MaterialSlotCount-1)); message=String.Join("; ",preview.Diagnostics); repaintPixels=true;}); }
-            int slot=EditorGUILayout.IntField("Material slot",materialSlot,GUILayout.Width(210));
-            if(slot!=materialSlot){materialSlot=Mathf.Clamp(slot,0,Mathf.Max(0,preview.MaterialSlotCount-1)); repaintPixels=true;}
-            var nextChannel=(PaintChannel)EditorGUILayout.EnumPopup(channel,GUILayout.Width(105));
-            if(nextChannel!=channel){channel=nextChannel; repaintPixels=true; message=channel==PaintChannel.Normal?"Normal channel: layers composite as unit normals (Overlay adds detail, other modes replace). Height → Normal is in the left panel.":"Painting only the selected channel; other channels remain unchanged.";}
-            GUILayout.EndHorizontal();
-        }
-        void DrawBrush(Rect rect)
-        {
-            GUILayout.BeginArea(rect,EditorStyles.helpBox); brushScroll=GUILayout.BeginScrollView(brushScroll);
-            GUILayout.Label("Tool",EditorStyles.boldLabel);
-            using(new EditorGUI.DisabledScope(stroke!=null))
-            {
-                var tools=new[]{new GUIContent("Brush"),new GUIContent("Fill","Bucket fill (B)"),new GUIContent("Grad","Gradient"),new GUIContent("Rect","Rectangle selection"),new GUIContent("Ellipse","Ellipse selection"),new GUIContent("Lasso","Lasso selection"),new GUIContent("Wand","Magic wand"),new GUIContent("Move","Move the layer, or the selected pixels (drag, arrow keys). Rotate, scale and flip below."),new GUIContent("Path","Editable stroke on the 3D model: click to add points, drag to move them")};
-                var nextTool=(PaintTool)GUILayout.SelectionGrid((int)tool,tools,4,EditorStyles.miniButton);
-                if(nextTool!=tool)Tool=nextTool;
-                if(tool==PaintTool.Fill||tool==PaintTool.MagicWand)
-                {
-                    wandTolerance=EditorGUILayout.IntSlider("Tolerance",wandTolerance,0,255);
-                    wandContiguous=EditorGUILayout.Toggle("Contiguous",wandContiguous);
-                    wandSampleAll=EditorGUILayout.Toggle(new GUIContent("Sample all layers","Use the composite instead of the selected layer"),wandSampleAll);
-                }
-                if(tool==PaintTool.Gradient)
-                {
-                    gradientShape=(GradientShape)EditorGUILayout.EnumPopup("Shape",gradientShape);
-                    gradientTo=EditorGUILayout.ColorField(new GUIContent("To","The colour at the end (the start is the brush value)"),gradientTo);
-                }
-                if(tool==PaintTool.Move) DrawMoveSettings();
-                if(tool==PaintTool.Path) DrawPathSettings();
-                if(tool==PaintTool.Fill||(tool>=PaintTool.SelectRectangle&&tool<=PaintTool.MagicWand)) DrawSurfacePick();
-                if(tool>=PaintTool.SelectRectangle&&tool<=PaintTool.MagicWand) EditorGUILayout.LabelField("Shift: add · Ctrl: subtract · Shift+Ctrl: intersect",EditorStyles.miniLabel);
-                GUILayout.BeginHorizontal();
-                if(GUILayout.Button(new GUIContent("All","Select all (Ctrl+A)"),EditorStyles.miniButtonLeft))document.SetSelection(SelectionMask.All(document));
-                using(new EditorGUI.DisabledScope(document.Selection==null))
-                {
-                    if(GUILayout.Button(new GUIContent("None","Deselect (Ctrl+D)"),EditorStyles.miniButtonMid))document.ClearSelection();
-                    if(GUILayout.Button(new GUIContent("Invert","Invert the selection (Ctrl+Shift+I)"),EditorStyles.miniButtonRight))document.SetSelection(document.Selection.Invert());
-                }
-                GUILayout.EndHorizontal();
-                DrawSelectionModify();
-            }
-            GUILayout.Space(6);
-            GUILayout.Label("Brush",EditorStyles.boldLabel);
-            using(new EditorGUI.DisabledScope(stroke!=null))
-            {
-                GUILayout.BeginHorizontal();
-                var thumb=BrushTips.Thumbnail(brush.tipId);
-                GUILayout.Label(thumb!=null?new GUIContent(thumb):new GUIContent("●"),GUILayout.Width(40),GUILayout.Height(40));
-                if(GUILayout.Button(brush.presetName,EditorStyles.popup,GUILayout.Height(20)))
-                {
-                    var menu=new GenericMenu();
-                    foreach(var preset in BuiltInBrushes.Presets){var p=preset;menu.AddItem(new GUIContent(p.Category+"/"+p.Name),brush.presetId==p.Id,()=>ApplyPreset(p));}
-                    if(PainterSettings.ShowBundledBrushes)
-                    {
-                        foreach(var preset in BundledBrushSets.Presets){var p=preset;menu.AddItem(new GUIContent(p.Category+"/"+p.Name),brush.presetId==p.Id,()=>ApplyPreset(p));}
-                        if(BundledBrushSets.LoadWarnings.Count>0)menu.AddDisabledItem(new GUIContent("Some bundled brushes could not be loaded (see Console)"));
-                    }
-                    foreach(var library in BrushLibrary.All)
-                        foreach(var preset in library.Presets){var p=preset;menu.AddItem(new GUIContent(library.MenuName+"/"+(String.IsNullOrEmpty(p.Category)?"":p.Category+"/")+p.Name),brush.presetId==p.Id,()=>ApplyPreset(p));}
-                    menu.AddSeparator("");
-                    menu.AddItem(new GUIContent("Brush settings…"),false,OpenSettings);
-                    menu.ShowAsContext();
-                }
-                GUILayout.EndHorizontal();
-                if(channel==PaintChannel.Roughness||channel==PaintChannel.Metallic||channel==PaintChannel.Height)
-                {float scalar=EditorGUILayout.Slider("Scalar value",brush.color.r,0,1);brush.color=new Color(scalar,scalar,scalar,brush.color.a);}
-                else brush.color=EditorGUILayout.ColorField("Value",brush.color);
-                brush.radius=EditorGUILayout.Slider("Radius px",brush.radius,.5f,128);
-                brush.hardness=EditorGUILayout.Slider("Hardness",brush.hardness,0,1);
-                brush.spacing=EditorGUILayout.Slider("Spacing",brush.spacing,.01f,1);
-                brush.opacity=EditorGUILayout.Slider("Opacity",brush.opacity,0,1);
-                brush.flow=EditorGUILayout.Slider("Flow",brush.flow,0,1);
-                brush.erase=EditorGUILayout.Toggle("Erase",brush.erase);
-                brush.pressureSize=EditorGUILayout.Toggle("Pressure size",brush.pressureSize);
-                brush.pressureOpacity=EditorGUILayout.Toggle("Pressure opacity",brush.pressureOpacity);
-                brush.pressureFlow=EditorGUILayout.Toggle("Pressure flow",brush.pressureFlow);
-                brush.pressureCurve=EditorGUILayout.CurveField("Pressure curve",brush.pressureCurve);
-                DrawStrokeAssist();
-                showDynamics=EditorGUILayout.Foldout(showDynamics,"Tip & dynamics",true);
-                if(showDynamics)
-                {
-                    EditorGUILayout.LabelField("Tip",string.IsNullOrEmpty(brush.tipId)?"Round (hardness)":BrushTips.ResolveRef(brush.tipId)==null?"Missing: "+brush.tipId+" (round tip used)":brush.tipId);
-                    brush.angle=EditorGUILayout.Slider("Angle",brush.angle,-180,180);
-                    brush.roundness=EditorGUILayout.Slider("Roundness",brush.roundness,.01f,1);
-                    brush.followDirection=EditorGUILayout.Toggle("Follow direction",brush.followDirection);
-                    brush.sizeJitter=EditorGUILayout.Slider("Size jitter",brush.sizeJitter,0,1);
-                    brush.angleJitter=EditorGUILayout.Slider("Angle jitter",brush.angleJitter,0,1);
-                    brush.roundnessJitter=EditorGUILayout.Slider("Roundness jitter",brush.roundnessJitter,0,1);
-                    brush.opacityJitter=EditorGUILayout.Slider("Opacity jitter",brush.opacityJitter,0,1);
-                    brush.flowJitter=EditorGUILayout.Slider("Flow jitter",brush.flowJitter,0,1);
-                    brush.scatter=EditorGUILayout.Slider("Scatter",brush.scatter,0,10);
-                    brush.count=EditorGUILayout.IntSlider("Count",brush.count,1,16);
-                    EditorGUILayout.LabelField("Texture",string.IsNullOrEmpty(brush.textureId)?"None":BrushTips.ResolveRef(brush.textureId)==null?"Missing: "+brush.textureId+" (not used)":brush.textureId);
-                    if(!string.IsNullOrEmpty(brush.textureId))
-                    {
-                        brush.textureDepth=EditorGUILayout.Slider("Texture depth",brush.textureDepth,0,1);
-                        brush.textureScale=EditorGUILayout.Slider("Texture scale",brush.textureScale,.05f,16);
-                    }
-                    DrawBrushDynamics();
-                }
-                if(GUILayout.Button("Save brush preset")) SavePreset();
-                if(GUILayout.Button("Load brush preset")) LoadPreset();
-                if(GUILayout.Button(new GUIContent("Import brushes…","Photoshop .abr / .pat (patterns as textures), GIMP .gbr / .gih / .vbr, or a PNG tip (dark = paint). Stored in this project's UserSettings."))) ImportBrushes();
-                if(BrushLibrary.IsLibraryPreset(brush.presetId)&&GUILayout.Button("Delete imported brush")) DeleteImportedBrush();
-            }
-            DrawNormalPanel();
-            DrawMeshMapPanel();
-            GUILayout.Space(12);
-            GUILayout.Label("Input",EditorStyles.boldLabel);
-            GUILayout.Label("LMB: use the tool (brush also on 3D)\nAlt / RMB: orbit 3D\nMMB: pan 2D / 3D\nWheel: zoom\nEsc: cancel stroke or drag\nCtrl/Cmd Z: undo · Shift: redo\nCtrl/Cmd A: select all · D: deselect\nCtrl/Cmd Shift I: invert selection\nFocus loss: cancel active stroke",EditorStyles.wordWrappedMiniLabel);
-            GUILayout.Space(12);
-            EditorGUILayout.HelpBox("Prototype uses one IMGUI pressure path. Tablet response, HiDPI and latency still require Unity/device tests. No-pressure input uses Unity's fixed fallback.",MessageType.Info);
-            if(GUILayout.Button("Show implementation limits")) Dialogs.Inform("G0/G1 limits","CPU source brush; bounded GPU tile compositor. Readable static and skinned meshes (skinned ones posed on a copy; Humanoid clips not yet). Selected channel only. .ylp save, PSD with RGB8 layers, groups, masks and three adjustment types. Editable surface paths, Generators/Filters/Anchors and an exact lilToon look in the preview remain unfinished. See Documentation~/STATUS.md in the package.");
-            DrawPosePanel();
-            GUILayout.EndScrollView(); GUILayout.EndArea();
-        }
-        void DrawLayers(Rect rect)
-        {
-            GUILayout.BeginArea(rect,EditorStyles.helpBox);
-            GUILayout.Label("Layers (top first)",EditorStyles.boldLabel);
-            using(new EditorGUI.DisabledScope(stroke!=null))
-            {
-                GUILayout.BeginHorizontal();
-                // 新しいレイヤーは選択中のレイヤーのすぐ上（同じグループの中）に作る
-                Guid? above=document.Layers.Any(l=>l.Id==selectedLayer)?selectedLayer:(Guid?)null;
-                if(GUILayout.Button("+")) selectedLayer=document.AddLayer("Paint "+(document.Layers.Count+1),above:above).Id;
-                if(GUILayout.Button("+ Fill")) selectedLayer=document.AddFillLayer("Fill "+(document.Layers.Count+1),new Dictionary<PaintChannel,Rgba32>{{channel,GetBrush().Color}},above:above).Id;
-                if(GUILayout.Button("+ Adjust"))
-                {
-                    var menu=new GenericMenu();
-                    menu.AddItem(new GUIContent("Invert"),false,()=>selectedLayer=document.AddAdjustmentLayer("Invert",AdjustmentSettings.Invert(),above:above).Id);
-                    menu.AddItem(new GUIContent("Levels"),false,()=>selectedLayer=document.AddAdjustmentLayer("Levels",AdjustmentSettings.Levels(),above:above).Id);
-                    menu.AddItem(new GUIContent("Hue / Saturation"),false,()=>selectedLayer=document.AddAdjustmentLayer("Hue / Saturation",AdjustmentSettings.HueSaturation(),above:above).Id);
-                    menu.ShowAsContext();
-                }
-                if(GUILayout.Button(new GUIContent("+ Group","Put the selected layer into a new group"))) TryAction(()=>selectedLayer=document.GroupLayers(new[]{selectedLayer},"Group "+(document.Layers.Count(l=>l.IsGroup)+1)).Id);
-                using(new EditorGUI.DisabledScope(document.Layers.Count<2)) if(GUILayout.Button(new GUIContent("−","Delete the selected layer (a group is deleted with its contents)"))){document.RemoveLayer(selectedLayer);selectedLayer=document.Layers.Count>0?document.Layers[document.Layers.Count-1].Id:Guid.Empty;}
-                GUILayout.EndHorizontal();
-                layerScroll=GUILayout.BeginScrollView(layerScroll);
-                for(int i=document.Layers.Count-1;i>=0;i--)
-                {
-                    var layer=document.Layers[i]; GUILayout.BeginHorizontal();
-                    GUILayout.Space(12*document.DepthOf(layer.Id));
-                    bool visible=GUILayout.Toggle(layer.Visible,"",GUILayout.Width(18)); if(visible!=layer.Visible) document.SetLayerVisibility(layer.Id,visible);
-                    string kind=layer.IsGroup?"▾ ":layer.Kind==LayerKind.Fill?"[Fill] ":layer.Kind==LayerKind.Adjustment?"[Adj] ":"";
-                    if(GUILayout.Toggle(selectedLayer==layer.Id,(document.IsEffectivelyClipped(i)?"↳ ":"")+kind+layer.Name,"Button")) selectedLayer=layer.Id;
-                    GUILayout.EndHorizontal();
-                }
-                GUILayout.EndScrollView();
-                var active=document.Layers.FirstOrDefault(l=>l.Id==selectedLayer);
-                if(active!=null)
-                {
-                    string name=EditorGUILayout.DelayedTextField("Name",active.Name);if(name!=active.Name)document.SetLayerName(active.Id,name);
-                    float opacity=EditorGUILayout.Slider("Opacity",(float)active.Opacity,0,1);if(Math.Abs(opacity-active.Opacity)>.00001)document.SetLayerOpacity(active.Id,opacity,coalesce:true);
-                    var blend=(LayerBlendMode)EditorGUILayout.EnumPopup(new GUIContent("Blend"),active.BlendMode,e=>active.IsGroup||(LayerBlendMode)e!=LayerBlendMode.PassThrough,false);if(blend!=active.BlendMode)TryAction(()=>document.SetLayerBlendMode(active.Id,blend));
-                    bool clipping=EditorGUILayout.Toggle("Clip to layer below",active.Clipping);if(clipping!=active.Clipping)document.SetLayerClipping(active.Id,clipping);
-                    if(!active.IsGroup){bool enabled=EditorGUILayout.Toggle("Channel enabled",active.IsChannelEnabled(channel));if(enabled!=active.IsChannelEnabled(channel))TryAction(()=>document.SetChannelEnabled(active.Id,channel,enabled));}
-                    var siblings=document.ChildrenOf(active.ParentId);int position=siblings.ToList().IndexOf(active);
-                    GUILayout.BeginHorizontal();
-                    using(new EditorGUI.DisabledScope(position>=siblings.Count-1)) if(GUILayout.Button("Up"))document.MoveLayer(active.Id,position+1);
-                    using(new EditorGUI.DisabledScope(position<=0)) if(GUILayout.Button("Down"))document.MoveLayer(active.Id,position-1);
-                    var groupBelow=position>0&&siblings[position-1].IsGroup?siblings[position-1]:null;
-                    using(new EditorGUI.DisabledScope(groupBelow==null)) if(GUILayout.Button(new GUIContent("Into ▾","Move into the group below (on top of its contents)")))document.MoveLayerTo(active.Id,groupBelow.Id,document.ChildrenOf(groupBelow.Id).Count);
-                    using(new EditorGUI.DisabledScope(active.ParentId==Guid.Empty)) if(GUILayout.Button(new GUIContent("Out","Move out of the group, just above it")))
-                    {
-                        var parent=document.GetLayer(active.ParentId);var outer=document.ChildrenOf(parent.ParentId).ToList();
-                        document.MoveLayerTo(active.Id,parent.ParentId,outer.IndexOf(parent)+1);
-                    }
-                    GUILayout.EndHorizontal();
-                    if(active.IsGroup)
-                    {
-                        EditorGUILayout.HelpBox(active.BlendMode==LayerBlendMode.PassThrough?"Pass through: the contents blend with the layers below as if they were not grouped.":"Isolated: the contents are composited together first, then blended with "+active.BlendMode+".",MessageType.None);
-                        if(GUILayout.Button("Ungroup (keep contents)"))
-                        {
-                            var first=document.ChildrenOf(active.Id).LastOrDefault();
-                            document.Ungroup(active.Id); selectedLayer=first!=null?first.Id:(document.Layers.Count>0?document.Layers[document.Layers.Count-1].Id:Guid.Empty);
-                            GUIUtility.ExitGUI(); // 消えたグループのまま下の欄を描かない
-                        }
-                    }
-                    if(active.Kind==LayerKind.Fill) DrawFill(active);
-                    if(active.Kind==LayerKind.Adjustment) DrawAdjustment(active);
-                    DrawMask(active);
-                    DrawFilters(active);
-                }
-            }
-            GUILayout.EndArea();
+            LayoutShell();
+            PaintGui.Fill(WindowRect,PaintTheme.WindowBg);
+            if(canvasRect.width>0) DrawCanvas();
+            if(surfaceRect.width>0 && e.type==EventType.Repaint){ PaintGui.Fill(surfaceRect,PaintTheme.CanvasBg); preview.Render(surfaceRect); DrawPathMarkers(); }
+            DrawShell();
+            HandleCanvasInput(e);
         }
         void DrawFill(PaintLayer active)
         {
@@ -485,7 +269,7 @@ namespace Yozolab.YoluPainter.Editor
         }
         void DrawCanvas()
         {
-            EditorGUI.DrawRect(canvasRect,new Color(.16f,.16f,.16f));
+            EditorGUI.DrawRect(canvasRect,PaintTheme.CanvasBg);
             GUI.BeginClip(canvasRect);
             var image=ImageRect(); image.position-=canvasRect.position;
             if(DisplayTexture!=null) EditorGUI.DrawTextureTransparent(image,DisplayTexture,ScaleMode.StretchToFill);
@@ -566,6 +350,7 @@ namespace Yozolab.YoluPainter.Editor
                     case PaintTool.Fill: TryAction(()=>BucketFill(p)); break;
                     case PaintTool.MagicWand: TryAction(()=>ApplySelection(Wand(p),CombineOf(e))); break;
                     case PaintTool.Move: TryAction(()=>BeginMove(p,e.mousePosition)); break;
+                    case PaintTool.Eyedropper: TryAction(()=>PickColor(p)); break;
                     default: toolDragging=true;toolStart=toolCurrent=p;lassoPoints.Clear();lassoPoints.Add(p);GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive); break;
                 }
                 e.Use();Repaint();return true;
@@ -583,6 +368,17 @@ namespace Yozolab.YoluPainter.Editor
                 CancelToolDrag();GUIUtility.hotControl=0;e.Use();Repaint();return true;
             }
             return false;
+        }
+        /// <summary>スポイト: 選んだ層（「全レイヤー」なら合成）の、今のチャンネルの色をブラシの色にする。</summary>
+        internal void PickColor(Vector2 p)
+        {
+            if(p.x<0||p.y<0||p.x>=document.Width||p.y>=document.Height)return;
+            int x=Mathf.FloorToInt(p.x),y=Mathf.FloorToInt(p.y);
+            var layer=document.Layers.FirstOrDefault(l=>l.Id==selectedLayer);
+            var c=wandSampleAll||layer==null||layer.IsGroup?document.CompositePixel(channel,x,y):layer.GetOutputPixel(channel,x,y);
+            if(c.A==0){message=L.Tr("Nothing to pick there (transparent).");return;}
+            brush.color=new Color(c.R/255f,c.G/255f,c.B/255f,1);
+            message=L.Tr("Picked")+" R "+c.R+" G "+c.G+" B "+c.B+".";
         }
         SelectionMask Wand(Vector2 p)
         {
@@ -948,6 +744,8 @@ namespace Yozolab.YoluPainter.Editor
             else if(stroke==null && (e.control||e.command) && e.shift && e.keyCode==KeyCode.I){if(document.Selection!=null)document.SetSelection(document.Selection.Invert());e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.Z){if(e.shift)document.Redo();else document.Undo();e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.S){SaveProject(e.shift);e.Use();}
+            else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.O){OpenProject();e.Use();}
+            else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.Alpha0){canvasZoom=1;canvasPan=Vector2.zero;e.Use();Repaint();}
         }
         static Vector2Int ArrowDelta(KeyCode key)=>key==KeyCode.LeftArrow?Vector2Int.left:key==KeyCode.RightArrow?Vector2Int.right:key==KeyCode.UpArrow?Vector2Int.up:key==KeyCode.DownArrow?Vector2Int.down:Vector2Int.zero;
         /// <summary>作った直後で何も手を加えていないドキュメントの版（New / 最初に開いたとき）。捨てても失うものが無いので確かめない。</summary>
@@ -1061,7 +859,7 @@ namespace Yozolab.YoluPainter.Editor
                 var result=PsdCodec.Read(File.ReadAllBytes(path));
                 if(result.Mode!=PsdCompatibilityMode.EditableRaster){Dialogs.Inform("PSD protected: "+result.Mode,String.Join("\n",result.Diagnostics.Select(d=>d.ToString()))+"\nOriginal file was not modified. Unsupported features cannot be edited here.");return;}
                 var next=PsdBridge.Import(result);if(!ConfirmDiscard())return;
-                document=next;if(document.Layers.Count==0)document.AddLayer("Paint 1");BindDocument();selectedLayer=document.Layers.Last().Id;projectPath=null;projectToken=null;savedRevision=-1;
+                document=next;if(document.Layers.Count==0)document.AddLayer(L.Tr("Layer")+" 1");BindDocument();selectedLayer=document.Layers.Last().Id;projectPath=null;projectToken=null;savedRevision=-1;
                 importedOriginal=result.CopyOriginalBytes();importedPsdPath=Path.GetFullPath(path);channel=PaintChannel.Color;
                 message="Imported "+Path.GetFileName(path)+". Save keeps it as a .ylp (with the original PSD inside); Export PSD writes a PSD. The PSD itself is never rewritten.";
                 // 編集できる取り込みでも、書き出す PSD に含まれない情報や合成結果の差などの注意があれば一覧で見せる（黙って捨てない）
