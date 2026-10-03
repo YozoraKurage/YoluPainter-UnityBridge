@@ -124,6 +124,10 @@ Editor イメージ）。テストはすべて EditMode テスト（`Tests/Edito
 - **テストデーモン**: 常駐 Unity を立てると run-tests.sh は自動でそちらへ依頼される
   （死んでいればコールドへ自動フォールバック。コールドは `-nographics` なので GPU と
   ウィンドウのテストはスキップ）。パッケージを出し入れしたら `restart`。
+- **テストの台とキュー**: 常駐 Unity は台 0（今までのプロジェクト）に加えて、台 1（batch-gl）と
+  台 2（GUI）を `runners.sh setup` / `runners.sh start` で並べられる。run-tests.sh は空いている台へ
+  振り分け、台 1 以上ではソースを台の中の写しへ同期してから回す（`--mode gui`・`--sha HEAD`・
+  `--source <worktree>`・`--both`）。詳細は `Documentation~/TESTING.md` の「テストの台（runners）とキュー」。
 - **常駐 Unity を直接使う** — `.devcontainer/unity/unity-do.sh`:
   ```
   unity-do.sh run -e 'return AssetDatabase.FindAssets("t:Material").Length;'

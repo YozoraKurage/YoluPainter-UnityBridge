@@ -7,6 +7,7 @@
 #   unity-do.sh console [error|warning|log ...] [--limit N] [--full] [--clear]
 #                                         コンソールの内容（既定: 全種別・末尾 50 件・1 行目だけ）
 #   unity-do.sh compile [--force]         再コンパイルしてエラー本文を表示（--force は全アセンブリ）
+#   unity-do.sh --runner 1 run -e '…'     テストの台を選ぶ（既定は台 0。runners.conf）
 #
 # 断片はメソッド本体として扱う（`return x;` で値を返す。先頭の using 行はそのまま
 # 使える）。System / System.Linq / UnityEngine / UnityEditor 等は取り込み済み。
@@ -15,6 +16,9 @@
 # 終了コード: 0=成功 / 1=実行時エラー / 3=コンパイルエラー / 5=デーモンが止まっていた。
 # デーモン専用でコールドへのフォールバックは無い — 先に test-daemon.sh start。
 
+# --runner N: テストの台を選ぶ（既定は台 0。台 1 以上では run と compile の前に、パッケージの写しを /workspace の
+# 作業ツリーに同期する）
+if [[ "${1:-}" == --runner ]]; then export YOLUPAINTER_RUNNER="${2:?--runner に台の番号が要る}"; shift 2; fi
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 readonly DAEMON_DIR="$UNITY_PROJECT/TestDaemon"
@@ -63,7 +67,11 @@ case "$cmd" in
   *) die "不明なコマンド: $cmd" ;;
 esac
 
-daemon_alive || die "デーモンが起動していない。先に test-daemon.sh start"
+daemon_alive || die "デーモンが起動していない。先に test-daemon.sh start（台 1 以上は runners.sh start）"
+if [[ "$UNITY_RUNNER" != 0 && ( "$op" == snippet || "$op" == compile ) ]]; then
+  python3 "$SCRIPT_DIR/sync-package.py" "$PACKAGE_ROOT" "$(runner_package "$UNITY_RUNNER")" --checksum | sed 's/^/    /' >&2
+  echo "folder $PACKAGE_ROOT" > "$RUNNERS_HOME/$UNITY_RUNNER/source.txt"
+fi
 case "$arg" in *'"'* | *'\'* ) die 'arg に " と \ は使えない' ;; esac
 
 rm -f "$DAEMON_DIR/done" "$DAEMON_DIR/exec-result.txt"

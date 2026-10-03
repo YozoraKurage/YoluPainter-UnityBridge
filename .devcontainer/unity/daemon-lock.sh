@@ -10,6 +10,8 @@
 
 acquire_daemon_client_lock() {
   [[ -n "${YOLUPAINTER_DAEMON_SWITCHING:-}" ]] && return 0
+  # run-tests.sh が台を選んでロック（fd 8）を持ったまま実行し直したとき
+  [[ -n "${YOLUPAINTER_LOCK_HELD:-}" ]] && return 0
   mkdir -p "$DAEMON_DIR"
   local waited=0
   while :; do

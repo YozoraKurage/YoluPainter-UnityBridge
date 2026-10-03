@@ -25,6 +25,37 @@
 
 シリーズの区切りでは、batch-gl と GUI の両方で全件を回し、合わせて全テストが実行されたことを確かめる。
 
+### テストの台（runners）とキュー
+
+常駐 Unity を何台か並べ、依頼を空いている台へ振り分ける（2026-10-03 から。設計の考え方は、マルチエージェント協調基盤の設計草案の段階 1）。
+
+| 台 | プロジェクト | パッケージ | モード |
+|---|---|---|---|
+| 0 | `~/unity-testproject`（名前付きボリューム） | `/workspace` を直接読む | `switch-daemon.sh` で変わる |
+| 1 | `~/unity-runners/1/project` | 台の中の写し `~/unity-runners/1/pkg` | batch-gl（`runners.conf`） |
+| 2 | `~/unity-runners/2/project` | 台の中の写し `~/unity-runners/2/pkg` | GUI（`runners.conf`） |
+
+```sh
+.devcontainer/unity/runners.sh setup        # 台 1・2 を作る（台 0 から設定とパッケージを写し、コールドで取り込む。1 台 40 秒ほど）
+.devcontainer/unity/runners.sh start        # runners.conf のモードで常駐させる
+.devcontainer/unity/runners.sh status       # 台ごとのモードとパッケージの出どころ
+.devcontainer/unity/run-tests.sh --filter '…'                  # 空いている batch-gl の台（1 → 0 の順）
+.devcontainer/unity/run-tests.sh --mode gui --filter '…'       # GUI の台
+.devcontainer/unity/run-tests.sh --both --sha HEAD             # コミットの木で、batch-gl と GUI の台で同時に全件
+.devcontainer/unity/run-tests.sh --source /path/to/worktree    # 別の worktree のパッケージで回す
+.devcontainer/unity/unity-do.sh --runner 1 run -e '…'          # 台を選んでスニペット
+```
+
+- 台 1 以上は、依頼のたびにソース（既定は `/workspace` の作業ツリー、`--sha` ならそのコミットを `git archive` で、`--source` ならそのフォルダ）を
+  台の中の写しへ同期してから回す（`sync-package.py`。中身の違うファイルだけを写すので、Unity は変わった所だけを取り込み直す。
+  `temp~`・`.git`・`.devcontainer`・`.github` は写さない）。テストの最中にほかの作業者が保存しても、その回には入らない。
+- `--sha` と `--source` は台 1 以上だけ（台 0 は `/workspace` を直接読むので選べない）。どの台が何を回したかは出力の 1 行目に出る。
+- 空いている台は、台ごとの依頼のロック（`TestDaemon/client.lock`）を取り合って決める。全部が埋まっていれば空くのを待つ。
+- `switch-daemon.sh gui -- …` は、GUI の台が動いていれば台 0 を切り替えずにその台で回す（切り替えの数分を待たない）。
+- 台 1 以上のプロジェクトは名前付きボリュームではないので、コンテナを作り直すと消える（`runners.sh setup` で作り直す）。台 0 の Library は
+  写さない（開いている Unity の Library を写すと、データベースが壊れた写しになり得る）。台 0 の Assets（`ZZ_UserAssets` を含む）も写さない。
+- 資源の目安: 3 台を常駐させても、この PC（メモリ 58 GB・32 スレッド）では余裕がある。GPU は WSL2 の d3d12 を共有する。
+
 ### 複数の作業者（エージェント）が同時にデーモンを使うとき
 
 デーモンへの依頼の受け口は 1 組しか無いので、`run-tests.sh` と `unity-do.sh` は `TestDaemon/client.lock` を flock で取り、依頼を 1 本ずつ通す（後から来た依頼は待つ）。モードの切り替えは `test-daemon.sh` を直接使わず、`switch-daemon.sh` を使う:

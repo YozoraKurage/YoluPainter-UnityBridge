@@ -27,6 +27,8 @@
 # （どちらのモードでも同じ受け口が動く）。常駐している間、同じプロジェクトを別の Unity
 # で開くことはできない。パッケージの出し入れ（SDK 剥がし等）をしたら restart するのが安全。
 
+# --runner N: テストの台を選ぶ（既定は台 0。台 1 以上は runners.sh がまとめて扱う）
+if [[ "${1:-}" == --runner ]]; then export YOLUPAINTER_RUNNER="${2:?--runner に台の番号が要る}"; shift 2; fi
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 readonly DAEMON_DIR="$UNITY_PROJECT/TestDaemon"

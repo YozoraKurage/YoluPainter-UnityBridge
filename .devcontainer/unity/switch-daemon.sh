@@ -7,6 +7,9 @@
 #                                        # GUI で run-tests.sh を回してから、元のモード（batch-gl）に戻す
 #   switch-daemon.sh gui --              # GUI で全件を回してから batch-gl に戻す
 #
+# -- で試験を回すとき、そのモードのテストの台（runners.conf の 1 以上）が動いていれば、台 0 は切り替えずに
+# run-tests.sh --mode でその台へ回す。
+#
 # 切り替えの間は TestDaemon/switching を置く。run-tests.sh / unity-do.sh はそれが消えるまで待つので、
 # デーモンがいない一瞬にコールド実行へ落ちない。実行中の依頼があれば、それが終わってから切り替える。
 set -uo pipefail
@@ -19,6 +22,17 @@ mode="${1:-}"; shift || true
 run_args=(); run_tests=0
 # -- があれば試験を回す（-- の後が空なら全件。-- の後に何も渡さず「切り替えだけ」になる取り違えが続いたため）
 if [[ "${1:-}" == "--" ]]; then shift; run_args=("$@"); run_tests=1; fi
+
+# そのモードのテストの台（1 以上、runners.conf）が動いていれば、台 0 を切り替えずにそちらで回す（切り替えの数分を待たず、
+# ほかの依頼も止めない）。切り替えだけの呼び出し（-- 無し）は今までどおり台 0 を切り替える。
+if [[ $run_tests == 1 ]]; then
+  for n in $(runner_numbers); do
+    if [[ "$(runner_live_mode "$n")" == "$mode" ]]; then
+      info "テストの台 $n が ${mode} で動いているので、台 0 を切り替えずにそちらで回す"
+      exec "$SCRIPT_DIR/run-tests.sh" --mode "$mode" ${run_args[@]+"${run_args[@]}"}
+    fi
+  done
+fi
 
 mkdir -p "$DAEMON_DIR"
 # 切り替えどうしは 1 本ずつ通す（2 本が同時に止めて起動すると、2 つ目の Unity が「同じプロジェクトを別の Unity が開いている」で
