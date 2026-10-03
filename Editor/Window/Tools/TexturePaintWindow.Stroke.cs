@@ -29,10 +29,11 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>ブラシのストローク（2D キャンバスと 3D ビュー）: 押して始め、ドラッグで足し、離して確定する。</summary>
         void HandleBrushInput(Event e)
         {
-            if(tool!=PaintTool.Brush&&e.type==EventType.MouseDown&&surfaceRect.Contains(e.mousePosition)&&e.button==0&&!e.alt){message=tool+" works on the 2D canvas. Use the brush, the polygon fill, a selection tool or the bucket on the 3D view.";e.Use();return;}
+            if(!IsBrushTool&&e.type==EventType.MouseDown&&surfaceRect.Contains(e.mousePosition)&&e.button==0&&!e.alt){message=tool+" works on the 2D canvas. Use the brush, the polygon fill, a selection tool or the bucket on the 3D view.";e.Use();return;}
             if(e.type==EventType.MouseDown && e.button==0 && !e.alt && (canvasRect.Contains(e.mousePosition)||surfaceRect.Contains(e.mousePosition)))
             {
                 surfaceStroke=surfaceRect.Contains(e.mousePosition);
+                if (!PrepareBrushEffectStroke(e.mousePosition, surfaceStroke)) { e.Use(); Repaint(); return; }
                 if(surfaceStroke && !preview.CanPaint){message="This preview snapshot is not safe to paint. See its load diagnostics.";return;}
                 // ほかのテクスチャセットの面では描き始めない（その面をダブルクリックするか、テクスチャセットのパネルで切り替える）
                 if(surfaceStroke && preview.TryPick(surfaceRect,e.mousePosition,out var startHit) && startHit.MaterialSlot!=materialSlot){OtherSlotPressed(startHit.MaterialSlot);e.Use();Repaint();return;}
@@ -47,6 +48,7 @@ namespace Yozolab.YoluPainter.Editor
                         // チャンネルはストロークの中で有効にする（ストロークと同じ 1 回の Undo。取消で戻る）
                         stroke=document.BeginMaterialStroke(selectedLayer,StrokeChannels(),GetBrush());
                     }
+                    effectSurfaceIsland=-1;
                     previousPointer=e.mousePosition; previousPressure=Pressure(e); surfaceHasBefore=surfaceHasHeld=false;
                     PaintAt(e.mousePosition,previousPressure); GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive);
                 });
@@ -130,7 +132,8 @@ namespace Yozolab.YoluPainter.Editor
                 var dab=BuildStrokeSurfaceDab(hit,radius);
                 if(dab.WasClipped)throw new InvalidOperationException(dab.Diagnostic);
                 if(!String.IsNullOrEmpty(dab.Diagnostic))message=dab.Diagnostic;
-                foreach(var pixel in dab.Pixels)stroke.ApplyPixel(pixel.X,pixel.Y,pixel.Coverage,pressure);
+                if(CurrentBrushEffect == BrushEffect.Paint) foreach(var pixel in dab.Pixels)stroke.ApplyPixel(pixel.X,pixel.Y,pixel.Coverage,pressure);
+                else ApplySurfaceEffect(dab,hit,pressure);
             }
             else
             {
@@ -146,7 +149,7 @@ namespace Yozolab.YoluPainter.Editor
             try
             {
                 if(commit&&surfaceStroke)FinishSurfaceCurve(); // 2D の最後の区間は Commit が描く
-                if(commit)stroke.Commit();else stroke.Cancel();
+                if(commit) { bool changed=stroke.Commit(); if(changed && tool==PaintTool.Clone) { cloneOffset=cloneStrokeOffset; cloneOffsetValid=true; } } else stroke.Cancel();
             }
             catch(Exception ex){message=ex.Message;stroke.Cancel();}
             finally{stroke.Dispose();stroke=null;GUIUtility.hotControl=0;repaintPixels=true;surfaceHasHeld=surfaceHasBefore=false;surfaceVisibility=null;EndPolygonFillDrag();}

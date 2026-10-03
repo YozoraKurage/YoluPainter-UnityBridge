@@ -16,7 +16,7 @@ namespace Yozolab.YoluPainter.Editor
     public static class PainterToolIcons
     {
         /// <summary>同梱の絵のあるツールの ID。</summary>
-        public static readonly IReadOnlyList<string> BuiltInIds = new[] { "brush", "eraser", "fill", "gradient", "select-rectangle", "select-ellipse", "lasso", "magic-wand", "move", "path", "eyedropper", "polygon-fill", "id-select" };
+        public static readonly IReadOnlyList<string> BuiltInIds = new[] { "brush", "eraser", "fill", "gradient", "select-rectangle", "select-ellipse", "lasso", "magic-wand", "move", "path", "eyedropper", "polygon-fill", "id-select", "blur", "smudge", "clone" };
         /// <summary>描き手の画像の上限（バイト数と一辺）。</summary>
         public const int MaxFileBytes = 1 << 20, MaxSide = 256;
 

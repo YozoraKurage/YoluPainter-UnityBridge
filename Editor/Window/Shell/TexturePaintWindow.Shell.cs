@@ -38,6 +38,9 @@ namespace Yozolab.YoluPainter.Editor
         {
             new ToolSlot { Tool = PaintTool.Brush, Id = "brush", Name = "Brush", Key = "B" },
             new ToolSlot { Tool = PaintTool.Brush, Erase = true, Id = "eraser", Name = "Eraser", Key = "E" },
+            new ToolSlot { Tool = PaintTool.Blur, Id = "blur", Name = "Blur Brush", Key = "U" },
+            new ToolSlot { Tool = PaintTool.Smudge, Id = "smudge", Name = "Smudge", Key = "Shift+U" },
+            new ToolSlot { Tool = PaintTool.Clone, Id = "clone", Name = "Clone Stamp", Key = "S" },
             new ToolSlot { Tool = PaintTool.Fill, Id = "fill", Name = "Fill", Key = "G" },
             new ToolSlot { Tool = PaintTool.Gradient, Id = "gradient", Name = "Gradient", Key = "Shift+G" },
             new ToolSlot { Tool = PaintTool.PolygonFill, Id = "polygon-fill", Name = "Polygon Fill", Key = "4" },
@@ -150,7 +153,7 @@ namespace Yozolab.YoluPainter.Editor
             Rect Fit(string text) => Next(PaintTheme.LabelDim.CalcSize(new GUIContent(text)).x + 6); // 説明文は文字の幅に合わせる
             switch (tool)
             {
-                case PaintTool.Brush:
+                case PaintTool.Brush: case PaintTool.Blur: case PaintTool.Smudge: case PaintTool.Clone:
                 {
                     PaintGui.Dropdown(Next(150), null, string.IsNullOrEmpty(brush.presetName) || brush.presetName == "Custom" ? L.Tr("Custom") : brush.presetName, OpenPresetMenu, L.Tr("Brush preset"));
                     float size = PaintGui.Slider(Next(150), L.Tr("Size"), brush.radius * 2, 1, 256, "0", " px", L.Tr("Brush diameter ([ and ])")); brush.radius = Mathf.Max(.5f, size / 2);

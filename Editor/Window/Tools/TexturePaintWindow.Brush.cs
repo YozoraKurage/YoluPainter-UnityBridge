@@ -28,6 +28,9 @@ namespace Yozolab.YoluPainter.Editor
             public bool followDirection, randomSeedPerStroke = true;
             // 手ぶれ補正と入り抜き（キャンバスの画素、0 で無し）。無い版のファイルは 0 として読む
             public float stabilizer, taperIn, taperOut;
+            public int blurRadius = 3;
+            public float smudgeStrength = .5f;
+            public bool cloneAligned = true;
         }
         static readonly System.Random seeds = new System.Random();
         static BrushState ReadBrushState(string json)
@@ -37,6 +40,7 @@ namespace Yozolab.YoluPainter.Editor
             if(b.schema<2){b.roundness=1;b.textureScale=1;b.count=1;b.randomSeedPerStroke=true;b.schema=2;}
             UpgradeBrushState(b);
             ValidateMaterial(b);
+            if (b.blurRadius < 1 || b.blurRadius > 64 || float.IsNaN(b.smudgeStrength) || b.smudgeStrength < 0 || b.smudgeStrength > 1) throw new InvalidDataException("Unsupported pixel effect brush settings");
             return b;
         }
         internal BrushSettings GetBrush() { var s = NewBrushSettings(); BrushTips.Apply(s, brush.tipId);
@@ -44,7 +48,7 @@ namespace Yozolab.YoluPainter.Editor
             return s; }
         BrushSettings NewBrushSettings() => new BrushSettings { Radius=brush.radius, Hardness=brush.hardness, Spacing=brush.spacing, Opacity=brush.opacity, Flow=brush.flow,
             Color=new Rgba32((byte)Mathf.RoundToInt(brush.color.r*255),(byte)Mathf.RoundToInt(brush.color.g*255),(byte)Mathf.RoundToInt(brush.color.b*255),(byte)Mathf.RoundToInt(brush.color.a*255)),
-            PressureSize=brush.pressureSize,PressureOpacity=brush.pressureOpacity,PressureFlow=brush.pressureFlow,Erase=brush.erase,
+            PressureSize=brush.pressureSize,PressureOpacity=brush.pressureOpacity,PressureFlow=brush.pressureFlow,Erase=CurrentBrushEffect == BrushEffect.Paint && brush.erase, Effect=CurrentBrushEffect, BlurRadius=brush.blurRadius, SmudgeStrength=brush.smudgeStrength, CloneOffsetX=cloneStrokeOffset.x, CloneOffsetY=cloneStrokeOffset.y,
             Texture=BrushTips.Resolve(brush.textureId), Angle=brush.angle, Roundness=brush.roundness, FollowDirection=brush.followDirection,
             SizeJitter=brush.sizeJitter, AngleJitter=brush.angleJitter, RoundnessJitter=brush.roundnessJitter, OpacityJitter=brush.opacityJitter, FlowJitter=brush.flowJitter,
             Scatter=brush.scatter, Count=brush.count, TextureDepth=brush.textureDepth, TextureScale=brush.textureScale,
@@ -62,6 +66,7 @@ namespace Yozolab.YoluPainter.Editor
                 scatter=(float)s.Scatter, count=s.Count, textureDepth=(float)s.TextureDepth, textureScale=(float)s.TextureScale,
                 stabilizer=assist.Item1, taperIn=assist.Item2, taperOut=assist.Item3 }; // 補正と入り抜きは描き手の設定として残す
             CopyPresetDynamics(s,secondary);
+            brush.blurRadius=previous.blurRadius; brush.smudgeStrength=previous.smudgeStrength; brush.cloneAligned=previous.cloneAligned;
             CopyMaterial(previous,brush); // マテリアル（塗るチャンネルと値）は描画色と同じく描き手のものとして残す
         }
         void SavePreset(){string p=Dialogs.SaveFile("Save brush",Application.dataPath,"brush","json");if(!String.IsNullOrEmpty(p))TryAction(()=>File.WriteAllText(p,JsonUtility.ToJson(brush,true)));}

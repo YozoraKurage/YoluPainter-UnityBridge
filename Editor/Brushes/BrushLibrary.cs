@@ -30,6 +30,8 @@ namespace Yozolab.YoluPainter.Editor
             public double radius = 16, hardness = .8, spacing = .15, opacity = 1, flow = 1, angle, roundness = 1;
             public double sizeJitter, angleJitter, roundnessJitter, opacityJitter, flowJitter, scatter, textureDepth, textureScale = 1;
             public int count = 1;
+            public int effect, blurRadius = 3;
+            public double smudgeStrength = .5;
             public bool pressureSize = true, pressureOpacity = true, pressureFlow, erase, followDirection;
             // schema 2
             public double fgBgJitter, hueJitter, saturationJitter, brightnessJitter, purity;
@@ -97,6 +99,7 @@ namespace Yozolab.YoluPainter.Editor
                     scatter = s.Scatter, textureDepth = s.TextureDepth, textureScale = s.TextureScale, count = s.Count,
                     pressureSize = s.PressureSize, pressureOpacity = s.PressureOpacity, pressureFlow = s.PressureFlow, erase = s.Erase, followDirection = s.FollowDirection,
                     fgBgJitter = s.ForegroundBackgroundJitter, hueJitter = s.HueJitter, saturationJitter = s.SaturationJitter, brightnessJitter = s.BrightnessJitter, purity = s.Purity,
+                    effect = (int)s.Effect, blurRadius = s.BlurRadius, smudgeStrength = s.SmudgeStrength,
                     colorPerTip = s.ColorPerTip, fadeSize = s.FadeSize, fadeOpacity = s.FadeOpacity, fadeFlow = s.FadeFlow,
                     tiltSize = s.TiltSize, tiltOpacity = s.TiltOpacity, tiltFlow = s.TiltFlow, tiltAngle = s.TiltAngle,
                 };
@@ -166,6 +169,7 @@ namespace Yozolab.YoluPainter.Editor
                         Scatter = e.scatter, TextureDepth = e.textureDepth, TextureScale = e.textureScale, Count = e.count,
                         PressureSize = e.pressureSize, PressureOpacity = e.pressureOpacity, PressureFlow = e.pressureFlow, Erase = e.erase, FollowDirection = e.followDirection,
                         ForegroundBackgroundJitter = e.fgBgJitter, HueJitter = e.hueJitter, SaturationJitter = e.saturationJitter, BrightnessJitter = e.brightnessJitter, Purity = e.purity,
+                        Effect = (BrushEffect)e.effect, BlurRadius = e.blurRadius, SmudgeStrength = e.smudgeStrength,
                         ColorPerTip = e.colorPerTip, FadeSize = e.fadeSize, FadeOpacity = e.fadeOpacity, FadeFlow = e.fadeFlow,
                         TiltSize = e.tiltSize, TiltOpacity = e.tiltOpacity, TiltFlow = e.tiltFlow, TiltAngle = e.tiltAngle,
                     };

@@ -50,7 +50,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>ブラシ以外のツールのキャンバス入力。2D キャンバスだけで働く。</summary>
         bool HandleToolInput(Event e)
         {
-            if(tool==PaintTool.Brush||tool==PaintTool.Path)return false; // パスは HandlePathTool が受け持つ
+            if(IsBrushTool||tool==PaintTool.Path)return false; // パスは HandlePathTool が受け持つ
             if(e.type==EventType.MouseDown&&e.button==0&&!e.alt&&canvasRect.Contains(e.mousePosition))
             {
                 var p=CanvasPoint(e.mousePosition);

@@ -66,6 +66,8 @@ namespace Yozolab.YoluPainter.Core
     /// <summary>How a brush with several tips picks one for each dab.</summary>
     public enum TipSelection { Random = 0, Sequential = 1 }
 
+    public enum BrushEffect { Paint, Blur, Smudge, Clone }
+
     public sealed partial class BrushSettings
     {
         public const double MaxStrokeAssist = 10000;
@@ -80,6 +82,11 @@ namespace Yozolab.YoluPainter.Core
         public bool PressureOpacity = true;
         public bool PressureFlow;
         public bool Erase;
+        public BrushEffect Effect;
+        public int BlurRadius = 3;
+        public double SmudgeStrength = .5;
+        // クローンの相対位置はストロークだけの設定。窓の写し元は文書の画素とは別に管理する。
+        public double CloneOffsetX, CloneOffsetY;
 
         // --- Tip shape. A null Tip is the procedural round tip shaped by Hardness. ---
         /// <summary>Sampled tip image, or null for the round tip. Its larger side spans the brush diameter.</summary>
@@ -124,7 +131,7 @@ namespace Yozolab.YoluPainter.Core
         public BrushSettings Clone()
         {
             return new BrushSettings { Radius = Radius, Hardness = Hardness, Spacing = Spacing, Opacity = Opacity,
-                Flow = Flow, Color = Color, PressureSize = PressureSize, PressureOpacity = PressureOpacity, PressureFlow = PressureFlow, Erase = Erase,
+                Flow = Flow, Color = Color, PressureSize = PressureSize, PressureOpacity = PressureOpacity, PressureFlow = PressureFlow, Erase = Erase, Effect = Effect, BlurRadius = BlurRadius, SmudgeStrength = SmudgeStrength, CloneOffsetX = CloneOffsetX, CloneOffsetY = CloneOffsetY,
                 Tip = Tip, Tips = Tips == null ? null : (BrushTip[])Tips.Clone(), TipSelection = TipSelection, Angle = Angle, Roundness = Roundness, FollowDirection = FollowDirection,
                 SizeJitter = SizeJitter, AngleJitter = AngleJitter, RoundnessJitter = RoundnessJitter, OpacityJitter = OpacityJitter, FlowJitter = FlowJitter,
                 Scatter = Scatter, Count = Count, Seed = Seed, Texture = Texture, TextureDepth = TextureDepth, TextureScale = TextureScale,
@@ -152,6 +159,12 @@ namespace Yozolab.YoluPainter.Core
             if (Tips != null && (Tips.Length > 256 || Array.IndexOf(Tips, null) >= 0)) throw new ArgumentException("Tips must hold 1..256 non-null tips.", nameof(Tips));
             if (!Enum.IsDefined(typeof(TipSelection), TipSelection)) throw new ArgumentOutOfRangeException(nameof(TipSelection));
             ValidateDynamics();
+            if (!Enum.IsDefined(typeof(BrushEffect), Effect)) throw new ArgumentOutOfRangeException(nameof(Effect));
+            if (BlurRadius < 1 || BlurRadius > 64) throw new ArgumentOutOfRangeException(nameof(BlurRadius));
+            MathUtil.RequireFinite(SmudgeStrength, nameof(SmudgeStrength));
+            if (SmudgeStrength < 0 || SmudgeStrength > 1) throw new ArgumentOutOfRangeException(nameof(SmudgeStrength));
+            foreach (double v in new[] { CloneOffsetX, CloneOffsetY }) { MathUtil.RequireFinite(v, "clone offset"); if (Math.Abs(v) > 10000000) throw new ArgumentOutOfRangeException("clone offset"); }
+            if (Effect != BrushEffect.Paint && Erase) throw new ArgumentException("Pixel effect brushes cannot erase.");
         }
     }
 

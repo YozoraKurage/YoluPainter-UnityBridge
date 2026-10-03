@@ -19,6 +19,7 @@ namespace Yozolab.YoluPainter.Editor
             switch (tool)
             {
                 case PaintTool.Brush: BrushSections(rows); break;
+                case PaintTool.Blur: case PaintTool.Smudge: case PaintTool.Clone: BrushEffectSection(rows); BrushSections(rows); break;
                 case PaintTool.Fill: MaterialSection(rows); SurfacePickSection(rows); break;
                 case PaintTool.Gradient:
                     MaterialSection(rows);
@@ -36,7 +37,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>初めは閉じておくセクション（細かい設定。Photoshop のブラシ設定の一覧のように、見出しだけを並べる）。</summary>
         static readonly HashSet<string> ToolSectionsClosedAtFirst = new HashSet<string> { "brush-jitter", "brush-texture", "brush-dual", "brush-color", "brush-fade" };
         /// <summary>ツールのセクションのキー（テストがすべて開いて描くため）。</summary>
-        internal static readonly string[] ToolSectionKeys = { "brush", "brush-material", "brush-stroke", "brush-symmetry", "brush-jitter", "brush-texture", "brush-dual", "brush-color", "brush-fade", "surface-pick", "selection-modify", "id-map", "move", "path" };
+        internal static readonly string[] ToolSectionKeys = { "brush-effect", "brush", "brush-material", "brush-stroke", "brush-symmetry", "brush-jitter", "brush-texture", "brush-dual", "brush-color", "brush-fade", "surface-pick", "selection-modify", "id-map", "move", "path" };
         internal void SetToolSectionsOpen(bool open) { foreach (var key in ToolSectionKeys) sectionOpen[key] = open; }
 
         /// <summary>ツールのセクションの見出し（開いていれば true）。初めの開閉は <see cref="ToolSectionsClosedAtFirst"/>。</summary>
@@ -78,14 +79,14 @@ namespace Yozolab.YoluPainter.Editor
             JitterSection(rows);
             TextureSection(rows);
             DualBrushSection(rows);
-            ColorDynamicsSection(rows);
+            if (tool == PaintTool.Brush) ColorDynamicsSection(rows);
             FadeTiltSection(rows);
         }
 
         void BrushTipSection(UiRows rows)
         {
             if (!ToolSection(rows, "brush", L.Tr("Brush"), "paint_brush")) return;
-            if (!brush.material && (channel == PaintChannel.Roughness || channel == PaintChannel.Metallic || channel == PaintChannel.Height))
+            if (tool == PaintTool.Brush && !brush.material && (channel == PaintChannel.Roughness || channel == PaintChannel.Metallic || channel == PaintChannel.Height))
             {
                 // データのチャンネルはブラシの色の明るさを値として描く（マテリアルで塗るときは「マテリアル」の節の値）（色は灰色にそろえる。以前の欄と同じ）
                 float scalar = PaintGui.FitSlider(rows.Row(), L.Tr("Value"), brush.color.r, 0, 1, "0.00", "", L.Tr("The value this channel is painted with"));

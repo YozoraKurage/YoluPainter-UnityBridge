@@ -98,3 +98,35 @@ The public PSD mode is not an external-application certification. See PSD_COMPAT
 ## Remaining architecture
 
 Typed DAG validation currently covers stable node identity, type/semantic compatibility, same Texture Set, layer/effect order and cycle prevention. This is executable validation code, not an implemented material graph editor. Generators (`Runtime/Core/Generators.cs`) are point stages of the same effect stack as filters: each reads the mesh maps of its texture set through `IGeneratorInputs` (set per texture set by the window; only maps `MeshMapSet.TryGetUsable` accepts for the current model, high-poly, bake settings, size and slot), snapshots them when the inputs' revision changes, and passes its input through with a reason when a map is missing, stale or of another size. Documents poll the inputs only at `TryGetChangedTiles`, the compositor entry points, stack edits/undo and baking, never per tile; a changed map bumps the generator stamp and marks only layers with generators changed. Generators are evaluated on the CPU only (the GPU path uploads evaluated tiles). The ID colour generator (type 6) reads the ID map and gives 1 where a texel's colour is within its tolerance of one of its colours. The shape gradient (type 5, `ShapeVolume`) reads the Position map back into the snapshot space with its provenance's bounding box and then into the model root's space with the frame the inputs give (`IGeneratorModelFrame`: the loaded root's position and rotation; identity for inputs that do not say), so a box, sphere or plane placed relative to the root stays on the model when the root is turned and the maps are baked again; the window edits it with a gizmo in the 3D view and can copy a scene object's BoxCollider, SphereCollider or transform relative to the root (read only). Still missing before claiming Anchor support: anchor-stage outputs as generator inputs, neighbourhood (halo) generators such as curvature from painted height, evaluation scheduling through the DAG, and stale revisions across texture sets.
+Typed DAG validation currently covers stable node identity, type/semantic compatibility, same Texture Set, layer/effect order and cycle prevention. This is executable validation code, not an implemented material graph editor. Generators (`Runtime/Core/Generators.cs`) are point stages of the same effect stack as filters: each reads the mesh maps of its texture set through `IGeneratorInputs` (set per texture set by the window; only maps `MeshMapSet.TryGetUsable` accepts for the current model, high-poly, bake settings, size and slot), snapshots them when the inputs' revision changes, and passes its input through with a reason when a map is missing, stale or of another size. Documents poll the inputs only at `TryGetChangedTiles`, the compositor entry points, stack edits/undo and baking, never per tile; a changed map bumps the generator stamp and marks only layers with generators changed. Generators are evaluated on the CPU only (the GPU path uploads evaluated tiles). The shape gradient (type 5, `ShapeVolume`) reads the Position map back into the snapshot space with its provenance's bounding box and then into the model root's space with the frame the inputs give (`IGeneratorModelFrame`: the loaded root's position and rotation; identity for inputs that do not say), so a box, sphere or plane placed relative to the root stays on the model when the root is turned and the maps are baked again; the window edits it with a gizmo in the 3D view and can copy a scene object's BoxCollider, SphereCollider or transform relative to the root (read only). Still missing before claiming Anchor support: anchor-stage outputs as generator inputs, neighbourhood (halo) generators such as curvature from painted height, evaluation scheduling through the DAG, and stale revisions across texture sets.
+
+## 指先・クローン・ぼかしのブラシ
+
+`BrushSettings.Effect`（既定は Paint）は `BrushStroke.Effects.cs` で既存ストロークのターゲット・被覆率・巻き戻しを使う。
+ダブが触れる参照領域を全チャンネルで書き込み前に凍結し、ワーカーはその写しだけを読む。参照領域と積分表は
+`ActiveStrokeBudgetBytes` に含め、拒否と例外は全チャンネルを取り消す。Undo は結果のタイルを戻し、再演算しない。
+
+- ぼかし: 半径 1〜64 画素の箱型の平均。RGB はアルファを重みにし、アルファは窓内の平均。
+  整数の積分表で窓の和を求め、画像の外は窓から除く。ストローク前にアルファが 0 の画素は RGB・アルファとも変えない。
+- 指先: 最初のダブは拾うだけ。次のダブでは前のダブ中心への相対位置で、現在の画素をプリマルチプライドで補間して拾う。
+  引きずる量は流量に掛ける。同じ位置のダブは何もしない。透明な場所へ色を引き出せるが、結果のアルファが 0 なら元の RGB を保つ。
+- クローン: ストローク前の現在のレイヤーかマスクを相対位置で拾い、通常ブラシの source-over で描く。
+  既に触った読み元のタイルは巻き戻しの写しを使い、同じストロークで描いた画素を再度写さない。
+  参照が画像の外なら描かず、整数の相対位置では標本をそのまま拾う。合成結果の参照は未対応。
+
+効果はダブごとに変わる標本と蓄積した被覆率を使い、元の画素から計算し直すので、不透明度・筆圧の天井と
+選択範囲の割合を守る。ぼかしと指先は元と標本のプリマルチプライド補間、透明部分のロック時はアルファを固定して色だけを寄せる。
+効果では描画色・マテリアルの値・カラーダイナミクスを使わず、各チャンネルの画素を別に計算する。マスクでは格納された隠す量に効く。
+選択量は書き込みにだけ掛け、近傍や写し元は選択範囲の外からも読む。
+
+窓では別ツール（S: コピースタンプ、U: ぼかし、Shift+U: 指先）で、R の表示回転を残す。
+Alt＋クリックで写し元を画素の中心に置く。位置合わせがオンなら確定したストロークの相対位置を次も使い、オフなら毎回写し元から始める。
+取消で相対位置を確定させない。写し元はレイヤー・マスク・文書・大きさに紐付く一時状態で、保存・リロードで引き継がない。
+`brush.json` とプリセットの schema 3 に半径・引きずる量・位置合わせを追加し、置き場の schema 2 に Core の効果設定を追加した。
+正本の画素と形式は従来のまま。古い JSON は既定値で読む。ツールの列挙値は末尾に追加し、既存ツールの値を保つ。
+筆先のプリセットを選ぶときは現在のツール・ぼかしの半径・引きずる量・位置合わせを保つ。保存した JSON プリセットの読み込みでは効果の値も復元する。
+
+3D はダブ全体を `ApplyDab` に渡し、全画素の読み元を凍結してから適用する。ぼかしは UV 空間の近傍、指先は UV 空間の移動を使う。
+指先は UV アイランドが変われば拾い直し、鏡映の対称との同時利用は理由を表示して断る。表面に沿った距離・方向や
+継ぎ目を跨いだ画素輸送、モデル上の鏡像ごとの指先方向は保証しない。3D のクローンは継ぎ目を跨ぐ写し元を相対 UV だけで
+一意に指定できないため、理由を表示して断る。Photoshop と CLIP STUDIO の実機との画素一致は未検証。

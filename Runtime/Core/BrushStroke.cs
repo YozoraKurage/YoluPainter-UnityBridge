@@ -23,7 +23,7 @@ namespace Yozolab.YoluPainter.Core
     /// with exactly the bytes a stroke of that channel alone gives. Lock Transparent Pixels is decided per channel and pixel. The
     /// rollback copies of every channel and the shared coverage count together against the document's active-stroke budget. One
     /// commit is one undo step for every channel.</para></summary>
-    public sealed class BrushStroke : IDisposable
+    public sealed partial class BrushStroke : IDisposable
     {
         private readonly PaintDocument document;
         /// <summary>The settings that shape the dabs (the first target's; the targets' settings differ only in colour).</summary>
@@ -125,7 +125,7 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>Tiles taken over, summed over the channels the stroke paints.</summary>
         public int ChangedTileCount { get { int n = 0; foreach (var t in targets) n += t.Before.Count; return n; } }
         /// <summary>Rollback payload of the stroke: every channel's tile copies, the shared coverage and the scratch it keeps.</summary>
-        public long RollbackBytes { get { return rollbackBytes; } }
+        public long RollbackBytes { get { return rollbackBytes + effectScratchBytes; } }
         /// <summary>How many surfaces the stroke paints (1 for a channel or a mask).</summary>
         public int TargetCount { get { return targets.Length; } }
         internal BrushStroke(PaintDocument document, SparseTileSurface surface, BrushSettings settings, bool keepAlpha = false)
@@ -144,7 +144,7 @@ namespace Yozolab.YoluPainter.Core
             {
                 var s = paint[k].settings;
                 var t = new Target { Surface = paint[k].surface, Settings = s, StrokeColor = s.Color };
-                if (s.HasColorDynamics && !s.Erase)
+                if (s.Effect == BrushEffect.Paint && s.HasColorDynamics && !s.Erase)
                 {
                     // ストロークの色を最初に 1 回引く（ダブごとでないとき、また 3D の面のブラシ（ダブを持たない）はこの色で塗る）。
                     t.ColorRandom = new Random(s.Seed ^ ColorStream); t.StrokeColor = ColorDynamics.Next(s, t.ColorRandom);
@@ -326,6 +326,7 @@ namespace Yozolab.YoluPainter.Core
                 bool changed = false;
                 if (x >= 0 && y >= 0 && x < width && y < height)
                 {
+                    if (settings.Effect != BrushEffect.Paint) throw new InvalidOperationException("Pixel effects need a complete dab; use ApplyDab to freeze its source before writing.");
                     int tile = tileSize; BeginPass();
                     try { changed = ApplyPixelAt(cursor, true, x / tile, y / tile, (y % tile) * tile + x % tile, coverage, pressure, 1, 1); }
                     finally { EndPass(); }
@@ -431,7 +432,7 @@ namespace Yozolab.YoluPainter.Core
                         if (!dualCoverage.TryGetValue(coord, out cells))
                         {
                             long nextBytes = rollbackBytes + 64 + (long)tile * tile * 4;
-                            document.EnsureStrokeBudget(nextBytes);
+                            EnsureEffectBudget(nextBytes);
                             cells = new float[tile * tile]; dualCoverage.Add(coord, cells); rollbackBytes = nextBytes;
                         }
                     }
@@ -474,6 +475,7 @@ namespace Yozolab.YoluPainter.Core
             s.Plain = angle == 0 && roundness == 1;
             s.Hardness = settings.Hardness; s.Pressure = pressure; s.OpacityScale = opacityScale; s.FlowScale = flowScale;
             if (minX > maxX || minY > maxY) return false;
+            if (!PrepareEffectDab(minX, maxX, minY, maxY, x, y)) return false;
             int tile = tileSize, tx0 = minX / tile, ty0 = minY / tile, columns = maxX / tile - tx0 + 1, rows = maxY / tile - ty0 + 1;
             bool[] safe = null; int safeCount = 0, degree = CoreParallelism.Degree;
             // 画素ごとの仕事はチャンネルの数だけ増えるので、外接の箱 × チャンネルの数で比べる（1 チャンネルなら以前と同じ）
@@ -514,7 +516,7 @@ namespace Yozolab.YoluPainter.Core
                     }
                 }
             }
-            finally { EndPass(); }
+            finally { EndPass(); ReleaseEffectDab(); }
             return changed;
         }
         /// <summary>True when worker threads may change the tile: every target has taken it over (its rollback copy and coverage exist)
@@ -625,9 +627,10 @@ namespace Yozolab.YoluPainter.Core
             if (selected <= 0) return false;
             double ceiling = settings.Opacity * opacityScale * (settings.PressureOpacity ? pressure : 1);
             double flow = coverage * settings.Flow * flowScale * (settings.PressureFlow ? pressure : 1);
+            if (settings.Effect == BrushEffect.Smudge) flow *= settings.SmudgeStrength;
             if (flow <= 0 || ceiling <= 0) return false;
             var st = c.Stroke;
-            if (st != null && st.Wash[local] >= ceiling && !anyTipColors) return false;
+            if (st != null && st.Wash[local] >= ceiling && !anyTipColors && settings.Effect == BrushEffect.Paint) return false;
             int n = targets.Length, tile = tileSize;
             // アルファを守るストロークでは、透明な画素は変わらない（アルファは変わらないので、今の面の値が描く前の値と同じ）。
             // 巻き戻しの写しを取る前にチャンネルごとに見るので、透明なタイルには何も割り当てない
@@ -639,7 +642,7 @@ namespace Yozolab.YoluPainter.Core
                 // タイルを初めて触る: 共有の被覆率と、この画素を塗るチャンネルの写しを合わせて 1 回で予算と比べる（1 チャンネルなら以前と同じ 1 回）
                 long nextBytes = rollbackBytes + 64 + (long)tile * tile * 4;
                 for (int k = 0; k < n; k++) if (accepts[k]) nextBytes += CaptureBytes(k, c.Coord, c.Surfaces[k]);
-                document.EnsureStrokeBudget(nextBytes);
+                EnsureEffectBudget(nextBytes);
                 st = new StrokeTile(n, new float[tile * tile]);
                 for (int k = 0; k < n; k++) if (accepts[k]) Capture(k, st, c.Coord, c.Surfaces[k]);
                 strokeTiles.Add(c.Coord, st); c.Stroke = st; rollbackBytes = nextBytes;
@@ -650,7 +653,7 @@ namespace Yozolab.YoluPainter.Core
                     {
                         // 透明部分のロックで、このタイルでは初めてこのチャンネルを塗る（ほかのチャンネルが先に塗っていた）
                         long nextBytes = rollbackBytes + CaptureBytes(k, c.Coord, c.Surfaces[k]);
-                        document.EnsureStrokeBudget(nextBytes);
+                        EnsureEffectBudget(nextBytes);
                         Capture(k, st, c.Coord, c.Surfaces[k]); rollbackBytes = nextBytes;
                     }
             float[] wash = st.Wash;
@@ -678,14 +681,26 @@ namespace Yozolab.YoluPainter.Core
                 }
                 TileStorage original = st.Before[k];
                 Rgba32 start = original == null ? Rgba32.Transparent : original.Get(local * 4), next;
-                if (t.Settings.Erase)
+                if (settings.Effect != BrushEffect.Paint)
+                {
+                    int px = tx * tile + local % tile, py = ty * tile + local / tile;
+                    if (!EffectPixel(k, px, py, out var sampled)) continue;
+                    // ぼかしは透明部分に色を広げない。指先とクローンは透明な場所へ描ける。
+                    if (settings.Effect == BrushEffect.Blur && start.A == 0) continue;
+                    double amount = Math.Min(1, accumulated) * selected;
+                    next = settings.Effect == BrushEffect.Clone
+                        ? (keepAlpha ? PaintDocument.PaintKeepingAlpha(start, sampled, amount) : CpuCompositor.Fade(start, CpuCompositor.BlendUnchecked(start, sampled, Math.Min(1, accumulated), LayerBlendMode.Normal), selected))
+                        : MixEffect(start, sampled, amount, keepAlpha);
+                    if (next.A == 0) next = new Rgba32(start.R, start.G, start.B, 0);
+                }
+                else if (t.Settings.Erase)
                 {
                     byte alpha = MathUtil.ToByte(start.A / 255.0 * (1 - accumulated * t.Settings.Color.A / 255.0));
                     next = alpha == 0 ? Rgba32.Transparent : new Rgba32(start.R, start.G, start.B, alpha);
                 }
                 else if (keepAlpha) next = PaintDocument.PaintKeepingAlpha(start, paint, Math.Min(1, accumulated) * selected); // 選択の割合も色の寄せ方に入れる（丸めは 1 回）
                 else next = CpuCompositor.BlendUnchecked(start, paint, Math.Min(1, accumulated), LayerBlendMode.Normal); // 0..1 なので Blend の検査は要らない
-                if (selected < 1 && !keepAlpha) next = CpuCompositor.Fade(start, next, selected);
+                if (selected < 1 && !keepAlpha && settings.Effect == BrushEffect.Paint) next = CpuCompositor.Fade(start, next, selected);
                 if (!t.Surface.WritePixelQuiet(c.Coord, ref c.Surfaces[k], local * 4, next)) continue;
                 if (st.ChangedInPass[k] != passSerial) { st.ChangedInPass[k] = passSerial; if (collect) passChanged.Add(new PassChange { Target = k, Coord = c.Coord }); }
                 changed = true;
@@ -724,7 +739,7 @@ namespace Yozolab.YoluPainter.Core
             if (t.Before.TryGetValue(coord, out var original)) return original;
             var current = t.Surface.PeekTile(coord);
             long next = rollbackBytes + 64 + (current == null ? 0 : current.ByteSize);
-            document.EnsureStrokeBudget(next);
+            EnsureEffectBudget(next);
             original = current == null ? null : current.Clone();
             t.Before.Add(coord, original); rollbackBytes = next;
             return original;
@@ -746,7 +761,7 @@ namespace Yozolab.YoluPainter.Core
         {
             CheckOpen(); _ = Single;
             if (bytes < 0) throw new ArgumentOutOfRangeException(nameof(bytes));
-            long next = rollbackBytes + bytes; document.EnsureStrokeBudget(next); rollbackBytes = next;
+            long next = rollbackBytes + bytes; EnsureEffectBudget(next); rollbackBytes = next;
         }
 
         /// <summary>Commits exact before/after tile states of every channel as one undo step (with the channels the stroke switched on).
@@ -792,6 +807,7 @@ namespace Yozolab.YoluPainter.Core
         }
         private void ReleaseScratch()
         {
+            ReleaseEffectDab();
             foreach (var t in targets) t.Before.Clear();
             strokeTiles.Clear(); passChanged.Clear(); cursor.Reset(); rollbackBytes = 0; curvePieces.Clear(); curvePoints = 0;
             if (dual != null) { dualCoverage.Clear(); dualPending.Clear(); }

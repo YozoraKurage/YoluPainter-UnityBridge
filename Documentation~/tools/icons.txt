@@ -93,3 +93,8 @@ arrow_move fluent arrow_move
 # ── アセットのパネル（Editor/Window/Panels/TexturePaintWindow.AssetsPanel.cs） ──
 library fluent library
 shapes fluent shapes
+
+# 指先・クローン・ぼかし（既存の MIT アイコンセット）
+tools/blur fluent blur
+tools/smudge fluent hand_draw
+tools/clone phosphor stamp

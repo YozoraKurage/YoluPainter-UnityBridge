@@ -68,6 +68,8 @@ namespace Yozolab.YoluPainter.Editor
             switch (e.keyCode)
             {
                 case KeyCode.B: SelectTool(PaintTool.Brush); break;
+                case KeyCode.U: SelectTool(e.shift ? PaintTool.Smudge : PaintTool.Blur); break;
+                case KeyCode.S: if (e.shift) return false; SelectTool(PaintTool.Clone); break;
                 case KeyCode.E: SelectTool(PaintTool.Brush, true); break;
                 case KeyCode.G: SelectTool(e.shift ? PaintTool.Gradient : PaintTool.Fill); break;
                 case KeyCode.M: SelectTool(e.shift ? PaintTool.SelectEllipse : PaintTool.SelectRectangle); break;
