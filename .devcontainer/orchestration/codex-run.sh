@@ -1,5 +1,5 @@
 #!/bin/bash
-# Codex の担当を、指揮役が作った worktree で裏で走らせる（ORCHESTRATION.md の「Codex の担当」）。
+# Codex の担当を、指揮役が作った worktree で裏で走らせる（開発の文書 /workspace/temp~/dev/ORCHESTRATION.md の「Codex の担当」）。
 #
 #   codex-run.sh <名前> [--model M] [--effort E] [--bypass]       # /workspace/.worktrees/<名前>/.agent/task.md の依頼で始める
 #   codex-run.sh <名前> --status                                    # 動いているか・最後の返答
@@ -47,7 +47,7 @@ command -v codex >/dev/null || { echo "codex が無い（npm install -g @openai/
 codex login status >/dev/null 2>&1 || { echo "codex にログインしていない（ユーザーに ! codex login --device-auth を頼む）" >&2; exit 4; }
 export AGENT_BOARD_TOKEN_CODEX="$(cat "$HOME/.local/share/agent-board/codex.token" 2>/dev/null || true)"
 model_args=(); [[ -n "$MODEL" ]] && model_args=(-m "$MODEL")
-prompt="あなたの依頼文は $A/task.md にあります。まずそれと、リポジトリの AGENTS.md・CLAUDE.md・Documentation~/ORCHESTRATION.md を読み、依頼文の指示どおりに作業してください（作業場所は $WT だけ）。返答・コミットメッセージ・進捗メモは日本語で。最後の返答は依頼文の「報告」の形で。"
+prompt="あなたの依頼文は $A/task.md にあります。まずそれと、/workspace/AGENTS.md・/workspace/CLAUDE.md・/workspace/temp~/dev/ORCHESTRATION.md を読み、依頼文の指示どおりに作業してください（作業場所は $WT だけ）。返答・コミットメッセージ・進捗メモは日本語で。最後の返答は依頼文の「報告」の形で。"
 mkdir -p "$HOME/.cache/yolupainter-tests"
 # push させない: VS Code が渡す資格情報（IPC・askpass）を Codex のプロセスに渡さず、git の credential.helper を空にし、origin への
 # push の宛先を無効にする（Codex のプロセスと子にだけ効く。わざと回避されれば防げないが、うっかりの push は通らない）

@@ -6,3 +6,10 @@ temp.meta
 # 置くと丸ごとコンパイル対象になってしまう。
 temp~
 .distillery/
+
+# 開発の決まりと文書は公開リポジトリに入れない（/workspace の手元に置く。開発の文書は temp~/dev/）。
+# CLAUDE.md・AGENTS.md は /workspace の根に置いたまま（worktree で動く担当が、親のフォルダから読む）。
+/CLAUDE.md
+/CLAUDE.md.meta
+/AGENTS.md
+/AGENTS.md.meta

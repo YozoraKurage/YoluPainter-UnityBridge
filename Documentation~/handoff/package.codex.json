@@ -1,9 +1,0 @@
-{
-  "name": "com.dot.texture-painter",
-  "version": "0.1.0-preview.1",
-  "displayName": "dot Texture Painter (G0/G1 Prototype)",
-  "description": "Experimental editor-only sparse-tile texture authoring. No production compatibility claims.",
-  "unity": "2022.3",
-  "author": { "name": "dot" },
-  "keywords": ["texture", "painting", "editor", "prototype"]
-}

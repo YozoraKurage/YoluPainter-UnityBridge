@@ -1,6 +1,6 @@
 # YoluPainter
 
-Unity Editor 内の専用ウィンドウで、同じレイヤーへ 2D と 3D から描くテクスチャ制作拡張です。現在は G0/G1 の実装プロトタイプで、仕様書 v0.1（`Documentation~/spec/`）の全機能完成版ではありません。
+Unity Editor 内の専用ウィンドウで、同じレイヤーへ 2D と 3D から描くテクスチャ制作拡張です。現在は実装のプロトタイプで、完成版ではありません。
 
 - Unity 2022.3 以降 / パッケージ名 `net.yozolab.yolupainter` / エディタ専用
 - 依存パッケージ: com.unity.burst（1.8.7 以上）と com.unity.mathematics（1.2.6）。Unity のレジストリから自動で入る（どちらも Unity Companion License）。Unity 2022.3.22f1 ではエディタの決まりで Burst は 1.8.12 になる。無くても動く（.unitypackage で Assets に入れたときなど。CPU の合成の内側のループが Burst ではなく管理側のコードで動き、少し遅くなるだけ）。lilToon への出力は今後の範囲で、今は lilToon に依存していません
@@ -69,7 +69,6 @@ Unity Editor 内の専用ウィンドウで、同じレイヤーへ 2D と 3D �
 - `.ylp` の正本は機能を足すたびに版が上がり、**新しい版で保存したファイルは古い YoluPainter では開けない**（開くのを断るだけで、ファイルは
   壊さない）。保存の前に退避（バックアップ）を残す設定は Project Settings ▸ YoluPainter。
 - プロトタイプなので、操作・保存の形・API は 0.x のあいだに変わり得る。大事なテクスチャは PNG にも書き出しておく。
-- 詳しい現状は `Documentation~/STATUS.md`、実際に回した検証は `Documentation~/VALIDATION.md`。
 
 ## 保存（.ylp）
 
@@ -100,14 +99,12 @@ YoluPainter のファイルは `.ylp` です（CLIP STUDIO の .clip、Photoshop
 
 ## 文書
 
-- `CLAUDE.md` — このリポジトリでの作業ルール
-- `Documentation~/STATUS.md` — 仕様全範囲に対する実装状態
-- `Documentation~/VALIDATION.md` — 実行した検証と、まだ実行していない検証
-- `Documentation~/TESTING.md` — テストの走らせ方
-- `Documentation~/ARCHITECTURE.md`、`PSD_COMPATIBILITY.md` — 設計と PSD 互換の範囲
-- `Documentation~/spec/` — 仕様書 v0.1 と調査資料
-- `Documentation~/handoff/` — Codex からの引き継ぎ時の原文
+- `Documentation~/YLP_FORMAT.md` — .ylp ファイルの中身の形式と、版・移行の決まり
+- `Documentation~/PSD_COMPATIBILITY.md` — PSD の読み書きの対応の範囲
+- `Documentation~/PLUGIN_API.md` — プラグインの受け口（試作 API）
+- `Documentation~/THIRD_PARTY.md`・`Editor/UI/Icons/THIRD-PARTY-NOTICES.md` — 同梱しているもののライセンス
+- `Runtime/Core/README.md`・`Editor/Preview/README.md` — コードの中の仕組みの説明
 
 ## まだ無い主要機能
 
-Anchor、Generator の GPU での評価とプリセット、PSD の部分編集・ICC・高 bit、トーンカーブ等の調整、定規・ゆがみ、3D ビューでの移動・グラデーション・形での選択、シーン上のプレビュー（NDMF）、GPU の正本ブラシ、ディスク退避、4K の実測性能保証、Windows の D3D11・実ペン・HiDPI・リニアのカラースペースでの確認。どれも最終スコープから外していません。詳しくは `Documentation~/STATUS.md`。
+Anchor、Generator の GPU での評価とプリセット、PSD の部分編集・ICC・高 bit、トーンカーブ等の調整、定規・ゆがみ、3D ビューでの移動・グラデーション・形での選択、シーン上のプレビュー（NDMF）、GPU の正本ブラシ、ディスク退避、4K の実測性能保証、Windows の D3D11・実ペン・HiDPI・リニアのカラースペースでの確認。どれも最終スコープから外していません。

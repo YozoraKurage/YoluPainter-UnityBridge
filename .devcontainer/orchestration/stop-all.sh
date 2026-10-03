@@ -26,4 +26,4 @@ echo "テストの台を止める…"
 echo "掲示板を止める…"
 ~/agent-board/bin/agent-boardctl stop >/dev/null 2>&1
 /workspace/.devcontainer/unity/runners.sh status
-echo "止めた。再開は ORCHESTRATION.md の「再開するとき」"
+echo "止めた。再開は /workspace/temp~/dev/ORCHESTRATION.md の「再開するとき」"

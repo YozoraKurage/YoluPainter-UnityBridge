@@ -75,6 +75,6 @@
   // chmod は Windows ホストから clone した場合に実行ビットが落ちているのを直すため。
   "postCreateCommand": "chmod +x /workspace/.devcontainer/unity/*.sh /workspace/.devcontainer/unity/*.js && bash /workspace/.devcontainer/unity/setup.sh",
   // 起動ごとに、エージェントの掲示板（別リポジトリ agent-board。無ければ GitHub から取る）とテストの台（裏で 1 台ずつ）を
-  // 立ち上げる。失敗しても起動は止めない（Documentation~/ORCHESTRATION.md）
+  // 立ち上げる。失敗しても起動は止めない（手順は開発の文書 ORCHESTRATION.md。/workspace/temp~/dev/）
   "postStartCommand": "bash /workspace/.devcontainer/orchestration/start-all.sh"
 }
