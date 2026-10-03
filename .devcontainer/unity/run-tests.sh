@@ -223,6 +223,13 @@ if daemon_alive; then
     fi
     echo ""
     node "$SCRIPT_DIR/summarize-results.js" "$DAEMON_DIR/result.xml" || true
+    # テストごとの時間を台ごとの履歴に残す（遅いテストを探す: test-durations.sh。新しい 200 回分だけ残す）
+    if [[ -s "$DAEMON_DIR/durations.tsv" ]]; then
+      hist="$HOME/.cache/yolupainter-tests/durations"; mkdir -p "$hist"
+      stamp="$(date +%Y%m%d-%H%M%S)-runner$UNITY_RUNNER-$(runner_live_mode "$UNITY_RUNNER")"
+      { printf '# filter=%s source=%s\n' "$FILTER" "${SOURCE_DIR:-${SHA:-/workspace}}"; cat "$DAEMON_DIR/durations.tsv"; } > "$hist/$stamp.tsv"
+      ls -1t "$hist"/*.tsv 2>/dev/null | tail -n +201 | xargs -r rm -f
+    fi
     exit "$code"
   fi
   warn "デーモンのプロセスが死んでいた。後始末してコールドで続行する"

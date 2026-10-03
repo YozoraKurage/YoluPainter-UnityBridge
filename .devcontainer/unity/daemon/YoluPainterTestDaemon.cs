@@ -41,6 +41,9 @@ namespace Yozolab.YoluPainterTestDaemon
         static string RequestPath => Path.Combine(Dir, "request.json");
         static string RunningPath => Path.Combine(Dir, "running.json");
         static string ResultXmlPath => Path.Combine(Dir, "result.xml");
+        // テストごとの時間（1 行 1 件: 完全名 TAB 秒 TAB 結果）。1 件ずつ足すので、途中のドメインリロードの前の分も残る。
+        // run-tests.sh が実行の後に台ごとの履歴へ写し、遅いテストを探すのに使う（test-durations.sh）。
+        static string DurationsPath => Path.Combine(Dir, "durations.tsv");
         static string ExecResultPath => Path.Combine(Dir, "exec-result.txt");
         // 直近のコンパイルのメッセージ。リロードで static は消えるが、これは残る。
         static string CompileLogPath => Path.Combine(Dir, "compile.txt");
@@ -314,6 +317,7 @@ namespace Yozolab.YoluPainterTestDaemon
             // いるので、同じ意味論にするためリロードを実行の間だけ施錠する。
             EditorApplication.LockReloadAssemblies();
             s_locked = true;
+            try { File.WriteAllText(DurationsPath, ""); } catch (IOException) { }
             var api = ScriptableObject.CreateInstance<TestRunnerApi>();
             api.RegisterCallbacks(new Callbacks());
             api.Execute(new ExecutionSettings(filter));
@@ -776,6 +780,13 @@ namespace Yozolab.YoluPainterTestDaemon
             public void TestFinished(ITestResultAdaptor result)
             {
                 YoluPainterTestDaemon.Beat();
+                if (!result.Test.IsSuite)
+                    try
+                    {
+                        File.AppendAllText(DurationsPath, result.FullName.Replace('\t', ' ').Replace('\n', ' ') + "\t"
+                            + result.Duration.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "\t" + result.TestStatus + "\n");
+                    }
+                    catch (IOException) { }
                 if (!result.Test.IsSuite && result.TestStatus == TestStatus.Inconclusive)
                     Trace("inconclusive case " + result.FullName + ": " + (result.Message ?? "").Split('\n')[0]);
                 if (result.TestStatus != TestStatus.Failed) return;
