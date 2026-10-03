@@ -31,6 +31,7 @@ namespace Yozolab.YoluPainter.Editor
             public int blurRadius = 3;
             public float smudgeStrength = .5f;
             public bool cloneAligned = true;
+            public bool cloneAllLayers;
         }
         static readonly System.Random seeds = new System.Random();
         static BrushState ReadBrushState(string json)
@@ -67,7 +68,7 @@ namespace Yozolab.YoluPainter.Editor
                 scatter=(float)s.Scatter, count=s.Count, textureDepth=(float)s.TextureDepth, textureScale=(float)s.TextureScale,
                 stabilizer=assist.Item1, taperIn=assist.Item2, taperOut=assist.Item3 }; // 補正と入り抜きは描き手の設定として残す
             CopyPresetDynamics(s,secondary);
-            brush.blurRadius=previous.blurRadius; brush.smudgeStrength=previous.smudgeStrength; brush.cloneAligned=previous.cloneAligned;
+            brush.blurRadius=previous.blurRadius; brush.smudgeStrength=previous.smudgeStrength; brush.cloneAligned=previous.cloneAligned; brush.cloneAllLayers=previous.cloneAllLayers;
             CopySymmetry(previous,brush);
             CopyMaterial(previous,brush); // マテリアル（塗るチャンネルと値）は描画色と同じく描き手のものとして残す
         }

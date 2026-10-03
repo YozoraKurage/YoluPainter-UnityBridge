@@ -22,10 +22,12 @@ namespace Yozolab.YoluPainter.Tests
                 {
                     L.OverrideLanguage(language); w.Tool = tool;
                     PaintGui.ShortenedTexts = 0;
-                    var path = Path.GetFullPath(Path.Combine("Logs", "YoluPainterSnapshots", "BrushEffects", tool + "-" + language + ".png"));
+                    var path = Path.GetFullPath(Path.Combine("Logs", "YoluPainterSnapshots", "BrushSources", tool + "-" + language + ".png"));
                     OffscreenGui.RenderWindow(w, 1200, 800, path);
                     Assert.That(File.Exists(path), Is.True); Assert.That(new FileInfo(path).Length, Is.GreaterThan(10000));
                     Assert.That(PaintGui.ShortenedTexts, Is.Zero, tool + " " + language);
+                    if (tool == TexturePaintWindow.PaintTool.Clone)
+                        Assert.That(w.ToolControlScreenRects.ContainsKey("clone-all-layers"), Is.True, "合成を参照する欄が両言語で出る");
                     var panel = Path.Combine(Path.GetDirectoryName(path), "panel-" + tool + "-" + language + ".png");
                     OffscreenGui.RenderToPng(310, 300, () => {
                         var rows = new UiRows(new Rect(0, 0, 310, 300), 0);

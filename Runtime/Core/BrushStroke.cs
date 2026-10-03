@@ -132,7 +132,7 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>Tiles taken over, summed over the channels the stroke paints.</summary>
         public int ChangedTileCount { get { int n = 0; foreach (var t in targets) n += t.Before.Count; return n; } }
         /// <summary>Rollback payload of the stroke: every channel's tile copies, the shared coverage and the scratch it keeps.</summary>
-        public long RollbackBytes { get { return rollbackBytes + effectScratchBytes + symmetryScratchBytes; } }
+        public long RollbackBytes { get { return rollbackBytes + effectScratchBytes + cloneSourceBytes + symmetryScratchBytes; } }
         /// <summary>How many surfaces the stroke paints (1 for a channel or a mask).</summary>
         public int TargetCount { get { return targets.Length; } }
         internal BrushStroke(PaintDocument document, SparseTileSurface surface, BrushSettings settings, bool keepAlpha = false)
@@ -866,7 +866,7 @@ namespace Yozolab.YoluPainter.Core
         }
         private void ReleaseScratch()
         {
-            ReleaseEffectDab(); symmetryScratchBytes = 0;
+            ReleaseEffectDab(); ReleaseCloneSource(); symmetryScratchBytes = 0;
             foreach (var t in targets) t.Before.Clear();
             strokeTiles.Clear(); passChanged.Clear(); cursor.Reset(); rollbackBytes = 0; curvePieces.Clear(); curvePoints = 0;
             if (dual != null) { dualCoverage.Clear(); dualPending.Clear(); }

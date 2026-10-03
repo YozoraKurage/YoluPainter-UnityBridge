@@ -49,7 +49,7 @@ namespace Yozolab.YoluPainter.Editor
                         stroke=document.BeginMaterialStroke(selectedLayer,StrokeChannels(),StrokeBrush(surfaceStroke));
                     }
                     strokeCanvasSymmetry=surfaceStroke ? null : CanvasSymmetryNow();
-                    effectSurfaceIsland=-1;
+                    BeginBrushEffectStroke();
                     previousPointer=e.mousePosition; previousPressure=Pressure(e); surfaceHasBefore=surfaceHasHeld=false;
                     PaintAt(e.mousePosition,previousPressure); GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive);
                 });
@@ -150,10 +150,10 @@ namespace Yozolab.YoluPainter.Editor
             try
             {
                 if(commit&&surfaceStroke)FinishSurfaceCurve(); // 2D の最後の区間は Commit が描く
-                if(commit) { bool changed=stroke.Commit(); if(changed && tool==PaintTool.Clone) { cloneOffset=cloneStrokeOffset; cloneOffsetValid=true; } } else stroke.Cancel();
+                if(commit) { bool changed=stroke.Commit(); if(changed && tool==PaintTool.Clone) CommitCloneAlignment(); } else stroke.Cancel();
             }
             catch(Exception ex){message=ex.Message;stroke.Cancel();}
-            finally{stroke.Dispose();stroke=null;GUIUtility.hotControl=0;repaintPixels=true;surfaceHasHeld=surfaceHasBefore=false;surfaceVisibility=null;strokeMirror=null;strokeRadial=null;strokeCanvasSymmetry=null;EndPolygonFillDrag();}
+            finally{stroke.Dispose();stroke=null;GUIUtility.hotControl=0;repaintPixels=true;surfaceHasHeld=surfaceHasBefore=false;surfaceVisibility=null;strokeMirror=null;strokeRadial=null;strokeCanvasSymmetry=null;EndBrushEffectStroke();EndPolygonFillDrag();}
         }
         /// <summary>今の 3D のストロークのあいだ覚えておく、テクセルの見え方（ストロークが終われば捨てる）。</summary>
         Preview.SurfaceVisibilityCache surfaceVisibility;

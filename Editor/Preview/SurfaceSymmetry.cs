@@ -134,7 +134,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 long ka = i < pa.Count ? (long)pa[i].Y * width + pa[i].X : long.MaxValue, kb = j < pb.Count ? (long)pb[j].Y * width + pb[j].X : long.MaxValue;
                 if (ka < kb) result.Pixels.Add(pa[i++]);
                 else if (kb < ka) result.Pixels.Add(pb[j++]);
-                else { var p = pa[i++]; var q = pb[j++]; result.Pixels.Add(q.Coverage > p.Coverage ? q : p); } // 大きいほうの覆い（とその点）
+                else { var p = pa[i++]; var q = pb[j++]; result.Pixels.Add(p.Coverage >= q.Coverage ? p : q); }
             }
             return result;
         }

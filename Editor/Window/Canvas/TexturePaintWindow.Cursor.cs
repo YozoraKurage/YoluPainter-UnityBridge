@@ -24,6 +24,7 @@ namespace Yozolab.YoluPainter.Editor
         void DrawSurfaceBrushCursor(Vector2 mouse)
         {
             if (Event.current.type != EventType.Repaint || !ShowsBrushCursor || !preview.HasModel) return;
+            DrawSurfaceCloneSource();
             if (!surfaceRect.Contains(mouse) || !preview.TryPick(surfaceRect, mouse, out var hit)) return;
             float worldRadius = Mathf.Max(.000001f, preview.Bounds.size.magnitude) * brush.radius / document.Width;
             Circle(mouse, preview.WorldRadiusToGuiPoints(hit.Position, worldRadius));

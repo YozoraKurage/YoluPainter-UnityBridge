@@ -26,11 +26,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>Texture pixel coordinates, with (0,0) at bottom left.</summary>
         public int X, Y;
         public float Coverage;
-        /// <summary>The texel centre's point on the model (the snapshot's space; of the triangle that gave the coverage). The stencil
-        /// projects it to the screen.</summary>
+        /// <summary>最大の被覆率を与えた面の来歴。重複 UV では同率なら先に訪れた面。</summary>
+        public int TriangleIndex;
         public Vector3 Position;
-        public SurfacePixel(int x, int y, float coverage) { X = x; Y = y; Coverage = coverage; Position = default; }
-        public SurfacePixel(int x, int y, float coverage, Vector3 position) { X = x; Y = y; Coverage = coverage; Position = position; }
+        public SurfacePixel(int x, int y, float coverage) : this(x, y, coverage, -1, default) { }
+        public SurfacePixel(int x, int y, float coverage, Vector3 position) : this(x, y, coverage, -1, position) { }
+        public SurfacePixel(int x, int y, float coverage, int triangleIndex, Vector3 position)
+        { X = x; Y = y; Coverage = coverage; TriangleIndex = triangleIndex; Position = position; }
     }
 
     public sealed class SurfaceDabResult
@@ -115,13 +117,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
     /// Vertices coincident within weldTolerance may join UV seams; nonmanifold edges do not join.
     /// This is a bounded spherical surface footprint, not a geodesic, GPU or Burst backend.
     /// </summary>
-    public sealed class SurfaceGeometry
+    public sealed partial class SurfaceGeometry
     {
         readonly SurfaceTriangle[] triangles;
         readonly int[][] adjacency;
         readonly int[] indices;
         readonly List<BvhNode> nodes = new List<BvhNode>();
-        readonly float visibilityEpsilon;
+        readonly float visibilityEpsilon, seamTolerance;
         internal double SnapshotMilliseconds { get; }
         internal double AdjacencyMilliseconds { get; }
         internal double BvhMilliseconds { get; }
@@ -180,7 +182,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (!Finite(weldTolerance) || weldTolerance <= 0) throw new ArgumentOutOfRangeException(nameof(weldTolerance));
             cancellation.ThrowIfCancellationRequested();
             var clock = Stopwatch.StartNew();
-            SnapshotRevision = snapshotRevision;
+            SnapshotRevision = snapshotRevision; seamTolerance = weldTolerance;
             triangles = new SurfaceTriangle[source.Count]; source.CopyTo(triangles, 0);
             indices = new int[triangles.Length];
             var boxes = new BuildBox[triangles.Length]; var centers = new Vector3[triangles.Length];
@@ -474,7 +476,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 outcomes[k] = new RayOutcome { HasHit = hasHit, Hit = visible, CameraDistance = distance,
                     Tests = budget.MaxRayTriangleTests - work.RemainingTriangleTests, Visits = budget.MaxRayNodeVisits - work.RemainingNodeVisits, Exceeded = work.Exceeded };
             }
-            long tests = 0, visits = 0; var pixels = new Dictionary<int, float>(); var points = new Dictionary<int, Vector3>(); int collected = result.CandidatePixels;
+            long tests = 0, visits = 0; var pixels = new Dictionary<int, SurfacePixel>(); int collected = result.CandidatePixels;
             for (int i = 0; i < candidates.Count; i++)
             {
                 // 元の逐次の処理がこの候補を見ていた時点の、候補の画素の数（断るときに同じ数を返す）
@@ -515,13 +517,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 }
                 float coverage = c.Distance <= hardness || hardness >= 0.9999f ? 1 : 1 - Mathf.SmoothStep(0, 1, (c.Distance - hardness) / (1 - hardness));
                 int key = c.Y * width + c.X;
-                if (!pixels.TryGetValue(key, out float current) || coverage > current) { pixels[key] = coverage; points[key] = c.Position; }
+                if (!pixels.TryGetValue(key, out var current) || coverage > current.Coverage) pixels[key] = new SurfacePixel(c.X, c.Y, coverage, c.Triangle, c.Position);
             }
             result.CandidatePixels = collected;
             if (stop != null) return result.Reject(stop);
             // Deterministic bottom-left row order and max-union prevent shared-edge double paint.
             var keys = new List<int>(pixels.Keys); keys.Sort();
-            foreach (int key in keys) result.Pixels.Add(new SurfacePixel(key % width, key / width, pixels[key], points[key]));
+            foreach (int key in keys) result.Pixels.Add(pixels[key]);
             return result;
         }
 
@@ -543,7 +545,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             { result.Diagnostic = "Surface binding does not match the current snapshot."; return result; }
             budget = budget ?? new SurfaceBrushBudget(); hardness = Mathf.Clamp01(hardness);
             var rayWork = new RayQueryBudget { RemainingTriangleTests = budget.MaxRayTriangleTests, RemainingNodeVisits = budget.MaxRayNodeVisits };
-            var queue = new Queue<int>(); var visited = new HashSet<int>(); var pixels = new Dictionary<int, float>(); var points = new Dictionary<int, Vector3>();
+            var queue = new Queue<int>(); var visited = new HashSet<int>(); var pixels = new Dictionary<int, SurfacePixel>();
             queue.Enqueue(hit.TriangleIndex); visited.Add(hit.TriangleIndex);
             float radiusSquared = radiusWorld * radiusWorld; int processed = 0;
             while (queue.Count > 0)
@@ -591,12 +593,12 @@ namespace Yozolab.YoluPainter.Editor.Preview
                     }
                     float coverage = normalizedDistance <= hardness || hardness >= 0.9999f ? 1 : 1 - Mathf.SmoothStep(0, 1, (normalizedDistance - hardness) / (1 - hardness));
                     int key = y * width + x;
-                    if (!pixels.TryGetValue(key, out float current) || coverage > current) { pixels[key] = coverage; points[key] = position; }
+                    if (!pixels.TryGetValue(key, out var current) || coverage > current.Coverage) pixels[key] = new SurfacePixel(x, y, coverage, triangleIndex, position);
                 }
             }
             // Deterministic bottom-left row order and max-union prevent shared-edge double paint.
             var keys = new List<int>(pixels.Keys); keys.Sort();
-            foreach (int key in keys) result.Pixels.Add(new SurfacePixel(key % width, key / width, pixels[key], points[key]));
+            foreach (int key in keys) result.Pixels.Add(pixels[key]);
             return result;
         }
 

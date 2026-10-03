@@ -1,0 +1,40 @@
+# 合成クローンと表面の画素輸送
+
+msgid "Set the clone source on a surface of the active texture set."
+msgstr "今のテクスチャセットの面の上で写し元を指定してください。"
+
+msgid "Clone source set. Alt-click sets a new source in the same view."
+msgstr "写し元を設定しました。同じビューを Alt＋クリックすると写し元を変えられます。"
+
+msgid "Alt-click this view to set a clone source on this layer or mask first."
+msgstr "まずこのビューを Alt＋クリックし、今のレイヤーかマスクの写し元を指定してください。"
+
+msgid "Sample all visible layers"
+msgstr "全表示レイヤーを参照"
+
+msgid "Each dab pulls pixels from the previous dab. In 3D it follows connected faces across UV seams and mirrored islands. Disconnected surfaces start a new pickup."
+msgstr "描点ごとに前の描点の画素を引きずります。3D では UV の継ぎ目や鏡映した島をまたぎ、つながった面に沿って動きます。つながっていない面では拾い直します。"
+
+msgid "Alt-click sets the source in the 2D or 3D view. Aligned keeps the relation between strokes; off restarts at the source. All visible layers samples the channel composite before the stroke."
+msgstr "2D か 3D のビューを Alt＋クリックして写し元を指定します。位置合わせはストロークをまたいで位置関係を保ち、オフなら写し元から始めます。全表示レイヤーの参照は描き始める前のチャンネル合成を使います。"
+
+msgid "A mask cannot sample the channel composite. Choose Current layer."
+msgstr "マスクにはチャンネルの合成を写せません。現在のレイヤーを参照してください。"
+
+msgid "Surface sampling exceeded its memory budget. Stroke canceled."
+msgstr "面の参照がメモリの予算を超えたため、ストロークを取り消しました。"
+
+msgid "Surface sampling exceeded its triangle or memory budget. Stroke canceled."
+msgstr "面の参照が三角形かメモリの予算を超えたため、ストロークを取り消しました。"
+
+msgid "Surface sampling exceeded its lookup budget. Stroke canceled."
+msgstr "面の参照が問い合わせの予算を超えたため、ストロークを取り消しました。"
+
+msgid "Smudge picked up again on a disconnected surface."
+msgstr "つながっていない面に移ったため、指先の色を拾い直しました。"
+
+msgid "Surface sampling could not reach this dab. Start a new stroke."
+msgstr "面をたどってこの描点へ到達できませんでした。新しいストロークを始めてください。"
+
+msgid "The model snapshot changed. Set the source again."
+msgstr "モデルのスナップショットが変わりました。写し元を指定し直してください。"
