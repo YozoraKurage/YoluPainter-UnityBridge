@@ -51,6 +51,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             Item(m, "New Project…", NewProjectDialog, keys: "Ctrl+N");
             Item(m, "Open…", OpenProject, keys: "Ctrl+O");
+            Item(m, "Recovery…", ShowRecovery);
             m.AddSeparator("");
             Item(m, "Save", () => SaveProject(false), keys: "Ctrl+S");
             Item(m, "Save As…", () => SaveProject(true), keys: "Ctrl+Shift+S");

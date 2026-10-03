@@ -75,22 +75,15 @@ namespace Yozolab.YoluPainter.Editor
             compositor = CreateCompositor(); preview = new IsolatedModelPreview(); ApplyPreviewFrameRate(); // 3D を描く回数の上限（Model/TexturePaintWindow.RedrawRate.cs）
             if (materialEdits == null) materialEdits = new PreviewMaterialEdits();
             materialEdits.Touch(); preview.MaterialEdits = materialEdits; preview.Shading = previewShading; BindPreviewScene();
-            if (String.IsNullOrEmpty(recoveryRoot)) recoveryRoot=Path.GetFullPath(Path.Combine("Library","YoluPainter","recovery-"+Guid.NewGuid().ToString("N")));
+            if (String.IsNullOrEmpty(recoveryRoot)) recoveryRoot=RecoveryCatalog.NewRoot();
             try
             {
                 if (File.Exists(Path.Combine(recoveryRoot,"current")))
                 {
-                    var snapshot=GenerationStore.Load(recoveryRoot); var recovered=YlpFormat.Open(snapshot.Files);
-                    var sets=ReadTextureSets(recovered); var recoveredResources=ResourceIndex.Load(recovered.Files,recovered.Resources);
-                    ReplaceProject(sets,sets.First(s=>s.Id==recovered.Project.CurrentSet)); AdoptResources(recoveredResources);
-                    ResetSetsBaseline(false); recoveryToken=snapshot.Token; projectCreatedBy=recovered.Info.CreatedBy;
-                    var recoveryNotes=new List<string>();
-                    foreach(var set in sets)RestoreSavedSelection(set,recovered.SetFiles(set.Id),recoveryNotes);
-                    var missingImages=MissingFillImageNote(); if(missingImages!=null)recoveryNotes.Add(missingImages);
-                    message="Recovered native source from the last durable checkpoint. Unsaved edits after that checkpoint may be missing."+(recoveryNotes.Count>0?" "+String.Join(" ",recoveryNotes):"");
+                    RestoreRecovery(recoveryRoot);
                 }
             }
-            catch (Exception ex) { message="Recovery was not loaded: "+ex.Message; }
+            catch (Exception ex) { message=L.Tr("Recovery was not loaded: {0}",ex.Message); }
             resolution=PainterSettings.DefaultResolution;
             if (document==null) CreateDocument(resolution);
             BindDocument(); RestorePenInput();
@@ -98,6 +91,7 @@ namespace Yozolab.YoluPainter.Editor
             EditorApplication.update+=Tick; PainterSettings.Changed+=SettingsChanged; EditorApplication.projectChanged+=OnUnityProjectChanged; HookResources();
             AssemblyReloadEvents.beforeAssemblyReload+=BeforeReload;
             EditorApplication.playModeStateChanged+=PlayModeChanged;
+            CheckRecoveryStorage();
         }
         /// <summary>設定のメモリ予算をドキュメントに入れる。今の画素がすでに予算を超えているときは画素を捨てず、予算を今の量まで
         /// 広げてそう知らせる。</summary>
@@ -161,6 +155,7 @@ namespace Yozolab.YoluPainter.Editor
         void Tick()
         {
             if(document==null) return;
+            if(EditorApplication.timeSinceStartup-lastRecoveryStorageCheck>60) CheckRecoveryStorage();
             TickAssetsPanel(); // アセットのパネルが出たら、リソースの出どころを確かめる（TexturePaintWindow.AssetsPanel.cs）
             if(stroke==null && EditorApplication.timeSinceStartup-lastRecovery>PainterSettings.RecoveryIntervalSeconds && !RecoveryIsCurrent()) SaveRecovery();
             if(!String.IsNullOrEmpty(projectPath) && EditorApplication.timeSinceStartup-lastExternalCheck>3) CheckExternalChange();

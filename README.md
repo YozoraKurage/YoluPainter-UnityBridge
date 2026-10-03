@@ -92,13 +92,16 @@ YoluPainter のファイルは `.ylp` です（CLIP STUDIO の .clip、Photoshop
 - `.ylp` を Assets に置くと、Project ウィンドウにサムネイルと大きさ・チャンネル・テクスチャセット・形式の版が出て、ダブルクリックで YoluPainter が開きます。テクスチャは出しません（.ylp は作業ファイルで、配布先に YoluPainter があるとは限らないため。マテリアルには書き出した PNG を使う）
 - PSD は「Export PSD」で今のセットの選んだチャンネルを書き出します。PSD で表せないものがあると、平らにせず理由を示して書き出しません。取り込んだ PSD を直接上書きせず、元のバイト列を `.ylp` の中に保持します
 - 未保存の作業の復旧 checkpoint は Unity プロジェクトの `Library/YoluPainter` 配下へ 15 秒ごと（設定で 5〜600 秒）、フォーカス喪失・リロード時にも保存します。突然のプロセス停止では最後の正常 checkpoint までです
+- 復旧の世代は既定で 3 つ（設定で最低 2）残し、同じ内容のセットや画像は世代間で共有します。新しい checkpoint の保存が完了してから古い世代を整理します
+- 保存済みか作った直後のままのウィンドウを閉じると、その復旧フォルダを片付けます。未保存の作業は残り、**ファイル ▸ 復旧…** で日時・プロジェクト名・容量を見て復旧か破棄を選べます。復旧したら `.ylp` として保存してください。破棄は元に戻せません
+- `Library/YoluPainter` の合計が容量の通知目安（既定 2 GiB）を超えるとステータスバーと復旧の一覧で知らせます。未保存の作業を容量のために自動で破棄しません
 
 ## 設定
 
 ウィンドウのメニューの ファイル ▸ プロジェクト設定… / 編集 ▸ 環境設定…、または Project Settings > YoluPainter で開きます。
 
 - **プロジェクトで共有**（`ProjectSettings/Packages/net.yozolab.yolupainter/Settings.json`、バージョン管理に入る）: 新規ドキュメントの既定の大きさ、書き出しのパディング、共有のブラシ置き場
-- **自分だけ**（`UserSettings/YoluPainter/Settings.json`）: 取り込んだブラシの置き場、自分の置き場（アセットのパネル。既定は `UserSettings/YoluPainter/Library`）、同梱ブラシの表示、`.ylp` のバックアップを残す数、復旧 checkpoint の間隔、メモリの予算、Unity のショートカットを止めるか、表示の合成（自動 / GPU / CPU）と CPU のスレッド数
+- **自分だけ**（`UserSettings/YoluPainter/Settings.json`）: 取り込んだブラシの置き場、自分の置き場（アセットのパネル。既定は `UserSettings/YoluPainter/Library`）、同梱ブラシの表示、`.ylp` のバックアップを残す数、復旧 checkpoint の間隔・残す世代の数・容量の通知目安、メモリの予算、Unity のショートカットを止めるか、表示の合成（自動 / GPU / CPU）と CPU のスレッド数
 
 ブラシ置き場と自分の置き場は Unity に取り込まれないよう、Assets / Packages の下（名前が `~` で終わるフォルダの中を除く）は指定できません。メモリの予算には、プロジェクトのリソース（埋め込んだ画像の画素）の上限もあります。
 

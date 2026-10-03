@@ -12,6 +12,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
         public string Generation { get; internal set; }
         public string Token { get; internal set; }
         public Dictionary<string, byte[]> Files { get; internal set; }
+        /// <summary>今回新しく書いた内容のバイト数（manifest・ポインタは含めない）。Load では 0。</summary>
+        public long WrittenContentBytes { get; internal set; }
+        public int ReusedContentFiles { get; internal set; }
     }
     /// <summary>
     /// Immutable generation directories, verified content hashes, current pointer changed last.
@@ -22,6 +25,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// </summary>
     public static class GenerationStore
     {
+        const string FlatManifest = "DOTPAINT-MANIFEST-1", SharedManifest = "DOTPAINT-MANIFEST-2";
         public static GenerationSnapshot Load(string root)
         {
             string pointer = Path.Combine(root, "current");
@@ -31,12 +35,14 @@ namespace Yozolab.YoluPainter.Core.Persistence
             string manifestPath = Path.Combine(directory, "manifest.sha256");
             if (!File.Exists(manifestPath)) throw new InvalidDataException("Current generation has no manifest.");
             byte[] manifest = ReadBounded(manifestPath, 1024 * 1024);
-            var files = ParseAndVerify(directory, manifest, true);
+            var files = ParseAndVerify(root, directory, manifest, true);
             return new GenerationSnapshot { Generation = generation, Token = generation + ":" + Hash(manifest), Files = files };
         }
 
-        public static GenerationSnapshot Commit(string root, IDictionary<string, byte[]> files, string expectedToken = null, Action<string> faultInjection = null)
+        public static GenerationSnapshot Commit(string root, IDictionary<string, byte[]> files, string expectedToken = null, Action<string> faultInjection = null,
+            int? generationsToKeep = null, bool shareContents = false)
         {
+            if (generationsToKeep.HasValue && generationsToKeep.Value < 2) throw new ArgumentOutOfRangeException(nameof(generationsToKeep), "Keep at least current and previous.");
             if (files == null || !HasNative(files.Keys)) throw new ArgumentException("A complete native document is required.");
             long total = 0;
             foreach (var entry in files)
@@ -54,18 +60,35 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 Directory.CreateDirectory(staging); Directory.CreateDirectory(generations);
                 try
                 {
-                    var manifest = new StringBuilder("DOTPAINT-MANIFEST-1\n");
+                    long written = 0; int reused = 0;
+                    var manifest = new StringBuilder(shareContents ? SharedManifest + "\n" : FlatManifest + "\n");
                     foreach (var entry in files.OrderBy(x => x.Key, StringComparer.Ordinal))
                     {
-                        string path = Path.Combine(staging, entry.Key);
+                        string hash = Hash(entry.Value);
+                        string path = shareContents ? ContentPath(root, hash) : Path.Combine(staging, entry.Key);
                         Directory.CreateDirectory(Path.GetDirectoryName(path));
-                        WriteDurable(path, entry.Value);
-                        manifest.Append(Hash(entry.Value)).Append(' ').Append(entry.Value.LongLength).Append(' ').Append(entry.Key).Append('\n');
+                        if (shareContents && File.Exists(path))
+                        {
+                            if (new FileInfo(path).Length != entry.Value.LongLength || Hash(ReadBounded(path, entry.Value.LongLength)) != hash)
+                                throw new InvalidDataException("Shared recovery content was changed outside this tool.");
+                            reused++;
+                        }
+                        else
+                        {
+                            if (shareContents)
+                            {
+                                string pending = Path.Combine(staging, hash + ".pending");
+                                WriteDurable(pending, entry.Value); File.Move(pending, path);
+                            }
+                            else WriteDurable(path, entry.Value);
+                            written += entry.Value.LongLength;
+                        }
+                        manifest.Append(hash).Append(' ').Append(entry.Value.LongLength).Append(' ').Append(entry.Key).Append('\n');
                         faultInjection?.Invoke("file:" + entry.Key);
                     }
                     byte[] manifestBytes = Encoding.UTF8.GetBytes(manifest.ToString());
                     WriteDurable(Path.Combine(staging, "manifest.sha256"), manifestBytes);
-                    ParseAndVerify(staging, manifestBytes, false);
+                    ParseAndVerify(root, staging, manifestBytes, false);
                     faultInjection?.Invoke("verified");
                     string committed = Path.Combine(generations, generation);
                     Directory.Move(staging, committed);
@@ -82,7 +105,13 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     }
                     else File.Move(nextPointer, current);
                     faultInjection?.Invoke("after-pointer");
-                    return Load(root);
+                    var saved = Load(root);
+                    saved.WrittenContentBytes = written; saved.ReusedContentFiles = reused;
+                    // 保存の確定後だけ整理する。整理の失敗は新しい current を取り消さず、次の保存で再試行する。
+                    if (generationsToKeep.HasValue)
+                        try { Prune(root, generationsToKeep.Value, faultInjection); }
+                        catch (Exception) { }
+                    return saved;
                 }
                 catch { /* Keep staged/orphan generation for diagnosis. Never mutate previous source. */ throw; }
             }
@@ -90,6 +119,27 @@ namespace Yozolab.YoluPainter.Core.Persistence
         public static bool HasExternalChange(string root, string expectedToken)
         {
             try { return Load(root).Token != expectedToken; } catch { return true; }
+        }
+        /// <summary>一覧用の小さな情報だけ読む。正本全体の検証は Load が行う。</summary>
+        public static byte[] ReadFile(string root, string name, long maxBytes)
+        {
+            ValidateName(name);
+            string generation = File.ReadAllText(Path.Combine(root, "current"), Encoding.UTF8).Trim(); ValidateGeneration(generation);
+            string directory = Path.Combine(root, "generations", generation);
+            string[] lines = new UTF8Encoding(false, true).GetString(ReadBounded(Path.Combine(directory, "manifest.sha256"), 1024 * 1024)).Split('\n');
+            if (lines[0] != FlatManifest && lines[0] != SharedManifest) throw new InvalidDataException("Unsupported manifest.");
+            byte[] result = null;
+            foreach (string line in lines.Skip(1).Where(l => l.Length > 0))
+            {
+                string[] parts = line.Split(' ');
+                if (parts.Length != 3 || !IsHash(parts[0]) || !long.TryParse(parts[1], out long length) || length < 0) throw new InvalidDataException("Malformed manifest entry.");
+                ValidateName(parts[2]);
+                if (parts[2] != name) continue;
+                if (result != null || length > maxBytes) throw new InvalidDataException("Recovery information exceeds its budget or is duplicated.");
+                result = ReadBounded(lines[0] == SharedManifest ? ContentPath(root, parts[0]) : Path.Combine(directory, name), length);
+                if (result.LongLength != length || Hash(result) != parts[0]) throw new InvalidDataException("Recovery information checksum mismatch.");
+            }
+            return result;
         }
         static void CheckExpected(string root, string expectedToken)
         {
@@ -110,21 +160,22 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 if (token != expectedToken) throw new IOException(changed);
             }
         }
-        static Dictionary<string, byte[]> ParseAndVerify(string directory, byte[] bytes, bool keepBytes)
+        static Dictionary<string, byte[]> ParseAndVerify(string root, string directory, byte[] bytes, bool keepBytes)
         {
             string text = new UTF8Encoding(false, true).GetString(bytes);
             string[] lines = text.Split('\n');
-            if (lines.Length < 2 || lines[0] != "DOTPAINT-MANIFEST-1") throw new InvalidDataException("Unsupported manifest.");
+            if (lines.Length < 2 || lines[0] != FlatManifest && lines[0] != SharedManifest) throw new InvalidDataException("Unsupported manifest.");
+            bool shared = lines[0] == SharedManifest;
             var files = new Dictionary<string, byte[]>(StringComparer.Ordinal); long total = 0;
             for (int i = 1; i < lines.Length; i++)
             {
                 if (lines[i].Length == 0) continue;
                 string[] parts = lines[i].Split(' ');
-                if (parts.Length != 3 || parts[0].Length != 64 || !long.TryParse(parts[1], out long length) || length < 0 || length > 512L * 1024 * 1024)
+                if (parts.Length != 3 || !IsHash(parts[0]) || !long.TryParse(parts[1], out long length) || length < 0 || length > 512L * 1024 * 1024)
                     throw new InvalidDataException("Malformed manifest entry.");
                 ValidateName(parts[2]); if (files.ContainsKey(parts[2])) throw new InvalidDataException("Duplicate manifest file.");
                 total = checked(total + length); if (total > 768L * 1024 * 1024) throw new InvalidDataException("Generation exceeds read budget.");
-                string path = Path.Combine(directory, parts[2]);
+                string path = shared ? ContentPath(root, parts[0]) : Path.Combine(directory, parts[2]);
                 var info = new FileInfo(path); if (!info.Exists || info.Length != length) throw new InvalidDataException("Generation length mismatch: " + parts[2]);
                 byte[] data = ReadBounded(path, length);
                 if (!String.Equals(Hash(data), parts[0], StringComparison.Ordinal)) throw new InvalidDataException("Generation checksum mismatch: " + parts[2]);
@@ -132,6 +183,63 @@ namespace Yozolab.YoluPainter.Core.Persistence
             }
             if (!HasNative(files.Keys)) throw new InvalidDataException("Generation missing native source.");
             return files;
+        }
+        static bool IsHash(string value) => value.Length == 64 && value.All(c => c >= '0' && c <= '9' || c >= 'a' && c <= 'f');
+        static string ContentPath(string root, string hash) => Path.Combine(root, "contents", hash + ".bin");
+
+        static void Prune(string root, int keep, Action<string> faultInjection)
+        {
+            var protectedGenerations = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string pointer in new[] { "current", "previous" })
+            {
+                string path = Path.Combine(root, pointer);
+                if (!File.Exists(path)) continue;
+                string generation = File.ReadAllText(path, Encoding.UTF8).Trim(); ValidateGeneration(generation);
+                protectedGenerations.Add(generation);
+            }
+            string generations = Path.Combine(root, "generations");
+            var candidates = Directory.GetDirectories(generations).OrderByDescending(Path.GetFileName, StringComparer.Ordinal).ToList();
+            var retained = new HashSet<string>(protectedGenerations, StringComparer.Ordinal);
+            foreach (string directory in candidates)
+            {
+                string name = Path.GetFileName(directory); ValidateGeneration(name);
+                if (retained.Count < keep) retained.Add(name);
+            }
+            foreach (string directory in candidates.Where(d => !retained.Contains(Path.GetFileName(d))))
+                try
+                {
+                    faultInjection?.Invoke("prune-generation:" + Path.GetFileName(directory));
+                    Directory.Delete(directory, true);
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
+            PruneContents(root, faultInjection);
+        }
+
+        static void PruneContents(string root, Action<string> faultInjection)
+        {
+            string contents = Path.Combine(root, "contents"); if (!Directory.Exists(contents)) return;
+            var referenced = new HashSet<string>(StringComparer.Ordinal);
+            // 診断用に残る作業中の世代も守る。manifest が無い/読めない世代があれば共有内容を整理しない。
+            foreach (string directory in Directory.GetDirectories(Path.Combine(root, "generations")).Concat(Directory.GetDirectories(root, ".staging-*")))
+            {
+                string manifest = Path.Combine(directory, "manifest.sha256"); if (!File.Exists(manifest)) return;
+                string[] lines = new UTF8Encoding(false, true).GetString(ReadBounded(manifest, 1024 * 1024)).Split('\n');
+                if (lines[0] == FlatManifest) continue;
+                if (lines[0] != SharedManifest) return;
+                foreach (string line in lines.Skip(1).Where(l => l.Length > 0))
+                {
+                    var parts = line.Split(' ');
+                    if (parts.Length != 3 || !IsHash(parts[0])) return;
+                    referenced.Add(parts[0]);
+                }
+            }
+            foreach (string path in Directory.GetFiles(contents, "*.bin"))
+            {
+                string hash = Path.GetFileNameWithoutExtension(path);
+                if (!IsHash(hash) || referenced.Contains(hash)) continue;
+                try { faultInjection?.Invoke("prune-content:" + hash); File.Delete(path); }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
+            }
         }
         static byte[] ReadBounded(string path, long max)
         {

@@ -27,7 +27,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if(currentSet==null)return true;
             SyncCurrentSet();
-            return setsRevision==recoveredSetsRevision&&textureSets.All(s=>s.Document.Revision==s.RecoveredRevision);
+            return setsRevision==recoveredSetsRevision&&textureSets.All(s=>s.Document.Revision==s.RecoveredRevision)&&recoveredProjectState==RecoveryState();
         }
         bool SaveRecovery()
         {
@@ -35,6 +35,7 @@ namespace Yozolab.YoluPainter.Editor
             try
             {
                 var files=new Dictionary<string,byte[]>(StringComparer.Ordinal);
+                files.Add(RecoveryCatalog.InfoName,RecoveryInfoBytes());
                 foreach(var set in textureSets)
                 {
                     files.Add(YlpFormat.SetEntry(set.Id,YlpArchive.NativeName),DocumentBinary.Write(set.Document));
@@ -43,9 +44,10 @@ namespace Yozolab.YoluPainter.Editor
                 files.Add(YlpFormat.ProjectName,YlpFormat.WriteProject(ProjectInfo()));
                 ResourceIndex.AddTo(files,resources); // プロジェクトのリソース（形式 4。TexturePaintWindow.Resources.cs）
                 YlpFormat.Stamp(files,YlpContent.Writer,projectCreatedBy);
-                var snapshot=GenerationStore.Commit(recoveryRoot,files,recoveryToken); recoveryToken=snapshot.Token;
+                var snapshot=GenerationStore.Commit(recoveryRoot,files,recoveryToken,generationsToKeep:PainterSettings.RecoveryGenerationsToKeep,shareContents:true); recoveryToken=snapshot.Token;
+                LastRecoveryWrittenBytes=snapshot.WrittenContentBytes;LastRecoveryReusedFiles=snapshot.ReusedContentFiles;recoveredProjectState=RecoveryState();
                 foreach(var set in textureSets)set.RecoveredRevision=set.Document.Revision;
-                recoveredSetsRevision=setsRevision;lastRecovery=EditorApplication.timeSinceStartup;return true;
+                recoveredSetsRevision=setsRevision;lastRecovery=EditorApplication.timeSinceStartup;CheckRecoveryStorage();return true;
             }
             catch(Exception ex){message="Recovery checkpoint failed: "+ex.Message;return false;}
         }

@@ -119,6 +119,7 @@ namespace Yozolab.YoluPainter.Editor
         void ReplaceProject(IList<TextureSet> next, TextureSet current)
         {
             if (next == null || next.Count == 0 || !next.Contains(current)) throw new ArgumentException("A project needs its current texture set.");
+            DetachRecoveryForProjectChange();
             if (AbandonMeshBake()) message = L.Tr("The mesh-map bake was stopped because the document changed.");
             meshBakeOutcome = null; meshBakeSkipped.Clear(); meshMapView = MeshMapView.None;
             foreach (var set in textureSets) if (!next.Contains(set)) set.DisposeTextures();
