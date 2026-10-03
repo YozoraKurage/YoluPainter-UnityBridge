@@ -153,7 +153,7 @@ namespace Yozolab.YoluPainter.Tests
                     int rootAt = rnd.Next(plan.Count + 1); var root = new byte[bytes];
                     var first = new CpuCompositor.CompositeJob(0, 0, W, H, new byte[bytes], 0, rootAt, root) { Captures = taken };
                     CpuCompositor.CompositeRegions(d, ch, new[] { first });
-                    CpuCompositingTests.AssertSameBytes(full, first.Pixels, "document " + c + " " + ch + ": capturing on the way");
+                    PixelAssert.SameBytes(full, first.Pixels, "document " + c + " " + ch + ": capturing on the way");
                     captures += taken.Count;
                     // 2. 写しから始める: 最上段は rootAt から（届くグループだけ）、浅いグループから、外の写しの中に入るものは除く
                     for (int round = 0; round < 3; round++)
@@ -212,13 +212,13 @@ namespace Yozolab.YoluPainter.Tests
                 var retake = new CpuCompositor.CompositeJob(0, 0, W, H, new byte[W * H * 4])
                 { Resume = new[] { new CpuCompositor.NestedCopy(g, low, copy, 0, W * 4) }, Captures = new[] { new CpuCompositor.NestedCopy(g, high, copy, 0, W * 4) } };
                 CpuCompositor.CompositeRegions(d, ch, new[] { retake });
-                CpuCompositingTests.AssertSameBytes(full, retake.Pixels, "document " + c + ": resumed and retaken in place");
+                PixelAssert.SameBytes(full, retake.Pixels, "document " + c + ": resumed and retaken in place");
                 var fresh = new byte[W * H * 4];
                 CpuCompositor.CompositeRegions(d, ch, new[] { new CpuCompositor.CompositeJob(0, 0, W, H, new byte[W * H * 4]) { Captures = new[] { new CpuCompositor.NestedCopy(g, high, fresh, 0, W * 4) } } });
-                CpuCompositingTests.AssertSameBytes(fresh, copy, "document " + c + ": the retaken copy is the copy taken from scratch");
+                PixelAssert.SameBytes(fresh, copy, "document " + c + ": the retaken copy is the copy taken from scratch");
                 var again = new CpuCompositor.CompositeJob(0, 0, W, H, new byte[W * H * 4]) { Resume = new[] { new CpuCompositor.NestedCopy(g, high, copy, 0, W * 4) } };
                 CpuCompositor.CompositeRegions(d, ch, new[] { again });
-                CpuCompositingTests.AssertSameBytes(full, again.Pixels, "document " + c + ": from the retaken copy");
+                PixelAssert.SameBytes(full, again.Pixels, "document " + c + ": from the retaken copy");
                 checkedCount++;
             }
             Assert.That(checkedCount, Is.GreaterThan(20));

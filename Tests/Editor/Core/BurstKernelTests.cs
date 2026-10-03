@@ -24,8 +24,8 @@ namespace Yozolab.YoluPainter.Tests
         static void AssertAllSame(PaintDocument d, PaintChannel channel, string context)
         {
             var managed = CompositeWith(KernelChoice.Managed, d, channel);
-            CpuCompositingTests.AssertSameBytes(managed, CompositeWith(KernelChoice.Registered, d, channel), context + ": Burst");
-            CpuCompositingTests.AssertSameBytes(managed, CompositeWith(KernelChoice.RegisteredWithBurstOff, d, channel), context + ": Burst switched off");
+            PixelAssert.SameBytes(managed, CompositeWith(KernelChoice.Registered, d, channel), context + ": Burst");
+            PixelAssert.SameBytes(managed, CompositeWith(KernelChoice.RegisteredWithBurstOff, d, channel), context + ": Burst switched off");
         }
 
         [Test] public void TheBurstKernelsAreRegisteredWhereBurstIsInstalled()
@@ -128,7 +128,7 @@ namespace Yozolab.YoluPainter.Tests
                     AssertAllSame(d, PaintChannel.Color, $"document {c} threads {degree}");
                     int x = rnd.Next(d.Width), y = rnd.Next(d.Height), w = 1 + rnd.Next(d.Width - x), h = 1 + rnd.Next(d.Height - y);
                     byte[] Region(KernelChoice k) { using (KernelScope.Use(k)) return CpuCompositor.CompositeRegion(d, PaintChannel.Color, x, y, w, h); }
-                    CpuCompositingTests.AssertSameBytes(Region(KernelChoice.Managed), Region(KernelChoice.Registered), $"document {c} threads {degree} region");
+                    PixelAssert.SameBytes(Region(KernelChoice.Managed), Region(KernelChoice.Registered), $"document {c} threads {degree} region");
                 }
             }
         }

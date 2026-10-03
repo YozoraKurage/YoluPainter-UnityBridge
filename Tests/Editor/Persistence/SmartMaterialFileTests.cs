@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using NUnit.Framework;
 using Yozolab.YoluPainter.Core;
 using Yozolab.YoluPainter.Core.Persistence;
 using Yozolab.YoluPainter.Core.Shelf;
-using Yozolab.YoluPainter.Editor;
 
 namespace Yozolab.YoluPainter.Tests
 {
@@ -25,7 +25,9 @@ namespace Yozolab.YoluPainter.Tests
         static readonly Guid A = new Guid("0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0");
         static byte[] Utf8(string s) => Encoding.UTF8.GetBytes(s);
         static string Text(byte[] b) => Encoding.UTF8.GetString(b);
-        static string Fixture(string name) => PackagePaths.Physical("Tests/Editor/Persistence/Fixtures~/" + name);
+        // 試験ソースと一緒に配る固定ファイルを、コンパイル時のソース位置から読む。
+        static string Fixture(string name, [CallerFilePath] string sourceFile = "")
+            => Path.Combine(Path.GetDirectoryName(sourceFile), "Fixtures~", name);
 
         static SmartMaterial Material()
         {
