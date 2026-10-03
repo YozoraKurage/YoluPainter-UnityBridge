@@ -309,6 +309,19 @@ if daemon_alive; then
       { printf '# filter=%s source=%s group=%s\n' "$FILTER" "${SOURCE_DIR:-${SHA:-/workspace}}" "${YOLUPAINTER_TEST_GROUP:-}"; cat "$DAEMON_DIR/durations.tsv"; } > "$hist/$stamp.tsv"
       ls -1t "$hist"/*.tsv 2>/dev/null | tail -n +201 | xargs -r rm -f
     fi
+    # 台の Unity はドメインの再読み込み（担当が worktree を替えて頼むたびの組み直し）ごとにメモリを溜め込む（2026-10-03: 再読み込み
+    # 200 回の台で 3.1 GB、23 回の台で 1.7 GB）。太った台は、使い終わった今、ロックを持ったまま裏で再起動する（終わるまでほかの依頼は
+    # 別の台へ行くか待つ）。台 0 は /workspace を直接読む台で、ほかの作業と同じプロジェクトなのでここでは触らない
+    if [[ "$UNITY_RUNNER" != 0 ]]; then
+      # 本体と、その台のプロジェクトの取り込みの手伝い（AssetImportWorker。圧縮テクスチャの試験などで起きて何時間も残る、1 つ 1.4 GB ほど）の合計
+      rss_kb=$(ps -eo rss=,args= | awk -v p="-projectPath $UNITY_PROJECT" 'index($0, p) { s += $1 } END { print s + 0 }')
+      limit_kb=$(( ${YOLUPAINTER_RUNNER_RSS_LIMIT_MB:-4500} * 1024 ))
+      if [[ -n "$rss_kb" && "$rss_kb" -gt "$limit_kb" ]]; then
+        info "台 $UNITY_RUNNER の Unity が $(( rss_kb / 1024 )) MB に太ったので、裏で再起動する（1〜2 分。ログ $RUNNERS_HOME/$UNITY_RUNNER/restart.log）"
+        ( YOLUPAINTER_LOCK_HELD=1 "$SCRIPT_DIR/runners.sh" restart "$UNITY_RUNNER" > "$RUNNERS_HOME/$UNITY_RUNNER/restart.log" 2>&1 ) &
+        disown
+      fi
+    fi
     exit "$code"
   fi
   warn "デーモンのプロセスが死んでいた。後始末してコールドで続行する"

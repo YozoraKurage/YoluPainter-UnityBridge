@@ -20,6 +20,8 @@ YoluPainter は、指揮役（メインの Claude）と、作業者のエージ�
 ## エージェントの決まり（書き残し）
 
 - 指揮役は、エージェントを立てるときの依頼文を、その worktree の **`.agent/task.md`** に保存する（再開した人が読む）。
+- ビルドの確かめは `.devcontainer/orchestration/buildcheck.sh <worktree>`（Unity を立てずに Core・Editor・Tests を組む。数十秒）、指揮役の
+  掲示板への書き込みは `.devcontainer/orchestration/board.sh <op> '<json>'`。どちらも /tmp に置かない（コンテナの起動し直しで消える）。
 - 自分の worktree に **`.agent/progress.md`** を置き、区切りごと（目安 30 分ごと、テストを回した後、方針を決めた後）に書き直す。
   `.agent/` は git でもテストの台への同期でも無視される。形:
 
