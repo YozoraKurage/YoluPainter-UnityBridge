@@ -36,7 +36,11 @@ const unescape = (s) =>
     .replace(/&amp;/g, '&');
 
 const runHeader = xml.match(/<test-run\b[^>]*>/);
-const run = runHeader ? attrs(runHeader[0]) : {};
+if (!runHeader || !/<\/test-run\s*>/.test(xml)) {
+  console.error(`結果 XML が不完全: ${path}`);
+  process.exit(3);
+}
+const run = attrs(runHeader[0]);
 
 const total = Number(run.total || 0);
 const passed = Number(run.passed || 0);

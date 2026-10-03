@@ -76,7 +76,9 @@ daemon_alive || die "デーモンが起動していない。先に test-daemon.s
 [[ -z "${YOLUPAINTER_SOURCE:-}" || "$UNITY_RUNNER" != 0 ]] || die "--source は台 1 以上でだけ使える（--runner N も付ける）"
 if [[ "$UNITY_RUNNER" != 0 && ( "$op" == snippet || "$op" == compile ) ]]; then
   from="${YOLUPAINTER_SOURCE:-$PACKAGE_ROOT}"
-  python3 "$SCRIPT_DIR/sync-package.py" "$from" "$(runner_package "$UNITY_RUNNER")" --checksum | sed 's/^/    /' >&2
+  if ! python3 "$SCRIPT_DIR/sync-package.py" "$from" "$(runner_package "$UNITY_RUNNER")" --checksum | sed 's/^/    /' >&2; then
+    warn "台 $UNITY_RUNNER のパッケージ同期に失敗した（結果無し）"; exit 3
+  fi
   echo "folder $from" > "$RUNNERS_HOME/$UNITY_RUNNER/source.txt"
 fi
 case "$arg" in *'"'* | *'\'* ) die 'arg に " と \ は使えない' ;; esac

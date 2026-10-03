@@ -26,6 +26,24 @@
 # 標準出力にはサマリと失敗内容だけを出す。Unity の生ログ（数万行）は台のプロジェクトの Logs/ に残る。
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+readonly DAEMON_DIR="$UNITY_PROJECT/TestDaemon"
+source "$SCRIPT_DIR/daemon-lock.sh"
+
+# 集約は順序に依らず 1（失敗）> 3（結果無し）> その他の子のエラー > 0。
+combined_test_exit_code() {
+  local c failed=0 missing=0 other=0
+  for c in "$@"; do
+    case "$c" in
+      0) ;;
+      1) failed=1 ;;
+      3) missing=1 ;;
+      *) [[ $other != 0 ]] || other="$c" ;;
+    esac
+  done
+  if [[ $failed == 1 ]]; then echo 1
+  elif [[ $missing == 1 ]]; then echo 3
+  else echo "$other"; fi
+}
 
 FILTER=""
 CATEGORY=""
@@ -79,7 +97,7 @@ if [[ -n "$SOURCE_DIR" ]]; then
   [[ -f "$SOURCE_DIR/package.json" ]] || die "パッケージ（package.json）が無い: $SOURCE_DIR"
 fi
 
-# --both: batch-gl と GUI の台で同時に回して、両方の結果を順に出す（どちらかが落ちたら落ちた方の終了コード）
+# --both: 両モードの結果を出す。結果無しは 3、どちらかの失敗は 1 を優先する。
 if [[ $BOTH == 1 ]]; then
   [[ -z "$MODE" && -z "$RUNNER_ARG" ]] || die "--both は --mode・--runner と一緒に使えない"
   rest=()
@@ -97,8 +115,7 @@ if [[ $BOTH == 1 ]]; then
   c1=0; wait $p1 || c1=$?; c2=0; wait $p2 || c2=$?
   echo "──── batch-gl ────"; cat "$out_dir/batch-gl"
   echo ""; echo "──── GUI ────"; cat "$out_dir/gui"
-  [[ $c1 != 0 ]] && exit $c1
-  exit $c2
+  exit "$(combined_test_exit_code "$c1" "$c2")"
 fi
 
 # --shards: 全件を組に分けて、同じモードの台で同時に回し、結果を合わせる
@@ -151,7 +168,8 @@ if [[ -n "$SHARDS" ]] && (( SHARDS > 1 )); then
   for j in $(seq 1 $i); do
     echo "──── 組 $j/$i（見込み $(cat "$shard_dir/expect-$j") s）────"; cat "$shard_dir/out-$j"; echo ""
   done
-  python3 - "$shard_dir" "$i" <<'PY'
+  summary_code=0
+  python3 - "$shard_dir" "$i" <<'PY' || summary_code=$?
 import re, sys
 d, n = sys.argv[1], int(sys.argv[2])
 tot = {"件": 0, "成功": 0, "失敗": 0, "スキップ": 0, "不確定": 0}; secs = []; missing = 0
@@ -171,14 +189,14 @@ if tot["スキップ"]: parts.append("スキップ %d" % tot["スキップ"])
 if tot["不確定"]: parts.append("不確定 %d" % tot["不確定"])
 print("合計（%d 組）: EditMode テスト: %s  (いちばん長い組 %.1fs)" % (n, " / ".join(parts), max(secs) if secs else 0))
 if missing: print("結果の出なかった組: %d（上の組ごとの出力を見る）" % missing)
+sys.exit(1 if tot["失敗"] else 3 if missing else 0)
 PY
-  for c in "${codes[@]}"; do [[ "$c" != 0 ]] && exit "$c"; done
-  exit 0
+  exit "$(combined_test_exit_code "$summary_code" "${codes[@]}")"
 fi
 
 # 台を選ぶ（選んだ台のロックを持ったまま、その台の設定で自分を実行し直す）。switch-daemon.sh の中から呼ばれたときと、
 # 台がもう決まって実行し直された後は選ばない。
-if [[ -z "${YOLUPAINTER_LOCK_HELD:-}" && -z "${YOLUPAINTER_DAEMON_SWITCHING:-}" ]]; then
+if ! daemon_client_lock_held && [[ -z "${YOLUPAINTER_DAEMON_SWITCHING:-}" ]]; then
   want="${MODE:-batch-gl}"
   candidates=()
   if [[ -n "$RUNNER_ARG" ]]; then candidates=("$RUNNER_ARG")
@@ -235,7 +253,6 @@ fi
 
 # デーモン（test-daemon.sh start で常駐させた Unity）が生きていれば、起動費を払わずに
 # そちらへ依頼する。死んでいれば黙って従来のコールド実行へ落ちる。
-readonly DAEMON_DIR="$UNITY_PROJECT/TestDaemon"
 # 死活は PID だけで見る。ハートビートは使わない — 同期的な Refresh や長いテスト
 # フレームの間は update が止まって鼓動も止まるので、鮮度で判定すると「忙しい」を
 # 「死んだ」と誤読してコールドに落ち、常駐とロック衝突する(実測済み)。
@@ -246,7 +263,6 @@ daemon_alive() {
 # 依頼の受け口（request.json / done）は 1 つしか無いので、同時に走る依頼（複数のエージェントや
 # unity-do.sh）を 1 本ずつ通す（daemon-lock.sh）。switch-daemon.sh がモードを切り替えている間は、
 # コールドへ落ちずに切り替えが終わるのを待つ。
-source "$SCRIPT_DIR/daemon-lock.sh"
 acquire_daemon_client_lock
 if [[ "$UNITY_RUNNER" != 0 ]]; then
   daemon_alive || die "台 $UNITY_RUNNER の常駐 Unity が動いていない（runners.sh start $UNITY_RUNNER）"
@@ -254,12 +270,16 @@ if [[ "$UNITY_RUNNER" != 0 ]]; then
   if [[ -n "$SHA" ]]; then
     stage="$RUNNERS_HOME/$UNITY_RUNNER/stage"; rm -rf "$stage"; mkdir -p "$stage"
     git -C "$PACKAGE_ROOT" archive "$SHA" | tar -x -C "$stage"
-    python3 "$SCRIPT_DIR/sync-package.py" "$stage" "$pkg" --checksum | sed 's/^/    /'
+    if ! python3 "$SCRIPT_DIR/sync-package.py" "$stage" "$pkg" --checksum | sed 's/^/    /'; then
+      warn "台 $UNITY_RUNNER のパッケージ同期に失敗した（結果無し）"; exit 3
+    fi
     rm -rf "$stage"; echo "commit $SHA" > "$RUNNERS_HOME/$UNITY_RUNNER/source.txt"
     what="コミット ${SHA:0:12}"
   else
     from="${SOURCE_DIR:-$PACKAGE_ROOT}"
-    python3 "$SCRIPT_DIR/sync-package.py" "$from" "$pkg" --checksum | sed 's/^/    /'
+    if ! python3 "$SCRIPT_DIR/sync-package.py" "$from" "$pkg" --checksum | sed 's/^/    /'; then
+      warn "台 $UNITY_RUNNER のパッケージ同期に失敗した（結果無し）"; exit 3
+    fi
     echo "folder $from" > "$RUNNERS_HOME/$UNITY_RUNNER/source.txt"
     what="フォルダ $from"
   fi
@@ -332,7 +352,7 @@ if daemon_alive; then
     if [[ "$code" == 3 ]]; then
       warn "デーモン側でコンパイルエラー: $(sed -n 2p "$DAEMON_DIR/done")"
       grep -o '[^ ]*\.cs([0-9]*,[0-9]*): error CS[0-9]*: .*' \
-        "$UNITY_LOG_DIR/daemon.log" 2>/dev/null | sort -u | head -50
+        "$UNITY_LOG_DIR/daemon.log" 2>/dev/null | sort -u | head -50 || true
       exit 3
     fi
     if [[ "$code" == 5 ]]; then
@@ -340,7 +360,9 @@ if daemon_alive; then
       exit 5
     fi
     echo ""
-    node "$SCRIPT_DIR/summarize-results.js" "$DAEMON_DIR/result.xml" || true
+    summary_code=0
+    node "$SCRIPT_DIR/summarize-results.js" "$DAEMON_DIR/result.xml" || summary_code=$?
+    code="$(combined_test_exit_code "$code" "$summary_code")"
     # テストごとの時間を台ごとの履歴に残す（遅いテストを探す: test-durations.sh。新しい 200 回分だけ残す）
     if [[ -s "$DAEMON_DIR/durations.tsv" ]]; then
       hist="$HOME/.cache/yolupainter-tests/durations"; mkdir -p "$hist"

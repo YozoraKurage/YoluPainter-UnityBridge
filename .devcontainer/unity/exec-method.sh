@@ -15,6 +15,8 @@ TARGET="${1:?第 1 引数に 'Full.Type.Name.Method' が要る}"
 ARG="${2:-}"
 
 readonly DAEMON_DIR="$UNITY_PROJECT/TestDaemon"
+source "$SCRIPT_DIR/daemon-lock.sh"
+acquire_daemon_client_lock
 daemon_alive() {
   [[ -f "$DAEMON_DIR/daemon.pid" ]] \
     && kill -0 "$(cat "$DAEMON_DIR/daemon.pid")" 2>/dev/null
@@ -44,7 +46,7 @@ code=$(head -1 "$DAEMON_DIR/done")
 if [[ "$code" == 3 ]]; then
   warn "デーモン側でコンパイルエラー: $(sed -n 2p "$DAEMON_DIR/done")"
   grep -o '[^ ]*\.cs([0-9]*,[0-9]*): error CS[0-9]*: .*' \
-    "$UNITY_LOG_DIR/daemon.log" 2>/dev/null | sort -u | head -50
+    "$UNITY_LOG_DIR/daemon.log" 2>/dev/null | sort -u | head -50 || true
   exit 3
 fi
 cat "$DAEMON_DIR/exec-result.txt" 2>/dev/null
