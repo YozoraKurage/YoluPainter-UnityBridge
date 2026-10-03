@@ -14,8 +14,8 @@
 #                                                  3 まで。--both の全件は auto。分け方は shard-filters.py、重さはテストごとの時間の履歴）
 #   run-tests.sh --runner 2                        台を決めて回す
 #   run-tests.sh --priority …                      指揮役の統合（リリースの道筋）: 統合用の台（runners.conf の 3 列目 integration）を先に使い、
-#                                                  重い試験（Tests/Editor/Support/SlowTests.txt）も回す
-#   run-tests.sh --full …                          重い試験も回す（絞り込みの無い全件は、既定では重い試験を飛ばす）
+#                                                  重い試験（Tests/Editor/Support/SlowTests.txt）は飛ばす（リリースの前だけ）
+#   run-tests.sh --release …                       リリースの前: 統合用の台で、重い試験も全部回す（--full も重い試験を回す）
 #   run-tests.sh --log                             失敗時に Unity ログの末尾も出す
 #
 # 台（runners.conf・runners.sh）: 台 0 はパッケージとして /workspace を直接読む。台 1 以上は依頼のたびに台の中の写しへ
@@ -71,7 +71,8 @@ while [[ $# -gt 0 ]]; do
     --both)     BOTH=1; shift ;;
     --gui-only) GUI_ONLY=1; shift ;;
     --shards)   SHARDS="${2:?--shards に組の数か auto が要る}"; shift 2 ;;
-    --priority) PRIORITY=1; FULL=1; shift ;;
+    --priority) PRIORITY=1; shift ;;      # 統合: 統合用の台を先に。重い試験（SlowTests.txt）はリリースの前だけなので飛ばす
+    --release)  PRIORITY=1; FULL=1; shift ;;  # リリースの前: 重い試験も全部
     --full)     FULL=1; shift ;;
     -h|--help)  sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)          die "不明な引数: $1" ;;
@@ -297,12 +298,18 @@ if [[ $GUI_ONLY == 1 ]]; then
   if [[ -f "$list" ]]; then
     names="$(grep -v '^[[:space:]]*#' "$list" | sed 's/[[:space:]]//g' | grep -v '^$' | paste -sd'|')"
     FILTER="Yozolab.YoluPainter.Tests.(${names})[.]"
+    # 重い試験はリリースの前（--release / --full）だけ。GUI の側でも飛ばす
+    slow_list="${list%/*}/SlowTests.txt"
+    if [[ $FULL == 0 && -f "$slow_list" ]]; then
+      slow_names="$(grep -v '^[[:space:]]*#' "$slow_list" | sed 's/[[:space:]]//g' | grep -v '^$' | sed 's/[.]/[.]/g' | paste -sd'|')"
+      [[ -z "$slow_names" ]] || FILTER="Yozolab[.]YoluPainter[.]Tests[.](?!(?:${slow_names})(?:[(]|\$))(${names})[.]"
+    fi
     info "GUI でしか回らないテストだけを回す（${names//|/、}）"
   else
     warn "GuiOnlyFixtures.txt が無いので全件を回す: $list"
   fi
 fi
-# 絞り込みの無い全件（GUI でしか回らないテストだけの依頼を除く）は、既定で重い試験（SlowTests.txt）を飛ばす。統合と --full では回す。
+# 絞り込みの無い全件は、重い試験（SlowTests.txt）を飛ばす（統合でも。2026-10-03 ユーザーと決めた: 重い試験はリリースの前だけ）。--release か --full で回す。
 # 飛ばすのは「テストのメソッドの完全名」だけに当たる正規表現で表す（組（アセンブリ・名前空間・クラス）の名前に当たると、中の全部が回る）
 if [[ -z "$FILTER" && -z "$CATEGORY" && $FULL == 0 && $GUI_ONLY == 0 && -z "${YOLUPAINTER_FULL_RUN:-}" ]]; then
   slow_list="$( [[ "$UNITY_RUNNER" != 0 ]] && runner_package "$UNITY_RUNNER" || echo "$PACKAGE_ROOT" )/Tests/Editor/Support/SlowTests.txt"  # 回す木の中の一覧
@@ -310,7 +317,7 @@ if [[ -z "$FILTER" && -z "$CATEGORY" && $FULL == 0 && $GUI_ONLY == 0 && -z "${YO
     slow_names="$(grep -v '^[[:space:]]*#' "$slow_list" | sed 's/[[:space:]]//g' | grep -v '^$' | sed 's/[.]/[.]/g' | paste -sd'|')"
     if [[ -n "$slow_names" ]]; then
       FILTER="Yozolab[.]YoluPainter[.]Tests[.](?!(?:${slow_names})(?:[(]|\$))[A-Za-z0-9_]+[.(]"
-      info "重い試験 $(grep -v '^[[:space:]]*#' "$slow_list" | grep -c '[^[:space:]]') 件を飛ばす（Tests/Editor/Support/SlowTests.txt。--full か --priority で全部）"
+      info "重い試験 $(grep -v '^[[:space:]]*#' "$slow_list" | grep -c '[^[:space:]]') 件を飛ばす（Tests/Editor/Support/SlowTests.txt。--release か --full で全部）"
     fi
   fi
 fi
