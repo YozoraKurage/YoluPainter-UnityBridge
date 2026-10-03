@@ -10,18 +10,15 @@ namespace Yozolab.YoluPainter.Editor
     /// 選択範囲にする（Shift 追加・Ctrl 削除・Shift+Ctrl 交差）か、塗る（今の選択範囲の内側だけ）。</summary>
     public sealed partial class TexturePaintWindow
     {
-        SurfaceRegionKind surfacePick = SurfaceRegionKind.UvIsland;
+        /// <summary>クリックした三角形からたどる範囲（選択ツールとバケツの 3D ビューのクリック、ポリゴン塗りつぶしで共有）。</summary>
+        [SerializeField] SurfaceRegionKind surfacePick = SurfaceRegionKind.UvIsland;
         internal SurfaceRegionKind SurfacePick { get => surfacePick; set => surfacePick = value; }
 
         void SurfacePickSection(UiRows rows)
         {
             if (!ToolSection(rows, "surface-pick", L.Tr("3D Pick"), "view_in_ar")) return;
-            PaintGui.FitDropdown(rows.Row(), L.TrIn("3D pick", "Region"), SurfacePickName(surfacePick), at =>
-            {
-                var menu = new GenericMenu();
-                foreach (SurfaceRegionKind kind in Enum.GetValues(typeof(SurfaceRegionKind))) { var k = kind; menu.AddItem(new GUIContent(SurfacePickName(k)), k == surfacePick, () => surfacePick = k); }
-                menu.DropDown(at);
-            }, L.Tr("What a click on the model in the 3D view selects or fills"), true, LabelColumn);
+            PaintGui.FitDropdown(rows.Row(), L.TrIn("3D pick", "Region"), SurfacePickName(surfacePick), OpenSurfacePickMenu,
+                L.Tr("What a click on the model in the 3D view selects or fills (the polygon fill (4) uses the same setting)"), true, LabelColumn);
             rows.Space(4);
         }
 
@@ -48,7 +45,7 @@ namespace Yozolab.YoluPainter.Editor
                 if(!preview.HasModel){message="Load a model (or the demo cube) to pick on the 3D view.";return;}
                 if(!preview.TryPick(surfaceRect,pointer,out var hit)){message="Nothing of the model under the pointer.";return;}
                 if(hit.MaterialSlot!=materialSlot){OtherSlotPressed(hit.MaterialSlot);return;}
-                var region=SurfaceRegions.Selection(document,preview.Geometry,SurfaceRegions.Region(preview.Geometry,hit.TriangleIndex,surfacePick));
+                var region=SurfaceRegions.Selection(document,preview.Geometry,RegionIndex().Region(hit.TriangleIndex,surfacePick)); // 索引は SurfaceRegions.Region と同じ範囲（ジオメトリごとに 1 回作る）
                 if(selecting){ApplySelection(region,mode);message=document.Selection==null?"Nothing selected.":"Selected the "+surfacePick+" ("+mode+").";}
                 else FillRegion(region,surfacePick.ToString());
             });

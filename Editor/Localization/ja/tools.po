@@ -256,8 +256,8 @@ msgctxt "3D pick"
 msgid "Region"
 msgstr "範囲"
 
-msgid "What a click on the model in the 3D view selects or fills"
-msgstr "3D ビューでモデルをクリックしたときに選ぶ・塗る範囲"
+msgid "What a click on the model in the 3D view selects or fills (the polygon fill (4) uses the same setting)"
+msgstr "3D ビューでモデルをクリックしたときに選ぶ・塗る範囲（ポリゴン塗りつぶし（4）も同じ設定を使う）"
 
 msgctxt "3D pick"
 msgid "Triangle"

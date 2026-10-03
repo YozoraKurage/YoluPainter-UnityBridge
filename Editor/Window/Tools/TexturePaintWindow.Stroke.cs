@@ -29,7 +29,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>ブラシのストローク（2D キャンバスと 3D ビュー）: 押して始め、ドラッグで足し、離して確定する。</summary>
         void HandleBrushInput(Event e)
         {
-            if(tool!=PaintTool.Brush&&e.type==EventType.MouseDown&&surfaceRect.Contains(e.mousePosition)&&e.button==0&&!e.alt){message=tool+" works on the 2D canvas. Use the brush, a selection tool or the bucket on the 3D view.";e.Use();return;}
+            if(tool!=PaintTool.Brush&&e.type==EventType.MouseDown&&surfaceRect.Contains(e.mousePosition)&&e.button==0&&!e.alt){message=tool+" works on the 2D canvas. Use the brush, the polygon fill, a selection tool or the bucket on the 3D view.";e.Use();return;}
             if(e.type==EventType.MouseDown && e.button==0 && !e.alt && (canvasRect.Contains(e.mousePosition)||surfaceRect.Contains(e.mousePosition)))
             {
                 surfaceStroke=surfaceRect.Contains(e.mousePosition);
@@ -149,7 +149,7 @@ namespace Yozolab.YoluPainter.Editor
                 if(commit)stroke.Commit();else stroke.Cancel();
             }
             catch(Exception ex){message=ex.Message;stroke.Cancel();}
-            finally{stroke.Dispose();stroke=null;GUIUtility.hotControl=0;repaintPixels=true;surfaceHasHeld=surfaceHasBefore=false;surfaceVisibility=null;}
+            finally{stroke.Dispose();stroke=null;GUIUtility.hotControl=0;repaintPixels=true;surfaceHasHeld=surfaceHasBefore=false;surfaceVisibility=null;EndPolygonFillDrag();}
         }
         /// <summary>今の 3D のストロークのあいだ覚えておく、テクセルの見え方（ストロークが終われば捨てる）。</summary>
         Preview.SurfaceVisibilityCache surfaceVisibility;

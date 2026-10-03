@@ -70,14 +70,22 @@ namespace Yozolab.YoluPainter.Core
         {
             MathUtil.RequireFinite(opacity, nameof(opacity)); if (opacity < 0 || opacity > 1) throw new ArgumentOutOfRangeException(nameof(opacity));
             var surface = PaintableSurface(layerId, channel, erase, out bool keepAlpha);
-            if (keepAlpha) return EditRegion(surface, region, (x, y, start, amount) => PaintKeepingAlpha(start, color, opacity * amount));
-            return EditRegion(surface, region, (x, y, start, amount) =>
+            var rule = FillRule(color, opacity, erase, keepAlpha);
+            return EditRegion(surface, region, (x, y, start, amount) => rule(start, amount));
+        }
+
+        /// <summary>The pixel rule of <see cref="Fill"/> (and <see cref="TriangleFill"/>): the new value of a pixel that was start, where
+        /// the region gives amount (0..1). opacity must be 0..1.</summary>
+        internal static Func<Rgba32, double, Rgba32> FillRule(Rgba32 color, double opacity, bool erase, bool keepAlpha)
+        {
+            if (keepAlpha) return (start, amount) => PaintKeepingAlpha(start, color, opacity * amount);
+            if (!erase) return (start, amount) => CpuCompositor.BlendUnchecked(start, color, opacity * amount, LayerBlendMode.Normal); // 0..1
+            return (start, amount) =>
             {
                 double a = opacity * amount;
-                if (!erase) return CpuCompositor.BlendUnchecked(start, color, a, LayerBlendMode.Normal); // a is 0..1 (checked above)
                 byte alpha = MathUtil.ToByte(start.A / 255.0 * (1 - a * color.A / 255.0));
                 return alpha == 0 ? Rgba32.Transparent : new Rgba32(start.R, start.G, start.B, alpha);
-            });
+            };
         }
 
         /// <summary>Paints a layer's mask over a region: hides by amount × region (or reveals with reveal).</summary>
@@ -86,12 +94,20 @@ namespace Yozolab.YoluPainter.Core
             MathUtil.RequireFinite(amount, nameof(amount)); if (amount < 0 || amount > 1) throw new ArgumentOutOfRangeException(nameof(amount));
             EnsureNoStroke(); var mask = RequireMask(layerId, out var owner);
             RefuseLockedAttributes(owner);
+            var rule = MaskFillRule(amount, reveal);
+            return EditRegion(mask.Surface, region, (x, y, start, coverage) => rule(start, coverage));
+        }
+
+        /// <summary>The pixel rule of <see cref="FillMask"/> (and <see cref="TriangleFill"/> on a mask): the hide amount moves towards 255
+        /// (or 0 with reveal) by amount × coverage.</summary>
+        internal static Func<Rgba32, double, Rgba32> MaskFillRule(double amount, bool reveal)
+        {
             double target = reveal ? 0 : 255;
-            return EditRegion(mask.Surface, region, (x, y, start, coverage) =>
+            return (start, coverage) =>
             {
                 byte hide = MathUtil.ToByte((start.A + (target - start.A) * amount * coverage) / 255.0);
                 return hide == 0 ? Rgba32.Transparent : new Rgba32(0, 0, 0, hide);
-            });
+            };
         }
 
         /// <summary>Lays a gradient over a layer's channel inside region (else the selection, else everything).</summary>

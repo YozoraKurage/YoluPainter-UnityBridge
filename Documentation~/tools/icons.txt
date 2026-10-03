@@ -61,6 +61,7 @@ tools/magic-wand fluent wand
 tools/move fluent arrow_move
 tools/path fluent pen
 tools/eyedropper fluent eyedropper
+tools/polygon-fill fluent triangle
 
 # ── プロパティの欄のレイヤー・チャンネル側（レイヤーマスク・フィルター・メッシュマップ・ポーズ）で足したもの ──
 close fluent dismiss

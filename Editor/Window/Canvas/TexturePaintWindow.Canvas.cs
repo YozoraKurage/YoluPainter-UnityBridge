@@ -28,6 +28,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             finally{if(turned)GL.PopMatrix();}
             DrawUvWireframe(view); // 今のテクスチャセットの UV（Canvas/TexturePaintWindow.UvWireframe.cs）
+            DrawPolygonFillOutline(view); // ポリゴン塗りつぶしのポインタの下の範囲の輪郭（Tools/TexturePaintWindow.PolygonFill.cs）
             if(toolDragging&&Event.current.type==EventType.Repaint) DrawToolPreview(view);
             else if(tool==PaintTool.Move&&!toolDragging&&Event.current.type==EventType.Repaint) DrawTransformHandles(view);
             if(Event.current.type==EventType.Repaint) DrawCanvasPathMarkers(view);
@@ -50,6 +51,7 @@ namespace Yozolab.YoluPainter.Editor
                 if(e.type==EventType.ScrollWheel){ZoomCanvasView(canvasZoom*Mathf.Exp(-e.delta.y*.07f),e.mousePosition);e.Use();return;}
                 if(e.type==EventType.MouseDrag && e.button==2){canvasPan+=e.delta;e.Use();Repaint();return;}
             }
+            if(HandlePolygonFillInput(e))return; // ポリゴン塗りつぶし（2D と 3D。ドラッグの最中も）
             if(stroke==null&&HandleToolInput(e))return;
             if(stroke==null&&HandlePathTool(e))return;
             if(stroke==null&&HandleSurfaceTool(e))return;

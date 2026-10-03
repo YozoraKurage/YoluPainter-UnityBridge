@@ -75,7 +75,8 @@ namespace Yozolab.YoluPainter.Editor
                 case KeyCode.V: SelectTool(PaintTool.Move); break;
                 case KeyCode.P: SelectTool(PaintTool.Path); break;
                 case KeyCode.I: SelectTool(PaintTool.Eyedropper); break;
-                case KeyCode.X: SwapColors(); break;
+                case KeyCode.Alpha4: case KeyCode.Keypad4: if (e.shift) return false; SelectTool(PaintTool.PolygonFill); break; // Substance Painter と同じ 4
+                case KeyCode.X: if (tool == PaintTool.PolygonFill && EditingMask) PolygonFillErase = !polyFillErase; else SwapColors(); break; // マスクのポリゴン塗りつぶしでは白と黒（Substance の X）
                 case KeyCode.D: DefaultColors(); break;
                 case KeyCode.LeftBracket: brush.radius = Mathf.Max(.5f, brush.radius / 1.15f); break;
                 case KeyCode.RightBracket: brush.radius = Mathf.Min(128, brush.radius * 1.15f); break;

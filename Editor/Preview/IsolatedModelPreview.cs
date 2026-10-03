@@ -24,7 +24,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
     /// a transform-only copy of the model's hierarchy and drawn from their CPU-baked shape.
     /// Render, pick and paint share one immutable, transformed snapshot. Call Dispose on disable/reload.
     /// </summary>
-    public sealed class IsolatedModelPreview : IDisposable
+    public sealed partial class IsolatedModelPreview : IDisposable
     {
         PreviewLoadOptions loadOptions = new PreviewLoadOptions();
         SurfaceAttributes attributes;
@@ -623,7 +623,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (!HasModel || rect.width < 2 || rect.height < 2) return;
             EnsurePreview(); UpdateCamera(rect);
             foreach (var material in materials) material.SetFloat("_PreviewLit", LitPreview ? 1 : 0);
-            ApplyScene(); UpdateSymmetryPlaneObject();
+            ApplyScene(); UpdateSymmetryPlaneObject(); UpdateRegionHighlightObject();
             Texture texture = null;
             // PreviewRenderUtility.Render in Unity 2022.3 temporarily changes this editor flag
             // without its own finally. Preserve it here even if a render callback throws.
@@ -864,7 +864,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         {
             ThrowIfDisposed();
             if (!HasModel) return null;
-            EnsurePreview(); var rect = new Rect(0, 0, width, height); UpdateCamera(rect); ApplyScene(); UpdateSymmetryPlaneObject();
+            EnsurePreview(); var rect = new Rect(0, 0, width, height); UpdateCamera(rect); ApplyScene(); UpdateSymmetryPlaneObject(); UpdateRegionHighlightObject();
             bool previousPipelineFlag = Unsupported.useScriptableRenderPipeline, previousAsync = ShaderUtil.allowAsyncCompilation;
             // 試験の画像は、元のシェーダーのコンパイルを待った絵にする（非同期のあいだは仮のシアンで描かれる）
             ShaderUtil.allowAsyncCompilation = false;
@@ -928,7 +928,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public void Dispose()
         {
             if (disposed) return;
-            ClearModel(); DisposeSymmetryPlane(); DisposeShapeOverlay();
+            ClearModel(); DisposeSymmetryPlane(); DisposeShapeOverlay(); DisposeRegionHighlight();
             materialView?.Dispose(); materialView = null;
             if (preview != null) { preview.Cleanup(); preview = null; }
             disposed = true;

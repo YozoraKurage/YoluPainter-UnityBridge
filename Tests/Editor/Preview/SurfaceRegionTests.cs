@@ -40,6 +40,63 @@ namespace Yozolab.YoluPainter.Tests
             return new SurfaceGeometry(t);
         }
 
+        /// <summary>乱数の格子のメッシュ: UV の継ぎ目（同じ位置で UV が違う）、3 つの三角形が集まる辺、つぶれた三角形、スロット 3 つ。</summary>
+        static SurfaceGeometry Scrambled(int seed)
+        {
+            var random = new System.Random(seed); var t = new List<SurfaceTriangle>();
+            for (int y = 0; y < 6; y++) for (int x = 0; x < 8; x++)
+            {
+                int slot = x < 3 ? 0 : x < 6 ? 1 : 2;
+                float island = random.Next(3) * .3f; // 同じ 3D の辺でも UV が飛ぶ所（継ぎ目）
+                Vector3 a = new Vector3(x, y, 0), b = new Vector3(x + 1, y, 0), c = new Vector3(x + 1, y + 1, 0), d = new Vector3(x, y + 1, 0);
+                Vector2 Uv(Vector3 p) => new Vector2(p.x / 8 * .3f + island, p.y / 6);
+                t.Add(new SurfaceTriangle(a, b, c, Uv(a), Uv(b), Uv(c), 0, slot));
+                if (random.Next(5) > 0) t.Add(new SurfaceTriangle(a, c, d, Uv(a), Uv(c), Uv(d), 0, slot));
+            }
+            t.Add(new SurfaceTriangle(new Vector3(0, 0, 0), new Vector3(1, 1, 0), new Vector3(.5f, .5f, 3), new Vector2(0, 0), new Vector2(.0375f, 1 / 6f), new Vector2(.9f, .9f), 0, 0)); // 辺 (0,0)-(1,1) に 3 つ目
+            t.Add(new SurfaceTriangle(new Vector3(9, 9, 9), new Vector3(9, 9, 9), new Vector3(9, 9, 9), Vector2.one, Vector2.one, Vector2.one, 0, 1)); // つぶれた三角形
+            return new SurfaceGeometry(t);
+        }
+
+        [Test] public void TheIndexFindsTheSameRegionsAsTheWalk()
+        {
+            foreach (var g in new[] { TwoIslands(), Scrambled(1), Scrambled(2), Scrambled(3) })
+            {
+                var index = new SurfaceRegionIndex(g);
+                foreach (SurfaceRegionKind kind in System.Enum.GetValues(typeof(SurfaceRegionKind)))
+                    for (int i = 0; i < g.TriangleCount; i++)
+                    {
+                        var expected = SurfaceRegions.Region(g, i, kind);
+                        Assert.That(index.Region(i, kind).ToArray(), Is.EqualTo(expected.ToArray()), kind + " from " + i);
+                        foreach (int j in expected) Assert.That(index.Key(j, kind), Is.EqualTo(index.Key(i, kind)), "one key for one region");
+                    }
+                Assert.That(() => index.Region(-1, SurfaceRegionKind.Triangle), Throws.InstanceOf<System.ArgumentOutOfRangeException>());
+                Assert.That(() => index.Key(0, (SurfaceRegionKind)99), Throws.InstanceOf<System.ArgumentOutOfRangeException>());
+            }
+            var two = new SurfaceRegionIndex(TwoIslands());
+            Assert.That(two.Key(0, SurfaceRegionKind.UvIsland), Is.Not.EqualTo(two.Key(2, SurfaceRegionKind.UvIsland)), "two islands, two keys");
+            Assert.That(two.Key(0, SurfaceRegionKind.MeshPart), Is.Not.EqualTo(two.Key(0, SurfaceRegionKind.UvIsland)), "the kind is part of the key");
+        }
+
+        [Test] public void AUvPointFindsItsTriangleAndAnIslandHasItsOutline()
+        {
+            var g = TwoIslands(); var index = new SurfaceRegionIndex(g);
+            Assert.That(index.TriangleAtUv(0, new Vector2(.3f, .1f)), Is.EqualTo(0), "below the diagonal of the first square");
+            Assert.That(index.TriangleAtUv(0, new Vector2(.1f, .3f)), Is.EqualTo(1));
+            Assert.That(index.TriangleAtUv(0, new Vector2(.8f, .2f)), Is.EqualTo(2));
+            Assert.That(index.TriangleAtUv(0, new Vector2(.5f, .2f)), Is.EqualTo(-1), "the gap between the islands");
+            Assert.That(index.TriangleAtUv(0, new Vector2(.3f, .8f)), Is.EqualTo(-1), "above the UVs");
+            Assert.That(index.TriangleAtUv(0, new Vector2(.2f, .25f)), Is.EqualTo(0), "on the shared diagonal: the lower index");
+            Assert.That(index.TriangleAtUv(1, new Vector2(.5f, .25f)), Is.EqualTo(4), "another slot has its own triangles");
+            Assert.That(index.TriangleAtUv(7, new Vector2(.5f, .25f)), Is.EqualTo(-1), "a slot without triangles");
+            // UV アイランドの輪郭は四角の 4 辺（対角線は 2 つの三角形が共有するので入らない）
+            var outline = index.UvOutline(0, SurfaceRegionKind.UvIsland);
+            Assert.That(outline.Length, Is.EqualTo(8));
+            Assert.That(index.UvOutline(0, SurfaceRegionKind.Triangle).Length, Is.EqualTo(6), "one triangle: its three edges");
+            Assert.That(index.UvOutline(0, SurfaceRegionKind.MeshPart).Length, Is.EqualTo(16), "the mesh part spans two islands: two outlines");
+            Assert.That(index.UvOutline(1, SurfaceRegionKind.UvIsland), Is.SameAs(outline), "the outline is remembered per region");
+        }
+
         [Test] public void RegionsFollowUvIslandsMeshPartsAndMaterials()
         {
             var g = TwoIslands();

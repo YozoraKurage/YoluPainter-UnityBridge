@@ -608,6 +608,41 @@ namespace Yozolab.YoluPainter.Core
             if (st.ChangedInPass != passSerial) { st.ChangedInPass = passSerial; if (collect) passChanged.Add(c.Coord); }
             return true;
         }
+        // ───── whole-tile edits (TriangleFill): tiles computed from their state before the stroke, not from dabs ─────
+
+        /// <summary>The tile as it was before the stroke (null when absent), captured now under the rollback budget the first time a
+        /// whole-tile edit asks for it. The returned object is never written to.</summary>
+        internal TileStorage OriginalTile(TileCoord coord)
+        {
+            CheckOpen();
+            if (before.TryGetValue(coord, out var original)) return original;
+            var current = surface.PeekTile(coord);
+            long next = rollbackBytes + 64 + (current == null ? 0 : current.ByteSize);
+            document.EnsureStrokeBudget(next);
+            original = current == null ? null : current.Clone();
+            before.Add(coord, original); rollbackBytes = next;
+            return original;
+        }
+        /// <summary>Puts after (computed from <see cref="OriginalTile"/>) in place of a captured tile, under the source budget. Commit
+        /// records it like any other changed tile; Cancel puts the original back.</summary>
+        internal void ReplaceTile(TileCoord coord, TileStorage after)
+        {
+            CheckOpen();
+            if (!before.ContainsKey(coord)) throw new InvalidOperationException("Capture the tile with OriginalTile before replacing it.");
+            surface.EnsureGrowth((after == null ? 0 : after.ByteSize) - surface.TileBytesAt(coord));
+            surface.Restore(coord, after); cursor.Reset();
+        }
+        /// <summary>The tile the surface holds now (read only, not a copy; null when absent).</summary>
+        internal TileStorage PeekSurfaceTile(TileCoord coord) => surface.PeekTile(coord);
+        /// <summary>Scratch memory a whole-tile edit keeps until the stroke ends, counted in the rollback budget like the brush's own
+        /// per-tile scratch (throws, changing nothing, when it does not fit).</summary>
+        internal void ReserveScratch(long bytes)
+        {
+            CheckOpen();
+            if (bytes < 0) throw new ArgumentOutOfRangeException(nameof(bytes));
+            long next = rollbackBytes + bytes; document.EnsureStrokeBudget(next); rollbackBytes = next;
+        }
+
         /// <summary>Commits exact before/after tile states. Returns false when the stroke made no net pixel change.</summary>
         public bool Commit()
         {

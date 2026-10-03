@@ -28,7 +28,7 @@ namespace Yozolab.YoluPainter.Editor
         Vector2 previousPointer, layerScroll;
         float previousPressure = 1;
         /// <summary>キャンバスでの左ボタンの働き。</summary>
-        internal enum PaintTool { Brush, Fill, Gradient, SelectRectangle, SelectEllipse, Lasso, MagicWand, Move, Path, Eyedropper }
+        internal enum PaintTool { Brush, Fill, Gradient, SelectRectangle, SelectEllipse, Lasso, MagicWand, Move, Path, Eyedropper, PolygonFill }
         PaintTool tool;
         int materialSlot, resolution = 1024;
         double lastRecovery, lastExternalCheck;
@@ -71,7 +71,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void OnEnable()
         {
-            minSize = new Vector2(980,640); wantsMouseMove = true; L.LanguageChanged += Repaint; PainterToolIcons.Changed += Repaint;
+            minSize = new Vector2(980,640); wantsMouseMove = true; wantsMouseEnterLeaveWindow = true; L.LanguageChanged += Repaint; PainterToolIcons.Changed += Repaint;
             compositor = CreateCompositor(); preview = new IsolatedModelPreview();
             if (materialEdits == null) materialEdits = new PreviewMaterialEdits();
             materialEdits.Touch(); preview.MaterialEdits = materialEdits; preview.Shading = previewShading; BindPreviewScene();
@@ -194,6 +194,7 @@ namespace Yozolab.YoluPainter.Editor
             // Repaint が来るので、その間の変更はまとめて 1 回で合成する。
             if(e.type==EventType.Repaint && DisplayNeedsCompositing) RefreshDisplayForFrame(); // 時間で区切る。残りは次の描画へ（Compositing.cs）
             LayoutShell();
+            SyncPolygonFillHover(); // ポインタの下の範囲の強調を、ツール・モデル・範囲の種類に合わせる（Tools/TexturePaintWindow.PolygonFill.cs）
             PaintGui.Fill(WindowRect,PaintTheme.WindowBg);
             if(canvasRect.width>0) DrawCanvas();
             if(surfaceRect.width>0 && e.type==EventType.Repaint)

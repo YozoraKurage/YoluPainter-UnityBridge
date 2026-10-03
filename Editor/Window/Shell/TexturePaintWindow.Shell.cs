@@ -40,6 +40,7 @@ namespace Yozolab.YoluPainter.Editor
             new ToolSlot { Tool = PaintTool.Brush, Erase = true, Id = "eraser", Name = "Eraser", Key = "E" },
             new ToolSlot { Tool = PaintTool.Fill, Id = "fill", Name = "Fill", Key = "G" },
             new ToolSlot { Tool = PaintTool.Gradient, Id = "gradient", Name = "Gradient", Key = "Shift+G" },
+            new ToolSlot { Tool = PaintTool.PolygonFill, Id = "polygon-fill", Name = "Polygon Fill", Key = "4" },
             null,
             new ToolSlot { Tool = PaintTool.SelectRectangle, Id = "select-rectangle", Name = "Rectangle Select", Key = "M" },
             new ToolSlot { Tool = PaintTool.SelectEllipse, Id = "select-ellipse", Name = "Ellipse Select", Key = "Shift+M" },
@@ -197,6 +198,17 @@ namespace Yozolab.YoluPainter.Editor
                     wandSampleAll = PaintGui.Toggle(Next(150), L.Tr("Sample All Layers"), wandSampleAll, L.Tr("Pick from the composite instead of the selected layer"));
                     { var t = L.Tr("Click the 2D canvas to pick the brush color."); PaintGui.Text(Fit(t), t, PaintTheme.LabelDim); }
                     break;
+                case PaintTool.PolygonFill: // Tools/TexturePaintWindow.PolygonFill.cs
+                {
+                    PaintGui.Dropdown(Mark("polyfill-region", Next(200)), L.TrIn("3D pick", "Region"), SurfacePickName(surfacePick), OpenSurfacePickMenu, L.Tr("What a click or drag fills: the triangle, the connected mesh part, the UV island or the whole material of this texture set"));
+                    string paint = PolygonFillPaintLabel, erase = PolygonFillEraseLabel;
+                    if (PaintGui.Button(Mark("polyfill-paint", Next(PaintGui.TextWidth(paint, PaintTheme.Label) + 20)), paint, !polyFillErase, true, EditingMask ? L.Tr("Fill the mask with white (shows the layer)") : L.Tr("Fill with the foreground color and the opacity"))) PolygonFillErase = false;
+                    x -= 6; // 塗る・消すは 1 組
+                    if (PaintGui.Button(Mark("polyfill-erase", Next(PaintGui.TextWidth(erase, PaintTheme.Label) + 20)), erase, polyFillErase, true, EditingMask ? L.Tr("Fill the mask with black (hides the layer)") : L.Tr("Erase to transparent"))) PolygonFillErase = true;
+                    brush.opacity = PaintGui.Slider(Next(130), L.Tr("Opacity"), brush.opacity * 100, 0, 100, "0", "%") / 100;
+                    { var t = PolygonFillHint; PaintGui.Text(Fit(t), t, PaintTheme.LabelDim, EditingMask ? PaintTheme.Warning : PaintTheme.TextDim); }
+                    break;
+                }
             }
         }
 
@@ -232,13 +244,16 @@ namespace Yozolab.YoluPainter.Editor
             PaintGui.Fill(r, PaintTheme.PanelBg);
             PaintGui.VLine(r.xMax - 1, r.y, r.yMax, PaintTheme.Border);
             float y = r.y + 6; var current = CurrentToolSlot();
+            // ボタンの間隔は 34。窓が低くて下の描画色・背景色に届くときは、届かないところまで詰める（最小の窓の高さ 640 でも 1 列に収める）
+            int buttons = ToolSlots.Count(s => s != null), separators = ToolSlots.Length - buttons;
+            float step = Mathf.Clamp(Mathf.Floor((r.yMax - 70 - y - separators * 8) / Mathf.Max(1, buttons)), 26, 34);
             foreach (var slot in ToolSlots)
             {
                 if (slot == null) { PaintGui.StripSeparator(new Rect(r.x, y, r.width, 8)); y += 8; continue; }
-                var at = new Rect(r.x + 5, y, r.width - 10, 32);
+                var at = new Rect(r.x + 5, y, r.width - 10, step - 2);
                 var s = slot;
                 if (PaintGui.ToolButton(at, slot.Id, L.Tr(slot.Name) + " (" + slot.Key + ")", slot == current, _ => ToolIconMenu(s))) SelectTool(slot.Tool, slot.Erase);
-                y += 34;
+                y += step;
             }
             // 描画色と背景色（Photoshop の配置: 描画色が左上、背景色が右下に重なる。右上に入れ替え、左下に初期設定）
             float bottom = r.yMax - 10, left = r.x + 6;
