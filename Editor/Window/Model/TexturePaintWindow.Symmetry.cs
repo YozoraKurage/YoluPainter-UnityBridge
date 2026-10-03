@@ -38,7 +38,7 @@ namespace Yozolab.YoluPainter.Editor
                 strokeIgnoreVisibility = brush.symmetryIgnoreVisibility;
             }
             if (!strokeMirror.HasValue && !strokeRadial.HasValue) { LastMirrorOutcome = null; return preview.BuildSurfaceDabs(hit, radius, document.Width, document.Height, brush.hardness, surfaceVisibility); }
-            var dab = SurfaceRadialSymmetry.Build(preview.Geometry, hit, strokeMirror, strokeRadial, strokeIgnoreVisibility,
+            var dab = SurfaceRadialSymmetry.Build(preview.PickingGeometry, hit, strokeMirror, strokeRadial, strokeIgnoreVisibility,
                 radius, document.Width, document.Height, preview.CameraPosition, brush.hardness, preview.BrushBudget, surfaceVisibility);
             LastMirrorOutcome = dab.Outcome;
             string note = MirrorNote(dab.Outcome);
@@ -140,7 +140,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (Event.current.type != EventType.Repaint || !ShowsBrushCursor || !HasSurfaceSymmetry || !preview.HasModel || (stroke != null && !surfaceStroke)) return;
             if (!surfaceRect.Contains(mouse) || !preview.TryPick(surfaceRect, mouse, out var hit) || !PaintsSlot(hit.MaterialSlot)) return;
-            var geometry = preview.Geometry;
+            var geometry = preview.PickingGeometry;
             float radius = Mathf.Max(.000001f, preview.Bounds.size.magnitude) * brush.radius / document.Width;
             MirrorPlane? mirror = StrokeSymmetryFrozen ? strokeMirror : symmetry ? CurrentSymmetryPlane : (MirrorPlane?)null;
             RadialSymmetry? radial = StrokeSymmetryFrozen ? strokeRadial : brush.radialSymmetry3D ? CurrentRadialSymmetry : (RadialSymmetry?)null;

@@ -213,7 +213,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 if (shading != PreviewShading.Material || !ShaderUtil.anythingCompiling) return false;
                 foreach (var (renderer, _) in slotRenderers)
                 {
-                    if (renderer == null) continue;
+                    if (renderer == null || !renderer.enabled) continue;
                     foreach (var m in renderer.sharedMaterials) if (m != null && m.shader != null && !ForwardPassesCompiled(m)) return true;
                 }
                 return false;
@@ -280,7 +280,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         PreviewLoadReport LoadSnapshot(GameObject source, PreviewLoadOptions options, bool asynchronous)
         {
             ThrowIfDisposed();
-            ClearModel(); revision++; report = new PreviewLoadReport(); loadOptions = options ?? new PreviewLoadOptions();
+            ClearModel(); visibilityRoot = source != null ? source.transform : null; revision++; report = new PreviewLoadReport(); loadOptions = options ?? new PreviewLoadOptions();
             LoadCount++; Timings = new PreviewLoadTimings();
             var loadClock = System.Diagnostics.Stopwatch.StartNew();
             LoadedSource = source; SourceFingerprint = PreviewSourceFingerprint.Of(source);
@@ -384,6 +384,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 objects.Add(go); preview.AddSingleGO(go);
                 go.AddComponent<MeshFilter>().sharedMesh = mesh;
                 var renderer = go.AddComponent<MeshRenderer>(); renderer.sharedMaterial = material; slotRenderers.Add((renderer, new[] { 0 }));
+                demoIndices = new[] { mesh.GetTriangles(0) };
+                rendererInfos.Add(new PreviewRendererInfo { Index = 0, Key = "demo:0", Names = new[] { "Demo cube" }, Slots = new[] { 0 } });
                 renderer.shadowCastingMode = ShadowCastingMode.Off; renderer.receiveShadows = false;
                 renderer.lightProbeUsage = LightProbeUsage.Off; renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
                 var triangles = new List<SurfaceTriangle>(); var attribute = new SurfaceAttributes.Builder();
@@ -527,7 +529,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 var copy = go.AddComponent<MeshRenderer>(); copy.sharedMaterials = clonedMaterials; slotRenderers.Add((copy, (int[])entry.Slots.Clone()));
                 copy.shadowCastingMode = ShadowCastingMode.Off; copy.receiveShadows = false;
                 copy.lightProbeUsage = LightProbeUsage.Off; copy.reflectionProbeUsage = ReflectionProbeUsage.Off;
-                entries.Add(entry);
+                entries.Add(entry); rendererInfos.Add(RendererInfo(renderer, visibilityRoot, entry.RendererIndex, entry.Slots));
                 report.LoadedRendererCount++;
                 return true;
             }
@@ -639,11 +641,14 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 if (vertices.Length != e.Vertices.Length) throw new InvalidOperationException("The baked mesh changed its vertex count.");
                 for (int v = 0; v < vertices.Length; v++) vertices[v] = matrix.MultiplyPoint3x4(vertices[v]) - loadOrigin;
                 e.Vertices = vertices; e.Display.vertices = vertices;
+                // 法線・接線は表示の目に依存させない。隠したインデックスを一時的に戻してから属性を更新する。
+                for (int sub = 0; sub < e.Indices.Length; sub++) e.Display.SetTriangles(e.Indices[sub], sub, false);
                 if (normals.Length == vertices.Length) { for (int n = 0; n < normals.Length; n++) normals[n] = NormalizeNonzero(normalMatrix.MultiplyVector(normals[n])); e.Display.normals = normals; }
                 else e.Display.RecalculateNormals();
                 if (e.HasUv) e.Display.RecalculateTangents();
                 e.Display.RecalculateBounds();
                 e.Normals = e.Display.normals; e.Tangents = e.Display.tangents;
+                for (int sub = 0; sub < e.Indices.Length; sub++) e.Display.SetTriangles(IsVisible(e.RendererIndex, e.Slots[sub]) ? e.Indices[sub] : Array.Empty<int>(), sub, false);
             }
             revision++;
             geometry = new SurfaceGeometry(BuildTriangles(), revision);
@@ -808,13 +813,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
             UpdateCamera(viewRect);
             var viewport = new Vector3((guiPosition.x - viewRect.x) / viewRect.width, 1 - (guiPosition.y - viewRect.y) / viewRect.height, 0);
             // Normalized viewport coordinates are independent of EditorGUIUtility.pixelsPerPoint.
-            return geometry.TryRaycast(preview.camera.ViewportPointToRay(viewport), out hit, true);
+            return PickingGeometry.TryRaycast(preview.camera.ViewportPointToRay(viewport), out hit, true);
         }
         /// <param name="cache">1 回のストロークのあいだテクセルの見え方を覚えるもの（ストロークごとに 1 つ。null なら覚えない）。</param>
         public SurfaceDabResult BuildSurfaceDabs(SurfaceHit hit, float radiusWorld, int width, int height, float hardness = 0.8f, SurfaceVisibilityCache cache = null)
         {
             if (!CanPaint) return new SurfaceDabResult { Diagnostic = "Load a complete supported static mesh snapshot before surface painting." };
-            return geometry.BuildSurfaceDabs(hit, radiusWorld, width, height, preview.camera.transform.position, hardness, BrushBudget, cache);
+            return PickingGeometry.BuildSurfaceDabs(hit, radiusWorld, width, height, preview.camera.transform.position, hardness, BrushBudget, cache);
         }
         // ───────────── シンメトリー ─────────────
 
@@ -832,7 +837,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 var refused = new SurfaceDabResult { Diagnostic = "Load a complete supported static mesh snapshot before surface painting." };
                 return new SymmetricSurfaceDab { Original = refused, Result = refused, Outcome = MirrorOutcome.OnPlane };
             }
-            return SurfaceSymmetry.Build(geometry, hit, plane, radiusWorld, width, height, preview.camera.transform.position, hardness, BrushBudget, cache, ignoreVisibility);
+            return SurfaceSymmetry.Build(PickingGeometry, hit, plane, radiusWorld, width, height, preview.camera.transform.position, hardness, BrushBudget, cache, ignoreVisibility);
         }
         /// <summary>今のカメラの位置（プレビューの空間。最後に描いた・当たりを調べた矩形での位置）。</summary>
         public Vector3 CameraPosition => preview != null ? preview.camera.transform.position : Vector3.zero;
@@ -921,7 +926,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             o.Apply(shapeOverlayMaterial);
             foreach (var (renderer, slots) in slotRenderers)
             {
-                if (renderer == null) continue;
+                if (renderer == null || !renderer.enabled) continue;
                 var filter = renderer.GetComponent<MeshFilter>(); var mesh = filter != null ? filter.sharedMesh : null;
                 if (mesh == null) continue;
                 for (int sub = 0; sub < slots.Length && sub < mesh.subMeshCount; sub++)
@@ -1043,7 +1048,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         {
             CancelPreparation(); PreparationCanceled = false; pendingTriangleCount = 0; snapshotBounds = new Bounds(Vector3.zero, Vector3.one);
             contentVersion++;
-            CancelNavigation(); geometry = null; attributes = null;
+            CancelNavigation(); ClearVisibility(); geometry = null; attributes = null;
             ModelRootPosition = Vector3.zero; ModelRootRotation = Quaternion.identity;
             foreach (var e in entries) e.Skin?.Dispose();
             entries.Clear();

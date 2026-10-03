@@ -212,6 +212,25 @@ namespace Yozolab.YoluPainter.Editor.Preview
             cancellation.ThrowIfCancellationRequested(); progress?.Invoke(1);
         }
 
+        readonly bool[] visibleTriangles;
+        readonly int queryRevision;
+        static int viewRevision;
+        /// <summary>表示用の読み取り専用の問い合わせ。元の三角形・BVH・隣接は共有し、非表示面の印だけを別に持つ。</summary>
+        internal SurfaceGeometry VisibleView(Func<SurfaceTriangle, bool> visible)
+        {
+            if (visible == null) throw new ArgumentNullException(nameof(visible));
+            var flags = new bool[triangles.Length]; for (int i = 0; i < flags.Length; i++) flags[i] = Visible(i) && visible(triangles[i]);
+            return new SurfaceGeometry(this, flags);
+        }
+        SurfaceGeometry(SurfaceGeometry source, bool[] visible)
+        {
+            triangles = source.triangles; adjacency = source.adjacency; indices = source.indices; nodes = source.nodes;
+            visibilityEpsilon = source.visibilityEpsilon; seamTolerance = source.seamTolerance; SnapshotRevision = source.SnapshotRevision; Bounds = source.Bounds; NonManifoldEdgeCount = source.NonManifoldEdgeCount;
+            SnapshotMilliseconds = source.SnapshotMilliseconds; AdjacencyMilliseconds = source.AdjacencyMilliseconds; BvhMilliseconds = source.BvhMilliseconds;
+            visibleTriangles = visible; queryRevision = -System.Threading.Interlocked.Increment(ref viewRevision);
+        }
+        bool Visible(int triangle) => visibleTriangles == null || visibleTriangles[triangle];
+
         int[][] BuildAdjacency(float tolerance, CancellationToken cancellation, Action<float> progress)
         {
             var vertices = new Dictionary<PositionKey, int>(triangles.Length);
@@ -348,8 +367,9 @@ namespace Yozolab.YoluPainter.Editor.Preview
             { RaycastNode(node.Left, ray, cull, ref nearest, ref triangle, ref barycentric, work); RaycastNode(node.Right, ray, cull, ref nearest, ref triangle, ref barycentric, work); return; }
             for (int i = node.Start; i < node.Start + node.Count; i++)
             {
-                if (work != null && work.RemainingTriangleTests-- <= 0) { work.Exceeded = true; return; }
                 int index = indices[i];
+                if (!Visible(index)) continue;
+                if (work != null && work.RemainingTriangleTests-- <= 0) { work.Exceeded = true; return; }
                 if (IntersectTriangle(ray, triangles[index], cull, out float distance, out var weights) && distance < nearest)
                 { nearest = distance; triangle = index; barycentric = weights; }
             }
@@ -402,7 +422,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (width <= 0 || height <= 0 || width > 32768 || height > 32768 || !Finite(radiusWorld) || radiusWorld <= 0 || !Finite(cameraPosition) || !Finite(hit.Position))
             { result.Diagnostic = "Invalid surface brush size, resolution or camera."; return result; }
             var seed = triangles[hit.TriangleIndex];
-            if (seed.RendererIndex != hit.RendererIndex || seed.MaterialSlot != hit.MaterialSlot)
+            if (!Visible(hit.TriangleIndex) || seed.RendererIndex != hit.RendererIndex || seed.MaterialSlot != hit.MaterialSlot)
             { result.Diagnostic = "Surface binding does not match the current snapshot."; return result; }
             budget = budget ?? new SurfaceBrushBudget(); hardness = Mathf.Clamp01(hardness);
 
@@ -415,7 +435,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 int triangleIndex = queue.Dequeue(); var t = triangles[triangleIndex];
                 result.VisitedTriangles = ++processed;
                 if (processed > budget.MaxTriangles) { stop = "Surface dab exceeded the triangle budget. No pixels were changed; reduce the brush radius."; break; }
-                if (t.RendererIndex != hit.RendererIndex || t.MaterialSlot != hit.MaterialSlot || t.Bounds.SqrDistance(hit.Position) > radiusSquared) continue;
+                if (!Visible(triangleIndex) || t.RendererIndex != hit.RendererIndex || t.MaterialSlot != hit.MaterialSlot || t.Bounds.SqrDistance(hit.Position) > radiusSquared) continue;
                 if ((ClosestPoint(hit.Position, t) - hit.Position).sqrMagnitude > radiusSquared) continue;
                 if (ignoreVisibility ? Vector3.Dot(t.Normal, hit.Normal) <= 0 : Vector3.Dot(t.Normal, cameraPosition - (t.A + t.B + t.C) / 3) <= 0) continue;
                 foreach (int neighbor in adjacency[triangleIndex]) if (visited.Add(neighbor)) queue.Enqueue(neighbor);
@@ -463,7 +483,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             var outcomes = new RayOutcome[Math.Min(rays, Chunk)];
             var options = new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Yozolab.YoluPainter.Core.CoreParallelism.Degree };
             int chunkStart = 0, chunkEnd = 0;
-            cache?.Prepare(SnapshotRevision, cameraPosition, width, height);
+            cache?.Prepare(visibleTriangles == null ? SnapshotRevision : queryRevision, cameraPosition, width, height);
             long Key(DabCandidate c) => (long)c.Triangle << 31 | (long)c.Y * width + c.X;
             void Shoot(int k)
             {
@@ -546,7 +566,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (width <= 0 || height <= 0 || width > 32768 || height > 32768 || !Finite(radiusWorld) || radiusWorld <= 0 || !Finite(cameraPosition) || !Finite(hit.Position))
             { result.Diagnostic = "Invalid surface brush size, resolution or camera."; return result; }
             var seed = triangles[hit.TriangleIndex];
-            if (seed.RendererIndex != hit.RendererIndex || seed.MaterialSlot != hit.MaterialSlot)
+            if (!Visible(hit.TriangleIndex) || seed.RendererIndex != hit.RendererIndex || seed.MaterialSlot != hit.MaterialSlot)
             { result.Diagnostic = "Surface binding does not match the current snapshot."; return result; }
             budget = budget ?? new SurfaceBrushBudget(); hardness = Mathf.Clamp01(hardness);
             var rayWork = new RayQueryBudget { RemainingTriangleTests = budget.MaxRayTriangleTests, RemainingNodeVisits = budget.MaxRayNodeVisits };
@@ -557,7 +577,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             {
                 int triangleIndex = queue.Dequeue(); var t = triangles[triangleIndex];
                 if (++processed > budget.MaxTriangles) return result.Reject("Surface dab exceeded the triangle budget. No pixels were changed; reduce the brush radius.");
-                if (t.RendererIndex != hit.RendererIndex || t.MaterialSlot != hit.MaterialSlot || t.Bounds.SqrDistance(hit.Position) > radiusSquared) continue;
+                if (!Visible(triangleIndex) || t.RendererIndex != hit.RendererIndex || t.MaterialSlot != hit.MaterialSlot || t.Bounds.SqrDistance(hit.Position) > radiusSquared) continue;
                 if ((ClosestPoint(hit.Position, t) - hit.Position).sqrMagnitude > radiusSquared) continue;
                 if (Vector3.Dot(t.Normal, cameraPosition - (t.A + t.B + t.C) / 3) <= 0) continue;
                 foreach (int neighbor in adjacency[triangleIndex]) if (visited.Add(neighbor)) queue.Enqueue(neighbor);
@@ -637,7 +657,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 }
                 for (int i = node.Start; i < node.Start + node.Count; i++)
                 {
-                    int index = indices[i]; var t = triangles[index];
+                    int index = indices[i]; if (!Visible(index)) continue; var t = triangles[index];
                     if (useFacing && Vector3.Dot(t.Normal, facing) <= 0) continue;
                     if (material >= 0 && t.Material != material) continue;
                     var closest = ClosestPoint(point, t); float squared = (closest - point).sqrMagnitude;

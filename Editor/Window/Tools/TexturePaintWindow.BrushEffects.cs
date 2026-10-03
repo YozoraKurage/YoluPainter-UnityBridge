@@ -23,7 +23,7 @@ namespace Yozolab.YoluPainter.Editor
         // テクスチャセットのマテリアル集合への移行時は、この関数を共通の問い合わせに置き換える。
         bool IsEffectSurfaceTarget(SurfaceHit hit) => PaintsSlot(hit.MaterialSlot);
 
-        internal bool HasCloneSource => ReferenceEquals(cloneDocument, document) && cloneWidth == document.Width && cloneHeight == document.Height && cloneLayer == selectedLayer && cloneMask == EditingMask && (!cloneOnSurface || ReferenceEquals(cloneGeometry, preview.Geometry));
+        internal bool HasCloneSource => ReferenceEquals(cloneDocument, document) && cloneWidth == document.Width && cloneHeight == document.Height && cloneLayer == selectedLayer && cloneMask == EditingMask && (!cloneOnSurface || (ReferenceEquals(cloneGeometry, preview.Geometry) && preview.IsVisible(cloneSurfaceSource.RendererIndex, cloneSurfaceSource.MaterialSlot)));
         internal Vector2 CloneSource => cloneSource;
         internal Vector2 CloneOffset => cloneOffset;
 
@@ -113,7 +113,7 @@ namespace Yozolab.YoluPainter.Editor
             long available = document.ActiveStrokeBudgetBytes - stroke.RollbackBytes - bytes
                 - (long)dab.Pixels.Count * (160 + stroke.TargetCount * 4 + (strokeStencilFrame.HasValue ? 24 : 0));
             if (available <= 0) throw new InvalidOperationException(L.Tr("Surface sampling exceeded its memory budget. Stroke canceled."));
-            var destChart = preview.Geometry.BuildSamplingChart(destination, reach, maxTriangles: preview.BrushBudget.MaxTriangles, maxBytes: available);
+            var destChart = preview.PickingGeometry.BuildSamplingChart(destination, reach, maxTriangles: preview.BrushBudget.MaxTriangles, maxBytes: available);
             bytes += destChart.NominalBytes; available -= destChart.NominalBytes;
             SurfaceGeometry.SamplingChart sourceChart; Vector2 offset;
             if (tool == PaintTool.Smudge)
@@ -127,7 +127,7 @@ namespace Yozolab.YoluPainter.Editor
                 Vector3 tangent = Vector3.ProjectOnPlane(Vector3.right, destination.Normal);
                 if (tangent.sqrMagnitude < 1e-12f) tangent = Vector3.ProjectOnPlane(Vector3.up, destination.Normal);
                 tangent = Quaternion.FromToRotation(destination.Normal, source.Normal) * tangent;
-                sourceChart = preview.Geometry.BuildSamplingChart(source, reach, tangent, preview.BrushBudget.MaxTriangles, available);
+                sourceChart = preview.PickingGeometry.BuildSamplingChart(source, reach, tangent, preview.BrushBudget.MaxTriangles, available);
                 bytes += sourceChart.NominalBytes; offset = Vector2.zero;
             }
             var plan = new List<BrushMappedPixel>();

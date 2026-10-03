@@ -349,7 +349,7 @@ namespace Yozolab.YoluPainter.Editor
             return value;
         }
 
-        /// <summary>選んでいる値を出す箱。押すと open が呼ばれる（GenericMenu を rect の下に開く）。label があれば左に。</summary>
+        /// <summary>選んでいる値を出す箱。押すと open が呼ばれる（PaintMenu を rect の下に開く）。label があれば左に。</summary>
         public static void Dropdown(Rect r, string label, string value, Action<Rect> open, string tooltip = null, bool enabled = true, float labelWidth = 0)
         {
             var box = r;
@@ -372,7 +372,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             Dropdown(r, label, name(value), box =>
             {
-                var menu = new GenericMenu();
+                var menu = new PaintMenu();
                 foreach (var v in values) { var item = v; menu.AddItem(new GUIContent(name(item)), Equals(item, value), () => changed(item)); }
                 menu.DropDown(box);
             }, null, enabled, labelWidth);
@@ -436,20 +436,21 @@ namespace Yozolab.YoluPainter.Editor
             else Debug.LogWarning("YoluPainter: Unity's color picker could not be opened.");
         }
 
-        /// <summary>メニューバー: 項目の名前を並べ、押した項目の rect で open を呼ぶ（GenericMenu を下に開く）。</summary>
-        public static void MenuBar(Rect r, string[] titles, Action<int, Rect> open)
+        /// <summary>自前メニューのバー。開いている見出しを強調し、ホバーで隣へ移る。</summary>
+        public static void MenuBar(Rect r, string[] titles, PaintMenuBar bar)
         {
-            Fill(r, PaintTheme.MenuBg);
-            HLine(r.x, r.xMax, r.yMax - 1, PaintTheme.Border);
-            float x = r.x + 6;
+            Fill(r, PaintTheme.MenuBg); HLine(r.x, r.xMax, r.yMax - 1, PaintTheme.Border);
+            float x = r.x + 6; bar.ScreenRects = new Rect[titles.Length];
             for (int i = 0; i < titles.Length; i++)
             {
-                float w = PaintTheme.Menu.CalcSize(new GUIContent(titles[i])).x + 18;
-                var item = new Rect(x, r.y + 2, w, r.height - 4);
-                if (Clickable(item, out bool pressed, out bool hover)) open(i, new Rect(item.x, r.yMax - 2, item.width, 0));
-                if (pressed || hover) Rounded(item, PaintTheme.ControlHover, 3);
-                Text(item, titles[i], PaintTheme.Menu);
-                x += w;
+                float width = PaintTheme.Menu.CalcSize(new GUIContent(titles[i])).x + 18;
+                var item = new Rect(x, r.y + 2, width, r.height - 4);
+                bar.ScreenRects[i] = GUIUtility.GUIToScreenRect(item);
+                bool hover = item.Contains(E.mousePosition) && GUI.enabled;
+                if (E.type == EventType.MouseMove && hover && bar.Opened && bar.Selected != i) bar.Open(i);
+                if (E.type == EventType.MouseDown && E.button == 0 && hover) { E.Use(); bar.Open(i, true); }
+                if (hover || bar.Opened && bar.Selected == i) Rounded(item, PaintTheme.ControlHover, 3);
+                Text(item, titles[i], PaintTheme.Menu); x += width;
             }
         }
 

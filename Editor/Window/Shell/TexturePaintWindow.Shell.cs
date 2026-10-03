@@ -190,7 +190,7 @@ namespace Yozolab.YoluPainter.Editor
                     else
                     {
                         PaintGui.Text(Next(36), L.Tr("From"), PaintTheme.Label);
-                        PaintGui.ColorSwatch(Next(36), brush.color, c => brush.color = c, true, L.Tr("Start color (the brush color)"));
+                        PaintGui.ColorSwatch(Next(36), brush.color, c => SetBrushColor(c), false, L.Tr("Start color (the brush color)"));
                         PaintGui.Text(Next(22), L.Tr("To"), PaintTheme.Label);
                         PaintGui.ColorSwatch(Next(36), gradientTo, c => gradientTo = c, true, L.Tr("End color"));
                     }
@@ -237,7 +237,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void OpenPresetMenu(Rect at)
         {
-            var menu = new GenericMenu();
+            var menu = new PaintMenu();
             foreach (var preset in BuiltInBrushes.Presets) { var p = preset; menu.AddItem(new GUIContent(p.Category + "/" + p.Name), brush.presetId == p.Id, () => ApplyPreset(p)); }
             if (PainterSettings.ShowBundledBrushes)
                 foreach (var preset in BundledBrushSets.Presets) { var p = preset; menu.AddItem(new GUIContent(p.Category + "/" + p.Name), brush.presetId == p.Id, () => ApplyPreset(p)); }
@@ -279,19 +279,19 @@ namespace Yozolab.YoluPainter.Editor
             }
             // 描画色と背景色（Photoshop の配置: 描画色が左上、背景色が右下に重なる。右上に入れ替え、左下に初期設定）
             float bottom = r.yMax - 10, left = r.x + 6;
-            var front = new Rect(left, bottom - 42, 22, 22);
-            var back = new Rect(left + 11, bottom - 31, 22, 22);
-            PaintGui.ColorSwatch(back, brush.secondaryColor, c => brush.secondaryColor = c, true, L.Tr("Background color"));
+            var front = new Rect(left + 2, bottom - 30, 18, 18);
+            var back = new Rect(left + 11, bottom - 21, 18, 18);
+            PaintGui.ColorSwatch(back, SubBrushColor, c => { SelectBrushColor(true); SetBrushColor(c); }, false, L.Tr("Background color"));
             PaintGui.Fill(new Rect(front.x - 1, front.y - 1, front.width + 2, front.height + 2), PaintTheme.PanelBg);
-            PaintGui.ColorSwatch(front, brush.color, c => brush.color = c, true, L.Tr("Foreground color (the brush value)"));
-            if (PaintGui.IconButton(new Rect(left + 21, bottom - 56, 14, 14), "swap_horiz", L.Tr("Swap colors (X)"), false, true, 12)) SwapColors();
+            PaintGui.ColorSwatch(front, MainBrushColor, c => { SelectBrushColor(false); SetBrushColor(c); }, false, L.Tr("Foreground color (the brush value)"));
+            if (PaintGui.IconButton(new Rect(left + 21, bottom - 45, 14, 14), "swap_horiz", L.Tr("Swap colors (X)"), false, true, 12)) SwapColors();
             if (PaintGui.IconButton(new Rect(left - 2, bottom - 8, 14, 14), "restart_alt", L.Tr("Default colors (D)"), false, true, 11)) DefaultColors();
         }
 
         /// <summary>ツールのボタンの右クリック: アイコンを描き手の画像に差し替える（CLIP STUDIO のサブツールのアイコンのように）。</summary>
         void ToolIconMenu(ToolSlot slot)
         {
-            var menu = new GenericMenu(); string id = slot.Id;
+            var menu = new PaintMenu(); string id = slot.Id;
             menu.AddItem(new GUIContent(L.Tr("Change Icon…")), false, () => PickToolIcon(id, false));
             menu.AddItem(new GUIContent(L.Tr("Change Selected Icon…")), false, () => PickToolIcon(id, true));
             if (PainterToolIcons.HasUserIcon(id)) menu.AddItem(new GUIContent(L.Tr("Reset Icon")), false, () => TryAction(() => { PainterToolIcons.ResetUserIcon(id); message = L.Tr("The tool icon is back to the bundled one."); }));
@@ -308,19 +308,33 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         void SwapColors() { var c = brush.color; brush.color = brush.secondaryColor; brush.secondaryColor = c; Repaint(); }
-        void DefaultColors() { brush.color = Color.black; brush.secondaryColor = Color.white; Repaint(); }
+        void DefaultColors() { brush.color = brush.backgroundColorSelected ? Color.white : Color.black; brush.secondaryColor = brush.backgroundColorSelected ? Color.black : Color.white; Repaint(); }
 
         // ───────── 表示域の見出し ─────────
 
         internal Rect surfaceHeaderLabelForTests; internal float viewModeButtonsEndForTests;
         void DrawViewHeader()
         {
-            modelShowButtonForTests = canvasShowButtonForTests = surfaceHeaderLabelForTests = default;
+            modelShowButtonForTests = canvasShowButtonForTests = surfaceHeaderLabelForTests = compactViewButtonForTests = compactShadingButtonForTests = default;
             var bar = new Rect(viewAreaRect.x, viewAreaRect.y, viewAreaRect.width, 26);
             PaintGui.Fill(bar, PaintTheme.PanelHeader);
             PaintGui.HLine(bar.x, bar.xMax, bar.yMax - 1, PaintTheme.Border);
             float x = bar.x + 6;
-            foreach (var (mode, icon, tip) in new[] { (ViewMode.Canvas, "square", "2D Canvas (F1)"), (ViewMode.Model, "view_in_ar", "3D View (F2)"), (ViewMode.Split, "splitscreen_right", "2D + 3D (F3)") })
+            var modes = new[] { (mode: ViewMode.Canvas, icon: "square", tip: "2D Canvas (F1)"), (mode: ViewMode.Model, icon: "view_in_ar", tip: "3D View (F2)"), (mode: ViewMode.Split, icon: "splitscreen_right", tip: "2D + 3D (F3)") };
+            float firstWidth = canvasRect.width > 0 && (surfaceRect.width <= 0 || canvasRect.x < surfaceRect.x) ? canvasRect.width : surfaceRect.width;
+            if (firstWidth < 240)
+            {
+                // 両側にドックがある狭い画面では、配置の3ボタンを選択メニューへまとめ、各ビューの表示名が押せる幅を残す。
+                var button = new Rect(x, bar.y + 2, 26, 22); compactViewButtonForTests = button; var current = modes.First(m => m.mode == viewMode);
+                if (PaintGui.IconButton(button, current.icon, L.Tr(current.tip), false, true, 17))
+                {
+                    var menu = new PaintMenu();
+                    foreach (var choice in modes) { var mode = choice.mode; menu.AddItem(new GUIContent(L.Tr(choice.tip)), mode == viewMode, () => View = mode); }
+                    menu.DropDown(button);
+                }
+                x += 28;
+            }
+            else foreach (var (mode, icon, tip) in modes)
             {
                 if (PaintGui.IconButton(new Rect(x, bar.y + 2, 26, 22), icon, L.Tr(tip), viewMode == mode, true, 17)) View = mode;
                 x += 28;

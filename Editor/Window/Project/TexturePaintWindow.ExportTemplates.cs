@@ -83,7 +83,7 @@ namespace Yozolab.YoluPainter.Editor
                 + (notes.Count > 0 ? " " + string.Join(" ", notes) : "") + " " + L.Tr("No material was changed.");
         }
 
-        void ExportTemplateMenuItems(GenericMenu m)
+        void ExportTemplateMenuItems(PaintMenu m)
         {
             foreach (var template in ExportTemplate.BuiltIn)
             {

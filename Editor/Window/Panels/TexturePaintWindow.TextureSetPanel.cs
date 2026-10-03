@@ -25,7 +25,7 @@ namespace Yozolab.YoluPainter.Editor
             return r;
         }
         float SetListHeight => Mathf.Min(Mathf.Max(1, textureSets.Count), SetRowsShown) * SetRowHeight;
-        float TextureSetHeight => 8 + 26 + 6 + SetListHeight + 6 + 26 + 8 + Mathf.Ceil(Channels.Length / (float)ChannelColumns) * (ChannelChipHeight + 4) + 4;
+        float TextureSetHeight => 8 + 26 + 6 + SetListHeight + 6 + MeshVisibilityHeight + 26 + 8 + Mathf.Ceil(Channels.Length / (float)ChannelColumns) * (ChannelChipHeight + 4) + 4;
         static string ChannelIcon(PaintChannel c)
         {
             switch (c)
@@ -57,6 +57,7 @@ namespace Yozolab.YoluPainter.Editor
                 EditorGUIUtility.ShowObjectPicker<GameObject>(model, false, "t:Model t:Prefab", ModelPickerId);
             // テクスチャセットの一覧
             DrawTextureSetList(rows.Row(SetListHeight, 6));
+            DrawMeshVisibility(rows);
             // ベイクとプロジェクト設定
             row = rows.Row(26, 8);
             var bakeRect = SetSpot("textureSet.bake", new Rect(row.x, row.y, row.width - 30, row.height));
@@ -93,19 +94,26 @@ namespace Yozolab.YoluPainter.Editor
             SyncCurrentSet();
             var e = Event.current;
             float content = textureSets.Count * SetRowHeight;
-            bool overflow = content > list.height + .5f;
             setListScroll.y = Mathf.Clamp(setListScroll.y, 0, Mathf.Max(0, content - list.height));
             PaintGui.Rounded(list, PaintTheme.MenuBg, 4);
-            TextureSet clicked = null;
+            TextureSet clicked = null; TextureSet eyeClicked = null; bool eyeAlt = false;
+            SetSpot("textureSets.scrollbar", PaintGui.ScrollTrack(list));
+            if (PaintGui.Scrollbar(list, ref setListScroll, content, 12)) Repaint();
             PaintGui.BeginScroll(list, setListScroll);
             for (int i = 0; i < textureSets.Count; i++)
             {
                 var set = textureSets[i];
-                var row = new Rect(0, i * SetRowHeight, list.width - (overflow ? 8 : 0), SetRowHeight);
+                var row = new Rect(0, i * SetRowHeight, PaintGui.ScrollContentWidth(list, content), SetRowHeight);
                 bool current = set == currentSet, hover = GUI.enabled && row.Contains(e.mousePosition) && new Rect(0, setListScroll.y, list.width, list.height).Contains(e.mousePosition);
                 if (current) PaintGui.Rounded(new Rect(row.x + 2, row.y + 2, row.width - 4, row.height - 4), PaintTheme.AccentDim, 4);
                 else if (hover) PaintGui.Rounded(new Rect(row.x + 2, row.y + 2, row.width - 4, row.height - 4), PaintTheme.ControlHover, 4);
-                var thumb = new Rect(row.x + 5, row.y + 4, 22, 22);
+                var eye = new Rect(row.x + 2, row.y + 3, 24, 24);
+                bool setVisible = TextureSetVisible(set.Id);
+                PaintGui.Icon(eye, setVisible ? "visibility" : "visibility_off", setVisible ? PaintTheme.Text : PaintTheme.TextDisabled, 16);
+                PaintGui.Tooltip(eye, L.Tr("Toggle texture set visibility. Alt-click shows only this set."));
+                if (hover && eye.Contains(e.mousePosition) && e.type == EventType.MouseDown && e.button == 0 && !PanelsLocked)
+                { eyeClicked = set; eyeAlt = e.alt; e.Use(); }
+                var thumb = new Rect(row.x + 29, row.y + 4, 22, 22);
                 if (e.type == EventType.Repaint) DrawThumbnail(thumb, SetThumbnail(set));
                 bool missing = preview.HasModel && !set.InModel;
                 string detail = set.Document.Width + (set.Document.Width == set.Document.Height ? "²" : " × " + set.Document.Height);
@@ -120,17 +128,16 @@ namespace Yozolab.YoluPainter.Editor
                     + (missing ? "\n" + L.Tr("The loaded model does not use this texture set's material; it is not shown in 3D. Choose its material in File ▸ Project Configuration.") : "")
                     + (current ? "" : "\n" + L.Tr("Click to paint this texture set."));
                 PaintGui.Tooltip(row, tip);
-                if (e.type == EventType.MouseDown && e.button == 0 && hover && !current) clicked = set;
+                if (e.type == EventType.MouseDown && e.button == 0 && hover && !eye.Contains(e.mousePosition) && !current) clicked = set;
             }
             PaintGui.EndScroll();
             for (int i = 0; i < textureSets.Count; i++)
             {
                 var visible = new Rect(list.x, list.y + i * SetRowHeight - setListScroll.y, list.width, SetRowHeight);
+                if (visible.y >= list.y && visible.yMax <= list.yMax) SetSpot("visibility.set." + i, new Rect(visible.x + 2, visible.y + 3, 24, 24));
                 if (visible.yMax > list.y && visible.y < list.yMax) SetSpot("textureSet." + i, Rect.MinMaxRect(visible.x, Mathf.Max(visible.y, list.y), visible.xMax, Mathf.Min(visible.yMax, list.yMax)));
             }
-            if (e.type == EventType.ScrollWheel && list.Contains(e.mousePosition) && overflow)
-            { setListScroll.y = Mathf.Clamp(setListScroll.y + e.delta.y * 12, 0, content - list.height); e.Use(); Repaint(); }
-            if (overflow) PaintGui.Rounded(new Rect(list.xMax - 6, list.y + list.height * setListScroll.y / content, 4, list.height * list.height / content), PaintTheme.ControlActive, 2);
+            if (eyeClicked != null) SetTextureSetVisible(eyeClicked.Id, !TextureSetVisible(eyeClicked.Id), eyeAlt);
             if (clicked != null) { e.Use(); TryAction(() => SwitchTextureSet(clicked.Id)); }
         }
 

@@ -31,6 +31,10 @@
 - `SurfaceGeometry.TryFindClosestPoint(..., material)` searches only that material group's triangles when `material` is 0 or more.
 - `SurfacePathRebind.TryRebind(path, from, to, material, …)` moves a path's points to another snapshot (the model swap): each point's 3D position on `from` goes to the nearest point of `to` on a triangle of that material group facing the same way, within the larger of the path brush's radius and 1% of `from`'s diagonal; one point that cannot be placed refuses the whole path (the window then rasterizes it). Positions are compared in both snapshots' space (world minus the root), so the two models are assumed to be placed alike; a posed snapshot is compared in its pose.
 
+## 表示の目
+
+`SetVisibility` は所有する描画用メッシュのサブメッシュのインデックスだけを空にし、レンダラー単位なら描画を無効にする。入力元のアセットは変えない。描画と影のキャッシュは可視性の世代を鍵に含める。`PickingGeometry` の `VisibleView` は三角形番号・BVH・連結性を元の `Geometry` と共有し、レイ・最短点・ダブの受け手と遮蔽物から非表示面を除く。可視性レイのキャッシュも表示の変更を区別する。`Geometry` と属性は常に全体のままで、ベイクと保存したパスの再評価は目の影響を受けない。ポーズで属性を更新する際も、隠れた面の法線と接線を全体から計算する。
+
 ## What surface projection actually does
 
 1. A median BVH finds triangle intersections on the same transformed geometry that is rendered.

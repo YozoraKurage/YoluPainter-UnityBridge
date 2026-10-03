@@ -150,7 +150,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void OnEnable() { wantsMouseMove = true; L.LanguageChanged += Repaint; EditorApplication.update += TickPreparation; }
         void TickPreparation() { if (preview != null && (preview.IsPreparing || preview.PreparationCanceled)) Repaint(); }
-        void OnDisable() { EditorApplication.update -= TickPreparation; L.LanguageChanged -= Repaint; preview?.Dispose(); preview = null; }
+        void OnDisable() { PaintMenuSession.CloseFor(this); EditorApplication.update -= TickPreparation; L.LanguageChanged -= Repaint; preview?.Dispose(); preview = null; }
 
         /// <summary>モデルが変わったら読み直す（マテリアルの名前と注意のため）。新規では選んだマテリアルを全部に戻す。設定では、セットの
         /// マテリアルを新しいモデルのマテリアルに付け直す（最初に開いたときは、ウィンドウと同じモデルなので付け直さない）。</summary>
@@ -212,6 +212,7 @@ namespace Yozolab.YoluPainter.Editor
         void OnGUI()
         {
             var e = Event.current;
+            if (PaintMenuSession.HandleOwnerEvent(this, e)) return;
             if (e.type == EventType.KeyDown) editingText = GUIUtility.keyboardControl != 0;
             if (e.type == EventType.MouseMove) Repaint();
             if (e.type == EventType.KeyDown && e.keyCode == KeyCode.Escape && GUIUtility.keyboardControl == 0) { Close(); e.Use(); return; }
@@ -307,9 +308,9 @@ namespace Yozolab.YoluPainter.Editor
             if (count == 0) { PaintGui.Text(rows.Row(18, 2), L.Tr("One texture set (no model yet)."), PaintTheme.LabelDim); return; }
             int chosen = Settings.Materials == null ? count : Settings.Materials.Count(s => s < count);
             var list = rows.Row(Mathf.Min(count, SetRowsShown) * SetRow);
-            ScrollList(list, count, i =>
+            ScrollList(list, count, (i, width) =>
             {
-                var row = new Rect(0, i * SetRow, list.width - (count > SetRowsShown ? 8 : 0), SetRow - 2);
+                var row = new Rect(0, i * SetRow, width, SetRow - 2);
                 bool on = Settings.Materials == null || Settings.Materials.Contains(i);
                 string name = MaterialName(groups[i]);
                 float nameWidth = Mathf.Min(PaintGui.TextWidth(name, PaintTheme.Label), (row.width - 23) * .55f);
@@ -337,10 +338,10 @@ namespace Yozolab.YoluPainter.Editor
             PaintGui.Text(rows.Row(18), L.Tr("Texture Sets"), PaintTheme.Header);
             var list = rows.Row(Mathf.Max(1, Mathf.Min(sets.Count, SetRowsShown - 1)) * SetRow);
             TextureSetDraft remove = null;
-            ScrollList(list, sets.Count, i =>
+            ScrollList(list, sets.Count, (i, width) =>
             {
                 var d = sets[i];
-                var row = new Rect(0, i * SetRow, list.width - (sets.Count > SetRowsShown - 1 ? 8 : 0), SetRow - 2);
+                var row = new Rect(0, i * SetRow, width, SetRow - 2);
                 var removeRect = new Rect(row.xMax - 22, row.y, 22, row.height);
                 var materialRect = new Rect(removeRect.x - 4 - 120, row.y, 120, row.height);
                 var sizeRect = new Rect(materialRect.x - 4 - 80, row.y, 80, row.height);
@@ -351,7 +352,7 @@ namespace Yozolab.YoluPainter.Editor
                 string shown = known ? MaterialName(groups[d.Material]) : groups.Count == 0 ? "—" : L.Tr("not in this model");
                 PaintGui.FitDropdown(materialRect, null, shown, at =>
                 {
-                    var menu = new GenericMenu();
+                    var menu = new PaintMenu();
                     for (int g = 0; g < groups.Count; g++)
                     {
                         int material = g; bool taken = sets.Any(o => o != d && o.Material == material);
@@ -408,7 +409,7 @@ namespace Yozolab.YoluPainter.Editor
             string tip = d.Id == Guid.Empty ? L.Tr("Size of the new texture set") : L.Tr("Size of this texture set (now {0} × {1}). A new size resamples its layers when you apply.", d.CurrentWidth, d.CurrentHeight);
             PaintGui.FitDropdown(r, null, text, at =>
             {
-                var menu = new GenericMenu();
+                var menu = new PaintMenu();
                 bool standard = d.CurrentWidth == d.CurrentHeight && NewProjectSettings.Resolutions.Contains(d.CurrentWidth);
                 if (d.Id != Guid.Empty && !standard)
                     menu.AddItem(new GUIContent(d.CurrentWidth + " × " + d.CurrentHeight + " (" + L.TrIn("size", "current") + ")"), w == d.CurrentWidth && h == d.CurrentHeight, () => { d.Width = d.CurrentWidth; d.Height = d.CurrentHeight; error = null; });
@@ -423,18 +424,15 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>行の一覧（多ければスクロール）。draw(i) は一覧の中の座標で描く。</summary>
-        void ScrollList(Rect viewport, int count, Action<int> draw)
+        void ScrollList(Rect viewport, int count, Action<int, float> draw)
         {
             float content = count * SetRow;
             setScroll.y = Mathf.Clamp(setScroll.y, 0, Mathf.Max(0, content - viewport.height));
+            if (PaintGui.Scrollbar(viewport, ref setScroll, content, 12)) Repaint();
             PaintGui.BeginScroll(viewport, setScroll);
-            for (int i = 0; i < count; i++) draw(i);
+            for (int i = 0; i < count; i++) draw(i, PaintGui.ScrollContentWidth(viewport, content));
             PaintGui.EndScroll();
             var e = Event.current;
-            if (e.type == EventType.ScrollWheel && viewport.Contains(e.mousePosition) && content > viewport.height)
-            { setScroll.y = Mathf.Clamp(setScroll.y + e.delta.y * 12, 0, content - viewport.height); e.Use(); Repaint(); }
-            if (content > viewport.height + .5f)
-                PaintGui.Rounded(new Rect(viewport.xMax - 5, viewport.y + viewport.height * setScroll.y / content, 4, viewport.height * viewport.height / content), PaintTheme.ControlActive, 2);
         }
 
         void DrawModelSummary(Rect r)

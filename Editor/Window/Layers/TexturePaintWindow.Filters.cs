@@ -110,7 +110,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>フィルターを足すメニュー。断られるもの（チャンネルの型・マスク）は理由を添えて押せない項目にする。</summary>
         void ShowFilterMenu(Rect at, Guid layerId, FilterTarget target)
         {
-            var menu = new GenericMenu();
+            var menu = new PaintMenu();
             foreach (var (label, settings, why) in FilterChoices(layerId, target))
             {
                 if (why == null) menu.AddItem(new GUIContent(label), false, () => { AddFilter(target, settings); Repaint(); });

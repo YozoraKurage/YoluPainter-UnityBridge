@@ -53,8 +53,10 @@ namespace Yozolab.YoluPainter.Editor
                 float headHeight = source == null ? r.height : Mathf.Min(200, Mathf.Max(48, r.height - 64 - 96));
                 var header = new Rect(r.x, r.y, r.width, headHeight);
                 MaterialSpot("material.header", header);
-                var rows = new UiRows(new Rect(0, 0, r.width - 16, materialHeaderHeight), 8);
-                materialHeaderScroll = GUI.BeginScrollView(header, materialHeaderScroll, new Rect(0, 0, r.width - 16, materialHeaderHeight), false, false, GUIStyle.none, GUI.skin.verticalScrollbar);
+                var rows = new UiRows(new Rect(0, 0, PaintGui.ScrollContentWidth(header, materialHeaderHeight), materialHeaderHeight), 8);
+                MaterialSpot("material.scrollbar", PaintGui.ScrollTrack(header));
+                if (PaintGui.Scrollbar(header, ref materialHeaderScroll, materialHeaderHeight)) Repaint();
+                PaintGui.BeginScroll(header, materialHeaderScroll);
                 var binding = source != null ? preview.MaterialBinding(CurrentFirstSlot) : null;
                 try
                 {
@@ -81,7 +83,7 @@ namespace Yozolab.YoluPainter.Editor
                 finally
                 {
                     if (Event.current.type == EventType.Repaint && !Mathf.Approximately(materialHeaderHeight, rows.Used + 4)) { materialHeaderHeight = rows.Used + 4; Repaint(); }
-                    GUI.EndScrollView();
+                    PaintGui.EndScroll();
                 }
                 DrawMaterialFooter(new Rect(r.x + PaintTheme.Padding, header.yMax + 4, r.width - 2 * PaintTheme.Padding, 52), source);
                 float top = header.yMax + 64;

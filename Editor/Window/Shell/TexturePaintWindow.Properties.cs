@@ -51,9 +51,9 @@ namespace Yozolab.YoluPainter.Editor
                 tab = DrawPropertyTabs(new Rect(r.x, r.y, r.width, PropertyTabStripHeight), context, tabs, tab);
                 r = new Rect(r.x, r.y + PropertyTabStripHeight, r.width, Mathf.Max(0, r.height - PropertyTabStripHeight));
             }
-            bool overflow = propertiesContentHeight > r.height + .5f;
-            var view = new Rect(0, 0, r.width - (overflow ? 8 : 0), Mathf.Max(propertiesContentHeight, r.height));
+            var view = new Rect(0, 0, PaintGui.ScrollContentWidth(r, propertiesContentHeight), Mathf.Max(propertiesContentHeight, r.height));
             propertiesScroll.y = Mathf.Clamp(propertiesScroll.y, 0, Mathf.Max(0, propertiesContentHeight - r.height));
+            if (PaintGui.Scrollbar(r, ref propertiesScroll, propertiesContentHeight, 14)) Repaint();
             PaintGui.BeginScroll(r, propertiesScroll);
             var rows = new UiRows(new Rect(0, 0, view.width, 1e6f), 0);
             DrawPropertyBody(rows, context, routes, tabs, tab);
@@ -61,9 +61,6 @@ namespace Yozolab.YoluPainter.Editor
             var measuring = Event.current.type;
             if ((measuring == EventType.Repaint || measuring == EventType.Layout) && Mathf.Abs(rows.Used - propertiesContentHeight) > .5f) { propertiesContentHeight = rows.Used; if (measuring == EventType.Repaint) Repaint(); }
             PaintGui.EndScroll();
-            if (Event.current.type == EventType.ScrollWheel && r.Contains(Event.current.mousePosition))
-            { propertiesScroll.y = Mathf.Clamp(propertiesScroll.y + Event.current.delta.y * 14, 0, Mathf.Max(0, propertiesContentHeight - r.height)); Event.current.Use(); Repaint(); }
-            if (overflow) PaintGui.Rounded(new Rect(r.xMax - 6, r.y + r.height * propertiesScroll.y / propertiesContentHeight, 4, r.height * r.height / propertiesContentHeight), PaintTheme.ControlActive, 2);
         }
 
         /// <summary>テスト用: プロパティの欄を、スクロールせずに area の幅で上から描く（タブの帯も）。使った高さ。</summary>

@@ -125,11 +125,11 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 shadowCasters.Clear();
                 foreach (var (renderer, _) in slotRenderers)
                 {
-                    if (renderer == null) continue;
+                    if (renderer == null || !renderer.enabled) continue;
                     var filter = renderer.GetComponent<MeshFilter>();
                     if (filter != null && filter.sharedMesh != null) shadowCasters.Add((filter.sharedMesh, renderer.transform.localToWorldMatrix));
                 }
-                try { shadowActive = shadowMap.Update(shadowCasters, Bounds, s.LightDirection, revision); if (!shadowActive) displayNotes.Add(shadowMap.Problem); }
+                try { shadowActive = shadowMap.Update(shadowCasters, Bounds, s.LightDirection, unchecked(revision * 397 + (int)visibilityVersion)); if (!shadowActive) displayNotes.Add(shadowMap.Problem); }
                 catch (Exception ex) { displayNotes.Add("The shadow map could not be drawn: " + ex.Message); }
             }
             // 中立の材料: 環境か影を使うあいだだけ、それを読むシェーダー（PreviewSurfaceLit）に替える。使えなければ見せずに知らせる
@@ -214,7 +214,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 if (environmentActive) overlay.SetVectorArray("_YPSH", environment.ShaderSH);
                 foreach (var (renderer, slots) in slotRenderers)
                 {
-                    if (renderer == null) continue;
+                    if (renderer == null || !renderer.enabled) continue;
                     var filter = renderer.GetComponent<MeshFilter>(); var mesh = filter != null ? filter.sharedMesh : null;
                     if (mesh == null) continue;
                     for (int sub = 0; sub < slots.Length && sub < mesh.subMeshCount; sub++)

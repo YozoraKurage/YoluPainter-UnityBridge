@@ -18,7 +18,7 @@ namespace Yozolab.YoluPainter.Editor
         internal IPainterSession Session => pluginSession ?? (pluginSession = new PluginSession(this));
 
         /// <summary>メニューに入れるプラグインのコマンド（区切りの後ろ）。</summary>
-        internal void AddPluginCommands(GenericMenu menu, string menuName)
+        internal void AddPluginCommands(PaintMenu menu, string menuName)
         {
             var commands = PainterPluginRegistry.CommandsIn(menuName).ToList();
             if (commands.Count == 0) return;

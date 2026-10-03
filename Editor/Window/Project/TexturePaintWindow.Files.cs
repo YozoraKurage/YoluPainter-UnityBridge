@@ -14,8 +14,8 @@ namespace Yozolab.YoluPainter.Editor
     /// 全部のテクスチャセットを同じ並び（.ylp の形式 3: project.json と sets/&lt;ID&gt;/）で書き、同じ <see cref="YlpFormat.Open"/> で読む。</summary>
     public sealed partial class TexturePaintWindow
     {
-        /// <summary>view.json: モデル（GUID）と選んだチャンネル。形式 2 までの materialSlot は project.json に移った（読まない・書かない）。</summary>
-        [Serializable] sealed class ViewState { public string modelAssetGuid; public int selectedChannel; }
+        /// <summary>view.json: モデル（GUID）・選んだチャンネル・任意の可視性。形式 2 までの materialSlot は project.json に移った（読まない・書かない）。</summary>
+        [Serializable] sealed class ViewState { public string modelAssetGuid; public int selectedChannel; public VisibilityState visibility; }
         /// <summary>開いた .ylp の中身の形式（新しく作った・取り込んだものは今の形式）と、最初に作ったアプリ（形式 1 のファイルは分からないので null）。</summary>
         int openedFormat=YlpFormat.Current; YlpWriterInfo projectCreatedBy;
         internal int OpenedFormat=>openedFormat;
@@ -90,7 +90,7 @@ namespace Yozolab.YoluPainter.Editor
                     if(set.Document.Selection!=null)files.Add(YlpFormat.SetEntry(set.Id,SelectionBinary.EntryName),SelectionBinary.Write(set.Document.Selection));
                 }
                 files.Add(YlpFormat.ProjectName,YlpFormat.WriteProject(ProjectInfo()));
-                var state=new ViewState{modelAssetGuid=model==null?"":AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(model)),selectedChannel=(int)channel};
+                var state=new ViewState{modelAssetGuid=model==null?"":AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(model)),selectedChannel=(int)channel,visibility=CaptureVisibility()};
                 files.Add(YlpContent.ViewName,System.Text.Encoding.UTF8.GetBytes(JsonUtility.ToJson(state,true)));
                 files.Add(YlpContent.BrushName,System.Text.Encoding.UTF8.GetBytes(JsonUtility.ToJson(brush,true)));
                 var thumbnail=ProjectThumbnail(); if(thumbnail!=null)files.Add(YlpContent.ThumbnailName,thumbnail);
@@ -160,15 +160,24 @@ namespace Yozolab.YoluPainter.Editor
                 if(files.TryGetValue(YlpContent.BrushName,out var preset))
                 {
                     // 状態のエントリ: 読めなければ今のブラシのまま開いて知らせる（正本は読めているので開くのを止めない）
-                    try{brush=ReadBrushState(System.Text.Encoding.UTF8.GetString(preset));}
+                    try{brush=ReadBrushState(System.Text.Encoding.UTF8.GetString(preset));var migration=BrushAlphaMigrationNote();if(migration!=null)notes.Add(migration);}
                     catch(Exception ex) when(ex is InvalidDataException||ex is ArgumentException){notes.Add("The saved brush settings could not be read ("+ex.Message+"); the brush keeps its current settings.");}
                 }
                 if(files.TryGetValue(YlpContent.ViewName,out var view))
                 {
-                    var state=JsonUtility.FromJson<ViewState>(System.Text.Encoding.UTF8.GetString(view));channel=(PaintChannel)state.selectedChannel;
+                    try
+                    {
+                    if (view.Length > 262144) throw new InvalidDataException("View state exceeds its budget.");
+                    var state=JsonUtility.FromJson<ViewState>(new System.Text.UTF8Encoding(false, true).GetString(view));
+                    if (state == null || !Enum.IsDefined(typeof(PaintChannel), state.selectedChannel)) throw new InvalidDataException("Invalid view state.");
+                    channel=(PaintChannel)state.selectedChannel;
                     var loaded=AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(state.modelAssetGuid));
                     if(loaded!=null){model=loaded;preview.Load(model);}
                     else if(!String.IsNullOrEmpty(state.modelAssetGuid))notes.Add("Model asset is unavailable; assign it explicitly.");
+                    RestoreVisibility(state.visibility);
+                    }
+                    catch(Exception ex) when(ex is ArgumentException || ex is InvalidDataException || ex is System.Text.DecoderFallbackException)
+                    { ResetVisibility(); notes.Add(L.Tr("The saved view state could not be restored; all meshes are shown.") + " " + ex.Message); }
                 }
                 SyncCurrentSet();
                 // セットの鍵を読んだモデルのマテリアルに結び付ける（形式 5 までのスロットの番号は、そのスロットのマテリアルに読み替える。

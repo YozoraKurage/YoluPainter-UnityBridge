@@ -170,7 +170,7 @@ namespace Yozolab.YoluPainter.Editor
         }
         void ShowGeneratorMenu(Rect at, Guid layerId, FilterTarget target)
         {
-            var menu = new GenericMenu();
+            var menu = new PaintMenu();
             foreach (var (label, type, why) in GeneratorChoices(layerId, target))
             {
                 if (why == null) menu.AddItem(new GUIContent(label), false, () => { AddGenerator(target, type); Repaint(); });

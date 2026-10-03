@@ -89,7 +89,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             PaintGui.FitDropdown(r, label, name(value), at =>
             {
-                var menu = new GenericMenu();
+                var menu = new PaintMenu();
                 foreach (var v in values) { var item = v; menu.AddItem(new GUIContent(name(item)), Equals(item, value), () => { changed(item); Repaint(); }); }
                 menu.DropDown(at);
             }, tooltip, enabled && GUI.enabled, DropdownLabelWidth);

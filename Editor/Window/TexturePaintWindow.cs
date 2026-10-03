@@ -73,7 +73,9 @@ namespace Yozolab.YoluPainter.Editor
 
         void OnEnable()
         {
+            var rememberedVisibility = visibility;
             MigrateSymmetryState();
+            UpgradeBrushState(brush); NormalizeBrushAlpha(brush);
             minSize = new Vector2(980,640); wantsMouseMove = true; wantsMouseEnterLeaveWindow = true; L.LanguageChanged += Repaint; PainterToolIcons.Changed += Repaint;
             compositor = CreateCompositor(); preview = new IsolatedModelPreview(); preview.Loaded += PreviewLoaded; ApplyPreviewFrameRate(); // 3D を描く回数の上限（Model/TexturePaintWindow.RedrawRate.cs）
             if (materialEdits == null) materialEdits = new PreviewMaterialEdits();
@@ -91,10 +93,12 @@ namespace Yozolab.YoluPainter.Editor
             if (document==null) CreateDocument(resolution);
             BindDocument(); RestorePenInput();
             if (model!=null) TryAction(()=>{preview.Load(model);ResolveSetMaterials();});
+            visibility = rememberedVisibility ?? new VisibilityState(); appliedVisibility = null; ApplyVisibility();
             EditorApplication.update+=Tick; PainterSettings.Changed+=SettingsChanged; EditorApplication.projectChanged+=OnUnityProjectChanged; HookResources();
             AssemblyReloadEvents.beforeAssemblyReload+=BeforeReload;
             EditorApplication.playModeStateChanged+=PlayModeChanged;
             CheckRecoveryStorage();
+            NotifyBrushAlphaMigration();
         }
         /// <summary>設定のメモリ予算をドキュメントに入れる。今の画素がすでに予算を超えているときは画素を捨てず、予算を今の量まで
         /// 広げてそう知らせる。</summary>
@@ -143,9 +147,9 @@ namespace Yozolab.YoluPainter.Editor
             projectPath=null; projectToken=null; savedRevision=-1; importedPsdPath=null; externalConflict=false; ResetCanvasView(); NewProjectRecord();
             ResetSetsBaseline(false);
         }
-        void OnLostFocus() { ClearPolygonFillHover(); pickHoverPointer = new Vector2(-100, -100); FinishStroke(false); CancelShapeDrag(); CancelGradientDrafts(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); ReleaseStencilInput(); preview?.CancelNavigation(); SaveRecovery(); }
-        void BeforeReload() { CancelSmartSave(); FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); CancelGradientDrafts(); EndLightingDrag(true); preview?.CancelNavigation(); preview?.CancelPreparation(); CaptureMaterialInspector(); DisposeMaterialInspector(); SaveRecoveryBeforeLifecycleChange(); }
-        void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ CancelSmartSave(); FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); CancelGradientDrafts(); SaveRecoveryBeforeLifecycleChange(); } }
+        void OnLostFocus() { menuAltPending = false; ClearPolygonFillHover(); pickHoverPointer = new Vector2(-100, -100); FinishStroke(false); CancelShapeDrag(); CancelGradientDrafts(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); ReleaseStencilInput(); preview?.CancelNavigation(); SaveRecovery(); }
+        void BeforeReload() { PaintMenuSession.CloseFor(this); CancelSmartSave(); FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); CancelGradientDrafts(); EndLightingDrag(true); preview?.CancelNavigation(); preview?.CancelPreparation(); CaptureMaterialInspector(); DisposeMaterialInspector(); SaveRecoveryBeforeLifecycleChange(); }
+        void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ PaintMenuSession.CloseFor(this); CancelSmartSave(); FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); CancelGradientDrafts(); SaveRecoveryBeforeLifecycleChange(); } }
         void OnDisable()
         {
             CancelSmartSave();
@@ -188,8 +192,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if(document==null) return;
             NoteNewAnchorIssues(); // キーの Undo・ドラッグの並べ替えなど TryAction を通らない編集の後も（文書が変わったときだけ見る）
-            var e=Event.current; var pointerAtStart=e.mousePosition; // 途中のクリップや 3D の描画の後でも同じ位置を使う
-            PaintMenuSession.HandleOwnerEvent(this, e);
+            var e=Event.current; if (HandleMenuInput(e)) return; var pointerAtStart=e.mousePosition; // 途中のクリップや 3D の描画の後でも同じ位置を使う
             // 診断がオフなら bool の判定だけ。オンのときはイベントが Use/座標変換される前に読み、最後に計器を重ねる。
             if(penInputEnabled)
             {
@@ -212,6 +215,7 @@ namespace Yozolab.YoluPainter.Editor
             // Repaint が来るので、その間の変更はまとめて 1 回で合成する。
             if(e.type==EventType.Repaint) CountRepaint(); // 描き直しの回数（RedrawRate.cs）
             if(e.type==EventType.Repaint && DisplayNeedsCompositing) RefreshDisplayForFrame(); // 時間で区切る。残りは次の描画へ（Compositing.cs）
+            ApplyVisibility();
             LayoutShell();
             SyncPolygonFillHover(); // ポインタの下の範囲の強調を、ツール・モデル・範囲の種類に合わせる（Tools/TexturePaintWindow.PolygonFill.cs）
             PaintGui.Fill(WindowRect,PaintTheme.WindowBg);
@@ -222,6 +226,7 @@ namespace Yozolab.YoluPainter.Editor
                 // 3D の描画（PreviewRenderUtility）の後はイベントのマウスの位置が (0,0) になっているので、外枠のマウスの乗った見た目のために戻す
                 if(Event.current!=null) Event.current.mousePosition=pointerAtStart;
             }
+            DrawHiddenModelNotice();
             DrawShell();
             DrawModelPreparation();
             if(surfaceRect.width>0){DrawSurfaceBrushCursor(pointerAtStart);DrawMirroredBrushCursor(pointerAtStart);} // 3D の描画の後に GUI の状態を戻してから重ねる

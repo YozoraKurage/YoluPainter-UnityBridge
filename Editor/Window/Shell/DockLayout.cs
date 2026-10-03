@@ -26,6 +26,8 @@ namespace Yozolab.YoluPainter.Editor
         public float weight = 1;
         /// <summary>別のウィンドウの位置（スクリーン座標。大きさが 0 なら持ち主の窓の脇に出す）。</summary>
         public Rect window;
+        /// <summary>true は Unity のレイアウトにドッキングできる普通の窓。false はいつも手前のユーティリティ窓。</summary>
+        public bool dockableWindow;
         /// <summary>別のウィンドウを閉じたときに戻る列と、その列の何番目か。</summary>
         public DockPlace home; public int homeIndex;
 
@@ -50,7 +52,7 @@ namespace Yozolab.YoluPainter.Editor
         static readonly Dictionary<string, string> TabbedWithAtFirst = new Dictionary<string, string> { { "textureSetSettings", "layers" } };
         public const float MinWidth = 220, MaxWidth = 560;
         /// <summary>保存の形式。0 は最初の形式（列ごとのパネルの ID の並びと、パネルごとの畳み・高さの比。<see cref="DockLayoutV0"/>）。</summary>
-        public const int CurrentVersion = 1;
+        public const int CurrentVersion = 2;
         public int version = CurrentVersion;
         public List<DockGroup> groups = new List<DockGroup>();
         public float leftWidth = 260, rightWidth = 300;
@@ -82,7 +84,10 @@ namespace Yozolab.YoluPainter.Editor
             var probe = JsonUtility.FromJson<VersionProbe>(json);
             if (probe == null) return Default();
             if (probe.version <= 0) return FromV0(JsonUtility.FromJson<DockLayoutV0>(json));
-            return (JsonUtility.FromJson<DockLayout>(json) ?? Default()).Normalized(); // 新しい版は、わかる所だけ読んで直す
+            var layout = JsonUtility.FromJson<DockLayout>(json) ?? Default();
+            // 版1で別窓だったものは普通の窓として戻す（既存のUnityレイアウトへのドッキングを保つ）。新しい切り離しは手前が既定。
+            if (probe.version == 1 && layout.groups != null) foreach (var group in layout.groups) if (group != null && group.Floating) group.dockableWindow = true;
+            return layout.Normalized();
         }
         [Serializable] sealed class VersionProbe { public int version; }
 
@@ -227,7 +232,7 @@ namespace Yozolab.YoluPainter.Editor
             var from = GroupOf(panel);
             if (from.panels.Count == 1) return FloatGroup(from.id, window);
             var g = Single(panel, DockPlace.Floating);
-            if (from.Floating) { g.home = from.home; g.homeIndex = from.homeIndex; }
+            if (from.Floating) { g.dockableWindow = from.dockableWindow; g.home = from.home; g.homeIndex = from.homeIndex; }
             else { g.home = from.place; g.homeIndex = Column(from.place).IndexOf(from) + 1; }
             Detach(from, panel);
             g.window = window;

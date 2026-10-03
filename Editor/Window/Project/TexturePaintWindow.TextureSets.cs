@@ -147,6 +147,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (next == null || next.Count == 0 || !next.Contains(current)) throw new ArgumentException("A project needs its current texture set.");
             DetachRecoveryForProjectChange();
+            visibility = new VisibilityState(); appliedVisibility = null;
             if (AbandonMeshBake()) message = L.Tr("The mesh-map bake was stopped because the document changed.");
             meshBakeOutcome = null; meshBakeSkipped.Clear(); meshMapView = MeshMapView.None;
             foreach (var set in textureSets) if (!next.Contains(set)) set.DisposeTextures();

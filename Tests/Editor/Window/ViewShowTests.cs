@@ -100,7 +100,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That((restored.ModelShow, restored.ModelShowMap), Is.EqualTo((TexturePaintWindow.ModelShowKind.MeshMap, MeshMapKind.AmbientOcclusion)));
             Assert.That(Pixels(restored.CanvasDisplayTexture)[0], Is.EqualTo(191).Within(1));
             var first = w.CurrentTextureSet;
-            w.AddTextureSet(1); PutMaps(w, .5, .1); w.RefreshPreviewTextures();
+            w.AddTextureSet(-1); PutMaps(w, .5, .1); w.RefreshPreviewTextures();
             Assert.That(Pixels(w.CanvasDisplayTexture)[0], Is.EqualTo(26).Within(1), "equal map revisions from another set do not reuse the first set's pixels");
             w.SwitchTextureSet(first.Id); w.RefreshPreviewTextures();
             Assert.That(Pixels(w.CanvasDisplayTexture)[0], Is.EqualTo(191).Within(1));

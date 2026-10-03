@@ -89,7 +89,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 throw new InvalidOperationException("The model snapshot changed. Set the source again.");
             if (!Finite(radius) || radius <= 0 || !Finite(anchor.Position) || !Finite(tangent)) throw new ArgumentOutOfRangeException(nameof(radius));
             var seed = triangles[anchor.TriangleIndex];
-            if (anchor.RendererIndex != seed.RendererIndex || anchor.MaterialSlot != seed.MaterialSlot) throw new InvalidOperationException("Surface binding does not match the current snapshot.");
+            if (!Visible(anchor.TriangleIndex) || anchor.RendererIndex != seed.RendererIndex || anchor.MaterialSlot != seed.MaterialSlot) throw new InvalidOperationException("Surface binding does not match the current snapshot.");
             Vector3 n = seed.Normal;
             Vector3 u = Vector3.ProjectOnPlane(tangent.sqrMagnitude > 0 ? tangent : Vector3.right, n);
             if (u.sqrMagnitude < 1e-12f) u = Vector3.ProjectOnPlane(Vector3.up, n);
@@ -109,7 +109,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 int current = queue.Dequeue(); var t = triangles[current]; var e = chart.Get(current);
                 foreach (int neighbor in adjacency[current])
                 {
-                    if (chart.Contains(neighbor)) continue;
+                    if (chart.Contains(neighbor) || !Visible(neighbor)) continue;
                     var nt = triangles[neighbor];
                     var oldWorld = new[] { t.A, t.B, t.C }; var oldFlat = new[] { e.A, e.B, e.C }; var newWorld = new[] { nt.A, nt.B, nt.C };
                     int a = -1, b = -1, na = -1, nb = -1;

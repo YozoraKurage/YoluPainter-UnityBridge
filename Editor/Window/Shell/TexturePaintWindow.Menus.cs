@@ -15,24 +15,8 @@ namespace Yozolab.YoluPainter.Editor
         {
             // プラグインが「Plugins」に入れるコマンドがあれば、その名前のメニューを最後に足す
             var titles = PainterPluginRegistry.HasPluginsMenu ? MenuTitles.Append(PainterPluginRegistry.PluginsMenu).ToArray() : MenuTitles;
-            PaintGui.MenuBar(menuRect, titles.Select(L.Tr).ToArray(), (index, at) =>
-            {
-                var menu = new GenericMenu();
-                switch (index)
-                {
-                    case 0: FileMenu(menu); break;
-                    case 1: EditMenu(menu); break;
-                    case 2: LayerMenu(menu); break;
-                    case 3: SelectMenu(menu); break;
-                    case 4: FilterMenuItems(menu); break;
-                    case 5: ModelMenu(menu); break;
-                    case 6: ViewMenu(menu); break;
-                    case 7: WindowMenu(menu); break;
-                    case 8: HelpMenu(menu); break;
-                }
-                AddPluginCommands(menu, index < MenuTitles.Length ? MenuTitles[index] : PainterPluginRegistry.PluginsMenu);
-                menu.DropDown(at);
-            });
+            if (menuBar == null) menuBar = new PaintMenuBar { Owner = this, Make = BuildMenu, BeforeOpen = CancelMenuInput };
+            PaintGui.MenuBar(menuRect, titles.Select(L.Tr).ToArray(), menuBar);
             // 右端: プロジェクトの名前と保存の状態
             string name = projectPath != null ? System.IO.Path.GetFileName(projectPath) : L.Tr("Untitled");
             string state = IsSaved ? "" : " •";
@@ -40,14 +24,50 @@ namespace Yozolab.YoluPainter.Editor
             PaintGui.Text(title, name + state, new GUIStyle(PaintTheme.LabelDim) { alignment = TextAnchor.MiddleRight }, IsSaved ? PaintTheme.TextDim : PaintTheme.Text);
         }
 
+        PaintMenuBar menuBar;
+        internal PaintMenu BuildMenu(int index)
+        {
+            var menu = new PaintMenu();
+            switch (index)
+            {
+                case 0: FileMenu(menu); break; case 1: EditMenu(menu); break; case 2: LayerMenu(menu); break;
+                case 3: SelectMenu(menu); break; case 4: FilterMenuItems(menu); break; case 5: ModelMenu(menu); break;
+                case 6: ViewMenu(menu); break; case 7: WindowMenu(menu); break; case 8: HelpMenu(menu); break;
+            }
+            AddPluginCommands(menu, index < MenuTitles.Length ? MenuTitles[index] : PainterPluginRegistry.PluginsMenu);
+            return menu;
+        }
+        void CancelMenuInput()
+        {
+            FinishStroke(false); pathDrag = -1; CancelShapeDrag(); CancelGradientDrafts(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); ReleaseStencilInput();
+            preview?.CancelNavigation(); GUIUtility.hotControl = 0; GUIUtility.keyboardControl = 0;
+        }
+        internal PaintMenuBar MenuBarForTests => menuBar;
+        bool menuAltPending;
+        static bool MenuAltKey(KeyCode key) => key == KeyCode.LeftAlt || key == KeyCode.RightAlt;
+        bool HandleMenuInput(Event e)
+        {
+            // 単独のAltの離しでバーへ。Alt+ドラッグの3DナビゲーションやAlt付きの編集キーを奪わない。
+            if (e.type == EventType.KeyDown && MenuAltKey(e.keyCode) && GUIUtility.keyboardControl == 0)
+            { menuAltPending = true; e.Use(); return true; }
+            if (menuAltPending && (e.type == EventType.MouseDown || e.type == EventType.MouseDrag || e.type == EventType.KeyDown && !MenuAltKey(e.keyCode))) menuAltPending = false;
+            if (e.type == EventType.KeyUp && MenuAltKey(e.keyCode))
+            { bool open = menuAltPending; menuAltPending = false; if (open && GUIUtility.keyboardControl == 0) { menuBar?.Open(0, true); e.Use(); return true; } }
+
+            if (PaintMenuSession.HandleOwnerEvent(this, e)) return true;
+            if (e.type == EventType.KeyDown && e.keyCode == KeyCode.F10 && GUIUtility.keyboardControl == 0)
+            { menuBar?.Open(0); e.Use(); return true; }
+            return false;
+        }
+
         static string Shortcut(string text, string keys) => text + "    " + keys;
-        void Item(GenericMenu menu, string text, Action action, bool enabled = true, bool on = false, string keys = null)
+        void Item(PaintMenu menu, string text, Action action, bool enabled = true, bool on = false, string keys = null)
         {
             var content = new GUIContent(keys == null ? L.Tr(text) : Shortcut(L.Tr(text), keys));
             if (enabled) menu.AddItem(content, on, () => { TryAction(action); Repaint(); }); else menu.AddDisabledItem(content, on);
         }
 
-        void FileMenu(GenericMenu m)
+        void FileMenu(PaintMenu m)
         {
             Item(m, "New Project…", NewProjectDialog, keys: "Ctrl+N");
             Item(m, "Open…", OpenProject, keys: "Ctrl+O");
@@ -69,7 +89,7 @@ namespace Yozolab.YoluPainter.Editor
             Item(m, "Project Settings…", OpenSettings);
         }
 
-        void EditMenu(GenericMenu m)
+        void EditMenu(PaintMenu m)
         {
             Item(m, "Undo", () => document.Undo(), document.CanUndo, keys: "Ctrl+Z");
             Item(m, "Redo", () => document.Redo(), document.CanRedo, keys: "Ctrl+Shift+Z / Ctrl+Y");
@@ -85,7 +105,7 @@ namespace Yozolab.YoluPainter.Editor
             Item(m, "Preferences…", OpenSettings);
         }
 
-        void LayerMenu(GenericMenu m)
+        void LayerMenu(PaintMenu m)
         {
             var active = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
             Item(m, "New Layer", AddPaintLayer, keys: "Ctrl+Shift+N");
@@ -126,7 +146,7 @@ namespace Yozolab.YoluPainter.Editor
 
         /// <summary>層のチャンネルの項目: 今のチャンネルに描くか（オフならこのチャンネルでは層が無いのと同じ。中身は残る）と、自分の合成モード・
         /// 不透明度を持つチャンネルを層の値に戻す項目。塗りつぶし・調整・グループの層ではプロパティの欄にも同じものが出る。</summary>
-        void LayerChannelMenuItems(GenericMenu m, PaintLayer active)
+        void LayerChannelMenuItems(PaintMenu m, PaintLayer active)
         {
             string channelName = L.Tr(channel.ToString());
             var paint = new GUIContent(L.Tr("Paint this channel") + " (" + channelName + ")");
@@ -147,7 +167,7 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
 
-        void SelectMenu(GenericMenu m)
+        void SelectMenu(PaintMenu m)
         {
             Item(m, "All", () => document.SetSelection(SelectionMask.All(document)), keys: "Ctrl+A");
             Item(m, "Deselect", () => document.ClearSelection(), document.Selection != null, keys: "Ctrl+D");
@@ -161,7 +181,7 @@ namespace Yozolab.YoluPainter.Editor
             Item(m, "Sharpen Edge", () => ModifySelection(SelectionModifyKind.Sharpen), any);
         }
 
-        void FilterMenuItems(GenericMenu m)
+        void FilterMenuItems(PaintMenu m)
         {
             var active = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
             foreach (var target in new[] { FilterTarget.Content, FilterTarget.Mask })
@@ -190,7 +210,7 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
 
-        void ModelMenu(GenericMenu m)
+        void ModelMenu(PaintMenu m)
         {
             Item(m, "Choose Model…", () => EditorGUIUtility.ShowObjectPicker<GameObject>(model, false, "t:Model t:Prefab", ModelPickerId));
             Item(m, "Demo Cube", LoadDemoCube);
@@ -204,7 +224,7 @@ namespace Yozolab.YoluPainter.Editor
             SceneMenuItems(m);
         }
 
-        void ViewMenu(GenericMenu m)
+        void ViewMenu(PaintMenu m)
         {
             Item(m, "2D Canvas", () => View = ViewMode.Canvas, true, viewMode == ViewMode.Canvas, "F1");
             Item(m, "3D View", () => View = ViewMode.Model, true, viewMode == ViewMode.Model, "F2");
@@ -220,12 +240,19 @@ namespace Yozolab.YoluPainter.Editor
             CanvasViewMenuItems(m);
         }
 
-        void WindowMenu(GenericMenu m)
+        void WindowMenu(PaintMenu m)
         {
             // パネルの表示（畳む・開く・タブを見せる）、別のウィンドウにする・戻す、配置を元に戻す
             foreach (var panel in Panels) { var id = panel.Id; Item(m, panel.Title, () => ShowOrHidePanel(id), true, PanelShown(id)); }
             m.AddSeparator("");
             foreach (var panel in Panels) { var id = panel.Id; m.AddItem(new GUIContent(L.Tr("Open in Separate Window") + "/" + L.Tr(panel.Title)), Layout.IsFloating(id), () => { TryAction(() => ToggleFloating(id)); Repaint(); }); }
+            foreach (var panel in Panels)
+            {
+                var group = Layout.GroupOf(panel.Id); if (!group.Floating) continue;
+                string gid = group.id;
+                m.AddItem(new GUIContent(L.Tr("Separate Window Mode") + "/" + L.Tr(panel.Title) + "/" + L.Tr("Keep in Front of Unity Windows")), !group.dockableWindow, () => SetPanelWindowMode(gid, false));
+                m.AddItem(new GUIContent(L.Tr("Separate Window Mode") + "/" + L.Tr(panel.Title) + "/" + L.Tr("Use a Dockable Unity Window")), group.dockableWindow, () => SetPanelWindowMode(gid, true));
+            }
             Item(m, "Return All Panels to the Dock", DockAllPanels, Layout.Column(DockPlace.Floating).Count > 0);
             Item(m, "Reset Panel Layout", ResetDockLayout);
             m.AddSeparator("");
@@ -233,7 +260,7 @@ namespace Yozolab.YoluPainter.Editor
             { var lang = language; m.AddItem(new GUIContent(L.Tr("Language") + "/" + label), L.Language == lang, () => { L.Language = lang; Repaint(); }); }
         }
 
-        void HelpMenu(GenericMenu m)
+        void HelpMenu(PaintMenu m)
         {
             Item(m, "Keyboard Shortcuts", () => Dialogs.Inform(L.Tr("Keyboard Shortcuts"), L.Tr(ShortcutHelp) + "\n" + L.Tr("2D view: - / ^ (or =) rotate 15° · R + drag rotates (with Shift in 15° steps) · Shift + middle drag rotates · Shift+R resets the rotation · H flips horizontally · Ctrl+0 also resets the rotation") + "\n" + L.Tr("Shift+W ID colour select (click a part on the 2D canvas or the 3D view; needs a baked ID map)")
                 + "\n" + L.Tr("3D view: C shows one channel at a time (unlit) · Shift+B one baked mesh map at a time · Shift+C the material · Ctrl + right drag turns the environment and the light")

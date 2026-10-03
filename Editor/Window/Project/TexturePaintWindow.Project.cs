@@ -310,7 +310,7 @@ namespace Yozolab.YoluPainter.Editor
             return (Application.dataPath, "Texture");
         }
 
-        void LoadDemoCube() { model = null; preview.LoadDemoMesh(); ResolveSetMaterials(); repaintPixels = true; message = L.Tr("Loaded the tool's seam-test cube. No scene or source asset changed."); }
+        void LoadDemoCube() { model = null; preview.LoadDemoMesh(); ResolveSetMaterials(); ResetVisibility(false); repaintPixels = true; message = L.Tr("Loaded the tool's seam-test cube. No scene or source asset changed."); }
 
         const int ModelPickerId = 0x59500001;
         /// <summary>モデルの選択（オブジェクトピッカーで選んだとき）。</summary>

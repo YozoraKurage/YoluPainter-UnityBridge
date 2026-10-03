@@ -133,6 +133,23 @@ namespace Yozolab.YoluPainter.Editor
         float DrawShadingSwitch(Rect bar)
         {
             float x = surfaceRect.xMax - 6;
+            if (surfaceRect.width < 240)
+            {
+                var button = new Rect(x - 26, bar.y + 2, 26, 22); compactShadingButtonForTests = button;
+                string tip = L.Tr("Scene: camera views, the light, the ambient and the background of the 3D view (the preview only)");
+                var warnings = new List<string>();
+                if (previewShading == PreviewShading.Material && preview.HasModel)
+                    for (int i = 0; i < preview.MaterialSlotCount; i++) { var why = preview.MaterialReason(i); if (why != null) warnings.Add(L.Tr("slot {0}", i) + ": " + why); }
+                if (warnings.Count > 0) tip += "\n" + L.Tr("Shown neutral:") + "\n" + string.Join("\n", warnings);
+                if (PaintGui.IconButton(button, warnings.Count > 0 ? "warning" : "light_mode", tip, false, stroke == null, 16))
+                {
+                    var menu = new PaintMenu(); ShadingMenuItems(menu);
+                    menu.AddSeparator(""); Item(menu, "Scene…", () => OpenScenePopup(button));
+                    Item(menu, "Symmetry", () => Symmetry = !symmetry, on: symmetry);
+                    menu.DropDown(button);
+                }
+                return button.x - 4;
+            }
             x -= 26; if (PaintGui.IconButton(new Rect(x, bar.y + 2, 26, 22), "auto_awesome", L.Tr("Material shading: the source material's shader with the painted maps (only a preview copy; the material itself is not changed)"), previewShading == PreviewShading.Material, preview.HasModel && stroke == null, 16)) { ShowMaterialIn3D(); Shading = PreviewShading.Material; }
             x -= 28; if (PaintGui.IconButton(new Rect(x, bar.y + 2, 26, 22), "contrast", L.Tr("Neutral shading: the painted channel on a neutral surface"), previewShading == PreviewShading.Neutral, stroke == null, 16)) { ShowMaterialIn3D(); Shading = PreviewShading.Neutral; }
             x -= 30;
@@ -154,7 +171,7 @@ namespace Yozolab.YoluPainter.Editor
             return x;
         }
 
-        void ShadingMenuItems(GenericMenu m)
+        void ShadingMenuItems(PaintMenu m)
         {
             Item(m, "Neutral Shading", () => { ShowMaterialIn3D(); Shading = PreviewShading.Neutral; }, true, previewShading == PreviewShading.Neutral);
             Item(m, "Material Shading", () => { ShowMaterialIn3D(); Shading = PreviewShading.Material; }, preview.HasModel, previewShading == PreviewShading.Material);

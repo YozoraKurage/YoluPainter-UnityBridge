@@ -56,6 +56,7 @@ namespace Yozolab.YoluPainter.Editor
             if(existing!=null)
                 for(int i=0;i<existing.Points.Count;i++)
                 {
+                    if (!preview.IsTriangleVisible(existing.Points[i].Triangle)) continue;
                     var p=SurfacePathRenderer.Position(preview.Geometry,existing.Points[i],out _);
                     if(preview.TryWorldToGui(surfaceRect,p,out var g)&&Vector2.Distance(g,pointer)<=PathGrabPoints){pathDrag=i;pathDragOnCanvas=false;pathDragGui=pointer;GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive);return;}
                 }
@@ -182,8 +183,8 @@ namespace Yozolab.YoluPainter.Editor
             for(int i=0;i<gui.Length;i++){if(preview.TryWorldToGui(surfaceRect,SurfacePathRenderer.Position(preview.Geometry,path.Points[i],out _),out var g))gui[i]=g;else all=false;}
             if(pathDrag>=0&&!pathDragOnCanvas&&pathDrag<gui.Length)gui[pathDrag]=pathDragGui;
             Handles.color=new Color(1,.8f,.2f,.9f);
-            if(all&&gui.Length>1)Handles.DrawAAPolyLine(2,gui);
-            foreach(var g in gui)EditorGUI.DrawRect(new Rect(g.x-3,g.y-3,6,6),new Color(1,.8f,.2f,1));
+            if(all&&gui.Length>1&&path.Points.All(p => preview.IsTriangleVisible(p.Triangle)))Handles.DrawAAPolyLine(2,gui);
+            for (int i = 0; i < gui.Length; i++) if (preview.IsTriangleVisible(path.Points[i].Triangle)) { var g = gui[i]; EditorGUI.DrawRect(new Rect(g.x-3,g.y-3,6,6),new Color(1,.8f,.2f,1)); }
         }
 
         /// <summary>選んだ層の 2D のパスの制御点と線をキャンバスに重ねる（Repaint のとき。view はクリップの中の座標の写し）。</summary>

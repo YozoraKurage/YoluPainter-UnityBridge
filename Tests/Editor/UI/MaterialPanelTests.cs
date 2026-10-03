@@ -113,17 +113,20 @@ namespace Yozolab.YoluPainter.Tests
             }
         }
 
+        static void LoadModel(TexturePaintWindow w, GameObject model)
+            => w.CreateProject(new NewProjectSettings { Model = model, Resolution = 512 });
+
         IEnumerable<(string, Action)> States(TexturePaintWindow w)
         {
             yield return ("no-model", () => { });
             yield return ("demo-cube", () => w.Preview.LoadDemoMesh());
-            yield return ("standard", () => { w.SetModel(Model(new Material(Shader.Find("Standard")))); Paint(w.Document, PaintChannel.Roughness); });
-            yield return ("unlit", () => w.SetModel(Model(new Material(Shader.Find("Unlit/Texture")))));
+            yield return ("standard", () => { LoadModel(w, Model(new Material(Shader.Find("Standard")))); Paint(w.Document, PaintChannel.Roughness); });
+            yield return ("unlit", () => LoadModel(w, Model(new Material(Shader.Find("Unlit/Texture")))));
             if (Shader.Find("lilToon") != null)
                 yield return ("liltoon", () =>
                 {
                     var material = new Material(Shader.Find("lilToon"));
-                    w.SetModel(Model(material)); Paint(w.Document, PaintChannel.Normal); Paint(w.Document, PaintChannel.Emission);
+                    LoadModel(w, Model(material)); Paint(w.Document, PaintChannel.Normal); Paint(w.Document, PaintChannel.Emission);
                     w.Document.AddFillLayer("Base", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(200, 120, 80) } });
                     var info = w.MaterialProperties(material).First(p => p.Name == "_Cutoff");
                     w.SetMaterialValue(material, info, new Vector4(.25f, 0, 0, 0));
@@ -132,7 +135,7 @@ namespace Yozolab.YoluPainter.Tests
             // 見せるマテリアルをシェーダーから作り、チャンネルの流し込み先を開いて 1 つを手で指定（Model/TexturePaintWindow.PreviewMaterial.cs）
             yield return ("chosen-shader", () =>
             {
-                w.SetModel(Model(new Material(Shader.Find("Unlit/Texture")))); w.Document.AddLayer("Height"); Paint(w.Document, PaintChannel.Height);
+                LoadModel(w, Model(new Material(Shader.Find("Unlit/Texture")))); w.Document.AddLayer("Height"); Paint(w.Document, PaintChannel.Height);
                 Assert.That(w.UsePreviewShader(Shader.Find("Standard")), Is.True, w.StatusMessage);
                 Assert.That(w.SetChannelRoute(PaintChannel.Height, "_DetailMask", PreviewPacking.Value), Is.True, w.StatusMessage);
                 w.MaterialRoutesOpen = true; w.Shading = PreviewShading.Material; w.RefreshPreviewTextures();

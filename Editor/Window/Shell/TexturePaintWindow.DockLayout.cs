@@ -442,7 +442,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>見出しの右クリック: 別のウィンドウにする・タブを分ける・左右の列へ・畳む（別のウィンドウでは、列に戻す・自分のウィンドウにする）。</summary>
         void PanelHeaderMenu(DockGroup g, string panel)
         {
-            var menu = new GenericMenu();
+            var menu = new PaintMenu();
             foreach (var (text, action) in PanelHeaderMenuItems(g, panel))
             {
                 if (text == null) { menu.AddSeparator(""); continue; }
@@ -470,6 +470,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             else
             {
+                items.Add((g.dockableWindow ? L.Tr("Keep in Front of Unity Windows") : L.Tr("Use a Dockable Unity Window"), () => SetPanelWindowMode(gid, !Layout.Group(gid).dockableWindow)));
                 items.Add((L.Tr("Return to the Dock"), () => DockPanelGroup(gid)));
                 if (tabs)
                 {

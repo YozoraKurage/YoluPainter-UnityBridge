@@ -236,12 +236,12 @@ namespace Yozolab.YoluPainter.Editor
             }
             return r;
         }
-        internal Rect modelShowButtonForTests, canvasShowButtonForTests;
+        internal Rect modelShowButtonForTests, canvasShowButtonForTests, compactViewButtonForTests, compactShadingButtonForTests;
 
         /// <summary>3D メニューの「見せるもの」。</summary>
-        void ModelShowMenuItems(GenericMenu m) => ModelShowItems(m, L.Tr("3D View Shows") + "/");
+        void ModelShowMenuItems(PaintMenu m) => ModelShowItems(m, L.Tr("3D View Shows") + "/");
 
-        void ModelShowItems(GenericMenu m, string prefix)
+        void ModelShowItems(PaintMenu m, string prefix)
         {
             foreach (var item in ModelShowChoices())
                 AddItem(m, prefix + item.path, item.choose, item.reason == null, item.on, item.keys);
@@ -299,7 +299,7 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>訳した文字のままメニューに足す（<see cref="Item"/> は文字を訳すので、ここは訳したものを渡す）。</summary>
-        void AddItem(GenericMenu m, string text, Action action, bool enabled, bool on, string keys = null)
+        void AddItem(PaintMenu m, string text, Action action, bool enabled, bool on, string keys = null)
         {
             var content = new GUIContent(keys == null ? text : Shortcut(text, keys));
             if (enabled) m.AddItem(content, on, () => { TryAction(action); Repaint(); }); else m.AddDisabledItem(content, on);

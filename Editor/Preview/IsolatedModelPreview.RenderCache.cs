@@ -16,22 +16,22 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>3D の絵を描き直す入力（どれかが変われば描く）。</summary>
         internal readonly struct RenderKey : IEquatable<RenderKey>
         {
-            public readonly int PixelWidth, PixelHeight, Revision; public readonly long Content, CompileTick;
+            public readonly int PixelWidth, PixelHeight, Revision; public readonly long Content, CompileTick, Visibility;
             public readonly Vector3 CameraPosition; public readonly Quaternion CameraRotation; public readonly float FieldOfView, Near, Far;
             public readonly PreviewShading Shading; public readonly bool Lit; public readonly int Scene;
             public readonly MirrorPlane? Plane; public readonly ShapeGradientOverlay? Shape;
             public readonly bool Region; public readonly long RegionKey; public readonly Color RegionColor;
             public readonly (int, int, int)? IdHighlight;
 
-            public RenderKey(int pixelWidth, int pixelHeight, int revision, long content, long compileTick, Camera camera, PreviewShading shading, bool lit, int scene,
+            public RenderKey(int pixelWidth, int pixelHeight, int revision, long content, long compileTick, long visibility, Camera camera, PreviewShading shading, bool lit, int scene,
                 MirrorPlane? plane, ShapeGradientOverlay? shape, bool region, long regionKey, Color regionColor, (int, int, int)? idHighlight)
             {
-                PixelWidth = pixelWidth; PixelHeight = pixelHeight; Revision = revision; Content = content; CompileTick = compileTick;
+                PixelWidth = pixelWidth; PixelHeight = pixelHeight; Revision = revision; Content = content; CompileTick = compileTick; Visibility = visibility;
                 CameraPosition = camera.transform.position; CameraRotation = camera.transform.rotation; FieldOfView = camera.fieldOfView; Near = camera.nearClipPlane; Far = camera.farClipPlane;
                 Shading = shading; Lit = lit; Scene = scene; Plane = plane; Shape = shape; Region = region; RegionKey = regionKey; RegionColor = regionColor; IdHighlight = idHighlight;
             }
 
-            public bool Equals(RenderKey o) => PixelWidth == o.PixelWidth && PixelHeight == o.PixelHeight && Revision == o.Revision && Content == o.Content && CompileTick == o.CompileTick
+            public bool Equals(RenderKey o) => PixelWidth == o.PixelWidth && PixelHeight == o.PixelHeight && Revision == o.Revision && Content == o.Content && CompileTick == o.CompileTick && Visibility == o.Visibility
                 && CameraPosition == o.CameraPosition && CameraRotation == o.CameraRotation && FieldOfView == o.FieldOfView && Near == o.Near && Far == o.Far
                 && Shading == o.Shading && Lit == o.Lit && Scene == o.Scene && Nullable.Equals(Plane, o.Plane) && Nullable.Equals(Shape, o.Shape)
                 && Region == o.Region && RegionKey == o.RegionKey && RegionColor == o.RegionColor && Nullable.Equals(IdHighlight, o.IdHighlight);
@@ -75,7 +75,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             bool compiling = CompilingShaders;
             long compileTick = compiling ? 1 + (long)Math.Floor(Clock() / CompileRedrawInterval) : 0;
             bool region = regionWanted && HasModel && ReferenceEquals(regionGeometry, geometry) && regionTriangles != null && regionTriangles.Count > 0;
-            return new RenderKey((int)(rect.width * pixelsPerPoint), (int)(rect.height * pixelsPerPoint), revision, contentVersion, compileTick, preview.camera,
+            return new RenderKey((int)(rect.width * pixelsPerPoint), (int)(rect.height * pixelsPerPoint), revision, contentVersion, compileTick, visibilityVersion, preview.camera,
                 shading, LitPreview, scene, ShownSymmetryPlane.HasValue && HasModel ? ShownSymmetryPlane : null, ShownShapeGradient.HasValue && HasModel ? ShownShapeGradient : null,
                 region, region ? regionKey : 0, region ? regionColor : default, region ? IdHighlightInput : null);
         }

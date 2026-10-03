@@ -161,7 +161,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void OpenFillImageMenu(Rect at, Guid layerId, PaintChannel target)
         {
-            var menu = new GenericMenu(); var images = ImageResources.Images;
+            var menu = new PaintMenu(); var images = ImageResources.Images;
             var current = document.Layers.FirstOrDefault(l => l.Id == layerId)?.FillImages.TryGetValue(target, out var cur) == true ? cur : Guid.Empty;
             if (images.Count == 0) menu.AddDisabledItem(new GUIContent(L.Tr("This project has no images yet (import them in the Assets panel)")));
             foreach (var r in images)

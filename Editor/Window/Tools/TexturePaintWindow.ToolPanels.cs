@@ -128,7 +128,7 @@ namespace Yozolab.YoluPainter.Editor
             PaintGui.FitDropdown(Mark("pressure-curve-preset", new Rect(head.x + LabelColumn, head.y, head.width - LabelColumn - 30, head.height)), null,
                 shape >= 0 ? CurvePresetTitle(shape) : L.Tr("Custom"), at =>
                 {
-                    var menu = new GenericMenu();
+                    var menu = new PaintMenu();
                     for (int i = 0; i < PressureCurve.Presets.Length; i++) { int k = i; menu.AddItem(new GUIContent(CurvePresetTitle(k)), k == shape, () => SetPressureCurve(PressureCurve.Presets[k].Points)); }
                     menu.DropDown(at);
                 }, L.Tr("Common pressure curves"));
@@ -213,7 +213,7 @@ namespace Yozolab.YoluPainter.Editor
             if (PaintGui.FitButton(c[1], L.TrIn("transform", "Reset"), false, true, L.Tr("Back to no change"))) { moveAngle = 0; moveScale = new Vector2(100, 100); moveOffset = Vector2.zero; }
             PaintGui.FitDropdown(rows.Row(), L.Tr("Resampling"), L.Tr(moveResampling.ToString()), at =>
             {
-                var menu = new GenericMenu();
+                var menu = new PaintMenu();
                 foreach (Resampling mode in Enum.GetValues(typeof(Resampling))) { var m = mode; menu.AddItem(new GUIContent(L.Tr(m.ToString())), m == moveResampling, () => moveResampling = m); }
                 menu.DropDown(at);
             }, L.Tr("Bilinear smooths, Nearest keeps hard pixels. Whole-pixel moves, 90° turns and flips copy pixels exactly either way."), true, LabelColumn);

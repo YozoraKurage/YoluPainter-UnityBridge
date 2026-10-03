@@ -28,8 +28,8 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>彩度×明度の四角の高さ（低い画面では小さく）。円のときは円の直径。</summary>
-        float SvHeight => ColorWheel ? Mathf.Clamp((colorColumnHeight - 480) * .6f, 120, 196) : Mathf.Clamp((colorColumnHeight - 480) * .5f, 72, 128);
-        float ColorPanelHeight => ColorPanelPicksColor ? 8 + SvHeight + 6 + 22 + 6 + 16 + 8 : 70;
+        float SvHeight => ColorWheel ? Mathf.Clamp((colorColumnHeight - 480) * .6f, 140, 220) : Mathf.Clamp((colorColumnHeight - 480) * .5f, 96, 160);
+        float ColorPanelHeight => ColorPanelPicksColor ? 8 + SvHeight + 6 + 44 + 8 : 108;
         /// <summary>色のパネルが色を選ぶか（Color・Emission のとき。マテリアルで塗るときはいつも描画色 = Color の値。ほかのチャンネルの値は
         /// ブラシの欄の「マテリアル」の節）。</summary>
         bool ColorPanelPicksColor => brush.material || channel == PaintChannel.Color || channel == PaintChannel.Emission;
@@ -38,23 +38,26 @@ namespace Yozolab.YoluPainter.Editor
 
         void DrawColorPanel(Rect r)
         {
+            if (NormalizeBrushAlpha(brush)) NotifyBrushAlphaMigration();
             var rows = new UiRows(r, 8);
             if (!brush.material && channel == PaintChannel.Normal)
             {
                 PaintGui.Text(rows.Row(36), L.Tr("The Normal channel paints a direction. Choose it in Properties ▸ Brush ▸ Normal."), PaintTheme.Wrap);
+                DrawBrushSwatches(rows.Row(44));
                 return;
             }
             if (!brush.material && (channel == PaintChannel.Roughness || channel == PaintChannel.Metallic || channel == PaintChannel.Height))
             {
                 var row = rows.Row(24);
                 float value = PaintGui.Slider(row, L.Tr("Value"), brush.color.r * 255, 0, 255, "0", "", L.Tr("The value the brush paints (0–255)")) / 255;
-                if (Mathf.Abs(value - brush.color.r) > 1e-5f) brush.color = new Color(value, value, value, brush.color.a);
+                if (Mathf.Abs(value - brush.color.r) > 1e-5f) brush.color = new Color(value, value, value, 1);
                 var strip = rows.Row(10);
                 if (Event.current.type == EventType.Repaint) GUI.DrawTexture(strip, GreyRamp(), ScaleMode.StretchToFill, false);
+                DrawBrushSwatches(rows.Row(44));
                 return;
             }
             SyncHsvFromBrush();
-            var area = rows.Row(SvHeight, 6);
+            var area = rows.Row(Mathf.Min(SvHeight, Mathf.Max(24, r.height - 66)), 6);
             var toggle = new Rect(area.xMax - 22, area.y, 22, 22);
             if (ColorWheel)
             {
@@ -68,15 +71,53 @@ namespace Yozolab.YoluPainter.Editor
                 DrawSvSquare(sv); DrawHueBar(hue);
             }
             if (PaintGui.IconButton(toggle, ColorWheel ? "color_square" : "target", L.Tr(ColorWheel ? "Square and hue bar" : "Hue wheel"))) ColorWheel = !ColorWheel;
-            // 16 進と使った色
-            var line = rows.Row(22, 6);
-            var cells = UiRows.Split(line, 2, 6);
+            var footer = rows.Row(44);
+            DrawBrushSwatches(new Rect(footer.x, footer.y, 44, 44));
             string hex = ColorUtility.ToHtmlStringRGB(brush.color);
-            string typed = PaintGui.TextField(new Rect(cells[0].x, cells[0].y, cells[0].width, cells[0].height), "#" + hex, L.Tr("Hex color (#RRGGBB)"));
-            if (typed != "#" + hex && ColorUtility.TryParseHtmlString(typed.StartsWith("#") ? typed : "#" + typed, out var parsed)) SetBrushColor(new Color(parsed.r, parsed.g, parsed.b, brush.color.a));
-            float alpha = PaintGui.Slider(cells[1], "A", brush.color.a * 100, 0, 100, "0", "%", L.Tr("Alpha of the brush color")) / 100;
-            if (Mathf.Abs(alpha - brush.color.a) > 1e-5f) brush.color = new Color(brush.color.r, brush.color.g, brush.color.b, alpha);
-            DrawRecentColors(rows.Row(16));
+            var code = new Rect(footer.x + 52, footer.y, Mathf.Min(102, Mathf.Max(0, footer.width - 52)), 20);
+            string note = BrushAlphaMigrationNote();
+            if (note != null)
+            {
+                var warning = new Rect(footer.xMax - 18, footer.y, 18, 20);
+                code.width = Mathf.Min(code.width, Mathf.Max(0, warning.x - code.x - 2));
+                PaintGui.Icon(warning, "warning", PaintTheme.Warning, 14); PaintGui.Tooltip(warning, note);
+            }
+            ColorPanelSpot("hex", code);
+            string typed = PaintGui.TextField(code, "#" + hex, L.Tr("Hex color (#RRGGBB)"));
+            string rgb = typed.StartsWith("#") ? typed : "#" + typed;
+            if (typed != "#" + hex && rgb.Length == 7 && ColorUtility.TryParseHtmlString(rgb, out var parsed)) SetBrushColor(parsed);
+            DrawRecentColors(new Rect(footer.x + 52, footer.y + 26, Mathf.Max(0, footer.width - 52), 16));
+        }
+
+        internal readonly Dictionary<string, Rect> ColorPanelScreenRects = new Dictionary<string, Rect>();
+        Rect ColorPanelSpot(string id, Rect r) { if (Event.current.type == EventType.Repaint) ColorPanelScreenRects[id] = GUIUtility.GUIToScreenRect(r); return r; }
+        internal void SelectBrushColor(bool background)
+        {
+            if (brush.backgroundColorSelected == background) return;
+            var c = brush.color; brush.color = brush.secondaryColor; brush.secondaryColor = c;
+            brush.backgroundColorSelected = background; pickedFor = new Color(-1, -1, -1, -1); Repaint();
+        }
+        Color MainBrushColor => brush.backgroundColorSelected ? brush.secondaryColor : brush.color;
+        Color SubBrushColor => brush.backgroundColorSelected ? brush.color : brush.secondaryColor;
+        void DrawBrushSwatches(Rect r)
+        {
+            var main = ColorPanelSpot("main", new Rect(r.x, r.y, 26, 26));
+            var sub = ColorPanelSpot("sub", new Rect(r.x + 12, r.y + 12, 26, 26));
+            void Swatch(Rect at, Color color, bool background)
+            {
+                PaintGui.Rounded(at, color, 2);
+                PaintGui.Outline(at, brush.backgroundColorSelected == background ? PaintTheme.Accent : PaintTheme.Border, brush.backgroundColorSelected == background ? 2 : 1, 2);
+                PaintGui.Tooltip(at, L.Tr(background ? "Background color" : "Foreground color (the brush value)"));
+            }
+            Swatch(sub, SubBrushColor, true); Swatch(main, MainBrushColor, false);
+            var e = Event.current;
+            if (e.type == EventType.MouseDown && e.button == 0 && GUI.enabled)
+            {
+                if (main.Contains(e.mousePosition)) { SelectBrushColor(false); e.Use(); }
+                else if (sub.Contains(e.mousePosition)) { SelectBrushColor(true); e.Use(); }
+            }
+            if (PaintGui.IconButton(new Rect(r.x + 28, r.y - 2, 14, 14), "swap_horiz", L.Tr("Swap colors (X)"), false, true, 12)) SwapColors();
+            if (PaintGui.IconButton(new Rect(r.x - 2, r.y + 28, 14, 14), "restart_alt", L.Tr("Default colors (D)"), false, true, 11)) DefaultColors();
         }
 
         void SyncHsvFromBrush()
@@ -89,7 +130,7 @@ namespace Yozolab.YoluPainter.Editor
             pickVal = v; pickedFor = brush.color;
         }
 
-        void SetBrushColor(Color c) { brush.color = c; pickedFor = new Color(-1, -1, -1, -1); Repaint(); }
+        void SetBrushColor(Color c) { c.a = 1; brush.color = c; pickedFor = new Color(-1, -1, -1, -1); Repaint(); }
 
         void DrawSvSquare(Rect r)
         {
@@ -113,7 +154,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             SyncHsvFromBrush();
             pickSat = Mathf.Clamp01((p.x - r.x) / r.width); pickVal = Mathf.Clamp01(1 - (p.y - r.y) / r.height);
-            var c = Color.HSVToRGB(pickHue, pickSat, pickVal); c.a = brush.color.a;
+            var c = Color.HSVToRGB(pickHue, pickSat, pickVal); c.a = 1;
             brush.color = c; pickedFor = c; Repaint();
         }
 
@@ -182,7 +223,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             SyncHsvFromBrush(); // 描く前に呼ばれても、今のブラシの彩度と明度を保つ
             pickHue = Mathf.Repeat(hue, 1);
-            var c = Color.HSVToRGB(pickHue, pickSat, pickVal); c.a = brush.color.a;
+            var c = Color.HSVToRGB(pickHue, pickSat, pickVal); c.a = 1;
             brush.color = c; pickedFor = c; Repaint();
         }
 
@@ -210,7 +251,7 @@ namespace Yozolab.YoluPainter.Editor
         void PickHue(Rect r, Vector2 p)
         {
             pickHue = Mathf.Clamp01(1 - (p.y - r.y) / r.height);
-            var c = Color.HSVToRGB(pickHue, pickSat, pickVal); c.a = brush.color.a;
+            var c = Color.HSVToRGB(pickHue, pickSat, pickVal); c.a = 1;
             brush.color = c; pickedFor = c; Repaint();
         }
 
@@ -222,7 +263,7 @@ namespace Yozolab.YoluPainter.Editor
                 var cell = new Rect(r.x + i * (size + 3), r.y, size, size); var c = recentColors[i];
                 PaintGui.Rounded(cell, new Color(c.r, c.g, c.b, 1), 2); PaintGui.Outline(cell, PaintTheme.Border, 1, 2);
                 if (Event.current.type == EventType.MouseDown && Event.current.button == 0 && cell.Contains(Event.current.mousePosition) && GUI.enabled) { SetBrushColor(c); Event.current.Use(); }
-                PaintGui.Tooltip(cell, "#" + ColorUtility.ToHtmlStringRGBA(c));
+                PaintGui.Tooltip(cell, "#" + ColorUtility.ToHtmlStringRGB(c));
             }
             if (recentColors.Count == 0) PaintGui.Text(r, L.Tr("Colors you paint with appear here."), PaintTheme.LabelSmall);
         }

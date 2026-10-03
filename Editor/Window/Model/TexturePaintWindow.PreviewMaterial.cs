@@ -323,7 +323,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void ShowPreviewMaterialMenu(Rect at)
         {
-            var m = new GenericMenu();
+            var m = new PaintMenu();
             var choice = MaterialChoice(); var source = choice?.source ?? PreviewMaterialSource.Original;
             Item(m, "Own Material", () => UseOriginalMaterial(), true, source == PreviewMaterialSource.Original);
             Item(m, "Project Material…", () => { previewMaterialPickerPending = true; Repaint(); RepaintPanelWindowsSoon(); }, true, source == PreviewMaterialSource.Material);
@@ -391,7 +391,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void ShowRouteMenu(PaintChannel channel, Material shown, PreviewMaterialBinding binding, Rect at)
         {
-            var m = new GenericMenu();
+            var m = new PaintMenu();
             var route = MaterialChoice()?.Route(channel);
             var c = channel;
             m.AddItem(new GUIContent(L.Tr("Automatic")), route == null, () => { TryAction(() => SetChannelRoute(c, null)); Repaint(); });

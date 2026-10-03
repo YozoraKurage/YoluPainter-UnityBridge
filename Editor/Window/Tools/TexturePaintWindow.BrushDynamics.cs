@@ -105,7 +105,7 @@ namespace Yozolab.YoluPainter.Editor
             PaintGui.FitDropdown(rows.Row(), L.Tr("Tip"), tip, DualTipMenu, missing ? L.Tr("This tip is not in this Unity project; a round tip is used instead.") : null, on, LabelColumn, !round);
             PaintGui.FitDropdown(rows.Row(), L.TrIn("brush", "Mode"), DualModeName((DualBrushMode)brush.dualMode), at =>
             {
-                var menu = new GenericMenu();
+                var menu = new PaintMenu();
                 foreach (DualBrushMode mode in Enum.GetValues(typeof(DualBrushMode))) { var m = mode; menu.AddItem(new GUIContent(DualModeName(m)), (int)m == brush.dualMode, () => brush.dualMode = (int)m); }
                 menu.DropDown(at);
             }, L.Tr("How the second tip's coverage combines with the main tip's"), on, LabelColumn);
@@ -142,7 +142,7 @@ namespace Yozolab.YoluPainter.Editor
             if (EditingMask) PaintGui.Notice(rows, L.Tr("Color dynamics apply to the Color and Emission channels only; a mask is painted with the exact value."), "info", PaintTheme.TextDim);
             else if (!BrushSettings.CarriesColor(channel)) PaintGui.Notice(rows, L.Tr("Color dynamics apply to the Color and Emission channels only; this channel is painted with the exact value."), "info", PaintTheme.TextDim);
             var row = rows.SliderRow();
-            PaintGui.ColorSwatch(new Rect(row.x, row.y + 4, 30, row.height - 8), brush.secondaryColor, color => { brush.secondaryColor = color; Repaint(); }, true,
+            PaintGui.ColorSwatch(new Rect(row.x, row.y + 4, 30, row.height - 8), brush.secondaryColor, color => { color.a = 1; brush.secondaryColor = color; Repaint(); }, false,
                 L.Tr("Background color") + "\n" + L.Tr("The second color for foreground/background jitter"));
             brush.fgBgJitter = PercentSlider(new Rect(row.x + 36, row.y, row.width - 36, row.height), L.TrIn("brush", "Fg/Bg jitter"), brush.fgBgJitter, 0, 1,
                 L.Tr("Each dab mixes toward the background color by a random amount up to this"));
@@ -177,7 +177,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void DualTipMenu(Rect at)
         {
-            var menu = new GenericMenu();
+            var menu = new PaintMenu();
             menu.AddItem(new GUIContent(L.TrIn("brush", "Round")), string.IsNullOrEmpty(brush.dualTipId), () => brush.dualTipId = "");
             if (!string.IsNullOrEmpty(brush.tipId)) menu.AddItem(new GUIContent(L.Tr("Same as the main tip")), brush.dualTipId == brush.tipId, () => brush.dualTipId = brush.tipId);
             foreach (var id in BuiltInBrushes.TipIds) { string full = "builtin:" + id; menu.AddItem(new GUIContent(L.TrIn("brush", "Built-in") + "/" + id), brush.dualTipId == full, () => brush.dualTipId = full); }
@@ -185,7 +185,7 @@ namespace Yozolab.YoluPainter.Editor
         }
         void TextureMenu(Rect at)
         {
-            var menu = new GenericMenu();
+            var menu = new PaintMenu();
             menu.AddItem(new GUIContent(L.Tr("None")), string.IsNullOrEmpty(brush.textureId), () => brush.textureId = "");
             foreach (var id in BuiltInBrushes.TipIds) { string full = "builtin:" + id; menu.AddItem(new GUIContent(L.TrIn("brush", "Built-in") + "/" + id), brush.textureId == full, () => SetTexture(full)); }
             foreach (var library in BrushLibrary.All)

@@ -127,7 +127,7 @@ namespace Yozolab.YoluPainter.Tests
 
             // 削除はメニューから（選んだ全部、1 回の Undo）
             ClickRow(b); ClickRow(c, Ctrl); undo = d.UndoCount;
-            var menu = new GenericMenu(); Invoke(window, "LayerMenu", menu);
+            var menu = new PaintMenu(); Invoke(window, "LayerMenu", menu);
             Assert.That(LayerMenuTexts(menu), Does.Contain("Delete Layers"));
             Assert.That(LayerMenuTexts(menu), Does.Contain("Merge Layers    Ctrl+E"));
             Assert.That(LayerMenuTexts(menu), Does.Contain("Group Layers    Ctrl+G"));

@@ -92,6 +92,16 @@ namespace Yozolab.YoluPainter.Editor
             if (Layout.HasGroup(w.GroupId) && Layout.Dock(w.GroupId)) { SaveDockLayout(); Repaint(); }
         }
 
+        /// <summary>窓の種類は開き直して切り替える。文書とタブのまとまり、位置・大きさ・戻り先を保つ。</summary>
+        internal void SetPanelWindowMode(string groupId, bool dockable)
+        {
+            if (!Layout.HasGroup(groupId) || !Layout.Group(groupId).Floating) return;
+            var group = Layout.Group(groupId); if (group.dockableWindow == dockable) return;
+            var window = PanelWindows.FirstOrDefault(w => w.GroupId == groupId);
+            if (window != null) { group.window = window.position; window.CloseLeavingLayout(); }
+            group.dockableWindow = dockable; PanelLayoutChanged();
+        }
+
         /// <summary>別のウィンドウの位置を配置に覚える（閉じる・リロードの前）。</summary>
         internal void RememberPanelWindowRect(PainterPanelWindow w)
         {

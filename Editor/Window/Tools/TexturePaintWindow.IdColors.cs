@@ -69,7 +69,7 @@ namespace Yozolab.YoluPainter.Editor
                     string PartName(int p) => L.Tr("Part {0}", p + 1);
                     PaintGui.FitDropdown(Mark("id-part", rows.Row()), L.TrIn("3D pick", "Mesh Part"), PartName(idEditPart), at =>
                     {
-                        var menu = new GenericMenu();
+                        var menu = new PaintMenu();
                         foreach (int part in parts) { int selected = part; menu.AddItem(new GUIContent(PartName(part)), part == idEditPart, () => { idEditPart = selected; repaint(); Repaint(); }); }
                         menu.DropDown(at);
                     }, L.Tr("Choose a connected mesh part of this texture set"), stroke == null && meshBakeJob == null, LabelColumn);

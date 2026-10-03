@@ -54,7 +54,7 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>レイヤーのメニュー（と右クリック）の Anchor の項目。</summary>
-        void AnchorMenuItems(GenericMenu m)
+        void AnchorMenuItems(PaintMenu m)
         {
             var active = SelectedOrNull; bool idle = stroke == null && !toolDragging;
             if (active?.Anchor == null) Item(m, "Add Anchor", () => AddAnchorTo(AnchorPlacement.Layer), idle && active != null);
@@ -121,7 +121,7 @@ namespace Yozolab.YoluPainter.Editor
             // 名前は利用者のデータ（長ければ詰めて、ツールチップに全部）
             PaintGui.FitDropdown(Spot("generator.anchor", Indent(rows.Row(), indent)), L.Tr("Anchor"), AnchorChoiceName(g.AnchorId), at =>
             {
-                var menu = new GenericMenu();
+                var menu = new PaintMenu();
                 foreach (var id in choices)
                 {
                     var choice = id;

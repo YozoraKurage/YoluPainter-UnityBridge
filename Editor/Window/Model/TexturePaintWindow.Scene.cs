@@ -23,7 +23,7 @@ namespace Yozolab.YoluPainter.Editor
         internal void ApplyLightPreset(PreviewLightPreset preset) { PreviewScene.Apply(preset, preview.CameraYaw, preview.CameraPitch); BindPreviewScene(); Repaint(); }
         internal void ResetPreviewScene() { previewScene = PreviewSceneSettings.Default(); BindPreviewScene(); Repaint(); }
 
-        void SceneMenuItems(GenericMenu m)
+        void SceneMenuItems(PaintMenu m)
         {
             bool model = preview.HasModel;
             Item(m, L.Tr("Camera") + "/" + L.TrIn("camera", "Front"), () => ViewFrom(PreviewCameraView.Front), model);

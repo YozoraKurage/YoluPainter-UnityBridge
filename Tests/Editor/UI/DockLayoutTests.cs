@@ -30,7 +30,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That((layout.leftWidth, layout.rightWidth), Is.EqualTo((280f, 320f)));
             // 書き直すと新しい形式になり、もう一度読んでも同じ
             var again = RoundTrip(layout);
-            Assert.That(JsonUtility.ToJson(again), Does.Contain("\"version\":1").And.Not.Contain("weightIds"));
+            Assert.That(JsonUtility.ToJson(again), Does.Contain("\"version\":" + DockLayout.CurrentVersion).And.Not.Contain("weightIds"));
             Assert.That(In(again, DockPlace.Left), Is.EqualTo(In(layout, DockPlace.Left))); Assert.That(again.GroupOf("color").collapsed, Is.True);
         }
 
@@ -221,10 +221,10 @@ namespace Yozolab.YoluPainter.Tests
                 Run("color", "Open in Separate Window");
                 var color = layout.GroupOf("color");
                 Assert.That(color.Floating, Is.True); Assert.That(color.window.width, Is.GreaterThan(0)); Assert.That(w.PanelShown("color"), Is.True);
-                Assert.That(Texts("color"), Is.EqualTo(new[] { "Return to the Dock" }));
+                Assert.That(Texts("color"), Is.EqualTo(new[] { "Use a Dockable Unity Window", "Return to the Dock" }));
                 w.ToggleFloating("color"); Assert.That(layout.PanelsIn(DockPlace.Right).First(), Is.EqualTo("color"), "Window ▸ Open in Separate Window again puts it back");
                 w.ToggleFloating("textureSet"); var tabs = layout.GroupOf("textureSet"); layout.Join("properties", tabs.id);
-                Assert.That(Texts("properties"), Is.EqualTo(new[] { "Return to the Dock", "Return This Panel to the Dock", "Separate into Its Own Window" }));
+                Assert.That(Texts("properties"), Is.EqualTo(new[] { "Use a Dockable Unity Window", "Return to the Dock", "Return This Panel to the Dock", "Separate into Its Own Window" }));
                 Run("properties", "Separate into Its Own Window");
                 Assert.That(layout.Column(DockPlace.Floating).Count, Is.EqualTo(2));
                 Assert.That(layout.GroupOf("properties").window.position, Is.EqualTo(tabs.window.position + new Vector2(32, 32)));

@@ -43,7 +43,7 @@ namespace Yozolab.YoluPainter.Editor
         }
         void OpenPolygonOverlapMenu(Rect at)
         {
-            var menu = new GenericMenu();
+            var menu = new PaintMenu();
             var geometry = overlapGeometry; int slot = overlapSlot; var kind = overlapKind;
             var candidates = overlapCandidates.ToArray();
             for (int i = 0; i < overlapCandidates.Count; i++)

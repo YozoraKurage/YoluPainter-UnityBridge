@@ -48,6 +48,35 @@ namespace Yozolab.YoluPainter.Tests
             finally { Object.DestroyImmediate(w); }
         }
 
+        [TestCase(180, "English")] [TestCase(180, "Japanese")]
+        [TestCase(300, "English")] [TestCase(300, "Japanese")]
+        public void OpaqueColorPanelFitsNarrowWidthsInBothLanguages(int width, string languageName)
+        {
+            if (!Application.isBatchMode) Assert.Ignore("Offscreen drawing is checked on batch-gl.");
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null) Assert.Ignore("No graphics device.");
+            var w = ScriptableObject.CreateInstance<TexturePaintWindow>();
+            string folder = Path.GetFullPath(Path.Combine("Logs", "YoluPainterSnapshots", "pen-ui")); Directory.CreateDirectory(folder);
+            var language = (PainterLanguage)System.Enum.Parse(typeof(PainterLanguage), languageName);
+            var draw = typeof(TexturePaintWindow).GetMethod("DrawColorPanel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            try
+            {
+                L.OverrideLanguage(language);
+                foreach (bool wheel in new[] { false, true })
+                {
+                    w.ColorWheel = wheel;
+                    string path = Path.Combine(folder, language + "-" + width + (wheel ? "-wheel" : "-square") + ".png");
+                    OffscreenGui.RenderToPng(width, 210, () => draw.Invoke(w, new object[] { new Rect(0, 0, width, 210) }), path, PaintTheme.PanelBg);
+                    foreach (var id in new[] { "main", "sub", "hex" })
+                    {
+                        var r = w.ColorPanelScreenRects[id];
+                        Assert.That(r.width, Is.GreaterThan(0)); Assert.That(r.xMin, Is.GreaterThanOrEqualTo(0));
+                        Assert.That(r.xMax, Is.LessThanOrEqualTo(width)); Assert.That(r.yMax, Is.LessThanOrEqualTo(210));
+                    }
+                    Assert.That(w.Brush.color.a, Is.EqualTo(1));
+                }
+            }
+            finally { Object.DestroyImmediate(w); L.OverrideLanguage(PainterLanguage.English); }
+        }
         [Test] public void BothStylesDrawOffscreen()
         {
             if (!Application.isBatchMode) Assert.Ignore("Offscreen drawing is checked on the batch-gl daemon.");

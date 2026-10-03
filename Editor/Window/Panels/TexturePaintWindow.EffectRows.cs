@@ -126,7 +126,7 @@ namespace Yozolab.YoluPainter.Editor
             if (ev.type == EventType.ContextClick && hover)
             {
                 SelectEffect(layer.Id, e.Id);
-                var menu = new GenericMenu(); EffectMenu(menu, row); menu.ShowAsContext(); ev.Use();
+                var menu = new PaintMenu(); EffectMenu(menu, row); menu.ShowAsContext(); ev.Use();
             }
         }
 
@@ -167,7 +167,7 @@ namespace Yozolab.YoluPainter.Editor
             if (ev.type == EventType.ContextClick && hover)
             {
                 SelectEffect(layer.Id, anchor.Id);
-                var menu = new GenericMenu(); var a = anchor;
+                var menu = new PaintMenu(); var a = anchor;
                 if (stroke == null) menu.AddItem(new GUIContent(L.Tr("Remove Anchor")), false, () => { RemoveAnchorOf(a); if (selectedFilter == a.Id) selectedFilter = Guid.Empty; });
                 else menu.AddDisabledItem(new GUIContent(L.Tr("Remove Anchor")));
                 menu.ShowAsContext(); ev.Use();
@@ -186,7 +186,7 @@ namespace Yozolab.YoluPainter.Editor
         internal void RemoveEffect(Guid layerId, Guid effectId) => TryAction(() => { document.RemoveFilter(layerId, effectId); if (selectedFilter == effectId) selectedFilter = Guid.Empty; repaintPixels = true; });
 
         /// <summary>効果の行の右クリック: 有効の切り替え・上へ・下へ・消す、この層に足す（画素・マスク）、焼き込み。</summary>
-        void EffectMenu(GenericMenu m, LayerListRow row)
+        void EffectMenu(PaintMenu m, LayerListRow row)
         {
             var layer = row.Layer; var e = row.Effect; Guid layerId = layer.Id, id = e.Id;
             m.AddItem(new GUIContent(e.Enabled ? L.Tr("Turn the filter off") : L.Tr("Turn the filter on")), false, () => SetEffectEnabled(layerId, id, !e.Enabled));
@@ -202,7 +202,7 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary><see cref="FilterMenuItems"/> と同じ項目（選んだ層の画素・マスクへのフィルターと Generator）を、prefix の下の階層に入れる（効果の行の右クリック）。</summary>
-        void FilterMenuItemsInto(GenericMenu m, string prefix)
+        void FilterMenuItemsInto(PaintMenu m, string prefix)
         {
             var active = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
             foreach (var target in new[] { FilterTarget.Content, FilterTarget.Mask })
@@ -225,7 +225,7 @@ namespace Yozolab.YoluPainter.Editor
 
         /// <summary>マスクのサムネイルの右クリック（Substance のマスクのメニュー）: マスクに描く・有効・反転・消す、マスクに足すフィルター。
         /// 濃度はマスクに描くあいだのプロパティの欄の「マスク」のタブ。</summary>
-        void MaskMenu(GenericMenu m, PaintLayer layer)
+        void MaskMenu(PaintMenu m, PaintLayer layer)
         {
             var mask = layer.Mask; Guid id = layer.Id;
             if (mask == null) return;

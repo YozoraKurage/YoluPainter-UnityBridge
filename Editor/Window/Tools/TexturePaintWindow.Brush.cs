@@ -19,6 +19,8 @@ namespace Yozolab.YoluPainter.Editor
             public string presetId = "", presetName = "Custom";
             public float radius = 16, hardness = .8f, spacing = .15f, opacity = 1, flow = 1;
             public Color color = new Color(.2f,.6f,1,1);
+            public bool backgroundColorSelected, colorAlphaMigrated, backgroundAlphaMigrated;
+            public float previousColorAlpha = 1;
             public bool pressureSize = true, pressureOpacity = true, pressureFlow, erase;
             public AnimationCurve pressureCurve = AnimationCurve.Linear(0,0,1,1);
             // schema 2
@@ -33,8 +35,34 @@ namespace Yozolab.YoluPainter.Editor
             public bool cloneAligned = true;
             public bool cloneAllLayers;
         }
+        internal static bool NormalizeBrushAlpha(BrushState b)
+        {
+            if (b == null) throw new InvalidDataException("Invalid brush settings");
+            bool Unit(float value) => !float.IsNaN(value) && !float.IsInfinity(value) && value >= 0 && value <= 1;
+            bool Valid(Color c) => Unit(c.r) && Unit(c.g) && Unit(c.b) && Unit(c.a);
+            if (!Valid(b.color) || !Valid(b.secondaryColor) || !Unit(b.opacity) || !Unit(b.previousColorAlpha))
+                throw new InvalidDataException("Invalid brush color or opacity");
+            bool changed = false;
+            if (b.color.a != 1)
+            {
+                b.previousColorAlpha = b.color.a;
+                // 以前の描画もRGBA8へ丸めていた値を使う。
+                b.opacity *= Mathf.RoundToInt(b.color.a * 255) / 255f;
+                b.color.a = 1; b.colorAlphaMigrated = changed = true;
+            }
+            if (b.secondaryColor.a != 1) { b.secondaryColor.a = 1; b.backgroundAlphaMigrated = changed = true; }
+            return changed;
+        }
+        internal string BrushAlphaMigrationNote()
+        {
+            string note = brush.colorAlphaMigrated ? L.Tr("Brush color alpha ({0}%) was moved to opacity. Colors are now opaque.", Mathf.RoundToInt(brush.previousColorAlpha * 100)) : null;
+            if (brush.backgroundAlphaMigrated) note = (note == null ? "" : note + " ") + L.Tr("Legacy background alpha was removed. Color mixing now uses opaque colors.");
+            return note;
+        }
+        void NotifyBrushAlphaMigration() { var note = BrushAlphaMigrationNote(); if (note != null) { message = note; Repaint(); } }
+
         static readonly System.Random seeds = new System.Random();
-        static BrushState ReadBrushState(string json)
+        internal static BrushState ReadBrushState(string json)
         {
             var b=JsonUtility.FromJson<BrushState>(json);
             if(b==null||b.schema<1||b.schema>3||b.pressureCurve==null)throw new InvalidDataException("Unsupported brush settings");
@@ -43,13 +71,14 @@ namespace Yozolab.YoluPainter.Editor
             ValidateMaterial(b);
             ValidateSymmetryState(b);
             if (b.blurRadius < 1 || b.blurRadius > 64 || float.IsNaN(b.smudgeStrength) || b.smudgeStrength < 0 || b.smudgeStrength > 1) throw new InvalidDataException("Unsupported pixel effect brush settings");
+            NormalizeBrushAlpha(b);
             return b;
         }
-        internal BrushSettings GetBrush() { var s = NewBrushSettings(); BrushTips.Apply(s, brush.tipId);
+        internal BrushSettings GetBrush() { if (NormalizeBrushAlpha(brush)) NotifyBrushAlphaMigration(); var s = NewBrushSettings(); BrushTips.Apply(s, brush.tipId);
             ApplyBrushDynamics(s); ApplyShelfBrushImages(s);
             return s; }
         BrushSettings NewBrushSettings() => new BrushSettings { Radius=brush.radius, Hardness=brush.hardness, Spacing=brush.spacing, Opacity=brush.opacity, Flow=brush.flow,
-            Color=new Rgba32((byte)Mathf.RoundToInt(brush.color.r*255),(byte)Mathf.RoundToInt(brush.color.g*255),(byte)Mathf.RoundToInt(brush.color.b*255),(byte)Mathf.RoundToInt(brush.color.a*255)),
+            Color=new Rgba32((byte)Mathf.RoundToInt(brush.color.r*255),(byte)Mathf.RoundToInt(brush.color.g*255),(byte)Mathf.RoundToInt(brush.color.b*255),255),
             PressureSize=brush.pressureSize,PressureOpacity=brush.pressureOpacity,PressureFlow=brush.pressureFlow,Erase=CurrentBrushEffect == BrushEffect.Paint && brush.erase, Effect=CurrentBrushEffect, BlurRadius=brush.blurRadius, SmudgeStrength=brush.smudgeStrength, CloneOffsetX=cloneStrokeOffset.x, CloneOffsetY=cloneStrokeOffset.y,
             Texture=BrushTips.Resolve(brush.textureId), Angle=brush.angle, Roundness=brush.roundness, FollowDirection=brush.followDirection,
             SizeJitter=brush.sizeJitter, AngleJitter=brush.angleJitter, RoundnessJitter=brush.roundnessJitter, OpacityJitter=brush.opacityJitter, FlowJitter=brush.flowJitter,
@@ -59,7 +88,12 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>プリセットの設定を今のブラシに写す。色は今のまま残す（チャンネルの値として選んだものだから）。</summary>
         internal void ApplyPreset(Core.BrushPreset preset)
         {
-            var s=preset.CreateSettings(); var color=brush.color; var curve=brush.pressureCurve; var assist=(brush.stabilizer,brush.taperIn,brush.taperOut);
+            NormalizeBrushAlpha(brush);
+            var s=preset.CreateSettings();
+            bool migrated = s.Color.A != 255;
+            float previousAlpha = s.Color.A / 255f;
+            if (migrated) s.Opacity *= previousAlpha;
+            var color=brush.color; var curve=brush.pressureCurve; var assist=(brush.stabilizer,brush.taperIn,brush.taperOut);
             var secondary=brush.secondaryColor; var previous=brush;
             brush=new BrushState{ presetId=preset.Id, presetName=preset.Name, radius=(float)s.Radius, hardness=(float)s.Hardness, spacing=(float)s.Spacing, opacity=(float)s.Opacity, flow=(float)s.Flow,
                 color=color, pressureCurve=curve, pressureSize=s.PressureSize, pressureOpacity=s.PressureOpacity, pressureFlow=s.PressureFlow, erase=s.Erase,
@@ -70,9 +104,14 @@ namespace Yozolab.YoluPainter.Editor
             CopyPresetDynamics(s,secondary);
             brush.blurRadius=previous.blurRadius; brush.smudgeStrength=previous.smudgeStrength; brush.cloneAligned=previous.cloneAligned; brush.cloneAllLayers=previous.cloneAllLayers;
             CopySymmetry(previous,brush);
+            brush.backgroundColorSelected = previous.backgroundColorSelected;
+            brush.colorAlphaMigrated = migrated || previous.colorAlphaMigrated;
+            brush.previousColorAlpha = migrated ? previousAlpha : previous.previousColorAlpha;
+            brush.backgroundAlphaMigrated = previous.backgroundAlphaMigrated;
+            if (migrated) NotifyBrushAlphaMigration();
             CopyMaterial(previous,brush); // マテリアル（塗るチャンネルと値）は描画色と同じく描き手のものとして残す
         }
-        void SavePreset(){string p=Dialogs.SaveFile("Save brush",Application.dataPath,"brush","json");if(!String.IsNullOrEmpty(p))TryAction(()=>File.WriteAllText(p,JsonUtility.ToJson(brush,true)));}
+        void SavePreset(){string p=Dialogs.SaveFile("Save brush",Application.dataPath,"brush","ylbrush");if(!String.IsNullOrEmpty(p))TryAction(()=>File.WriteAllText(p,JsonUtility.ToJson(brush,true)));}
         /// <summary>ブラシのファイルを取り込み、プロジェクトのライブラリに入れて 1 つ目を選ぶ。対応していない設定は
         /// 取り込み後に一覧で知らせる（黙って捨てない）。</summary>
         internal void ImportBrushes()
@@ -100,7 +139,7 @@ namespace Yozolab.YoluPainter.Editor
             if(!Dialogs.Confirm("Delete imported brush","Delete \""+brush.presetName+"\" from "+where+"? The original file is not touched.","Delete","Cancel"))return;
             TryAction(()=>{BrushLibrary.Owning(brush.presetId).Remove(brush.presetId);ApplyPreset(BuiltInBrushes.Presets[0]);message="Deleted the imported brush.";});
         }
-        void LoadPreset(){string p=Dialogs.OpenFile("Load brush",Application.dataPath,"json");if(!String.IsNullOrEmpty(p))TryAction(()=>{if(new FileInfo(p).Length>65536)throw new InvalidDataException("Preset too large");var b=ReadBrushState(File.ReadAllText(p));var previous=brush;brush=b;try{GetBrush().Validate();}catch{brush=previous;throw;}message=MissingTipNote()??"Brush preset loaded.";});}
+        void LoadPreset(){string p=Dialogs.OpenFile("Load brush",Application.dataPath,"ylbrush,json");if(!String.IsNullOrEmpty(p))TryAction(()=>{if(new FileInfo(p).Length>65536)throw new InvalidDataException("Preset too large");var b=ReadBrushState(File.ReadAllText(p));var previous=brush;brush=b;try{GetBrush().Validate();}catch{brush=previous;throw;}message=BrushAlphaMigrationNote()??MissingTipNote()??L.Tr("Brush preset loaded.");});}
         /// <summary>保存されたブラシの筆先・紙の質感がこの Unity プロジェクトに無いときの知らせ（取り込んだブラシはプロジェクトの
         /// UserSettings にあるので、別のプロジェクトや別の人の環境では見つからない）。見つからない筆先は丸い筆先で描き、ID は残す。</summary>
         string MissingTipNote()

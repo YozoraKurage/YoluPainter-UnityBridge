@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
@@ -144,7 +145,8 @@ namespace Yozolab.YoluPainter.Editor
             if (triangle < 0) return;
             var index = RegionIndex(); long key = index.Key(triangle, surfacePick);
             if (!polyFillRegions.Add(key)) return; // 足した範囲はもう塗ってある
-            polyFill.Add(CanvasTriangles(index.Region(triangle, surfacePick)));
+            var region = index.Region(triangle, surfacePick);
+            polyFill.Add(CanvasTriangles(polyFillOnSurface ? VisibleSurfaceRegion(region).ToList() : region));
             repaintPixels = true;
         }
 
@@ -242,7 +244,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>範囲の選び方のメニュー（オプションバーと「3D Pick」の欄で共有）。</summary>
         void OpenSurfacePickMenu(Rect at)
         {
-            var menu = new GenericMenu();
+            var menu = new PaintMenu();
             foreach (SurfaceRegionKind kind in Enum.GetValues(typeof(SurfaceRegionKind))) { var k = kind; menu.AddItem(new GUIContent(SurfacePickName(k)), k == surfacePick, () => { surfacePick = k; Repaint(); }); }
             menu.DropDown(at);
         }

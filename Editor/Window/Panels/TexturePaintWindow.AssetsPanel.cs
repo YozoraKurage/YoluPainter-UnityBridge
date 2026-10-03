@@ -150,7 +150,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void OpenAssetKindMenu(Rect at)
         {
-            var menu = new GenericMenu();
+            var menu = new PaintMenu();
             foreach (AssetKind k in Enum.GetValues(typeof(AssetKind))) { var kind = k; menu.AddItem(new GUIContent(L.Tr(AssetKindName(k))), k == assetKind, () => AssetPanelKind = kind); }
             menu.DropDown(at);
         }
@@ -173,20 +173,25 @@ namespace Yozolab.YoluPainter.Editor
             PaintGui.Rounded(grid, PaintTheme.MenuBg, 4);
             if (items.Count == 0)
             {
+                PaintGui.Scrollbar(grid, ref assetScroll, 0, 20);
                 var lines = PaintGui.WrapLines(AssetEmptyText(), grid.width - 16, PaintTheme.Wrap);
                 float lh = PaintTheme.Wrap.lineHeight + 2, y = grid.y + 10;
                 foreach (var line in lines) { PaintGui.Text(new Rect(grid.x + 8, y, grid.width - 16, lh), line, PaintTheme.Wrap); y += lh; }
                 return;
             }
             int columns = Mathf.Max(1, Mathf.FloorToInt((grid.width - AssetGap + AssetGap) / (AssetCell + AssetGap)));
-            float cellWidth = (grid.width - AssetGap * (columns + 1)) / columns;
             int rowsCount = (items.Count + columns - 1) / columns;
             float content = AssetGap + rowsCount * (AssetCellHeight + AssetGap);
-            assetScroll.y = Mathf.Clamp(assetScroll.y, 0, Mathf.Max(0, content - grid.height));
-            if (e.type == EventType.ScrollWheel && grid.Contains(e.mousePosition)) { assetScroll.y = Mathf.Clamp(assetScroll.y + e.delta.y * 20, 0, Mathf.Max(0, content - grid.height)); e.Use(); Repaint(); }
+            float width = PaintGui.ScrollContentWidth(grid, content);
+            columns = Mathf.Max(1, Mathf.FloorToInt(width / (AssetCell + AssetGap)));
+            rowsCount = (items.Count + columns - 1) / columns;
+            content = AssetGap + rowsCount * (AssetCellHeight + AssetGap);
+            float cellWidth = (width - AssetGap * (columns + 1)) / columns;
+            AssetSpot("scrollbar", PaintGui.ScrollTrack(grid));
+            if (PaintGui.Scrollbar(grid, ref assetScroll, content, 20)) Repaint();
             int newThumbs = 0;
             PaintGui.BeginScroll(grid, assetScroll);
-            var view = new Rect(0, assetScroll.y, grid.width, grid.height);
+            var view = new Rect(0, assetScroll.y, width, grid.height);
             for (int i = 0; i < items.Count; i++)
             {
                 var item = items[i];

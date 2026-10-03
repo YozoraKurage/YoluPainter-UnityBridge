@@ -280,14 +280,17 @@ namespace Yozolab.YoluPainter.Editor
             var body = Body;
             if (e.type == EventType.MouseMove)
             {
+                Repaint();
                 var screen = GUIUtility.GUIToScreenPoint(e.mousePosition);
                 if (Session.Bar != null && Session.Bar.ScreenRects.Any(r => r.Contains(screen))) { Session.Bar.Pointer(screen, false); return; }
-                for (int i = 0; i < Nodes.Count; i++) if (body.Contains(e.mousePosition) && Row(i).Contains(e.mousePosition)) { Select(Nodes[i].Enabled ? i : -1, true); break; }
+                for (int i = 0; i < Nodes.Count; i++) if (new Rect(body.x, body.y, PaintGui.ScrollContentWidth(body, Nodes.Sum(Height) + Padding * 2), body.height).Contains(e.mousePosition) && Row(i).Contains(e.mousePosition)) { Select(Nodes[i].Enabled ? i : -1, true); break; }
             }
             if (e.type == EventType.MouseDown && !body.Contains(e.mousePosition)) { e.Use(); Session.Close(); return; }
-            if (e.type == EventType.ScrollWheel && body.Contains(e.mousePosition))
-            { scroll = Mathf.Clamp(scroll + e.delta.y * 16, 0, Mathf.Max(0, Nodes.Sum(Height) + Padding * 2 - body.height)); hoverIndex = -1; Session.TrimAfter(this); e.Use(); Repaint(); }
             Draw(new Rect(0, 0, position.width, position.height), Nodes, Selected, scroll);
+            var positionInList = new Vector2(0, scroll);
+            if (PaintGui.Scrollbar(body, ref positionInList, Nodes.Sum(Height) + Padding * 2, 16))
+            { hoverIndex = -1; Session.TrimAfter(this); Repaint(); }
+            scroll = positionInList.y;
             for (int i = 0; i < Nodes.Count; i++)
             {
                 var node = Nodes[i]; var row = Row(i);
@@ -308,7 +311,7 @@ namespace Yozolab.YoluPainter.Editor
             float y = Padding - scroll;
             for (int i = 0; i < nodes.Count; i++)
             {
-                var n = nodes[i]; var row = new Rect(4, y, body.width - 8, Height(n)); y += row.height;
+                var n = nodes[i]; var row = new Rect(4, y, PaintGui.ScrollContentWidth(body, nodes.Sum(Height) + Padding * 2) - 8, Height(n)); y += row.height;
                 if (n.Separator) { PaintGui.HLine(row.x + 8, row.xMax - 8, row.center.y, PaintTheme.Separator); continue; }
                 PaintGui.Tooltip(row, n.Item?.content.tooltip);
                 Color color = n.Enabled ? PaintTheme.Text : n.Heading ? PaintTheme.TextDim : PaintTheme.TextDisabled;

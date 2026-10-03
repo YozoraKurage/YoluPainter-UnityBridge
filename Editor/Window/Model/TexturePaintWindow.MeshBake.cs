@@ -435,17 +435,14 @@ namespace Yozolab.YoluPainter.Editor
         static void BakeScroll(Rect viewport, MeshBakeWindow host, ref Vector2 scroll, ref float contentHeight, Action<UiRows> draw)
         {
             var e = Event.current;
-            bool overflow = contentHeight > viewport.height + .5f;
             scroll.y = Mathf.Clamp(scroll.y, 0, Mathf.Max(0, contentHeight - viewport.height));
+            if (PaintGui.Scrollbar(viewport, ref scroll, contentHeight, 14)) host.Repaint();
             PaintGui.BeginScroll(viewport, scroll);
-            var rows = new UiRows(new Rect(0, 0, viewport.width - (overflow ? 8 : 0), 1e6f), 8);
+            var rows = new UiRows(new Rect(0, 0, PaintGui.ScrollContentWidth(viewport, contentHeight), 1e6f), 8);
             draw(rows);
             rows.Space(8);
             if (e.type == EventType.Repaint && Mathf.Abs(rows.Used - contentHeight) > .5f) { contentHeight = rows.Used; host.Repaint(); }
             PaintGui.EndScroll();
-            if (e.type == EventType.ScrollWheel && viewport.Contains(e.mousePosition))
-            { scroll.y = Mathf.Clamp(scroll.y + e.delta.y * 14, 0, Mathf.Max(0, contentHeight - viewport.height)); e.Use(); host.Repaint(); }
-            if (overflow) PaintGui.Rounded(new Rect(viewport.xMax - 6, viewport.y + viewport.height * scroll.y / contentHeight, 4, viewport.height * viewport.height / contentHeight), PaintTheme.ControlActive, 2);
         }
 
         void DrawMeshBakeTarget(Rect row, MeshBakeWindow host, MeshBakeTarget target, int index, bool baking)
@@ -692,7 +689,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             PaintGui.FitDropdown(r, label, name(value), at =>
             {
-                var menu = new GenericMenu();
+                var menu = new PaintMenu();
                 foreach (var v in values) { var item = v; menu.AddItem(new GUIContent(name(item)), Equals(item, value), () => { changed(item); Repaint(); host.Repaint(); }); }
                 menu.DropDown(at);
             }, tooltip, GUI.enabled, BakeLabelWidth);

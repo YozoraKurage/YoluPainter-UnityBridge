@@ -81,10 +81,10 @@ namespace Yozolab.YoluPainter.Tests
             if (Directory.Exists(project)) Directory.Delete(project, true);
         }
 
-        static List<string> MenuTexts(GenericMenu menu)
+        static List<string> MenuTexts(PaintMenu menu)
         {
-            var field = typeof(GenericMenu).GetField("m_MenuItems", BindingFlags.NonPublic | BindingFlags.Instance) ?? typeof(GenericMenu).GetField("menuItems", BindingFlags.NonPublic | BindingFlags.Instance);
-            if (field == null) Assert.Inconclusive("GenericMenu.menuItems is not there in this Unity version.");
+            var field = typeof(PaintMenu).GetField("m_MenuItems", BindingFlags.NonPublic | BindingFlags.Instance) ?? typeof(PaintMenu).GetField("menuItems", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field == null) Assert.Inconclusive("PaintMenu.menuItems is not there in this Unity version.");
             var texts = new List<string>();
             foreach (var item in (IEnumerable)field.GetValue(menu))
             {
@@ -106,9 +106,9 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(PainterPluginRegistry.CommandsIn(PainterPluginRegistry.PluginsMenu).Select(c => c.Path), Is.EqualTo(new[] { "Tools/Say Hello", "Tools/Never", "Tools/Throws" }));
             Assert.That(PainterPluginRegistry.HasPluginsMenu, Is.True);
             window = ScriptableObject.CreateInstance<TexturePaintWindow>();
-            var filter = new GenericMenu(); window.AddPluginCommands(filter, "Filter");
+            var filter = new PaintMenu(); window.AddPluginCommands(filter, "Filter");
             Assert.That(MenuTexts(filter), Is.EqualTo(new[] { "---", "Test/Noise Layer" }), "after a separator at the end of the built-in Filter menu");
-            var plugins = new GenericMenu(); window.AddPluginCommands(plugins, PainterPluginRegistry.PluginsMenu);
+            var plugins = new PaintMenu(); window.AddPluginCommands(plugins, PainterPluginRegistry.PluginsMenu);
             Assert.That(MenuTexts(plugins), Is.EqualTo(new[] { "Tools/Say Hello", "Tools/Never (disabled)", "Tools/Throws" }));
         }
 

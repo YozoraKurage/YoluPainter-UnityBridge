@@ -110,6 +110,19 @@ PNG は RGBA8・最大 2048 ピクセル。ブラシの画像は赤チャンネ�
   （正本と同じく失えないものなので、既定に戻して開かない）。
 - 並びにあるセットに `sets/<id>/document.utpaint` が無ければ開くのを断る。並びに無い `sets/<id>/` は知らないエントリとして知らせる。
 
+### ブラシの描画色と透明度
+
+`brush.json` と `.ylbrush` の設定 JSON は schema 3 のまま、任意の `backgroundColorSelected`（副色を選択中）、
+`colorAlphaMigrated`・`backgroundAlphaMigrated`（旧透明度の移行を通知する印）、`previousColorAlpha`（旧主色のアルファ）を持つ。
+無い場合は主色を選択中、移行の印なし、旧アルファ1。以前の読み手は追加項目を無視する。
+描画中は `color` が現在選んだ色、`secondaryColor` がもう一方の色で、主・副の配置は選択の印から戻す。
+
+読み込んだ主色のアルファが1未満なら、旧描画と同じRGBA8への丸め（`round(alpha * 255) / 255`）を
+ブラシの `opacity` へ掛け、色のアルファを1にする。窓の保存状態とプリセットにも同じ移行を適用し、
+ステータスとカラーパネルの警告で知らせる。移行後のアルファ1と通知の印を保存するため、再読込では二重に掛けない。
+背景色のアルファも1へ戻して通知する。主色と背景色に異なる透明度があった色混合は完全には再現しない。
+色・不透明度・旧アルファの非数値や0〜1の範囲外は拒否する。正本の画素・版と .ylp の形式は変更しない。
+
 ### resources.json（形式 4 から）
 
 ```json
@@ -211,9 +224,13 @@ PNG は RGBA8・最大 2048 ピクセル。ブラシの画像は赤チャンネ�
 | `resources.json` | 正本 | リソースがあるとき | プロジェクトのリソースの並び（上のとおり。形式 4 から） | `ResourceIndex.Read` |
 | `resources/<content>.png` | 正本 | 並びにあるとき | リソースの画素（上のとおり。形式 4 から） | `ResourceIndex.Load` |
 | `resources/<content>.ylsmart` | 正本 | 並びにあるとき | スマートマテリアル・スマートマスクのファイル（上のとおり。形式 5 から） | `ResourceIndex.Load`・`SmartMaterialFile` |
-| `view.json` | 状態 | | モデル（GUID）・選んだチャンネル（形式 2 までの `materialSlot` は書かない・読まない） | ウィンドウ |
+| `view.json` | 状態 | | モデル（GUID）・選んだチャンネル・任意のメッシュ／セット可視性（形式 2 までの `materialSlot` は書かない・読まない） | ウィンドウ |
 | `brush.json` | 状態 | | ブラシの設定。`schema` 1〜3（2 で筆先・ゆらぎ・紙の質感、3 でダイナミクス。schema 3 のまま、マテリアルで塗る組と値 `material`・`materialChannels`・`materialEmission`・`materialRoughness`・`materialMetallic`・`materialHeight`・`materialNormalX/Y` を足した: 無い古いファイルはオフで読み、古い読み手は読み飛ばして今のチャンネル 1 つで塗る。知らないチャンネルの印・範囲の外の値は読まずに既定に戻して知らせる） 対称も schema 3 の追加項目: `symmetry3D`・`symmetryAxis`・`symmetryOffset`（鏡映）、`radialSymmetry3D`・`radialSymmetryAxis`・`radialSymmetryCount`（放射状）、`symmetryIgnoreVisibility`・`symmetryAxesShown`、`canvasSymmetry`（0 なし / 1 縦 / 2 横 / 3 両方 / 4 放射状）・`canvasSymmetryX/Y`（中心の 0〜1 の比率）・`canvasSymmetryCount`。数は 2〜16、軸は 0 X / 1 Y / 2 Z。古いファイルは対称オフ、中心 0.5、数 2、可視性無視オフ。古い読み手は追加項目を読み飛ばす。プリセットも同じ項目。正本の画素・版と .ylp の形式は変更しない。 | ウィンドウ |
 | `thumbnail.png` | 派生 | | 今のセットの Color（無ければ最初のチャンネル。どのチャンネルも使っていなければ並びの最初の描いたセット）の合成を長辺 256 px 以下に縮めたもの | インポーター |
+
+`view.json` の任意の `visibility` は表示だけの状態です。`hiddenSets` は非表示にしたセットの ID（D 形式の GUID）の配列、`hiddenRenderers` はモデル内の兄弟番号のパスとレンダラーのコンポーネント番号（例 `000001/000000:0`）の配列です。モデルのルートの最初のレンダラーは `:0`、デモのキューブは `demo:0`。モデルの名前や元のアセットの表示を変えません。モデルを差し替えるとレンダラーの目は戻ります。同じモデルでもヒエラルキーの順序が変わった場合の対応は保証しません。
+
+この状態は正本・Undo・ベイクに入らず、未保存の判定にも含めません。手動保存で書き、ウィンドウのドメインリロードではシリアライズされた状態を戻します。復旧 checkpoint の正本には加えません。古い読み手は追加フィールドを無視し、`visibility` の無いファイルは全部表示します。この表示状態の追加では .ylp の形式と正本の版を変えません。状態の上限は `view.json` 全体で256 KiB、セット64、レンダラー4096、レンダラーの鍵は2048文字。不正な状態は正本を開いた上で全表示に戻し、知らせます。
 
 テクスチャセットごと（`sets/<id>/` の下。形式 2 までは同じ名前で根にあった）:
 

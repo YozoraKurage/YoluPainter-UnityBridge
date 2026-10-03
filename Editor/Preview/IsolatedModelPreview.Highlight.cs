@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Yozolab.YoluPainter.Core;
 using Yozolab.YoluPainter.Core.MeshMaps;
 using UnityEngine;
@@ -18,11 +19,12 @@ namespace Yozolab.YoluPainter.Editor.Preview
         GameObject regionObject; Mesh regionMesh; Material regionMaterial;
         SurfaceGeometry regionGeometry, builtRegionGeometry; long regionKey, builtRegionKey; IReadOnlyList<int> regionTriangles; Color regionColor;
         bool regionWanted, regionBuilt, regionUsesId;
+        long regionVisibility = -1, builtRegionVisibility;
         BakedMeshMap regionIdMap; Texture2D regionIdTexture; int regionIdRgb, regionIdTolerance;
         internal int IdHighlightTextureBuilds { get; private set; }
         internal string IdHighlightRefusal { get; private set; }
         internal (int, int, int)? IdHighlightInput => regionUsesId && regionIdTexture != null ? (regionIdTexture.GetInstanceID(), regionIdRgb, regionIdTolerance) : ((int, int, int)?)null;
-        /// <summary>焼いた ID のテクセルを、そのまま照合して強調する。テクスチャはベイクが変わったときだけ、メッシュはスロットが変わったときだけ作る。</summary>
+        /// <summary>焼いた ID のテクセルを、そのまま照合して強調する。テクスチャはベイクが変わったときだけ、メッシュはスロットまたは可視性が変わったときだけ作る。</summary>
         internal bool ShowIdRegion(long key, IReadOnlyList<int> triangles, Color color, BakedMeshMap map, int rgb, int tolerance, long budget)
         {
             IdMapColors.RequireIdMap(map);
@@ -32,7 +34,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             // 入れ替えでは前の GPU テクスチャとメッシュも同時に生きている。ドライバー内部の量を測った値ではない。
             long textureBytes = (long)map.Width * map.Height * (ReferenceEquals(map, regionIdMap) && regionIdTexture != null ? 4 : 12);
             long oldTextureBytes = regionIdTexture != null && !ReferenceEquals(map, regionIdMap) ? (long)regionIdTexture.width * regionIdTexture.height * 4 : 0;
-            long oldMeshBytes = regionMesh != null && (!ReferenceEquals(geometry, builtRegionGeometry) || key != builtRegionKey) ? (long)regionMesh.vertexCount * 72 : 0;
+            long oldMeshBytes = regionMesh != null && (!ReferenceEquals(geometry, builtRegionGeometry) || key != builtRegionKey || visibilityVersion != builtRegionVisibility) ? (long)regionMesh.vertexCount * 72 : 0;
             if (textureBytes + oldTextureBytes + oldMeshBytes + (long)triangles.Count * 384 > budget)
             { IdHighlightRefusal = "ID highlight exceeds the preview memory budget."; HideRegion(); return false; }
             if (!ReferenceEquals(map, regionIdMap) || regionIdTexture == null)
@@ -53,7 +55,12 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>範囲 triangles（今のジオメトリの三角形の番号。key が同じなら同じ集まり）を color で薄く見せる。</summary>
         public void ShowRegion(long key, IReadOnlyList<int> triangles, Color color)
         {
-            regionUsesId = false; regionWanted = triangles != null && geometry != null; regionGeometry = geometry; regionKey = key; regionTriangles = triangles; regionColor = color;
+            if (triangles == null || regionTriangles == null || !ReferenceEquals(regionGeometry, geometry) || regionKey != key || regionVisibility != visibilityVersion)
+            {
+                regionTriangles = triangles == null || hiddenRenderers.Count == 0 && hiddenSlots.Count == 0 ? triangles : triangles.Where(IsTriangleVisible).ToArray();
+                regionVisibility = visibilityVersion;
+            }
+            regionUsesId = false; regionWanted = triangles != null && geometry != null; regionGeometry = geometry; regionKey = key; regionColor = color;
         }
         /// <summary>範囲を見せない。</summary>
         public void HideRegion() { regionWanted = false; regionUsesId = false; regionTriangles = null; }
@@ -81,7 +88,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 renderer.lightProbeUsage = LightProbeUsage.Off; renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
                 preview.AddSingleGO(regionObject); regionBuilt = false;
             }
-            if (!regionBuilt || regionKey != builtRegionKey || !ReferenceEquals(geometry, builtRegionGeometry))
+            if (!regionBuilt || regionKey != builtRegionKey || visibilityVersion != builtRegionVisibility || !ReferenceEquals(geometry, builtRegionGeometry))
             {
                 var all = geometry.Triangles; int n = regionTriangles.Count;
                 var vertices = new Vector3[n * 3]; var uvs = new Vector2[n * 3]; var bary = new Vector3[n * 3]; var indices = new int[n * 3];
@@ -96,7 +103,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 regionMesh.Clear();
                 regionMesh.SetVertices(vertices); regionMesh.SetUVs(0, uvs); regionMesh.SetUVs(1, new List<Vector3>(bary)); regionMesh.SetIndices(indices, MeshTopology.Triangles, 0);
                 regionMesh.RecalculateBounds();
-                builtRegionKey = regionKey; builtRegionGeometry = geometry; regionBuilt = true; RegionHighlightBuilds++;
+                builtRegionKey = regionKey; builtRegionGeometry = geometry; builtRegionVisibility = visibilityVersion; regionBuilt = true; RegionHighlightBuilds++;
             }
             regionMaterial.SetColor("_Color", regionColor);
             regionMaterial.SetFloat("_UseId", regionUsesId ? 1 : 0);

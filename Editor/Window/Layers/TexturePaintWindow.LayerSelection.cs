@@ -237,7 +237,7 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>レイヤーメニューのロックの項目（選んでいる層の全部に効く）。</summary>
-        void LockMenuItems(UnityEditor.GenericMenu m)
+        void LockMenuItems(PaintMenu m)
         {
             var ids = SelectedLayers; bool idle = stroke == null && !toolDragging;
             foreach (var (flag, _, _) in LockButtons)

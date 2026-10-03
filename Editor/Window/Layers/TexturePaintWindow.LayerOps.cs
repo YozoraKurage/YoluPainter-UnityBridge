@@ -237,7 +237,7 @@ namespace Yozolab.YoluPainter.Editor
         // ───────── メニュー ─────────
 
         /// <summary>編集メニューのクリップボードの項目。</summary>
-        void ClipboardMenuItems(UnityEditor.GenericMenu m)
+        void ClipboardMenuItems(PaintMenu m)
         {
             var active = SelectedOrNull; bool idle = stroke == null && !toolDragging;
             bool mask = editMask && active?.Mask != null;
@@ -250,7 +250,7 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>レイヤーメニュー（と右クリック）の複製・結合の項目。結合できない理由があれば使えない項目にする。</summary>
-        void LayerOpMenuItems(UnityEditor.GenericMenu m)
+        void LayerOpMenuItems(PaintMenu m)
         {
             var active = SelectedOrNull; bool idle = stroke == null && !toolDragging;
             var members = document.TopmostOf(SelectedLayers);

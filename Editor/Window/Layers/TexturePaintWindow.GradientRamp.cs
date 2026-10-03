@@ -50,7 +50,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             if (PaintGui.Button(Spot("gradient.presets", Indent(rows.Row(), indent)), L.Tr("Gradient Presets…")))
             {
-                var menu = new GenericMenu();
+                var menu = new PaintMenu();
                 foreach (GradientPreset p in Enum.GetValues(typeof(GradientPreset)))
                 { var preset = p; menu.AddItem(new GUIContent(RampPresetName(p)), false, () => { var fg = (Color32)brush.color; var bg = (Color32)brush.secondaryColor; Commit(GradientRamp.Preset(preset, new Rgba32(fg.r, fg.g, fg.b, fg.a), new Rgba32(bg.r, bg.g, bg.b, bg.a))); }); }
                 menu.ShowAsContext();
@@ -96,7 +96,7 @@ namespace Yozolab.YoluPainter.Editor
             var curveRamp = ramp;
             if (PaintGui.Button(Spot("gradient.curve.presets", Indent(rows.Row(), indent)), L.Tr("Curve Presets…")))
             {
-                var menu = new GenericMenu();
+                var menu = new PaintMenu();
                 for (int i = 0; i < PressureCurve.Presets.Length; i++) { int k = i; menu.AddItem(new GUIContent(CurvePresetTitle(k)), false, () => Commit(curveRamp.WithCurve(PressureCurve.Presets[k].Points.Select(p => new GradientCurvePoint(p.x, p.y))))); }
                 menu.ShowAsContext();
             }

@@ -42,6 +42,7 @@ namespace Yozolab.YoluPainter.Editor
             reconciledSnapshot = -1; modelTiles = null;
             ApplyPreviewFrameRate(); preview.MaterialEdits = materialEdits; preview.Shading = previewShading; BindPreviewScene();
             ResolveSetMaterials(refineKeys: false);
+            ResetVisibility(false);
         }
 
         /// <summary>3D のパス 1 つの扱い。</summary>
@@ -113,7 +114,7 @@ namespace Yozolab.YoluPainter.Editor
                 // 前のモデルが無い（モデル無しのプロジェクト）・モデルを外す: 差し替えではないので読むだけ（大きなモデルは別スレッドで準備する）
                 FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); EndLightingDrag(true);
                 previewDisplayCanceled = false; model = next;
-                preview.BeginLoad(model); var notes = new List<string>(); ResolveSetMaterials(notes);
+                preview.BeginLoad(model); ResetVisibility(false); var notes = new List<string>(); ResolveSetMaterials(notes);
                 message = string.Join("; ", preview.Diagnostics.Concat(notes)); repaintPixels = true;
                 return true;
             }

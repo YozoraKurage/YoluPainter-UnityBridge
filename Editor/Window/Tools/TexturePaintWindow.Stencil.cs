@@ -419,7 +419,7 @@ namespace Yozolab.YoluPainter.Editor
             stencilInvert = PaintGui.FitToggle(Mark("stencil-invert", c[0]), L.TrIn("stencil", "Invert"), stencilInvert, L.Tr("Black lets the paint through and white holds it back (transparent still holds back)."), mode == StencilMode.Mask);
             PaintGui.FitDropdown(Mark("stencil-tiling", c[1]), null, StencilTilingName(stencilTiling), at =>
             {
-                var menu = new GenericMenu();
+                var menu = new PaintMenu();
                 foreach (StencilTiling t in Enum.GetValues(typeof(StencilTiling))) { var item = t; menu.AddItem(new GUIContent(StencilTilingName(item)), item == stencilTiling, () => { stencilTiling = item; Repaint(); }); }
                 menu.DropDown(at);
             }, L.Tr("Repeat the image beyond its edges across the view. Without tiling nothing is painted outside the image."));
@@ -477,7 +477,7 @@ namespace Yozolab.YoluPainter.Editor
         }
         void OpenStencilMenu(Rect at)
         {
-            var menu = new GenericMenu(); var images = ImageResources.Images; var current = StencilResource ?? Guid.Empty;
+            var menu = new PaintMenu(); var images = ImageResources.Images; var current = StencilResource ?? Guid.Empty;
             if (images.Count == 0) menu.AddDisabledItem(new GUIContent(L.Tr("This project has no images yet (import them in the Assets panel)")));
             foreach (var r in images)
             {

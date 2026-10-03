@@ -24,7 +24,7 @@ namespace Yozolab.YoluPainter.Editor
         void AssetContextMenu(string key, string name)
         {
             if (!TryParseAssetKey(key, out var source, out string id) || source != AssetSource.Library && source != AssetSource.Project) return;
-            var menu = new GenericMenu();
+            var menu = new PaintMenu();
             menu.AddItem(new GUIContent(L.Tr("Rename…")), false, () => AssetNameWindow.Open(name, next =>
             {
                 if (this == null) return;
