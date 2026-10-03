@@ -133,7 +133,7 @@ namespace Yozolab.YoluPainter.Editor
         void DrawFill(UiRows rows, PaintLayer active)
         {
             PaintGui.GroupLabel(rows.Row(16), L.Tr("Fill Value") + " · " + L.Tr(channel.ToString()));
-            bool image = active.HasFillImage(channel); // 画像があれば、値は画像を使えないときの代わり（デカールの値だけのチャンネルは、形の中の値）
+            bool image = active.HasFillImage(channel) || active.HasFillGradient(channel); // 画像があれば、値は画像を使えないときの代わり
             if (active.FillValues.TryGetValue(channel, out var value))
             {
                 bool scalar = IsScalarChannel(channel);
@@ -164,6 +164,7 @@ namespace Yozolab.YoluPainter.Editor
             else if (PaintGui.Button(Spot("fill.add", rows.Row()), L.Tr("Add a Value for This Channel"), false, GUI.enabled, L.Tr("The fill starts with the brush color"), "add"))
                 TryAction(() => document.SetFillValue(active.Id, channel, GetBrush().Color));
             DrawFillImage(rows, active); // チャンネルの画像（TexturePaintWindow.FillImages.cs）
+            DrawFillGradient(rows, active);
             NoteRow(rows, active.IsDecal ? L.Tr("A decal shows only inside its box on the model (see Projection), in the shape of its image. Paint its mask to hide parts of it.")
                 : L.Tr("A fill covers the whole canvas. Paint its mask to choose where it shows."));
         }

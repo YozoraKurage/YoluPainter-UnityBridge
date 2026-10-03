@@ -122,7 +122,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (ReferenceEquals(inputs.SeenDocument, d) && inputs.SeenRevision == revision) continue;
                 bool first = !ReferenceEquals(inputs.SeenDocument, d);
                 inputs.SeenDocument = d; inputs.SeenRevision = revision;
-                if (first && !d.HasGenerators && !d.HasFillImages) continue; // 初めて見た文書で、Generator も塗りつぶしの画像も無い
+                if (first && !d.HasGenerators && !d.HasFillImages && !d.HasFillGradients) continue; // 初めて見た文書で、Generator も塗りつぶしの画像も無い
                 changed = true;
                 set.DisplayKey = null; set.LightingKey = null; set.ThumbnailRevision = long.MinValue;
                 foreach (var c in set.MaterialChannels.Values) c.Revision = long.MinValue;
@@ -297,7 +297,8 @@ namespace Yozolab.YoluPainter.Editor
                             L.Tr("0 at the bounding box's minimum, 1 at its maximum along this world axis"));
                         break;
                     case GeneratorType.ShapeGradient:
-                        next = ShapeGradientRows(rows, e, next, indent); // 形・置き場・シーンから写す（TexturePaintWindow.ShapeGradient.cs）
+                        next = ShapeGradientRows(rows, e, next, indent);
+                        next = GradientRampRows(rows, e.Id.ToString(), next, picked => ApplyFilterSettings(e.Id, e.Settings.WithGenerator(picked)), () => document.FindFilter(selectedLayer, e.Id, out _)?.Settings.Generator, IsScalarChannel(channel) || document.FindFilter(selectedLayer, e.Id, out var rampTarget) != null && rampTarget == FilterTarget.Mask, indent); // 形・置き場・シーンから写す（TexturePaintWindow.ShapeGradient.cs）
                         break;
                     case GeneratorType.IdColor:
                         next = IdColorRows(rows, e, next, indent); // 色の一覧・スポイト・許容の幅（Tools/TexturePaintWindow.IdSelect.cs）

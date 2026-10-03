@@ -59,7 +59,14 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// how it reads it (int <see cref="AnchorRead"/>). A reference to an anchor that is gone or not below its layer loads as it was saved (it
     /// passes its input through and says why); one to the anchor on its own layer, an unknown flag, channel or read, a mask anchor without a mask,
     /// two anchors with one ID, bit 4 or type 7 in an older archive are refused. A document without anchors is laid out as version 19, only the
-    /// version number differs. Older archives still load.</summary>
+    /// version number differs. Older archives still load.
+    /// Version 21 adds attribute bit 5 for fill gradients (after fill images, before adjustments: int count,
+    /// per entry an int channel and the shape generator), and shape generator algorithm 2 for ramps after the volume: int colour
+    /// stop count, per stop double position, three RGB bytes, double midpoint; int opacity stop count, per stop double position,
+    /// opacity, midpoint; int curve point count, per point double x, y. A ramp is absent in algorithm 1. Unknown bits/algorithms,
+    /// invalid point counts, non-finite/out-of-range/unordered values and invalid fill sources are refused. Older archives still load.</summary>
+
+
     public static class DocumentBinary
     {
         /// <summary>The version that added per-channel blend modes and opacities (attribute bit 2).</summary>
@@ -76,7 +83,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
         internal const int ManualIdColorsVersion = 19;
         /// <summary>The version that added anchor points (attribute bit 4 and the block at the end of the layer) and the anchor generator (type 7).</summary>
         internal const int AnchorVersion = 20;
-        const int Version = AnchorVersion;
+        internal const int GradientRampVersion = 21;
+        const int Version = GradientRampVersion;
         /// <summary>The version <see cref="Write"/> produces.</summary>
         public const int CurrentVersion = Version;
         /// <summary>The version that added the shape gradient (generator type 5 and its volume after the generator block).</summary>
@@ -86,8 +94,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
         /// <summary>The most layers a native document holds (the reader refuses more).</summary>
         public const int MaxLayers = 2048;
         /// <summary>Version 12 layer attribute byte: bit 0 clipping, bit 1 an int of layer locks follows; version 14 bit 2 the per-channel
-        /// blend settings follow; version 16 bit 3 the fill images and projection follow the fill values; version 20 bit 4 the anchors end the layer.</summary>
-        const int AttributeClipping = 1, AttributeLocks = 2, AttributeChannelBlends = 4, AttributeFillImages = 8, AttributeAnchors = 16;
+        /// blend settings follow; version 16 bit 3 the fill images and projection follow the fill values; version 20 bit 4 the anchors end the layer; version 21 bit 5 the fill gradients follow the fill images.</summary>
+        const int AttributeClipping = 1, AttributeLocks = 2, AttributeChannelBlends = 4, AttributeFillImages = 8, AttributeAnchors = 16, AttributeFillGradients = 32;
         /// <summary>Version 20 anchor flags: an anchor on the layer, one on its mask.</summary>
         const int AnchorOnLayer = 1, AnchorOnMask = 2;
         /// <summary>Parts of a per-channel blend entry.</summary>
@@ -133,7 +141,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     bool fillImages = layer.Kind == LayerKind.Fill && (layer.FillImages.Count > 0 || !layer.Projection.Equals(FillProjection.Default));
                     var maskAnchor = layer.Mask?.Anchor; bool anchors = layer.Anchor != null || maskAnchor != null;
                     writer.Write((byte)((layer.Clipping ? AttributeClipping : 0) | (layer.Locks != LayerLocks.None ? AttributeLocks : 0) | (layer.HasChannelBlends ? AttributeChannelBlends : 0) | (fillImages ? AttributeFillImages : 0)
-                        | (anchors ? AttributeAnchors : 0)));
+                        | (anchors ? AttributeAnchors : 0) | (layer.FillGradients.Count > 0 ? AttributeFillGradients : 0)));
                     if (layer.Locks != LayerLocks.None) writer.Write((int)layer.Locks);
                     if (layer.HasChannelBlends) WriteChannelBlends(writer, layer); // 版 14
                     writer.Write((int)layer.Kind);
@@ -147,6 +155,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         writer.Write(value.R); writer.Write(value.G); writer.Write(value.B); writer.Write(value.A);
                     }
                     if (fillImages) WriteFillImages(writer, layer);
+                    if (layer.FillGradients.Count > 0) WriteFillGradients(writer, layer);
                     if (layer.Kind == LayerKind.Adjustment)
                     {
                         var a = layer.Adjustment;
@@ -242,14 +251,14 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         bool visible = reader.ReadBoolean(); double opacity = reader.ReadDouble(); int blend = reader.ReadInt32();
                         if (double.IsNaN(opacity) || double.IsInfinity(opacity) || opacity < 0 || opacity > 1 || !Enum.IsDefined(typeof(LayerBlendMode), blend))
                             throw new InvalidDataException("Invalid layer attributes.");
-                        bool clipping = false, fillImages = false, anchors = false; var locks = LayerLocks.None; System.Collections.Generic.List<(PaintChannel, ChannelBlend)> channelBlends = null;
+                        bool clipping = false, fillImages = false, anchors = false, fillGradients = false; var locks = LayerLocks.None; System.Collections.Generic.List<(PaintChannel, ChannelBlend)> channelBlends = null;
                         if (version >= 12)
                         {
                             int attributes = reader.ReadByte();
                             int known = AttributeClipping | AttributeLocks | (version >= ChannelBlendsVersion ? AttributeChannelBlends : 0) | (version >= FillImageVersion ? AttributeFillImages : 0)
-                                | (version >= AnchorVersion ? AttributeAnchors : 0);
+                                | (version >= AnchorVersion ? AttributeAnchors : 0) | (version >= GradientRampVersion ? AttributeFillGradients : 0);
                             if ((attributes & ~known) != 0) throw new InvalidDataException("Unknown layer attribute flags " + attributes + "; a newer reader is required (source retained unchanged).");
-                            clipping = (attributes & AttributeClipping) != 0; fillImages = (attributes & AttributeFillImages) != 0; anchors = (attributes & AttributeAnchors) != 0;
+                            clipping = (attributes & AttributeClipping) != 0; fillImages = (attributes & AttributeFillImages) != 0; anchors = (attributes & AttributeAnchors) != 0; fillGradients = (attributes & AttributeFillGradients) != 0;
                             if ((attributes & AttributeLocks) != 0)
                             {
                                 int value = reader.ReadInt32();
@@ -278,6 +287,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
                             }
                             if (fillImages && kind != (int)LayerKind.Fill) throw new InvalidDataException("Only fill layers have images and a projection.");
                             var images = fillImages ? ReadFillImages(reader, values, version, out projection) : null;
+                            if (fillGradients && kind != (int)LayerKind.Fill) throw new InvalidDataException("Only fill layers have gradients.");
+                            var gradients = fillGradients ? ReadFillGradients(reader, version) : null;
                             if (kind == (int)LayerKind.Adjustment)
                             {
                                 if (version < 4) throw new InvalidDataException("Adjustment layers require archive version 4.");
@@ -309,6 +320,11 @@ namespace Yozolab.YoluPainter.Core.Persistence
                             else layer = kind == (int)LayerKind.Fill ? doc.AddFillLayer(layerName, values, layerId) : doc.AddLayer(layerName, layerId);
                             foreach (var channel in disabled) doc.SetChannelEnabled(layer.Id, channel, false);
                             if (images != null) doc.SetFillImagesForLoad(layer, images, projection);
+                            if (gradients != null)
+                            {
+                                try { doc.SetFillGradientsForLoad(layer, gradients); }
+                                catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException) { throw new InvalidDataException("Invalid fill gradient: " + ex.Message, ex); }
+                            }
                         }
                         else layer = doc.AddLayer(layerName, layerId);
                         doc.SetParentForLoad(layer, parentId);
@@ -535,6 +551,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 var v = g.Volume;
                 writer.Write((int)v.Shape);
                 foreach (double d in new[] { v.CenterX, v.CenterY, v.CenterZ, v.RotationX, v.RotationY, v.RotationZ, v.SizeX, v.SizeY, v.SizeZ, v.Falloff }) writer.Write(d);
+                if (g.Ramp != null) WriteRamp(writer, g.Ramp);
             }
             if (g.Type == GeneratorType.IdColor)
             {
@@ -542,6 +559,40 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 foreach (int c in g.IdColors) writer.Write(c);
             }
             if (g.Type == GeneratorType.Anchor) { writer.Write(g.AnchorId.ToByteArray()); writer.Write((int)g.AnchorChannel); writer.Write((int)g.AnchorRead); } // 版 20
+        }
+        static void WriteFillGradients(BinaryWriter writer, PaintLayer layer)
+        {
+            writer.Write(layer.FillGradients.Count);
+            foreach (var g in layer.FillGradients.OrderBy(g => g.Key)) { writer.Write((int)g.Key); WriteGenerator(writer, g.Value); }
+        }
+        static System.Collections.Generic.Dictionary<PaintChannel, GeneratorSettings> ReadFillGradients(BinaryReader reader, int version)
+        {
+            int count = ReadCount(reader, 6, "fill gradients"); if (count == 0) throw new InvalidDataException("An empty fill-gradient block is invalid.");
+            var result = new System.Collections.Generic.Dictionary<PaintChannel, GeneratorSettings>();
+            for (int k = 0; k < count; k++)
+            {
+                int channel = reader.ReadInt32();
+                if (!Enum.IsDefined(typeof(PaintChannel), channel) || result.ContainsKey((PaintChannel)channel)) throw new InvalidDataException("Invalid or duplicate fill-gradient channel.");
+                try { result.Add((PaintChannel)channel, ReadGenerator(reader, version)); }
+                catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException) { throw new InvalidDataException("Invalid fill gradient: " + ex.Message, ex); }
+            }
+            return result;
+        }
+        static void WriteRamp(BinaryWriter writer, GradientRamp ramp)
+        {
+            writer.Write(ramp.Colors.Count); foreach (var s in ramp.Colors) { writer.Write(s.Position); writer.Write(s.Color.R); writer.Write(s.Color.G); writer.Write(s.Color.B); writer.Write(s.Midpoint); }
+            writer.Write(ramp.Opacities.Count); foreach (var s in ramp.Opacities) { writer.Write(s.Position); writer.Write(s.Opacity); writer.Write(s.Midpoint); }
+            writer.Write(ramp.Curve.Count); foreach (var p in ramp.Curve) { writer.Write(p.X); writer.Write(p.Y); }
+        }
+        static GradientRamp ReadRamp(BinaryReader reader)
+        {
+            var colors = new GradientStop[ReadCount(reader, GradientRamp.MaxStops, "gradient colour stops")];
+            for (int k = 0; k < colors.Length; k++) colors[k] = new GradientStop(reader.ReadDouble(), new Rgba32(reader.ReadByte(), reader.ReadByte(), reader.ReadByte(), 255), reader.ReadDouble());
+            var opacity = new GradientOpacityStop[ReadCount(reader, GradientRamp.MaxStops, "gradient opacity stops")];
+            for (int k = 0; k < opacity.Length; k++) opacity[k] = new GradientOpacityStop(reader.ReadDouble(), reader.ReadDouble(), reader.ReadDouble());
+            var curve = new GradientCurvePoint[ReadCount(reader, GradientRamp.MaxCurvePoints, "gradient curve points")];
+            for (int k = 0; k < curve.Length; k++) curve[k] = new GradientCurvePoint(reader.ReadDouble(), reader.ReadDouble());
+            return new GradientRamp(colors, opacity, curve);
         }
         const int MaxGeneratorPins = 8;
         /// <summary>The generator block (version 11; the shape gradient's volume from version 13; the ID colours from
@@ -552,7 +603,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             if (!Enum.IsDefined(typeof(GeneratorType), type) || type == (int)GeneratorType.ShapeGradient && version < ShapeGradientVersion || type == (int)GeneratorType.IdColor && version < IdColorVersion
                 || type == (int)GeneratorType.Anchor && version < AnchorVersion)
                 throw new InvalidDataException("Unknown generator type " + type + "; a newer reader is required (source retained unchanged).");
-            if (algorithm != GeneratorSettings.AlgorithmVersionOf((GeneratorType)type)) throw new InvalidDataException("Generator algorithm version " + algorithm + " of " + (GeneratorType)type + " is not supported by this reader; source retained unchanged.");
+            if (algorithm != GeneratorSettings.AlgorithmVersionOf((GeneratorType)type) && !(algorithm == 2 && type == (int)GeneratorType.ShapeGradient && version >= GradientRampVersion)) throw new InvalidDataException("Generator algorithm version " + algorithm + " of " + (GeneratorType)type + " is not supported by this reader; source retained unchanged.");
             double low = reader.ReadDouble(), high = reader.ReadDouble(), softness = reader.ReadDouble(); bool invert = reader.ReadBoolean();
             double noiseAmount = reader.ReadDouble(), noiseScale = reader.ReadDouble(); int noiseSeed = reader.ReadInt32(), noiseSpace = reader.ReadInt32();
             int blend = reader.ReadInt32(); double balance = reader.ReadDouble(); int axis = reader.ReadInt32();
@@ -575,6 +626,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 var v = new double[10]; for (int k = 0; k < v.Length; k++) v[k] = reader.ReadDouble();
                 volume = new ShapeVolume((GeneratorShape)shape, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9]);
             }
+            var ramp = algorithm == 2 && type == (int)GeneratorType.ShapeGradient ? ReadRamp(reader) : null;
             int tolerance = IdMapColors.DefaultTolerance; int[] colors = null;
             if (type == (int)GeneratorType.IdColor)
             {
@@ -592,7 +644,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             try
             {
                 return GeneratorSettings.FromValues((GeneratorType)type, low, high, softness, invert, noiseAmount, noiseScale, noiseSeed, (GeneratorNoiseSpace)noiseSpace,
-                    (GeneratorBlend)blend, balance, axis, dx, dy, dz, bent, pins, volume, colors, tolerance, anchorId, (PaintChannel)anchorChannel, (AnchorRead)anchorRead);
+                    (GeneratorBlend)blend, balance, axis, dx, dy, dz, bent, pins, volume, colors, tolerance, anchorId, (PaintChannel)anchorChannel, (AnchorRead)anchorRead).WithRamp(ramp);
             }
             catch (ArgumentException ex) { throw new InvalidDataException("Invalid generator parameters: " + ex.Message, ex); }
         }

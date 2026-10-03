@@ -88,6 +88,7 @@ namespace Yozolab.YoluPainter.Core
         {
             EnsureNoStroke(); PaintLayer.ValidateChannel(channel); var layer = GetLayer(id);
             if (layer.Kind != LayerKind.Fill) throw new InvalidOperationException("Only fill layers have images. Place the image as a layer instead.");
+            layer.FillGradients.TryGetValue(channel, out var oldGradient);
             Guid? old = layer.FillImages.TryGetValue(channel, out var current) ? current : (Guid?)null;
             if (Nullable.Equals(old, resourceId)) return;
             if (resourceId.HasValue)
@@ -107,12 +108,14 @@ namespace Yozolab.YoluPainter.Core
                 () =>
                 {
                     layer.SetFillImageInternal(channel, resourceId);
+                    if (resourceId.HasValue) layer.SetFillGradientInternal(channel, null);
                     if (resourceId.HasValue) { if (!hadValue) layer.SetFillValueInternal(channel, fallback); layer.Enable(channel, true); }
                     FillChanged(layer);
                 },
                 () =>
                 {
                     layer.SetFillImageInternal(channel, old);
+                    layer.SetFillGradientInternal(channel, oldGradient);
                     if (!hadValue) layer.SetFillValueInternal(channel, null);
                     layer.Enable(channel, wasEnabled);
                     FillChanged(layer);

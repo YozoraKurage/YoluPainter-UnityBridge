@@ -114,3 +114,13 @@ Halo-aware dependency scheduling beyond this, graphs in native persistence and g
 `ArchiveBudgetBytes` はメモリ予算とは別の保存予算。異なる PNG・ブラシファイル・スマートファイルの長さを数え、エディタは現在の文書などの予約量を引いた残りを設定する。
 `DocumentBinary.Measure` は正本の書き手を、配列を保持しないストリームへ通してサイズを数える。旧ファイルの読み込みは予算を一時的に外し、内容を捨てない。
 `ResourceOrigin.LocalFileId` が Unity のサブアセットを指し、置き場は検証した相対パスを使う。`SmartPreview` のプレビューは球の見本を使う。
+
+## 形のグラデーションと直接の塗りつぶし
+
+GradientRamp は不変の値で、RGB と不透明度にそれぞれ2〜32個の分岐点、区間の中点、2〜16点の値のカーブを持つ。Evaluate は範囲を保つ PCHIP のカーブを先に適用し、分岐点を補間する。SampleStops は編集欄のために分岐点の位置を直接読む。RGB は格納 sRGB の成分をプリマルチプライせずに補間する（sRGB の作業空間で Photoshop Classic を基準にした方式）。スカラーとマスクは sRGB の変換をせず Rec. 709 の輝度を値として扱い、マスクでは不透明度を掛ける。中点は重みが半分になる位置で、前後を線形に結ぶ。筆圧のカーブとの一致は float の精度の範囲で確認する。Photoshop の厳密な式や Linear/Perceptual の出力との一致は保証しない。
+
+GeneratorSettings.WithRamp は ShapeGradient にだけ使える。未設定は既存のアルゴリズム1とその画素を保ち、設定するとアルゴリズム2になる。層の Generator は色（Roughness/Metallic/Height ではスカラー）を出し、段の強さに応じて元のアルファへ勾配の不透明度を掛ける。PaintDocument.SetFillGradient / PaintLayer.FillGradients は同じ Position の接続と出力キャッシュで、チャンネルのソースとして直接使う。同じチャンネルは画像か勾配の片方を持ち、切り替えの Undo は以前のソースも戻す。不足・古いマップでは残した Fill の値を代わりに表示し、GetFillGradientStatus / InactiveFillGradients が理由を返す。デカールの層では勾配も箱・面の向き・形の画像のアルファで切り抜き、置けない場合は全面透明にする。Normal と Replace 以外を拒否し、ロック・型・作業予算を変更前に調べる。複製・サイズ変更・ネイティブ保存でも保持し、PSD へは評価した画素を書き、編集情報の損失を知らせる。元のモデルやアセットは変更しない。
+
+直接の勾配も層の Anchor が保持する合成に含まれる。同じ Fill のソースが直接の勾配と Anchor の Generator を持つ場合も、両方を束縛して評価する。ネイティブは Anchor の版20・属性bit4・種類7を保ち、勾配を版21・属性bit5として保存する。復旧の CaptureSnapshot は勾配と Anchor の参照も保ち、その後の編集で保存用の写しを変えない。
+
+表示の合成はエディターのスレッド上で処理を区切る。縮小の合成も評価済みのタイルを読むため、TileGpuCompositor は見えるスタック（グループ・クリップ・マスクを含む）に評価ソースがあると、保留領域全体の縮小プレビューを省く。同じ更新ごとの時間予算で全解像度のブロックを進め、1回の縮小表示で勾配の全ブロックが評価されるのを避ける。1ブロックと上限のある先読みは予算を超えることがある。通常のラスターや不透明度のドラッグは縮小表示を保つ。バックグラウンドの非同期処理やフレームごとの待ち時間は保証しない。

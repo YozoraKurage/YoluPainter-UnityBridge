@@ -252,12 +252,12 @@ namespace Yozolab.YoluPainter.Core
         internal void SetFillImageInternal(PaintChannel channel, Guid? id) { if (id.HasValue) fillImages[channel] = id.Value; else fillImages.Remove(channel); }
         /// <summary>True when the layer's pixels in the channel are evaluated (by its filters, or a fill's projection) rather than read
         /// as stored: the compositors then read <see cref="CopyOutputTile"/> and its <see cref="OutputStamp"/>.</summary>
-        public bool HasEvaluatedOutput(PaintChannel channel) => HasActiveFilters(channel) || IsProjectedFill(channel);
+        public bool HasEvaluatedOutput(PaintChannel channel) => HasActiveFilters(channel) || HasFillGradient(channel) || IsProjectedFill(channel);
         /// <summary>A fill layer whose projection is a decal (<see cref="FillProjectionMode.Decal"/>).</summary>
         public bool IsDecal => Kind == LayerKind.Fill && Projection.IsDecal;
         /// <summary>A fill channel whose pixels come from the projection: a channel with an image, and every channel with a value of a decal.</summary>
         internal bool IsProjectedFill(PaintChannel channel) => Kind == LayerKind.Fill && (fillImages.ContainsKey(channel) || Projection.IsDecal && fillValues.ContainsKey(channel));
         /// <summary>A fill whose projection reads the baked mesh maps (and has an image to project, or is a decal).</summary>
-        internal bool ReadsMeshMapsForFill => Kind == LayerKind.Fill && (fillImages.Count > 0 || Projection.IsDecal) && Projection.ReadsMeshMaps;
+        internal bool ReadsMeshMapsForFill => Kind == LayerKind.Fill && (fillGradients.Count > 0 || (fillImages.Count > 0 || Projection.IsDecal) && Projection.ReadsMeshMaps);
     }
 }

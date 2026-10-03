@@ -25,7 +25,8 @@ namespace Yozolab.YoluPainter.Editor
             if(e.type!=EventType.KeyDown)return;
             // キーが届いた時点で文字の欄にフォーカスがあったか（Enter で確定して外れる前の状態を見る）
             editingText=GUIUtility.keyboardControl!=0; tookKey=KeyCode.None;
-            if(ShapeDragging){if(e.keyCode==KeyCode.Escape)CancelShapeDrag();e.Use();Repaint();} // 形のハンドルのドラッグ中は Esc で取り消すだけ（Undo などのキーも使わない）
+            if(GradientDraftActive){if(e.keyCode==KeyCode.Escape)CancelGradientDrafts();e.Use();Repaint();}
+            else if(ShapeDragging){if(e.keyCode==KeyCode.Escape)CancelShapeDrag();e.Use();Repaint();} // 形のハンドルのドラッグ中は Esc で取り消すだけ（Undo などのキーも使わない）
             else if(pathDrag>=0){if(e.keyCode==KeyCode.Escape)CancelToolDrag();e.Use();Repaint();}
             else if(e.keyCode==KeyCode.Escape && toolDragging){CancelToolDrag();GUIUtility.hotControl=0;e.Use();Repaint();}
             else if(e.keyCode==KeyCode.Escape && stroke!=null){FinishStroke(false);e.Use();}

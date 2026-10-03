@@ -23,15 +23,17 @@ namespace Yozolab.YoluPainter.Editor
         [SerializeField] string shapeEditFilter = "";
         /// <summary>投影の置き場のハンドルを隠している（Q・投影の欄のボタン。Substance の Show/Hide manipulator）。窓の状態で、保存しない。</summary>
         [SerializeField] bool projectionHandlesHidden;
+        [SerializeField] string fillGradientEditLayer = "";
+        [SerializeField] PaintChannel fillGradientEditChannel;
         [SerializeField] ShapeGizmoMode shapeGizmoMode = ShapeGizmoMode.Move;
-        ShapeHandle shapeDrag; ShapeVolume shapeDragStart; Vector2 shapeDragFrom; Guid shapeDragFilter, shapeDragLayer; int shapeDragControl; bool shapeDragProjection;
+        ShapeHandle shapeDrag; ShapeVolume shapeDragStart; Vector2 shapeDragFrom; Guid shapeDragFilter, shapeDragLayer; int shapeDragControl; bool shapeDragProjection, shapeDragFillGradient; PaintChannel shapeDragFillChannel;
 
         /// <summary>3D ビューで編集している形のグラデーションの Generator（無ければ Guid.Empty）。窓の状態で、保存しない。編集している間は、
         /// 投影の置き場より先にこちらを出す（ギズモは 1 つ）。</summary>
         internal Guid ShapeEditFilter
         {
             get => Guid.TryParse(shapeEditFilter, out var id) ? id : Guid.Empty;
-            set { if (value != ShapeEditFilter) CancelShapeDrag(); shapeEditFilter = value == Guid.Empty ? "" : value.ToString(); Repaint(); }
+            set { if (value != ShapeEditFilter) CancelShapeDrag(); shapeEditFilter = value == Guid.Empty ? "" : value.ToString(); if (value != Guid.Empty) { fillGradientEditLayer = ""; } Repaint(); }
         }
         /// <summary>今 3D ビューに置き場のハンドルが出ている塗りつぶしの層（無ければ Guid.Empty）: 選んでいる層の投影が型の上の投影かデカールで、
         /// その層のマスクを編集しておらず、形のグラデーションを編集しておらず、ハンドルを隠していないとき。</summary>
@@ -40,8 +42,27 @@ namespace Yozolab.YoluPainter.Editor
         internal bool ProjectionHandlesHidden
         {
             get => projectionHandlesHidden;
-            set { if (value == projectionHandlesHidden) return; if (value && shapeDragProjection) CancelShapeDrag(); projectionHandlesHidden = value; Repaint(); }
+            set
+            {
+                if (!value && (ShapeEditFilter != Guid.Empty || FillGradientEditLayer != Guid.Empty))
+                { CancelShapeDrag(); shapeEditFilter = fillGradientEditLayer = ""; }
+                if (value && shapeDragProjection) CancelShapeDrag();
+                projectionHandlesHidden = value; Repaint();
+            }
         }
+        internal Guid FillGradientEditLayer
+        {
+            get => Guid.TryParse(fillGradientEditLayer, out var id) ? id : Guid.Empty;
+            set { if (value != FillGradientEditLayer) CancelShapeDrag(); fillGradientEditLayer = value == Guid.Empty ? "" : value.ToString(); if (value != Guid.Empty) { shapeEditFilter = ""; } Repaint(); }
+        }
+        internal PaintChannel FillGradientEditChannel { get => fillGradientEditChannel; set { if (value != fillGradientEditChannel) CancelShapeDrag(); fillGradientEditChannel = value; } }
+        GeneratorSettings EditedFillGradient()
+        {
+            if (FillGradientEditLayer != selectedLayer || document == null || EditingMask) return null;
+            var layer = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
+            return layer != null && layer.FillGradients.TryGetValue(fillGradientEditChannel, out var g) ? g : null;
+        }
+        internal static ShapeSnap SceneShapeSnap => new ShapeSnap(EditorSnapSettings.move, EditorSnapSettings.scale, EditorSnapSettings.rotate);
         internal ShapeGizmoMode ShapeGizmoMode { get => shapeGizmoMode; set { if (shapeDrag == ShapeHandle.None) shapeGizmoMode = value; Repaint(); } }
         /// <summary>ギズモのハンドルをドラッグしている間 true。</summary>
         internal bool ShapeDragging => shapeDrag != ShapeHandle.None;
@@ -63,7 +84,7 @@ namespace Yozolab.YoluPainter.Editor
         /// </summary>
         PaintLayer EditedProjection()
         {
-            if (document == null || projectionHandlesHidden || EditingMask || EditedShapeGradient() != null) return null;
+            if (document == null || projectionHandlesHidden || EditingMask || EditedShapeGradient() != null || EditedFillGradient() != null) return null;
             var layer = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
             return layer != null && layer.Kind == LayerKind.Fill && layer.Projection.ReadsMeshMaps ? layer : null;
         }
@@ -72,6 +93,8 @@ namespace Yozolab.YoluPainter.Editor
         {
             var effect = EditedShapeGradient();
             if (effect != null) { volume = effect.Settings.Generator.Volume; return true; }
+            var fillGradient = EditedFillGradient();
+            if (fillGradient != null) { volume = fillGradient.Volume; return true; }
             var layer = EditedProjection();
             if (layer != null) { var p = layer.Projection; volume = p.Mode == FillProjectionMode.Spherical ? p.Placement.WithShape(GeneratorShape.Sphere) : p.Placement; return true; }
             volume = default; return false;
@@ -83,7 +106,8 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (preview == null) return;
             var e = ShapeGizmoShown ? EditedShapeGradient() : null;
-            preview.ShownShapeGradient = e == null ? (ShapeGradientOverlay?)null : ShapeGradientOverlay.Of(e.Settings.Generator, preview.ModelRootPosition, preview.ModelRootRotation, materialSlot, ShapeOverlayTint);
+            var settings = e?.Settings.Generator ?? (ShapeGizmoShown ? EditedFillGradient() : null);
+            preview.ShownShapeGradient = settings == null ? (ShapeGradientOverlay?)null : ShapeGradientOverlay.Of(settings, preview.ModelRootPosition, preview.ModelRootRotation, materialSlot, ShapeOverlayTint);
         }
 
         /// <summary>形の線とハンドルを 3D ビューに重ねる（Repaint のとき、3D を描いた後）。マウスの下（ドラッグ中はそのハンドル）を光らせる。</summary>
@@ -95,7 +119,8 @@ namespace Yozolab.YoluPainter.Editor
             var hover = shapeDrag != ShapeHandle.None ? shapeDrag : stroke == null && surfaceRect.Contains(pointer) ? ShapeGizmo.Hit(v, rootPosition, rootRotation, view, shapeGizmoMode, pointer) : ShapeHandle.None;
             var offset = (Vector3)surfaceRect.position;
             GUI.BeginClip(surfaceRect);
-            var previous = Handles.color;
+            var previous = Handles.color; var previousDepth = Handles.zTest;
+            Handles.zTest = UnityEngine.Rendering.CompareFunction.Always;
             try
             {
                 foreach (var line in ShapeGizmo.Lines(v, rootPosition, rootRotation, view, shapeGizmoMode, hover))
@@ -124,7 +149,7 @@ namespace Yozolab.YoluPainter.Editor
                     }
                 }
             }
-            finally { Handles.color = previous; GUI.EndClip(); }
+            finally { Handles.color = previous; Handles.zTest = previousDepth; GUI.EndClip(); }
         }
 
         /// <summary>ギズモの入力（ハンドルを押す・ドラッグ・離す）。扱ったら true。ハンドルの無い所の押下は扱わない（今のツールへ）。</summary>
@@ -141,19 +166,20 @@ namespace Yozolab.YoluPainter.Editor
             var handle = ShapeGizmo.Hit(v, preview.ModelRootPosition, preview.ModelRootRotation, preview.GizmoView(surfaceRect), shapeGizmoMode, e.mousePosition);
             if (handle == ShapeHandle.None) return false;
             document.EndCoalescing(); // 前の欄のドラッグにまとめない
-            shapeDrag = handle; shapeDragStart = v; shapeDragFrom = e.mousePosition; shapeDragFilter = effect?.Id ?? Guid.Empty; shapeDragLayer = selectedLayer; shapeDragProjection = effect == null;
+            shapeDrag = handle; shapeDragStart = v; shapeDragFrom = e.mousePosition; shapeDragFilter = effect?.Id ?? Guid.Empty; shapeDragLayer = selectedLayer; shapeDragFillGradient = EditedFillGradient() != null; shapeDragFillChannel = fillGradientEditChannel; shapeDragProjection = effect == null && !shapeDragFillGradient;
             shapeDragControl = GUIUtility.GetControlID(FocusType.Passive); GUIUtility.hotControl = shapeDragControl;
             e.Use(); Repaint(); return true;
         }
 
         void ApplyShapeDrag(Vector2 mouse, bool symmetric, bool snap)
         {
+            if (shapeDragFillGradient) { ApplyFillGradientDrag(mouse, symmetric, snap); return; }
             if (shapeDragProjection) { ApplyProjectionDrag(mouse, symmetric, snap); return; }
             FilterEffect effect = null;
             if (selectedLayer == shapeDragLayer) try { effect = document.FindFilter(shapeDragLayer, shapeDragFilter, out _); } catch (KeyNotFoundException) { }
             if (effect == null || !effect.Settings.IsGenerator) { EndShapeDrag(); return; } // 層や Generator が無くなった
             var g = effect.Settings.Generator;
-            var next = ShapeGizmo.Drag(shapeDrag, shapeDragStart, preview.ModelRootPosition, preview.ModelRootRotation, preview.GizmoView(surfaceRect), shapeDragFrom, mouse, symmetric, snap);
+            var next = ShapeGizmo.Drag(shapeDrag, shapeDragStart, preview.ModelRootPosition, preview.ModelRootRotation, preview.GizmoView(surfaceRect), shapeDragFrom, mouse, symmetric, snap, SceneShapeSnap);
             if (next.Equals(g.Volume)) return;
             string why = next.Refusal();
             if (why != null) { message = why; return; }
@@ -165,12 +191,21 @@ namespace Yozolab.YoluPainter.Editor
         {
             var layer = selectedLayer == shapeDragLayer ? document.Layers.FirstOrDefault(l => l.Id == shapeDragLayer && l.Kind == LayerKind.Fill) : null;
             if (layer == null) { EndShapeDrag(); return; } // 層が無くなった
-            var next = ShapeGizmo.Drag(shapeDrag, shapeDragStart, preview.ModelRootPosition, preview.ModelRootRotation, preview.GizmoView(surfaceRect), shapeDragFrom, mouse, symmetric, snap);
+            var next = ShapeGizmo.Drag(shapeDrag, shapeDragStart, preview.ModelRootPosition, preview.ModelRootRotation, preview.GizmoView(surfaceRect), shapeDragFrom, mouse, symmetric, snap, SceneShapeSnap);
             var placement = layer.Projection.WithPlacement(next);
             if (placement.Equals(layer.Projection)) return;
             string why = placement.Placement.Refusal();
             if (why != null) { message = why; return; }
             TryAction(() => document.SetFillProjection(layer.Id, placement, coalesce: true));
+        }
+        void ApplyFillGradientDrag(Vector2 mouse, bool symmetric, bool snap)
+        {
+            var layer = document.Layers.FirstOrDefault(l => l.Id == shapeDragLayer);
+            if (selectedLayer != shapeDragLayer || layer == null || !layer.FillGradients.TryGetValue(shapeDragFillChannel, out var g)) { EndShapeDrag(); return; }
+            var next = ShapeGizmo.Drag(shapeDrag, shapeDragStart, preview.ModelRootPosition, preview.ModelRootRotation, preview.GizmoView(surfaceRect), shapeDragFrom, mouse, symmetric, snap, SceneShapeSnap);
+            if (next.Equals(g.Volume)) return;
+            string why = next.Refusal(); if (why != null) { message = why; return; }
+            ApplyFillGradient(layer.Id, shapeDragFillChannel, g.WithVolume(next), coalesce: true);
         }
         void EndShapeDrag()
         {

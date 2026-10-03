@@ -164,6 +164,7 @@ namespace Yozolab.YoluPainter.Core
             copy.CopyChannelBlendsFrom(source);
             foreach (var entry in source.FillValues) copy.SetFillValueInternal(entry.Key, entry.Value);
             if (source.Kind == LayerKind.Fill && (source.FillImages.Count > 0 || !source.Projection.Equals(FillProjection.Default))) SetFillImagesForLoad(copy, source.FillImages, source.Projection);
+            if (source.FillGradients.Count > 0) SetFillGradientsForLoad(copy, source.FillGradients);
             foreach (var entry in source.Channels)
             {
                 var surface = copy.GetChannel(entry.Key);

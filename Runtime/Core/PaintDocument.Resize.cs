@@ -154,6 +154,7 @@ namespace Yozolab.YoluPainter.Core
                     target = copy.AddFillLayer(layer.Name, values, layer.Id);
                     // 画像と投影は UV・モデルの空間で決まるので、大きさによらずそのまま写す
                     if (layer.FillImages.Count > 0 || !layer.Projection.Equals(FillProjection.Default)) copy.SetFillImagesForLoad(target, layer.FillImages, layer.Projection);
+                    if (layer.FillGradients.Count > 0) copy.SetFillGradientsForLoad(target, layer.FillGradients);
                     break;
                 case LayerKind.Adjustment: target = copy.AddAdjustmentLayer(layer.Name, layer.Adjustment, layer.EnabledChannels, layer.Id); break;
                 case LayerKind.Group: target = copy.AddGroup(layer.Name, layer.Id); break;

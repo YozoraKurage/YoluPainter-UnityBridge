@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 
@@ -209,7 +210,7 @@ namespace Yozolab.YoluPainter.Core
             long need = 0;
             foreach (var layer in layers)
             {
-                foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel))) { var chain = layer.ActiveChain(c); if (chain.Length > 0) need = Math.Max(need, BlockWorkingBytes(chain, blockPixels)); }
+                foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel))) { var chain = layer.ActiveChain(c); if (chain.Length > 0 || layer.HasFillGradient(c)) need = Math.Max(need, BlockWorkingBytes(chain, blockPixels)); }
                 if (layer.Mask != null) { var chain = layer.Mask.ActiveChain(); if (chain.Length > 0) need = Math.Max(need, BlockWorkingBytes(chain, blockPixels)); }
             }
             return need;
@@ -382,7 +383,7 @@ namespace Yozolab.YoluPainter.Core
             Execute(new DelegateCommand(
                 () => { MarkLayerChanged(layer, null); SetStack(layer, target, mask, after); MarkLayerChanged(layer, null); MarkClippedLayersChanged(); },
                 () => { MarkLayerChanged(layer, null); SetStack(layer, target, mask, before); MarkLayerChanged(layer, null); MarkClippedLayersChanged(); },
-                64 + 96L * (before.Length + after.Length)), coalesceKey);
+                64 + 96L * (before.Length + after.Length) + before.Sum(e => e.Settings.Generator?.Ramp?.ByteSize ?? 0) + after.Sum(e => e.Settings.Generator?.Ramp?.ByteSize ?? 0)), coalesceKey);
         }
         void SetStack(PaintLayer layer, FilterTarget target, RasterMask mask, FilterEffect[] stack)
         {

@@ -66,10 +66,12 @@ namespace Yozolab.YoluPainter.Editor
                 ShapeEditFilter = editing ? Guid.Empty : e.Id;
             if (PaintGui.IconButton(Spot("generator.shape.move", new Rect(row.xMax - modes + 4, row.y, 26, row.height)), "transform", L.Tr("Handles: move (arrows along the model's axes, the square in the view's plane)"), shapeGizmoMode == ShapeGizmoMode.Move, GUI.enabled && editing, 16))
                 ShapeGizmoMode = ShapeGizmoMode.Move;
-            if (PaintGui.IconButton(Spot("generator.shape.rotate", new Rect(row.xMax - 26, row.y, 26, row.height)), "3d_rotation", L.Tr("Handles: rotate (rings about the model's axes; Ctrl snaps to 15°)"), shapeGizmoMode == ShapeGizmoMode.Rotate, GUI.enabled && editing, 16))
+            if (PaintGui.IconButton(Spot("generator.shape.rotate", new Rect(row.xMax - 26, row.y, 26, row.height)), "3d_rotation", L.Tr("Handles: rotate (rings about the model's axes; Ctrl uses Unity's Scene rotation increment)"), shapeGizmoMode == ShapeGizmoMode.Rotate, GUI.enabled && editing, 16))
                 ShapeGizmoMode = ShapeGizmoMode.Rotate;
             if (editing && surfaceRect.width <= 0) NoteRow(rows, L.Tr("Show the 3D view (View ▸ 3D or 2D | 3D) to see and drag the shape."), NoteKind.Info, indent);
             else if (editing && (preview == null || !preview.HasModel)) NoteRow(rows, L.Tr("Load a model (or the demo cube) to see the shape on it."), NoteKind.Info, indent);
+
+            NoteRow(rows, L.Tr("Ctrl: snap movement, size and rotation using Unity's Scene snap settings. Shift: resize both faces. Handles are drawn in front of the model."), NoteKind.Plain, indent);
 
             // 置き場（モデルのルートの空間、シーンの単位）
             PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.Tr("Placement"), L.Tr("In the model root's space: its position and rotation, in scene units (the root's scale is not applied). The same values as the handles in the 3D view."));

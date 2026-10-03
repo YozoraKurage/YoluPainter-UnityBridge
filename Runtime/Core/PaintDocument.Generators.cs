@@ -203,6 +203,7 @@ namespace Yozolab.YoluPainter.Core
         public IReadOnlyList<string> InactiveGenerators()
         {
             var notes = new List<string>();
+            notes.AddRange(InactiveFillGradients());
             if (!HasGenerators) return notes;
             foreach (var layer in layers)
             {

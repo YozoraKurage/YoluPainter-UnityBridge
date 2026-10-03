@@ -303,7 +303,7 @@ namespace Yozolab.YoluPainter.Editor
             // 間引いた合成を先に見せる: ドラッグの最中（step > 1）、前の回で終わらなかった（1 回では揃わない変更）、文書がその後また
             // 変わった、全解像度で揃えるのに予算か間引いた合成の 4 回分以上かかる見込み（PreviewPays）、のすべてのとき。マウスを
             // 止めているあいだは作り直さず、時間を全解像度に回す
-            if (step > 1 && pending.Count > 0 && !lastFinished && doc.ChangeSerial != previewSerial && CanPreview(step) && PreviewPays(step, budget))
+            if (step > 1 && pending.Count > 0 && !lastFinished && doc.ChangeSerial != previewSerial && CanPreview(step) && !HasEvaluatedSources(CpuCompositor.Plan(doc, channel), channel) && PreviewPays(step, budget))
             {
                 double t0 = Elapsed();
                 long samples = Preview(doc, channel, step);
@@ -411,6 +411,20 @@ namespace Yozolab.YoluPainter.Editor
                 previewMaterial.SetTexture("_LayerTex", Texture2D.blackTexture);
             }
             return true;
+        }
+
+        /// <summary>間引く合成でも評価する層は全解像度のタイルを読む。予定の全部を先に間引くと、その層の全部も同じ回に評価して
+        /// 時間の区切りを越えるため、その場合は全解像度のブロックを予算ごとに進める。入れ子・クリッピング・マスクも同じ。
+        /// 評価しない層のドラッグは従来どおり間引ける。</summary>
+        static bool HasEvaluatedSources(IReadOnlyList<CpuCompositor.StackEntry> entries, PaintChannel channel)
+        {
+            foreach (var entry in entries)
+            {
+                var layer = entry.Base;
+                if (layer.HasEvaluatedOutput(channel) || layer.Mask != null && !layer.Mask.IsNeutral && layer.Mask.HasActiveFilters
+                    || HasEvaluatedSources(entry.Children, channel) || HasEvaluatedSources(entry.ClipEntries, channel)) return true;
+            }
+            return false;
         }
 
         /// <summary>予定のブロックの全部を、step で間引いた正確な合成（各ブロックの下の写しが今も使えればそこから）で作り、待っている

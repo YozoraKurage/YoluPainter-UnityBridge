@@ -294,9 +294,9 @@ namespace Yozolab.YoluPainter.Core
 
         /// <summary>True when the channel can have pixels in the tiles [tx0, tx1) × [ty0, ty1) (a decal: only where its box meets the
         /// tiles' positions).</summary>
-        internal bool MayCoverTiles(int tx0, int ty0, int tx1, int ty1)
+        internal bool MayCoverTiles(int tx0, int ty0, int tx1, int ty1, bool externalValue = false)
         {
-            if (!MayCover) return false;
+            if (!(externalValue && decal ? placed : MayCover)) return false;
             if (!decal || tileBounds == null) return true;
             for (int ty = Math.Max(0, ty0); ty < Math.Min(tileBounds.Rows, ty1); ty++)
                 for (int tx = Math.Max(0, tx0); tx < Math.Min(tileBounds.Columns, tx1); tx++)
@@ -386,7 +386,9 @@ namespace Yozolab.YoluPainter.Core
 
         /// <summary>A placed decal's pixel: transparent outside its box, where it is culled and on texels without a position or normal;
         /// inside, the channel's colour with its alpha times the shape and the coverage.</summary>
-        Rgba32 DecalPixel(int x, int y)
+        internal Rgba32 ApplyDecalToValue(int x, int y, Rgba32 value) => placed ? DecalPixel(x, y, value) : Rgba32.Transparent;
+
+        Rgba32 DecalPixel(int x, int y, Rgba32? externalValue = null)
         {
             if (!DecalPoint(x, y, out double lx, out double ly, out double lz, out double cover)) return Rgba32.Transparent;
             double s = lx * invSx + .5, t = ly * invSy + .5, dsx = 0, dtx = 0, dsy = 0, dty = 0;
@@ -404,7 +406,11 @@ namespace Yozolab.YoluPainter.Core
                 cover *= shape.Alpha / 255;
                 if (!(cover > 0)) return Rgba32.Transparent;
             }
-            if (Mips == null) return new Rgba32(Fallback.R, Fallback.G, Fallback.B, MathUtil.ToByte(Fallback.A / 255.0 * cover));
+            if (externalValue.HasValue || Mips == null)
+            {
+                var value = externalValue ?? Fallback;
+                return new Rgba32(value.R, value.G, value.B, MathUtil.ToByte(value.A / 255.0 * cover));
+            }
             var acc = new Acc(); SampleAt(Mips, s, t, dsx, dtx, dsy, dty, 1, ref acc);
             return acc.Resolve(cover);
         }

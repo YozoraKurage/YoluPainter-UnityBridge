@@ -103,6 +103,8 @@ namespace Yozolab.YoluPainter.Core
         public IReadOnlyDictionary<MeshMapKind, string> Pins { get; private set; }
         /// <summary>ShapeGradient: the shape and where it is in the model root's space. Other types keep <see cref="ShapeVolume.Default"/>.</summary>
         public ShapeVolume Volume { get; private set; }
+        /// <summary>ShapeGradient: optional colour/value ramp; null preserves the original scalar formula.</summary>
+        public GradientRamp Ramp { get; private set; }
         /// <summary>IdColor: the ID colours (0xRRGGBB) that give 1, in the order they were added; no repeats. Other types keep none.</summary>
         public IReadOnlyList<int> IdColors { get; private set; }
         /// <summary>IdColor: how far (largest 8-bit channel difference, 0..255) a texel's ID colour may be from a listed colour. Other types keep
@@ -178,6 +180,7 @@ namespace Yozolab.YoluPainter.Core
         public GeneratorSettings WithDirection(double x, double y, double z) { var g = Copy(); g.DirectionX = x; g.DirectionY = y; g.DirectionZ = z; return Checked(g); }
         public GeneratorSettings WithBentNormal(bool value) { var g = Copy(); g.UseBentNormal = value; return Checked(g); }
         /// <summary>ShapeGradient: another shape or placement.</summary>
+        public GeneratorSettings WithRamp(GradientRamp value) { var g = Copy(); g.Ramp = value; return Checked(g); }
         public GeneratorSettings WithVolume(ShapeVolume value) { var g = Copy(); g.Volume = value; return Checked(g); }
         /// <summary>IdColor: another list of colours (0xRRGGBB, no repeats, at most <see cref="MaxIdColors"/>).</summary>
         public GeneratorSettings WithIdColors(IEnumerable<int> colors) { var g = Copy(); g.IdColors = ColorList(colors); return Checked(g); }
@@ -208,7 +211,7 @@ namespace Yozolab.YoluPainter.Core
             {
                 Low = Low, High = High, Softness = Softness, Invert = Invert, NoiseAmount = NoiseAmount, NoiseScale = NoiseScale, NoiseSeed = NoiseSeed, NoiseSpace = NoiseSpace,
                 Blend = Blend, Balance = Balance, Axis = Axis, DirectionX = DirectionX, DirectionY = DirectionY, DirectionZ = DirectionZ, UseBentNormal = UseBentNormal, Pins = Pins,
-                Volume = Volume, IdColors = IdColors, IdTolerance = IdTolerance, AnchorId = AnchorId, AnchorChannel = AnchorChannel, AnchorRead = AnchorRead,
+                Volume = Volume, Ramp = Ramp, IdColors = IdColors, IdTolerance = IdTolerance, AnchorId = AnchorId, AnchorChannel = AnchorChannel, AnchorRead = AnchorRead,
             };
         }
         static IReadOnlyList<int> ColorList(IEnumerable<int> colors)
@@ -232,6 +235,7 @@ namespace Yozolab.YoluPainter.Core
 
         void Validate()
         {
+            if (Ramp != null && Type != GeneratorType.ShapeGradient) throw new ArgumentException("The ramp belongs to the shape gradient.", nameof(Ramp));
             if (!Enum.IsDefined(typeof(GeneratorType), Type)) throw new ArgumentOutOfRangeException(nameof(Type), "Unknown generator type " + (int)Type + ".");
             foreach (double v in new[] { Low, High, Softness, NoiseAmount, NoiseScale, Balance, DirectionX, DirectionY, DirectionZ }) MathUtil.RequireFinite(v, "generator");
             if (Low < 0 || Low > 1 || High < 0 || High > 1 || High - Low < MinLevelRange)
@@ -284,7 +288,7 @@ namespace Yozolab.YoluPainter.Core
         }
 
         /// <summary>Version of the type's formula. Stored with every generator; a reader refuses versions it does not implement.</summary>
-        public int AlgorithmVersion { get { return AlgorithmVersionOf(Type); } }
+        public int AlgorithmVersion { get { return Ramp == null ? AlgorithmVersionOf(Type) : 2; } }
         public static int AlgorithmVersionOf(GeneratorType type) { return 1; }
 
         /// <summary>Every map kind the type can read (whatever its parameters): what it may be pinned to.</summary>
@@ -352,7 +356,7 @@ namespace Yozolab.YoluPainter.Core
             if (other == null || Type != other.Type || Low != other.Low || High != other.High || Softness != other.Softness || Invert != other.Invert || NoiseAmount != other.NoiseAmount
                 || NoiseScale != other.NoiseScale || NoiseSeed != other.NoiseSeed || NoiseSpace != other.NoiseSpace || Blend != other.Blend || Balance != other.Balance || Axis != other.Axis
                 || DirectionX != other.DirectionX || DirectionY != other.DirectionY || DirectionZ != other.DirectionZ || UseBentNormal != other.UseBentNormal || Pins.Count != other.Pins.Count
-                || !Volume.Equals(other.Volume) || IdTolerance != other.IdTolerance || !IdColors.SequenceEqual(other.IdColors)
+                || !Equals(Ramp, other.Ramp) || !Volume.Equals(other.Volume) || IdTolerance != other.IdTolerance || !IdColors.SequenceEqual(other.IdColors)
                 || AnchorId != other.AnchorId || AnchorChannel != other.AnchorChannel || AnchorRead != other.AnchorRead) return false;
             foreach (var p in Pins) if (!other.Pins.TryGetValue(p.Key, out var key) || key != p.Value) return false;
             return true;

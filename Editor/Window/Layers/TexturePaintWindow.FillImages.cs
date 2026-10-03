@@ -262,12 +262,12 @@ namespace Yozolab.YoluPainter.Editor
             var p = active.Projection; var v = p.Placement;
             bool editing = ProjectionEditLayer == active.Id;
             var row = rows.Row(24); float modes = 3 * 26 + 6;
-            if (PaintGui.Button(Spot("projection.edit", new Rect(row.x, row.y, row.width - modes, row.height)), L.Tr("Handles in 3D View"), !projectionHandlesHidden, GUI.enabled && stroke == null,
+            if (PaintGui.Button(Spot("projection.edit", new Rect(row.x, row.y, row.width - modes, row.height)), L.Tr("Handles in 3D View"), editing, GUI.enabled && stroke == null,
                     L.Tr("Show or hide the projection's box in the 3D view (Q). While this layer is selected its handles show: drag the arrows to move it, the rings to turn it and the squares on its faces to size it (Shift: both faces)."), "view_in_ar"))
-                ProjectionHandlesHidden = !projectionHandlesHidden;
+                ProjectionHandlesHidden = editing;
             if (PaintGui.IconButton(Spot("projection.move", new Rect(row.xMax - modes + 4, row.y, 26, row.height)), "transform", L.Tr("Handles: move (arrows along the model's axes, the square in the view's plane)"), shapeGizmoMode == ShapeGizmoMode.Move, GUI.enabled && editing, 16))
                 ShapeGizmoMode = ShapeGizmoMode.Move;
-            if (PaintGui.IconButton(Spot("projection.rotate", new Rect(row.xMax - modes + 32, row.y, 26, row.height)), "3d_rotation", L.Tr("Handles: rotate (rings about the model's axes; Ctrl snaps to 15°)"), shapeGizmoMode == ShapeGizmoMode.Rotate, GUI.enabled && editing, 16))
+            if (PaintGui.IconButton(Spot("projection.rotate", new Rect(row.xMax - modes + 32, row.y, 26, row.height)), "3d_rotation", L.Tr("Handles: rotate (rings about the model's axes; Ctrl uses Unity's Scene rotation increment)"), shapeGizmoMode == ShapeGizmoMode.Rotate, GUI.enabled && editing, 16))
                 ShapeGizmoMode = ShapeGizmoMode.Rotate;
             if (PaintGui.IconButton(Spot("projection.fit", new Rect(row.xMax - 26, row.y, 26, row.height)), "target", L.Tr("Fit the box to the model (its bounds; a cube for tri-planar and spherical)"), false, GUI.enabled && stroke == null && preview != null && preview.HasModel, 16))
                 TryAction(() => { document.EndCoalescing(); document.SetFillProjection(active.Id, active.Projection.WithPlacement(ModelPlacement(p.Mode))); document.EndCoalescing(); });

@@ -142,16 +142,16 @@ namespace Yozolab.YoluPainter.Editor
             projectPath=null; projectToken=null; savedRevision=-1; importedPsdPath=null; externalConflict=false; ResetCanvasView(); NewProjectRecord();
             ResetSetsBaseline(false);
         }
-        void OnLostFocus() { ClearPolygonFillHover(); pickHoverPointer = new Vector2(-100, -100); FinishStroke(false); CancelShapeDrag(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); ReleaseStencilInput(); preview?.CancelNavigation(); SaveRecovery(); }
-        void BeforeReload() { CancelSmartSave(); FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); EndLightingDrag(true); preview?.CancelNavigation(); preview?.CancelPreparation(); CaptureMaterialInspector(); DisposeMaterialInspector(); SaveRecoveryBeforeLifecycleChange(); }
-        void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ CancelSmartSave(); FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); SaveRecoveryBeforeLifecycleChange(); } }
+        void OnLostFocus() { ClearPolygonFillHover(); pickHoverPointer = new Vector2(-100, -100); FinishStroke(false); CancelShapeDrag(); CancelGradientDrafts(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); ReleaseStencilInput(); preview?.CancelNavigation(); SaveRecovery(); }
+        void BeforeReload() { CancelSmartSave(); FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); CancelGradientDrafts(); EndLightingDrag(true); preview?.CancelNavigation(); preview?.CancelPreparation(); CaptureMaterialInspector(); DisposeMaterialInspector(); SaveRecoveryBeforeLifecycleChange(); }
+        void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ CancelSmartSave(); FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); CancelGradientDrafts(); SaveRecoveryBeforeLifecycleChange(); } }
         void OnDisable()
         {
             CancelSmartSave();
             PaintMenuSession.CloseFor(this);
             CaptureMaterialInspector(); DisposeMaterialInspector();
             DisposePenInput();
-            FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); preview?.CancelNavigation(); SaveRecoveryBeforeLifecycleChange(); recoveryWriter=null; lastRecoveryRequest=null;
+            FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); CancelGradientDrafts(); preview?.CancelNavigation(); SaveRecoveryBeforeLifecycleChange(); recoveryWriter=null; lastRecoveryRequest=null;
             EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; EditorApplication.projectChanged-=OnUnityProjectChanged; UnhookResources(); DisposeAssetThumbnails(); L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
             DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeDecalOverlay(); DisposeStencilOverlay(); DisposeThumbnails(); DisposeColorPanel(); DisposeTextureSetTextures(); DisposeMaterialChannelTextures(); DisposeModelShowTextures(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
             if(selectionOverlay!=null){DestroyImmediate(selectionOverlay);selectionOverlay=null;overlayFor=null;}

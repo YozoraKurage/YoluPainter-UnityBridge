@@ -205,7 +205,7 @@ PNG は RGBA8・最大 2048 ピクセル。ブラシの画像は赤チャンネ�
 
 | エントリ | 種類 | 必須 | 中身と版 | 読み手 |
 |---|---|---|---|---|
-| `document.utpaint` | 正本 | ○ | セットのネイティブの正本（そのセットの唯一の正本）。`DOTPAINT` + 版。今は **版 20**、版 1〜20 を読む（下） | `DocumentBinary` |
+| `document.utpaint` | 正本 | ○ | セットのネイティブの正本（そのセットの唯一の正本）。`DOTPAINT` + 版。今は **版 21**、版 1〜21 を読む（下） | `DocumentBinary` |
 | `selection.bin` | 正本 | 選択があるとき | 選択範囲。`YLSL` + 版 1 | `SelectionBinary` |
 | `imported-original.psd` | 正本 | PSD から取り込んだとき | 取り込んだ PSD の原本のバイト列（変えない） | — |
 | `composite/<チャンネル>.png` | 派生 | | そのチャンネルを使うレイヤーがあるときの合成（straight RGBA8、PNG なので外から見て上下は正しい）。Normal は Unity 向けの出力 | インポーター（大きさとチャンネルを見るだけ） |
@@ -219,7 +219,7 @@ PNG は RGBA8・最大 2048 ピクセル。ブラシの画像は赤チャンネ�
 
 `document.utpaint` の版: 2 でレイヤーのラスターマスク、3 でレイヤーの種類と Fill の値、4 で調整、5 でクリッピング、6 でグループ
 （親の ID、PassThrough）、7 で Normal の出力の設定、8 で編集できる 3D のパス、9 でフィルターのスタック、10 で 2D のパス、11 で Generator の段（フィルターのスタックの段の種類 6）、12 でレイヤーのロック、
-13 で形のグラデーション（Generator の種類 5 とその形の欄）、14 でレイヤーのチャンネルごとの合成モードと不透明度、15 で ID の色（Generator の種類 6 とその色の欄）、16 で塗りつぶしレイヤーの画像と投影、17 でデカール（投影の種類 5 と、画像の外を透明にする外側 2）、18 で 2D/3D パスのマテリアルの組、19 で手動 ID 色の任意の末尾ブロック。版の数は `DocumentBinary` の定数 1 か所（`Version`。形のグラデーションを足した版は `ShapeGradientVersion`、チャンネルごとの合成を足した版は `ChannelBlendsVersion`、ID の色を足した版は `IdColorVersion`、塗りつぶしの画像を足した版は `FillImageVersion`、デカールを足した版は `DecalVersion`、パスの組を足した版は `MaterialPathVersion`。`Version` は手動 ID 色を足した `ManualIdColorsVersion` に従う）。
+13 で形のグラデーション（Generator の種類 5 とその形の欄）、14 でレイヤーのチャンネルごとの合成モードと不透明度、15 で ID の色（Generator の種類 6 とその色の欄）、16 で塗りつぶしレイヤーの画像と投影、17 でデカール（投影の種類 5 と、画像の外を透明にする外側 2）、18 で 2D/3D パスのマテリアルの組、19 で手動の ID 色の末尾ブロック、20 で Anchor（属性のビット 4・Generator の種類 7）、21 で色・不透明度の分岐点と値のカーブ、チャンネルごとの直接の勾配。版の数は `DocumentBinary` の定数 1 か所（`Version`。形のグラデーションを足した版は `ShapeGradientVersion`、チャンネルごとの合成を足した版は `ChannelBlendsVersion`、ID の色を足した版は `IdColorVersion`、塗りつぶしの画像を足した版は `FillImageVersion`、デカールを足した版は `DecalVersion`、パスの組を足した版は `MaterialPathVersion`、手動の ID 色を足した版は `ManualIdColorsVersion`、Anchor を足した版は `AnchorVersion`、勾配を足した版は `GradientRampVersion`。`Version` は `GradientRampVersion` に従う）。
 バイトの並びは `DocumentBinary` の doc コメントにある。大きさ（幅・高さ）は頭にあり、1〜8192（`PaintDocument.MaxNativeSide`）を読む。
 2026-10-03 までの読み手は 4096 までしか読まず、8192 の新規プロジェクトを保存すると開けなかった（書き手は変えていないので、版は上げない。
 古い読み手は 4096 を超える文書を「大きさ」で断る）。テクスチャセットの大きさの変更（プロジェクト設定）は、新しい大きさの正本を書くだけで、
@@ -340,6 +340,18 @@ ID マップの元 `MaterialAsset` は同じマテリアルのアセットを同
 違う。古い YoluPainter は版 20 の正本を「Unsupported archive version」で断るので、ファイルを開かない（アンカーを落として保存することは
 ない）。エントリの並び・名前・置き場は変わらないので、**.ylp の形式は 5 のまま**。
 
+版 21: ShapeGradient（Generator の種類5）に任意の勾配を足した。未設定ならアルゴリズムの版1のまま、形の欄で終わる。
+設定するとアルゴリズムの版2になり、形の欄の後に int 色の分岐点数（2〜32）、各点の double 位置・RGB 各1 byte・double 中点、
+int 不透明度の分岐点数（2〜32）、各点の double 位置・double 不透明度・double 中点、int カーブの点数（2〜16）、各点の double x・double y
+が続く。RGB のアルファは常に255で、不透明度は別の列。位置・不透明度・カーブは0〜1、中点は0.01〜0.99、分岐点の間隔は0.0001以上、
+カーブは x=0 と x=1 を端に持ち、点の間隔は0.02（GUI の float の丸め許容1e-6）以上。有限でない値、並び・数・範囲の違反、
+知らないアルゴリズム、版21より前にアルゴリズム2があるものは断る。
+
+塗りつぶしの直接の勾配はレイヤーの属性 bit5（32）が示す。Fill の値と画像・投影の欄の後、調整の欄の前に int チャンネル数（1〜6）、
+各チャンネルの int チャンネルと Generator の欄をチャンネル順で置く。種類5・アルゴリズム2・Replace が必要で、Normal、重複した
+チャンネル、同じチャンネルの画像、対応する Fill の値が無いもの、Fill 以外の層、作業予算を超えるものは断る。勾配が無い文書は版20と同じ
+並びで、版の数だけが違う。.ylp の形式は5のまま。古い読み手は新しい正本の版を断り、勾配を落として保存しない。
+
 ### 開くとき（YlpFormat.Open）
 
 1. `ylp.json` を読む（無ければ形式 1、書いたアプリは分からない）。
@@ -454,3 +466,4 @@ ID マップの元 `MaterialAsset` は同じマテリアルのアセットを同
 - `MaterialRemainingTests`: ポリゴンと二素材勾配の単一チャンネル比較、パスの組の保存・複製・サイズ変更、一括 Undo/Redo と拒否時の全体取消。
 
 スマートマテリアルの派生サムネイルは `smart.json` の任意欄 `thumbnailShape: "sphere"` で球の見本と分かる。欄がない旧ファイルの平面の見本はパネルで球に描き直す。元の `.ylsmart` のバイト列は変更しない。
+- `GradientRampTests`: 色と独立した不透明度・中点・値のカーブ、直接Fillとデカール、Undo/取消・型/ロック/予算拒否、版21の勾配・版20のAnchor・版19の手動ID色の同居、旧版読取と不正データの拒否、複製・サイズ変更・PSDのラスタライズ。筆圧エディターとの比較は `GradientRampPressureTests`。

@@ -327,14 +327,15 @@ namespace Yozolab.YoluPainter.Core
             EnsureNoStroke(); PaintLayer.ValidateChannel(channel); var layer = GetLayer(id);
             if (layer.Kind != LayerKind.Fill) throw new InvalidOperationException("Only fill layers have fill values.");
             Rgba32? old = layer.FillValues.TryGetValue(channel, out var current) ? current : (Rgba32?)null;
+            layer.FillGradients.TryGetValue(channel, out var gradient);
             Guid? image = layer.FillImages.TryGetValue(channel, out var imageId) ? imageId : (Guid?)null;
             bool wasEnabled = layer.IsChannelEnabled(channel);
             if (Nullable.Equals(old, value) && (value == null || wasEnabled)) return;
             RefuseLockedPixels(layer, erase: false); // 塗りつぶしの値は層の中身
             if ((old?.A ?? 0) != (value?.A ?? 0) || image.HasValue && value == null) RefuseLockedTransparency(layer);
             Execute(LayerScoped(layer, channel,
-                () => { layer.SetFillValueInternal(channel, value); if (value.HasValue) layer.Enable(channel, true); else layer.SetFillImageInternal(channel, null); FillChanged(layer); },
-                () => { layer.SetFillValueInternal(channel, old); layer.SetFillImageInternal(channel, image); layer.Enable(channel, wasEnabled); FillChanged(layer); }, 64), coalesce ? (object)("fill", id, channel) : null);
+                () => { layer.SetFillValueInternal(channel, value); if (value.HasValue) layer.Enable(channel, true); else { layer.SetFillImageInternal(channel, null); layer.SetFillGradientInternal(channel, null); } FillChanged(layer); },
+                () => { layer.SetFillValueInternal(channel, old); layer.SetFillImageInternal(channel, image); layer.SetFillGradientInternal(channel, gradient); layer.Enable(channel, wasEnabled); FillChanged(layer); }, 64), coalesce ? (object)("fill", id, channel) : null);
         }
         /// <summary>Adds an adjustment layer on top that changes the composite below it in the given channels (all channels
         /// the adjustment applies to when null). Hue/saturation can only target Color and Emission.</summary>

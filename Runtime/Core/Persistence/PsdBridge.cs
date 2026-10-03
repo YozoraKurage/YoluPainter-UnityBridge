@@ -83,7 +83,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             foreach (var anchor in new[] { layer.Anchor, layer.Mask?.Anchor }) // PSD にアンカーは無い: 書かないことを知らせる（黙って捨てない）
                 if (anchor != null) notes.Add(new PsdDiagnostic(PsdCodec.NotCarriedIntoExport, "The anchor '" + anchor.Name + "' on " + (anchor.Placement == AnchorPlacement.Mask ? "the mask of " : "") + "layer '" + layer.Name
                     + "' is not written: PSD has no anchor points (the native project keeps it).", -1, 0));
-            bool projected = layer.IsProjectedFill(channel); // 画像のチャンネルと、デカールの全部のチャンネル
+            bool projected = layer.IsProjectedFill(channel) || layer.HasFillGradient(channel); // 画像のチャンネルと、デカールの全部のチャンネル
             if (layer.Kind == LayerKind.Fill && !projected && layer.FillValues.TryGetValue(channel, out var fillValue) && fillValue.A != 255)
                 throw new InvalidOperationException("Fill layer '" + layer.Name + "': a PSD solid colour fill is opaque, and this fill's " + channel + " value has alpha " + fillValue.A + ". Use the layer opacity instead. Native project can still be saved losslessly.");
             if (layer.Kind != LayerKind.Raster && layer.Kind != LayerKind.Group && layer.Kind != LayerKind.Adjustment && layer.Kind != LayerKind.Fill) throw new InvalidOperationException("PSD projection does not write " + layer.Kind + " layers yet. Native project can still be saved losslessly.");
@@ -165,7 +165,14 @@ namespace Yozolab.YoluPainter.Core.Persistence
             bool flipGreen = channel == PaintChannel.Normal && source.NormalSettings.FileDirection == NormalYDirection.DirectX;
             for (int y = 0; y < height; y++) Buffer.BlockCopy(rgba, y * row, pixels, (height - 1 - y) * row, row);
             if (flipGreen) for (int i = 1; i < pixels.Length; i += 4) pixels[i] = (byte)(255 - pixels[i]);
-            if (layer.IsDecal)
+            if (layer.HasFillGradient(channel))
+            {
+                var status = source.GetFillGradientStatus(layer.Id, channel);
+                notes.Add(new PsdDiagnostic(PsdCodec.NotCarriedIntoExport, "Fill layer '" + layer.Name + "' (" + channel + "): the world-space gradient is written as raster pixels; the PSD does not keep its shape, stops or curve."
+                    + (layer.IsDecal ? " The decal placement and culling are also not kept." : "")
+                    + (status.Active ? "" : " The gradient is not available: " + status.Reason + (layer.IsDecal ? " The pixels are transparent." : " The pixels show the fallback value.")), -1, 0));
+            }
+            else if (layer.IsDecal)
             {
                 // デカール: 画像・値・置き場・間引きは残らない（画素だけ）
                 string problem = source.GetDecalProblem(layer.Id);

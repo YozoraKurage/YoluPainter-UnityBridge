@@ -14,7 +14,7 @@ namespace Yozolab.YoluPainter.Tests
     /// 上のクリッピングを含まない、隠した層）、マスクの Anchor が見える度合い、下の層だけを読める（依存のグラフの理由）、並べ替え・削除・
     /// グループへの出し入れで参照が上下逆・消えたら入力のまま通して理由を出し Undo で戻る、Anchor の追加・名前・削除・参照の Undo/Redo、
     /// 下の層の変更で読む層が描き直される（変更の記録はチャンネルをまたぎ halo だけ広がり、Anchor より上の読む層の出力は下の Anchor に
-    /// 戻らない、連鎖も追う、キャッシュに古い値が残らない）、ネイティブの今の版（仮に 19）の往復と古い版・壊れた値・自分の層の参照の拒否（消えた・上下逆の
+    /// 戻らない、連鎖も追う、キャッシュに古い値が残らない）、ネイティブの今の版の往復と古い版・壊れた値・自分の層の参照の拒否（消えた・上下逆の
     /// 参照はそのまま開く）、作業メモリとキャッシュの予算、複製・スマートマテリアル・大きさの変更で Anchor と参照が運ばれる、スレッドの数に
     /// よらない。</summary>
     public sealed class AnchorTests
@@ -360,8 +360,10 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(read.Composite(PaintChannel.Color), Is.EqualTo(d.Composite(PaintChannel.Color)));
             Assert.That(read.CanUndo, Is.False);
 
-            // Anchor の無い文書は 1 つ前の版と同じ並び（版の数だけが違う）。1 つ前の版と偽ると、Anchor の印・種類 7 は断る（Anchor は今の版で足した）
-            int before = DocumentBinary.CurrentVersion - 1;
+            // Anchor の版 20 は勾配の導入後もそのまま読む。Anchor の導入前と偽ると印・種類 7 を断る。
+            var anchorVersion = (byte[])bytes.Clone(); BitConverter.GetBytes(20).CopyTo(anchorVersion, 8);
+            Assert.That(DocumentBinary.Write(DocumentBinary.Read(anchorVersion)), Is.EqualTo(bytes), "版20のAnchorを現行版へ上げても編集情報を保つ");
+            int before = 19;
             var plain = new PaintDocument(W, H, T); var pl = plain.AddLayer("P"); pl.GetChannel(PaintChannel.Color).SetPixel(3, 4, new Rgba32(5, 6, 7, 8));
             Assert.That(DocumentBinary.Read(ArchiveTestUtil.AsVersion(DocumentBinary.Write(plain), "P", before)).Composite(PaintChannel.Color), Is.EqualTo(plain.Composite(PaintChannel.Color)));
             var asBefore = (byte[])bytes.Clone(); BitConverter.GetBytes(before).CopyTo(asBefore, 8);

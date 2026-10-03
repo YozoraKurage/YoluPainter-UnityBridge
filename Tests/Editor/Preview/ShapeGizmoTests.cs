@@ -113,5 +113,20 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(lines.SelectMany(l => l.Points).All(p => !float.IsNaN(p.x) && !float.IsNaN(p.y)), Is.True);
             Assert.That(Count(Box.WithShape(GeneratorShape.Sphere)), Is.GreaterThan(3)); Assert.That(Count(Box.WithShape(GeneratorShape.Plane)), Is.GreaterThan(12));
         }
+        [Test] public void IncrementalSnappingUsesEachMoveAxisFullSizeAndRotationSettings()
+        {
+            var snap = new ShapeSnap(new Vector3(.25f, .5f, 1), .2f, 30);
+            var moved = ShapeGizmo.Drag(ShapeHandle.MoveX, Box, Vector3.zero, Quaternion.identity, View, new Vector2(300, 175), new Vector2(340, 190), snap: true, increments: snap);
+            Assert.That(moved.CenterX - Box.CenterX, Is.EqualTo(.5).Within(1e-5));
+            var free = ShapeGizmo.Drag(ShapeHandle.MoveFree, Box, Vector3.zero, Quaternion.identity, View, new Vector2(250, 175), new Vector2(292, 109), snap: true, increments: snap);
+            Assert.That(free.CenterX - Box.CenterX, Is.EqualTo(.5).Within(1e-5)); Assert.That(free.CenterY - Box.CenterY, Is.EqualTo(.5).Within(1e-5));
+            var knob = Gui(new Vector3(1, .25f, 0));
+            var one = ShapeGizmo.Drag(ShapeHandle.SizeXPos, Box, Vector3.zero, Quaternion.identity, View, knob, knob + new Vector2(31, 0), snap: true, increments: snap);
+            Assert.That(one.SizeX - Box.SizeX, Is.EqualTo(.4).Within(1e-5)); Assert.That(one.CenterX - one.SizeX / 2, Is.EqualTo(Box.CenterX - Box.SizeX / 2).Within(1e-5));
+            var both = ShapeGizmo.Drag(ShapeHandle.SizeXPos, Box, Vector3.zero, Quaternion.identity, View, knob, knob + new Vector2(31, 0), symmetric: true, snap: true, increments: snap);
+            Assert.That(both.SizeX - Box.SizeX, Is.EqualTo(.6).Within(1e-5)); Assert.That(both.CenterX, Is.EqualTo(Box.CenterX));
+            var center = new Vector2(250, 175); var turned = ShapeGizmo.Drag(ShapeHandle.RotateZ, Box, Vector3.zero, Quaternion.identity, View, center + new Vector2(50, 0), center + new Vector2(50, -14), snap: true, increments: snap);
+            Assert.That(turned.RotationZ, Is.EqualTo(30).Within(1e-3));
+        }
     }
 }

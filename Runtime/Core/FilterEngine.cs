@@ -54,6 +54,7 @@ namespace Yozolab.YoluPainter.Core
             public SparseTileSurface Surface; public bool IsFill; public Rgba32 Fill;
             /// <summary>A fill channel with an image: the bound projection (its pixels replace the fill value), or null.</summary>
             public FillImageSampler Sampler;
+            public BoundGenerator FillGradient; public GradientRamp FillRamp;
             public FilterEffect[] Chain; public long FilterRevision;
             /// <summary>Generator stacks: the mesh maps by kind as the document resolved them, and that resolution's revision (0
             /// without a generator).</summary>
@@ -85,8 +86,9 @@ namespace Yozolab.YoluPainter.Core
         internal static Source ContentSource(PaintLayer layer, PaintChannel channel)
         {
             var chain = layer.ActiveChain(channel);
-            bool projected = layer.IsProjectedFill(channel); // 画像のチャンネルと、デカールの値のチャンネル
-            if (chain.Length == 0 && !projected) return null;
+            bool projected = layer.IsProjectedFill(channel);
+            bool gradient = layer.Kind == LayerKind.Fill && layer.HasFillGradient(channel);
+            if (chain.Length == 0 && !projected && !gradient) return null;
             var s = new Source { Layer = layer, Channel = channel, Chain = chain, FilterRevision = layer.FilterRevision };
             if (layer.Kind == LayerKind.Fill)
             {
@@ -95,6 +97,7 @@ namespace Yozolab.YoluPainter.Core
             }
             else { SparseTileSurface surface; layer.TryGetChannel(channel, out surface); s.Surface = surface; }
             AttachMaps(s, layer.Document);
+            if (gradient) { var g = layer.FillGradients[channel]; s.FillRamp = g.Ramp; s.FillGradient = BoundGenerator.Bind(g, s.Maps, s.Frame, layer.Document.Width, layer.Document.Height, out _); }
             s.Anchors = layer.Document.AnchorBindingsOf(chain);
             return s;
         }
@@ -108,7 +111,7 @@ namespace Yozolab.YoluPainter.Core
         }
         static void AttachMaps(Source s, PaintDocument document)
         {
-            bool reads = s.Sampler != null && s.Layer.ReadsMeshMapsForFill; // 型の上に投影する塗りつぶしの画像もマップを読む
+            bool reads = s.Layer.ReadsMeshMapsForFill; // 型の上に投影する塗りつぶしの画像もマップを読む
             foreach (var e in s.Chain) if (e.Settings.IsGenerator) reads = true;
             if (reads) s.Maps = document.GeneratorMapSnapshot(out s.MapsRevision, out s.Frame);
         }
@@ -166,9 +169,9 @@ namespace Yozolab.YoluPainter.Core
             }
             if (s.IsFill)
             {
-                if (s.Sampler == null) return s.Fill != Rgba32.Transparent;
+                if (s.Sampler == null) return s.FillRamp != null || s.Fill != Rgba32.Transparent;
                 int grow = Tiles(Expansion(s.Chain)); // デカールは箱の届くタイルだけ（ぼかしの広がりの分は広げて）
-                return s.Sampler.MayCoverTiles(tx0 - grow, ty0 - grow, tx1 + grow, ty1 + grow);
+                return s.Sampler.MayCoverTiles(tx0 - grow, ty0 - grow, tx1 + grow, ty1 + grow, externalValue: s.FillRamp != null);
             }
             if (s.Surface == null) return false;
             int e = Tiles(Expansion(s.Chain));
@@ -185,7 +188,7 @@ namespace Yozolab.YoluPainter.Core
         {
             long input;
             // 塗りつぶしの画像は層の塗りつぶしの版（負にして、値の詰め合わせと重ならないように）。一定の値はその値
-            if (s.IsFill) input = s.Sampler != null ? -1 - s.Layer.FillRevision : (long)((uint)s.Fill.R | (uint)s.Fill.G << 8 | (uint)s.Fill.B << 16 | (uint)s.Fill.A << 24);
+            if (s.IsFill) input = (s.Sampler != null || s.FillRamp != null) ? -1 - s.Layer.FillRevision : (long)((uint)s.Fill.R | (uint)s.Fill.G << 8 | (uint)s.Fill.B << 16 | (uint)s.Fill.A << 24);
             else if (s.Surface == null) input = 0;
             else if (IsGlobal(s.Chain, s.Chain.Length)) input = s.Surface.Revision;
             else { int m = Tiles(Halo(s.Chain, s.Chain.Length)); input = s.Surface.MaxTileRevision(tx0 - m, ty0 - m, tx1 + m, ty1 + m); }
@@ -476,6 +479,21 @@ namespace Yozolab.YoluPainter.Core
             int n = r.Area * 4; Array.Clear(buf, 0, n);
             if (s.IsFill)
             {
+                if (s.FillRamp != null)
+                {
+                    bool scalar = s.Channel != PaintChannel.Color && s.Channel != PaintChannel.Emission;
+                    ParallelRange(r.H, (row0, row1) =>
+                    {
+                        for (int y = row0; y < row1; y++) for (int x = 0; x < r.W; x++)
+                        {
+                            var value = s.Fill;
+                            if (s.FillGradient != null && s.FillGradient.TryValue(r.X0 + x, r.Y0 + y, out double t)) value = s.FillRamp.Evaluate(t, scalar);
+                            if (s.Sampler != null && s.Sampler.IsDecal) value = s.Sampler.ApplyDecalToValue(r.X0 + x, r.Y0 + y, value);
+                            int i = (y * r.W + x) * 4; buf[i] = value.R; buf[i + 1] = value.G; buf[i + 2] = value.B; buf[i + 3] = value.A;
+                        }
+                    });
+                    return buf;
+                }
                 if (s.Sampler != null)
                 {
                     // 投影した画像: 画素ごとに入力（マップ・画像）だけから決まるので、行の分け方によらず同じバイト
@@ -625,10 +643,19 @@ namespace Yozolab.YoluPainter.Core
                         if (!bound.TryValue(r.X0 + x, r.Y0 + y, out double v)) continue;
                         if (mask)
                         {
+                            if (g.Ramp != null) { var mapped = g.Ramp.Evaluate(v, true); v = unit[mapped.R] * unit[mapped.A]; }
                             byte hide = (byte)(255 - MathUtil.ToByte(BoundGenerator.Combine(blend, 1 - unit[buf[i]], v, strength)));
                             buf[i] = hide; buf[i + 1] = hide; buf[i + 2] = hide;
                         }
-                        else for (int c = 0; c < 3; c++) buf[i + c] = MathUtil.ToByte(BoundGenerator.Combine(blend, unit[buf[i + c]], v, strength));
+                        else if (g.Ramp == null) { for (int c = 0; c < 3; c++) buf[i + c] = MathUtil.ToByte(BoundGenerator.Combine(blend, unit[buf[i + c]], v, strength)); }
+                        else
+                        {
+                            var mapped = g.Ramp.Evaluate(v, s.Channel != PaintChannel.Color && s.Channel != PaintChannel.Emission);
+                            buf[i] = MathUtil.ToByte(BoundGenerator.Combine(blend, unit[buf[i]], unit[mapped.R], strength));
+                            buf[i + 1] = MathUtil.ToByte(BoundGenerator.Combine(blend, unit[buf[i + 1]], unit[mapped.G], strength));
+                            buf[i + 2] = MathUtil.ToByte(BoundGenerator.Combine(blend, unit[buf[i + 2]], unit[mapped.B], strength));
+                            buf[i + 3] = MathUtil.ToByte(unit[buf[i + 3]] * (1 - strength + strength * unit[mapped.A]));
+                        }
                     }
             });
         }
