@@ -6,8 +6,8 @@ using UnityEngine;
 
 namespace Yozolab.YoluPainter.Editor
 {
-    /// <summary>Normal の出力: 文書の設定（Height → Normal・強さ・端・ファイルの Y の向き）の欄、Normal チャンネルの表示（出力 / レイヤーの
-    /// 合成）、法線を傾きで選ぶブラシの値、書き出しの注意。設定の変更は文書の Undo に 1 回ずつ入る（スライダーのドラッグは 1 回にまとめる）。</summary>
+    /// <summary>Normal の出力: 文書の設定（Height → Normal・強さ・端・ファイルの Y の向き）と Normal チャンネルの表示（出力 / レイヤーの
+    /// 合成）の欄（テクスチャセットの設定）、法線を傾きで選ぶブラシの値（プロパティのブラシ）、書き出しの注意。設定の変更は文書の Undo に 1 回ずつ入る（スライダーのドラッグは 1 回にまとめる）。</summary>
     public sealed partial class TexturePaintWindow
     {
         NormalOutputView normalOutput;
@@ -53,7 +53,7 @@ namespace Yozolab.YoluPainter.Editor
                 bool derive = PaintGui.FitToggle(Spot("normal.derive", rows.Row()), L.Tr("Height → Normal"), s.DeriveFromHeight,
                     L.Tr("Add the normal derived from the Height channel under the painted Normal layers in the Normal output (preview, .ylp texture, exports). It is regenerated from Height, never painted into a layer."));
                 // スライダーは float。触っていなければ文書の値（double）のままにする（読み込んだ値を勝手に丸めて Undo を作らない）
-                double strength = PaintGui.KeepSlider(Spot("normal.strength", rows.Row()), L.TrIn("normal output", "Strength"), s.Strength, -NormalSettings.MaxStrength, NormalSettings.MaxStrength, "0.##", "",
+                double strength = PaintGui.KeepSlider(Spot("normal.strength", rows.SliderRow()), L.TrIn("normal output", "Strength"), s.Strength, -NormalSettings.MaxStrength, NormalSettings.MaxStrength, "0.##", "",
                     L.Tr("Texels of rise for the full height range (0 → 1). Negative turns bumps into dents."), derive);
                 if (derive != s.DeriveFromHeight) TryAction(() => ApplyNormalSettings(s.WithDerive(derive)));
                 else if (strength != s.Strength) TryAction(() => ApplyNormalSettings(s.WithStrength(strength), coalesce: true));
@@ -71,6 +71,17 @@ namespace Yozolab.YoluPainter.Editor
                 bool show = PaintGui.FitToggle(rows.Row(), L.Tr("Show output"), showNormalOutput,
                     L.Tr("On: the Normal output (renormalized, flat where unpainted, Height → Normal included). Off: the painted Normal layers with transparency."));
                 if (show != showNormalOutput) ShowNormalOutput = show;
+            }
+            finally { GUI.enabled = was; }
+        }
+
+        /// <summary>Normal のチャンネルに描くときのブラシの欄（プロパティの「ブラシ」のタブ）: ブラシの値を法線の傾きで選ぶ行と、選んだ層の
+        /// 合成モードが法線に意味を持たないときの知らせ。テクスチャセットの出力の設定（<see cref="DrawNormalPanel"/>）とは別。</summary>
+        void DrawNormalBrushRows(UiRows rows)
+        {
+            bool was = GUI.enabled; GUI.enabled = was && stroke == null;
+            try
+            {
                 DrawNormalBrushValue(rows);
                 var layer = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
                 if (layer != null && !layer.IsGroup && layer.Kind != LayerKind.Adjustment && !NormalMaps.IsVectorMode(layer.BlendModeIn(PaintChannel.Normal)))
@@ -86,15 +97,14 @@ namespace Yozolab.YoluPainter.Editor
         {
             // マテリアルで塗るときは、マテリアルの Normal の値（ブラシの欄の「マテリアル」と同じ）を変える
             bool material = brush.material;
-            PaintGui.GroupLabel(rows.Row(16), material ? L.Tr("Material value (normal)") : L.Tr("Brush value (normal)"));
-            var row = rows.Row();
-            var c = UiRows.Split(new Rect(row.x, row.y, row.width - 28, row.height), 2, 6);
+            var row = rows.Row(20);
+            PaintGui.GroupLabel(new Rect(row.x, row.y, row.width - 28, row.height), material ? L.Tr("Material value (normal)") : L.Tr("Brush value (normal)"));
             double x = material ? brush.materialNormalX : brush.color.r * 2 - 1, y = material ? brush.materialNormalY : brush.color.g * 2 - 1;
-            double nx = PaintGui.KeepSlider(Spot("normal.tiltX", c[0]), L.TrIn("normal brush", "Tilt X"), x, -1, 1, "0.00", "", L.Tr("The brush value as a normal: +1 leans right"));
-            double ny = PaintGui.KeepSlider(c[1], L.TrIn("normal brush", "Tilt Y"), y, -1, 1, "0.00", "", L.Tr("+1 leans up (OpenGL / Unity)"));
+            double nx = PaintGui.KeepSlider(Spot("normal.tiltX", rows.SliderRow()), L.TrIn("normal brush", "Tilt X"), x, -1, 1, "0.00", "", L.Tr("The brush value as a normal: +1 leans right"));
+            double ny = PaintGui.KeepSlider(rows.SliderRow(), L.TrIn("normal brush", "Tilt Y"), y, -1, 1, "0.00", "", L.Tr("+1 leans up (OpenGL / Unity)"));
             if (nx != x || ny != y) { if (material) SetMaterialNormal((float)nx, (float)ny); else SetBrushNormal((float)nx, (float)ny); }
             if (PaintGui.IconButton(Spot("normal.flat", new Rect(row.xMax - 24, row.y, 24, row.height)), "restart_alt", L.Tr("Flat brush value (128, 128, 255): paints a flat normal"), false, GUI.enabled, 16)) { if (material) SetMaterialNormal(0, 0); else SetBrushNormal(0, 0); }
-            if (material && !MaterialIncludes(PaintChannel.Normal)) NoteRow(rows, L.Tr("The material does not paint Normal now. Check it in Properties ▸ Brush ▸ Brush Material."), NoteKind.Info);
+            if (material && !MaterialIncludes(PaintChannel.Normal)) NoteRow(rows, L.Tr("The material does not paint Normal now. Check it in Properties ▸ Material."), NoteKind.Info);
         }
         /// <summary>ブラシの値を (x, y, √(1 − x² − y²)) の法線にする（長さが 1 を超える傾きは z = 0 の向きに縮める）。</summary>
         internal void SetBrushNormal(float x, float y)

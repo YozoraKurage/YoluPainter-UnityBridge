@@ -318,24 +318,14 @@ namespace Yozolab.YoluPainter.Editor
                 float y = smartDropAt.Value.y;
                 if (kind == SmartKind.Mask)
                 {
-                    int rowIndex = Mathf.FloorToInt(y / LayerRowHeight);
-                    if (rowIndex >= 0 && rowIndex < document.Layers.Count) PaintGui.Outline(new Rect(1, rowIndex * LayerRowHeight + 1, width - 2, LayerRowHeight - 2), PaintTheme.Accent, 2, 3);
+                    var under = LayerAtRow(y); // 効果の段の行はその層（Panels/TexturePaintWindow.EffectRows.cs）
+                    if (under != null) PaintGui.Outline(new Rect(1, LayerRowY(under) + 1, width - 2, LayerRowHeight - 2), PaintTheme.Accent, 2, 3);
                     return;
                 }
                 var target = LayerDropTarget(y);
-                if (target.into != null)
-                {
-                    int rowOf = document.Layers.Count - 1 - document.Layers.ToList().IndexOf(target.into);
-                    PaintGui.Outline(new Rect(1, rowOf * LayerRowHeight + 1, width - 2, LayerRowHeight - 2), PaintTheme.Accent, 2, 3);
-                }
-                else PaintGui.Fill(new Rect(4, target.gap * LayerRowHeight - 1, width - 8, 2), PaintTheme.Accent);
+                if (target.into != null) PaintGui.Outline(new Rect(1, LayerRowY(target.into) + 1, width - 2, LayerRowHeight - 2), PaintTheme.Accent, 2, 3);
+                else PaintGui.Fill(new Rect(4, LayerGapY(target.gap) - 1, width - 8, 2), PaintTheme.Accent);
             }
-        }
-
-        PaintLayer LayerAtRow(float y)
-        {
-            int n = document.Layers.Count, rowIndex = Mathf.FloorToInt(y / LayerRowHeight);
-            return rowIndex >= 0 && rowIndex < n ? document.Layers[n - 1 - rowIndex] : null;
         }
 
         /// <summary>層の一覧の落とす先（<see cref="LayerDropTarget"/>）を置き場所に: グループの中ほどならその中の一番上、一番下の線なら一番下、

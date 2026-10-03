@@ -34,7 +34,7 @@ namespace Yozolab.YoluPainter.Tests
             {
                 w.Preview.LoadDemoMesh();
                 w.SetToolSectionsOpen(true); // 折りたたんだセクションの中身も描く
-                int drawn = 0;
+                int drawn = 0, tabs = 0;
                 foreach (var scenario in new[] { "plain", "busy", "canvas-path" })
                 {
                     Prepare(w, scenario);
@@ -52,9 +52,35 @@ namespace Yozolab.YoluPainter.Tests
                                 Assert.That(PaintGui.ShortenedTexts, Is.Zero, name + ": a UI label did not fit its box and was cut with …");
                                 drawn++;
                             }
+                        // プロパティの欄のほかのタブ（ブラシ｜マテリアル、マスクに描くときはマスク）を、既定のドックの欄の幅（300 − 枠 1 − スクロールの印 8）で
+                        foreach (var tool in tools)
+                        {
+                            w.Tool = tool; var context = w.PropertyContextNow();
+                            foreach (var tab in w.PropertyTabsNow())
+                            {
+                                w.SetPropertyTab(context, tab);
+                                string name = scenario + "-" + language + "-" + tool + "-tab-" + tab;
+                                PaintGui.ShortenedTexts = 0;
+                                RenderProperties(w, 291, name);
+                                Assert.That(PaintGui.ShortenedTexts, Is.Zero, name + ": a UI label did not fit its box and was cut with …");
+                                tabs++;
+                            }
+                            if (w.PropertyTabsNow().Count > 0) w.SetPropertyTab(context, w.PropertyTabsNow()[0]);
+                        }
+                        // オプションバーの対称と手ぶれ補正の小さな窓
+                        foreach (OptionPopupKind kind in Enum.GetValues(typeof(OptionPopupKind)))
+                        {
+                            string name = scenario + "-" + language + "-popup-" + kind;
+                            PaintGui.ShortenedTexts = 0;
+                            var size = w.OptionPopupSize(kind);
+                            OffscreenGui.RenderToPng((int)size.x, 900, () => w.DrawOptionPopup(kind, new Rect(0, 0, size.x, 900)), Path.Combine(Folder, name + ".png"), PaintTheme.PanelBg);
+                            Assert.That(PaintGui.ShortenedTexts, Is.Zero, name + ": a UI label did not fit the popup and was cut with …");
+                            Assert.That(w.OptionPopupSize(kind).y, Is.LessThan(900), name + ": the popup's content fits the window size it asks for");
+                        }
                     }
                 }
                 Assert.That(drawn, Is.EqualTo(2 * 2 * (2 * Enum.GetValues(typeof(TexturePaintWindow.PaintTool)).Length + 1)));
+                Assert.That(tabs, Is.GreaterThan(0), "the painting tools have tabs");
             }
             finally { Object.DestroyImmediate(w); }
         }
@@ -104,9 +130,17 @@ namespace Yozolab.YoluPainter.Tests
             finally { Object.DestroyImmediate(texture); }
         }
 
+        /// <summary>プロパティの欄だけを width の幅で描く（オフスクリーン）。</summary>
+        static void RenderProperties(TexturePaintWindow w, int width, string name)
+        {
+            float used = 0;
+            OffscreenGui.RenderToPng(width, 1400, () => used = w.DrawPropertiesOnly(new Rect(0, 0, width, 1400)), Path.Combine(Folder, name + ".png"), PaintTheme.PanelBg);
+            Assert.That(used, Is.GreaterThan(40), name + ": the tab is empty");
+        }
+
         // ───────── 部品だけで描いていること ─────────
 
-        static readonly string[] ToolPanelFiles = { "Window/Tools/TexturePaintWindow.ToolPanels.cs", "Window/Tools/TexturePaintWindow.Stroke.cs", "Window/Tools/TexturePaintWindow.BrushDynamics.cs", "Window/Tools/TexturePaintWindow.Paths.cs", "Window/Model/TexturePaintWindow.Surface3D.cs", "Window/Model/TexturePaintWindow.Symmetry.cs" };
+        static readonly string[] ToolPanelFiles = { "Window/Tools/TexturePaintWindow.ToolPanels.cs", "Window/Tools/TexturePaintWindow.Stroke.cs", "Window/Tools/TexturePaintWindow.BrushDynamics.cs", "Window/Tools/TexturePaintWindow.Paths.cs", "Window/Model/TexturePaintWindow.Surface3D.cs", "Window/Model/TexturePaintWindow.Symmetry.cs", "Window/Shell/TexturePaintWindow.OptionPopups.cs", "Window/Shell/TexturePaintWindow.PropertyRoutes.cs" };
         /// <summary>Unity の標準の見た目の部品（と、それで描く区画）。EditorGUI.DrawRect はパスの印を描くだけなので除く。</summary>
         static readonly Regex UnityControls = new Regex(@"\b(?:EditorGUILayout|GUILayout|EditorStyles)\.|\bLegacySection\s*\(|\bEditorGUI\.(?!DrawRect\b)|\bGUI\.(?:Button|Toggle|TextField|TextArea|HorizontalSlider|VerticalSlider|Box|Label|Toolbar|SelectionGrid|BeginScrollView)\b");
 

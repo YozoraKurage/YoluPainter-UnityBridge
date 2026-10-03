@@ -14,7 +14,8 @@ using Object = UnityEngine.Object;
 namespace Yozolab.YoluPainter.Tests
 {
     /// <summary>
-    /// プロパティの欄のレイヤー・チャンネル側（レイヤー・レイヤーマスク・フィルター・ノーマル・メッシュマップ・ポーズ）: Unity の標準の部品
+    /// プロパティの欄（選んだ物: 塗りつぶし・調整・グループの層、マスクに描くときのブラシ、選んだフィルター・Generator）とテクスチャセットの設定
+    /// （ノーマル・メッシュマップ・ポーズ）: Unity の標準の部品
     /// （LegacySection・EditorGUILayout など）を使っていないこと、どの状態でも英語・日本語で例外なく描け、既定のドックの幅（最小のウィンドウ
     /// 980×640 でも大きいウィンドウでも同じ）で UI の文字が欄に収まる（… で詰めない）こと、ドックを最小まで狭めても描けること、描くだけでは
     /// 文書も設定も変わらないこと（double の値を float に丸めて Undo を作らない）。描いた PNG はテストプロジェクトの
@@ -27,9 +28,10 @@ namespace Yozolab.YoluPainter.Tests
         {
             "Window/Layers/TexturePaintWindow.LayerPanels.cs", "Window/Layers/TexturePaintWindow.Filters.cs", "Window/Layers/TexturePaintWindow.Normal.cs",
             "Window/Model/TexturePaintWindow.MeshMaps.cs", "Window/Model/TexturePaintWindow.MeshBake.cs", "Window/Model/MeshBakeWindow.cs", "Window/Model/TexturePaintWindow.Pose.cs", "UI/PaintGui.Layers.cs",
+            "Window/Shell/TexturePaintWindow.PropertyRoutes.cs", "Window/Panels/TexturePaintWindow.EffectRows.cs", "Window/Panels/TexturePaintWindow.TextureSetSettings.cs", "Window/Shell/TexturePaintWindow.OptionPopups.cs",
         };
         static readonly Regex Standard = new Regex(@"\bLegacySection\s*\(|\bEditorGUILayout\.|\bGUILayout\.|\bEditorGUI\.|\bEditorStyles\.", RegexOptions.Compiled);
-        static readonly string[] Sections = { "layer", "mask", "filters", "normal", "mesh-maps", "pose" };
+        static readonly string[] Sections = { "layer", "mask", "effect", "projection", "normal", "brush-normal", "mesh-maps", "pose" };
         static string Folder => Path.GetFullPath(Path.Combine("Logs", "YoluPainterSnapshots", "layer-panels"));
         /// <summary>プロパティの欄の中身の幅: 既定のドック（300）から枠の 1 と、はみ出したときのスクロールの印の 8 を引いたもの。もう一つは前の
         /// 版の最小のウィンドウのドック（294）のときの幅。どちらでも UI の文字を詰めない。</summary>
@@ -260,18 +262,15 @@ namespace Yozolab.YoluPainter.Tests
             foreach (var key in Sections) open[key] = true;
         }
 
-        /// <summary>レイヤーとチャンネルのセクションだけを、プロパティの欄と同じ呼び方（中身の幅 width の UiRows）で描いて PNG にする。中身の高さを返す。</summary>
+        /// <summary>プロパティの欄（今の文脈）とテクスチャセットの設定を、ドックと同じ幅で縦に続けて描いて PNG にする。中身の高さを返す。</summary>
         static float Draw(TexturePaintWindow w, int width, string name)
         {
-            var type = typeof(TexturePaintWindow); var flags = BindingFlags.NonPublic | BindingFlags.Instance;
-            var layer = type.GetMethod("LayerSections", flags); var channel = type.GetMethod("ChannelSections", flags);
             float used = 0; string path = Path.Combine(Folder, name + ".png");
             OffscreenGui.RenderToPng(width, 1600, () =>
             {
                 PaintGui.Fill(new Rect(0, 0, width, 1600), PaintTheme.PanelBg);
-                var rows = new UiRows(new Rect(0, 0, width, 1e6f), 0);
-                layer.Invoke(w, new object[] { rows }); channel.Invoke(w, new object[] { rows });
-                used = rows.Used;
+                float properties = w.DrawPropertiesOnly(new Rect(0, 0, width, 1600));
+                used = properties + w.DrawTextureSetSettingsOnly(new Rect(0, properties, width, 1600 - properties));
             }, path, PaintTheme.PanelBg);
             var texture = new Texture2D(2, 2);
             try

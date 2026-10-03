@@ -144,8 +144,8 @@ msgstr "左でベイクするマップをチェックし、項目を選ぶと設
 msgid "Stop the bake; the previous maps stay as they are"
 msgstr "ベイクを止めます。前のマップはそのままです"
 
-msgid "The bake goes on; Properties ▸ Mesh Maps shows its progress."
-msgstr "ベイクは続きます。進み具合はプロパティ ▸ メッシュマップに出ます。"
+msgid "The bake goes on; Texture Set Settings ▸ Mesh Maps shows its progress."
+msgstr "ベイクは続きます。進み具合はテクスチャセットの設定 ▸ メッシュマップに出ます。"
 
 msgid "Canceling"
 msgstr "取り消し中"

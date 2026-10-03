@@ -43,11 +43,11 @@ namespace Yozolab.YoluPainter.Editor
 
         /// <summary><see cref="Slider"/> の、名前が値に重なるときは名前を … で詰める版（値の幅は min・max・今の値の広いほうで見るので、
         /// 動かしても詰め方が揺れない）。</summary>
-        public static float FitSlider(Rect r, string label, float value, float min, float max, string format = "0.##", string suffix = "", string tooltip = null, bool enabled = true)
+        public static float FitSlider(Rect r, string label, float value, float min, float max, string format = "0.##", string suffix = "", string tooltip = null, bool enabled = true, float trackInset = 0)
         {
             float valueWidth = Mathf.Max(ValueWidth(min, format, suffix), ValueWidth(max, format, suffix), ValueWidth(value, format, suffix));
             string shown = Fit(label, r.width - 14 - valueWidth - 8, PaintTheme.Label);
-            return Slider(r, shown, value, min, max, format, suffix, shown != label ? Joined(label, tooltip) : tooltip, enabled);
+            return Slider(r, shown, value, min, max, format, suffix, shown != label ? Joined(label, tooltip) : tooltip, enabled, trackInset);
         }
         public static int FitIntSlider(Rect r, string label, int value, int min, int max, string suffix = "", string tooltip = null, bool enabled = true)
             => Mathf.RoundToInt(FitSlider(r, label, value, min, max, "0", suffix, tooltip, enabled));

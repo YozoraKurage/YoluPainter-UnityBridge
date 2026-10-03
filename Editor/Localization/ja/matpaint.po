@@ -40,16 +40,16 @@ msgstr "ノーマルの値を向きで: +1 で右に傾く"
 msgid "The {0} value the stroke paints"
 msgstr "ストロークが塗る{0}の値"
 
-msgid "Showing {0}. The material brush paints the channels checked in Properties ▸ Brush ▸ Brush Material."
-msgstr "{0}を表示しています。マテリアルのブラシは、プロパティ ▸ ブラシ ▸ ブラシのマテリアル でチェックしたチャンネルを塗ります。"
+msgid "Showing {0}. The material brush paints the channels checked in Properties ▸ Material."
+msgstr "{0}を表示しています。マテリアルのブラシは、プロパティ ▸ マテリアル でチェックしたチャンネルを塗ります。"
 
 # ── プロパティ ▸ ノーマル（マテリアルで塗るとき） ──
 
 msgid "Material value (normal)"
 msgstr "マテリアルの値（ノーマル）"
 
-msgid "The material does not paint Normal now. Check it in Properties ▸ Brush ▸ Brush Material."
-msgstr "今のマテリアルはノーマルを塗りません。プロパティ ▸ ブラシ ▸ ブラシのマテリアル でチェックしてください。"
+msgid "The material does not paint Normal now. Check it in Properties ▸ Material."
+msgstr "今のマテリアルはノーマルを塗りません。プロパティ ▸ マテリアル でチェックしてください。"
 
 # ── レイヤー: チャンネルごとの描画モードと不透明度 ──
 

@@ -102,8 +102,8 @@ msgstr "ステンシルを外しました。"
 msgid "The stencil's image is no longer in this project; the stencil was removed."
 msgstr "ステンシルの画像がこのプロジェクトから無くなったので、ステンシルを外しました。"
 
-msgid "Choose a stencil image first (Brush ▸ Stencil)."
-msgstr "先にステンシルの画像を選んでください（ブラシ ▸ ステンシル）。"
+msgid "Choose a stencil image first (Properties ▸ Stencil)."
+msgstr "先にステンシルの画像を選んでください（プロパティ ▸ ステンシル）。"
 
-msgid "Stencil (Brush ▸ Stencil): hold T and drag on a view, left turns it (with Shift in 15° steps), middle or Ctrl+left moves it, right or Alt+left resizes it · hold N to paint without it"
-msgstr "ステンシル（ブラシ ▸ ステンシル）: T を押したまま表示域をドラッグ、左で回す（Shift で 15° 刻み）、中か Ctrl+左で動かす、右か Alt+左で大きさ · N を押しているあいだは使わずに塗る"
+msgid "Stencil (Properties ▸ Stencil): hold T and drag on a view, left turns it (with Shift in 15° steps), middle or Ctrl+left moves it, right or Alt+left resizes it · hold N to paint without it"
+msgstr "ステンシル（プロパティ ▸ ステンシル）: T を押したまま表示域をドラッグ、左で回す（Shift で 15° 刻み）、中か Ctrl+左で動かす、右か Alt+左で大きさ · N を押しているあいだは使わずに塗る"

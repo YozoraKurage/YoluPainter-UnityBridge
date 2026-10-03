@@ -207,8 +207,8 @@ msgstr "次の Generator には使えるメッシュマップが無いので、�
 msgid "Export Anyway"
 msgstr "このまま書き出す"
 
-msgid "Nothing was exported: some generators have no usable mesh maps. Bake them (Properties ▸ Filters ▸ the generator) first."
-msgstr "何も書き出していません: 使えるメッシュマップの無い Generator があります。先に焼いてください（プロパティ ▸ フィルター ▸ その Generator）。"
+msgid "Nothing was exported: some generators have no usable mesh maps. Bake them (Texture Set Settings ▸ Mesh Maps) first."
+msgstr "何も書き出していません: 使えるメッシュマップの無い Generator があります。先に焼いてください（テクスチャセットの設定 ▸ メッシュマップ）。"
 
 msgid "{0} generator(s) have no usable mesh maps; they are kept in the file, and the preview images inside it are without their effect."
 msgstr "使えるメッシュマップの無い Generator が {0} 個あります。ファイルにはそのまま残り、中のプレビューの画像には効いていません。"

@@ -104,7 +104,7 @@ namespace Yozolab.YoluPainter.Editor
                 }
             }
             if (v.Shape != GeneratorShape.Plane)
-                v = v.WithFalloff(PaintGui.KeepSlider(Spot("generator.shape.falloff", Indent(rows.Row(), indent)), L.TrIn("shape gradient", "Falloff"), v.Falloff, 0, 1, "0", "%",
+                v = v.WithFalloff(PaintGui.KeepSlider(Spot("generator.shape.falloff", Indent(rows.SliderRow(), indent)), L.TrIn("shape gradient", "Falloff"), v.Falloff, 0, 1, "0", "%",
                     L.Tr("How much of the inside fades from 1 to 0 at the boundary: 0 %: a hard edge; 100 %: the fade reaches the middle (the thinnest axis of a box)."), true, 100));
 
             // シーンの物から写す（読むだけ）

@@ -37,7 +37,7 @@ namespace Yozolab.YoluPainter.Tests
                 w.SetFillImageFromAsset(fill.Id, PaintChannel.Color, "b:uv-checker");
                 w.SetFillImageFromAsset(fill.Id, PaintChannel.Roughness, "b:value-noise");
                 w.View = TexturePaintWindow.ViewMode.Split;
-                w.SetSectionOpen("layer", true); w.SetSectionOpen("mask", false); w.SetSectionOpen("filters", false); w.SetSectionOpen("projection", true);
+                w.SetSectionOpen("layer", true); w.SetSectionOpen("projection", true); // 塗りつぶしの層の文脈（層と投影）
                 w.Preview.ViewFrom(35, 25);
                 int drawn = 0;
                 foreach (var mode in new[] { FillProjectionMode.Uv, FillProjectionMode.Triplanar, FillProjectionMode.Planar, FillProjectionMode.Spherical, FillProjectionMode.Cylindrical })

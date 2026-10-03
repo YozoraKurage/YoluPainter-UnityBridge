@@ -41,7 +41,7 @@ namespace Yozolab.YoluPainter.Editor
             var rows = new UiRows(r, 8);
             if (!brush.material && channel == PaintChannel.Normal)
             {
-                PaintGui.Text(rows.Row(36), L.Tr("The Normal channel paints a direction. Choose it in Properties ▸ Normal."), PaintTheme.Wrap);
+                PaintGui.Text(rows.Row(36), L.Tr("The Normal channel paints a direction. Choose it in Properties ▸ Brush ▸ Normal."), PaintTheme.Wrap);
                 return;
             }
             if (!brush.material && (channel == PaintChannel.Roughness || channel == PaintChannel.Metallic || channel == PaintChannel.Height))

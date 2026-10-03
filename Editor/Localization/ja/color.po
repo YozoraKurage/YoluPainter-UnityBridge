@@ -4,8 +4,8 @@ msgstr ""
 "Language: ja\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 
-msgid "The Normal channel paints a direction. Choose it in Properties ▸ Normal."
-msgstr "ノーマルのチャンネルは向きを描きます。プロパティ ▸ ノーマル で選んでください。"
+msgid "The Normal channel paints a direction. Choose it in Properties ▸ Brush ▸ Normal."
+msgstr "ノーマルのチャンネルは向きを描きます。プロパティ ▸ ブラシ ▸ ノーマル で選んでください。"
 
 msgid "The value the brush paints (0–255)"
 msgstr "ブラシが描く値（0〜255）"

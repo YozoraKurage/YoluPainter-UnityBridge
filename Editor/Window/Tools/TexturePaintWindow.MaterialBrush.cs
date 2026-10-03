@@ -170,7 +170,9 @@ namespace Yozolab.YoluPainter.Editor
         void MaterialValueRow(UiRows rows, PaintChannel c, BrushState b = null, string prefix = "material.value.")
         {
             if (b == null) b = brush;
-            var row = Mark(prefix + c, rows.Row());
+            // 色の見本と法線の見出しは 1 行、値のスライダーは 2 行（Substance と同じ）
+            bool color = c == PaintChannel.Color || c == PaintChannel.Emission;
+            var row = Mark(prefix + c, color || c == PaintChannel.Normal ? rows.Row() : rows.SliderRow());
             string name = L.Tr(c.ToString());
             switch (c)
             {
@@ -187,10 +189,10 @@ namespace Yozolab.YoluPainter.Editor
                 }
                 case PaintChannel.Normal:
                 {
-                    var cols = PaintGui.LabeledColumns(new Rect(row.x, row.y, row.width - 28, row.height), name, 56, 2);
+                    PaintGui.Text(new Rect(row.x, row.y, row.width - 28, row.height), PaintGui.Fit(name, row.width - 34, PaintTheme.Label), PaintTheme.Label, GUI.enabled ? PaintTheme.Text : PaintTheme.TextDisabled);
                     double x = b.materialNormalX, y = b.materialNormalY;
-                    double nx = PaintGui.KeepSlider(cols[0], L.TrIn("normal brush", "Tilt X"), x, -1, 1, "0.00", "", L.Tr("The Normal value as a direction: +1 leans right"));
-                    double ny = PaintGui.KeepSlider(cols[1], L.TrIn("normal brush", "Tilt Y"), y, -1, 1, "0.00", "", L.Tr("+1 leans up (OpenGL / Unity)"));
+                    double nx = PaintGui.KeepSlider(rows.SliderRow(), L.TrIn("normal brush", "Tilt X"), x, -1, 1, "0.00", "", L.Tr("The Normal value as a direction: +1 leans right"));
+                    double ny = PaintGui.KeepSlider(rows.SliderRow(), L.TrIn("normal brush", "Tilt Y"), y, -1, 1, "0.00", "", L.Tr("+1 leans up (OpenGL / Unity)"));
                     if (nx != x || ny != y) SetMaterialNormal((float)nx, (float)ny, b);
                     if (PaintGui.IconButton(new Rect(row.xMax - 24, row.y, 24, row.height), "restart_alt", L.Tr("Flat brush value (128, 128, 255): paints a flat normal"), false, GUI.enabled && stroke == null, 16)) SetMaterialNormal(0, 0, b);
                     break;

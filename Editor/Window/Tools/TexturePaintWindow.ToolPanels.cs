@@ -8,36 +8,17 @@ using Yozolab.YoluPainter.Core;
 namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>
-    /// プロパティの欄のうち、今のツールの設定（ToolSections）。部品は <see cref="PaintGui"/>、文字は <see cref="L"/> で訳す。
-    /// ブラシは Photoshop のブラシ設定のように、よく触る「ブラシ」と「手ぶれ補正・入り抜き」を開いておき、細かい設定（ジッター・散布、
-    /// テクスチャ、デュアルブラシ、色の変化、フェード・ペンの傾き）は初めは見出しだけにする。
+    /// プロパティの欄のうち、ツールの設定の欄の中身（どの文脈でどの段に出すかは振り分けの表 Shell/TexturePaintWindow.PropertyRoutes.cs）。
+    /// 部品は <see cref="PaintGui"/>、文字は <see cref="L"/> で訳す。ブラシは Substance Painter のブラシのように「ブラシ」の大見出しに主な値を
+    /// 置き、細かい設定（ジッター・散布、テクスチャ、デュアルブラシ、色の変化、フェード・ペンの傾き）はその中の小見出し（初めは閉じる）にする。
+    /// 手ぶれ補正・入り抜きと対称はオプションバーのポップアップ（Shell/TexturePaintWindow.OptionPopups.cs）。
     /// </summary>
     public sealed partial class TexturePaintWindow
     {
-        void ToolSections(UiRows rows)
-        {
-            switch (tool)
-            {
-                case PaintTool.Brush: BrushSections(rows); break;
-                case PaintTool.Blur: case PaintTool.Smudge: case PaintTool.Clone: BrushEffectSection(rows); BrushSections(rows); break;
-                case PaintTool.PolygonFill: case PaintTool.Fill: MaterialSection(rows); SurfacePickSection(rows); break;
-                case PaintTool.Gradient:
-                    MaterialSection(rows);
-                    GradientMaterialSection(rows);
-                    break;
-                case PaintTool.SelectRectangle: case PaintTool.SelectEllipse: case PaintTool.Lasso: case PaintTool.MagicWand:
-                    SurfacePickSection(rows);
-                    SelectionModifySection(rows); break;
-                case PaintTool.IdSelect: IdMapSection(rows); SelectionModifySection(rows); break; // Tools/TexturePaintWindow.IdSelect.cs
-                case PaintTool.Move: TransformSection(rows); break;
-                case PaintTool.Path: MaterialSection(rows); PathSection(rows); break;
-            }
-        }
-
         /// <summary>初めは閉じておくセクション（細かい設定。Photoshop のブラシ設定の一覧のように、見出しだけを並べる）。</summary>
         static readonly HashSet<string> ToolSectionsClosedAtFirst = new HashSet<string> { "brush-jitter", "brush-texture", "brush-dual", "brush-color", "brush-fade" };
         /// <summary>ツールのセクションのキー（テストがすべて開いて描くため）。</summary>
-        internal static readonly string[] ToolSectionKeys = { "brush-effect", "brush", "brush-material", "brush-stencil", "brush-stroke", "brush-symmetry", "brush-jitter", "brush-texture", "brush-dual", "brush-color", "brush-fade", "surface-pick", "selection-modify", "id-map", "move", "path" };
+        internal static readonly string[] ToolSectionKeys = { "brush-effect", "brush", "brush-alpha", "brush-material", "brush-stencil", "brush-stroke", "brush-symmetry", "brush-jitter", "brush-texture", "brush-dual", "brush-color", "brush-fade", "surface-pick", "selection-modify", "id-map", "move", "path" };
         internal void SetToolSectionsOpen(bool open) { foreach (var key in ToolSectionKeys) sectionOpen[key] = open; }
 
         /// <summary>ツールのセクションの見出し（開いていれば true）。初めの開閉は <see cref="ToolSectionsClosedAtFirst"/>。</summary>
@@ -50,14 +31,34 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>行の左に名前を置く部品（ドロップダウン・値の表示・カーブ）の名前の幅。</summary>
         const float LabelColumn = 80;
 
-        /// <summary>描いたツールの部品の画面上の矩形（Repaint のたびに覚える）。テストがその部品を本物のマウスの入力で押すため。</summary>
+        /// <summary>描いたツールの部品の画面上の矩形（Repaint のたびに覚える）。テストがその部品を本物のマウスの入力で押すため。プロパティの欄と
+        /// オプションバーのポップアップの部品は、その欄を描き直すたびに忘れる（見えなくなったタブの部品を押さないように。<see cref="BeginMarks"/>）。</summary>
         internal readonly Dictionary<string, Rect> ToolControlScreenRects = new Dictionary<string, Rect>();
         readonly Dictionary<string, Rect> toolControlPanelRects = new Dictionary<string, Rect>();
+        /// <summary>部品を描いた所（"properties"・"popup.Symmetry" … 。null は窓の外枠で、忘れない）。</summary>
+        readonly Dictionary<string, string> markOwners = new Dictionary<string, string>();
+        string markOwner;
         Rect Mark(string id, Rect r)
         {
-            if (Event.current.type == EventType.Repaint) { ToolControlScreenRects[id] = GUIUtility.GUIToScreenRect(r); toolControlPanelRects[id] = r; }
+            if (Event.current.type == EventType.Repaint)
+            {
+                ToolControlScreenRects[id] = GUIUtility.GUIToScreenRect(r); toolControlPanelRects[id] = r;
+                if (markOwner != null) markOwners[id] = markOwner; else markOwners.Remove(id);
+            }
             return r;
         }
+        /// <summary>欄を描き始める（Repaint ならその欄の部品の矩形を忘れる）。戻り値を <see cref="EndMarks"/> に渡して前の持ち主に戻す。</summary>
+        string BeginMarks(string owner)
+        {
+            if (Event.current.type == EventType.Repaint)
+                foreach (var id in markOwners.Where(kv => kv.Value == owner).Select(kv => kv.Key).ToList()) { ToolControlScreenRects.Remove(id); toolControlPanelRects.Remove(id); markOwners.Remove(id); }
+            var previous = markOwner; markOwner = owner; return previous;
+        }
+        void EndMarks(string previous) => markOwner = previous;
+        /// <summary>テスト用: 部品を描いた欄の中（スクロールの中身）での矩形。</summary>
+        internal bool TryToolControlPanelRect(string id, out Rect r) => toolControlPanelRects.TryGetValue(id, out r);
+        /// <summary>テスト用: 部品を最後に描いた所（窓の外枠なら null）。</summary>
+        internal string ToolControlOwner(string id) => markOwners.TryGetValue(id, out var owner) ? owner : null;
         /// <summary>テスト用: 覚えた部品が見えるところまでプロパティの欄を送る（行き過ぎは次の描画で欄が範囲に収める）。</summary>
         internal void ScrollPropertiesTo(string id) { if (toolControlPanelRects.TryGetValue(id, out var r)) propertiesScroll.y = Mathf.Max(0, r.y - 40); }
 
@@ -70,44 +71,24 @@ namespace Yozolab.YoluPainter.Editor
 
         // ───────── ブラシ ─────────
 
-        void BrushSections(UiRows rows)
-        {
-            BrushTipSection(rows);
-            MaterialSection(rows); // マテリアルで塗る（Tools/TexturePaintWindow.MaterialBrush.cs）
-            StencilSection(rows); // ステンシル（Tools/TexturePaintWindow.Stencil.cs）
-            StrokeAssistSection(rows);
-            SymmetrySection(rows); // 3D ビューのシンメトリー（Model/TexturePaintWindow.Symmetry.cs）
-            JitterSection(rows);
-            TextureSection(rows);
-            DualBrushSection(rows);
-            if (tool == PaintTool.Brush) ColorDynamicsSection(rows);
-            FadeTiltSection(rows);
-        }
-
+        /// <summary>「ブラシ」のタブの大見出し（Substance のブラシの BRUSH）: データのチャンネルの値、サイズ・流量・不透明度（2 行目の右のペンで
+        /// 筆圧に従わせる）、間隔、角度と進行方向、筆圧のカーブ、プリセット。先端の形（アルファ）は「アルファ」のタブ（<see cref="AlphaSection"/>）。</summary>
         void BrushTipSection(UiRows rows)
         {
             if (!ToolSection(rows, "brush", L.Tr("Brush"), "paint_brush")) return;
             if (tool == PaintTool.Brush && !brush.material && (channel == PaintChannel.Roughness || channel == PaintChannel.Metallic || channel == PaintChannel.Height))
             {
                 // データのチャンネルはブラシの色の明るさを値として描く（マテリアルで塗るときは「マテリアル」の節の値）（色は灰色にそろえる。以前の欄と同じ）
-                float scalar = PaintGui.FitSlider(rows.Row(), L.Tr("Value"), brush.color.r, 0, 1, "0.00", "", L.Tr("The value this channel is painted with"));
+                float scalar = PaintGui.FitSlider(rows.SliderRow(), L.Tr("Value"), brush.color.r, 0, 1, "0.00", "", L.Tr("The value this channel is painted with"));
                 brush.color = new Color(scalar, scalar, scalar, brush.color.a);
             }
-            bool round = string.IsNullOrEmpty(brush.tipId), missing = !round && BrushTips.ResolveRef(brush.tipId) == null;
-            PaintGui.ValueBox(rows.Row(), L.Tr("Tip"), round ? L.Tr("Round (hardness)") : missing ? L.Tr("Missing") + ": " + brush.tipId : brush.tipId, LabelColumn,
-                missing ? PaintTheme.Warning : (Color?)null, L.Tr("The tip comes with the brush preset. Choose a preset or import brushes to change it."), !round);
-            var c = UiRows.Split(rows.Row(), 2, 6);
-            brush.angle = PaintGui.FitSlider(c[0], L.Tr("Angle"), brush.angle, -180, 180, "0", "°", L.Tr("Rotation of the tip"));
-            brush.roundness = PercentSlider(c[1], L.Tr("Roundness"), brush.roundness, .01f, 1, L.Tr("Squashes the tip along its angle (100% keeps its shape)"));
-            c = UiRows.Split(rows.Row(), 2, 6);
-            brush.spacing = PercentSlider(Mark("spacing", c[0]), L.Tr("Spacing"), brush.spacing, .01f, 1, L.Tr("Distance between dabs, in % of the diameter"));
-            brush.followDirection = PaintGui.FitToggle(c[1], L.TrIn("brush", "Follow direction"), brush.followDirection, L.Tr("Turns the tip with the direction of the stroke (added to the angle)"));
-
-            PaintGui.GroupLabel(rows.Row(16), L.TrIn("brush", "Pen pressure"));
-            c = UiRows.Split(rows.Row(), 3, 6);
-            brush.pressureSize = PaintGui.FitToggle(c[0], L.Tr("Size"), brush.pressureSize, L.Tr("Pressure controls size"));
-            brush.pressureOpacity = PaintGui.FitToggle(c[1], L.Tr("Opacity"), brush.pressureOpacity, L.Tr("Pressure controls opacity"));
-            brush.pressureFlow = PaintGui.FitToggle(c[2], L.Tr("Flow"), brush.pressureFlow, L.Tr("Pressure flow"));
+            float size = brush.radius * 2, nextSize = PenSlider(rows, "brush.size", L.Tr("Size"), size, 1, 256, "0", " px", L.Tr("Brush diameter ([ and ])"), ref brush.pressureSize, L.Tr("Pressure controls size"));
+            if (nextSize != size) brush.radius = Mathf.Max(.5f, nextSize / 2);
+            brush.flow = PenSlider(rows, "brush.flow", L.Tr("Flow"), brush.flow * 100, 0, 100, "0", "%", L.Tr("How much each dab adds"), ref brush.pressureFlow, L.Tr("Pressure flow"), percent: true);
+            brush.opacity = PenSlider(rows, "brush.opacity", L.Tr("Opacity"), brush.opacity * 100, 0, 100, "0", "%", L.Tr("The most a stroke can cover"), ref brush.pressureOpacity, L.Tr("Pressure controls opacity"), percent: true);
+            brush.spacing = PercentSlider(Mark("spacing", rows.SliderRow()), L.Tr("Spacing"), brush.spacing, .01f, 1, L.Tr("Distance between dabs, in % of the diameter"));
+            brush.angle = PaintGui.FitSlider(Mark("brush.angle", rows.SliderRow()), L.Tr("Angle"), brush.angle, -180, 180, "0", "°", L.Tr("Rotation of the tip"));
+            brush.followDirection = PaintGui.FitToggle(rows.Row(), L.TrIn("brush", "Follow direction"), brush.followDirection, L.Tr("Turns the tip with the direction of the stroke (added to the angle)"));
             PressureCurveRows(rows);
 
             rows.Space(2);
@@ -120,6 +101,19 @@ namespace Yozolab.YoluPainter.Editor
             if (PaintGui.IconButton(B(), "import", L.Tr("Import Brushes…"), false, true, 17)) ImportBrushes();
             if (PaintGui.IconButton(B(), "delete", L.Tr("Delete Imported Brush"), false, BrushLibrary.IsLibraryPreset(brush.presetId), 17)) DeleteImportedBrush();
             rows.Space(4);
+        }
+
+        /// <summary>筆圧に従わせられるスライダー（2 行の形の 2 行目の右に、筆圧で変えるかのペンのボタン。Substance のブラシと同じ）。
+        /// percent なら値は 0〜100 で見せて 0〜1 で返す。</summary>
+        float PenSlider(UiRows rows, string id, string label, float shown, float min, float max, string format, string suffix, string tooltip, ref bool pressure, string penTooltip, bool percent = false)
+        {
+            const float pen = 24;
+            var row = Mark(id, rows.SliderRow());
+            float next = PaintGui.FitSlider(row, label, shown, min, max, format, suffix, tooltip, true, pen + 4);
+            var button = Mark(id + ".pen", new Rect(row.xMax - pen, row.yMax - 20, pen, 20));
+            if (PaintGui.IconButton(button, "stylus", penTooltip, pressure, true, 15)) { pressure = !pressure; Repaint(); }
+            if (!percent) return next;
+            return next != shown ? next / 100 : shown / 100;
         }
 
         /// <summary>筆圧のカーブのグラフの高さ。</summary>
@@ -162,18 +156,14 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (!ToolSection(rows, "brush-jitter", L.Tr("Jitter & Scatter"), "data_scatter")) return;
             PaintGui.GroupLabel(rows.Row(16), L.TrIn("brush", "Jitter"), L.Tr("Each dab varies at random by up to this much"));
-            var c = UiRows.Split(rows.Row(), 2, 6);
-            brush.sizeJitter = PercentSlider(c[0], L.Tr("Size"), brush.sizeJitter, 0, 1, L.Tr("Size jitter"));
-            brush.angleJitter = PercentSlider(c[1], L.Tr("Angle"), brush.angleJitter, 0, 1, L.Tr("Angle jitter"));
-            c = UiRows.Split(rows.Row(), 2, 6);
-            brush.roundnessJitter = PercentSlider(c[0], L.Tr("Roundness"), brush.roundnessJitter, 0, 1, L.Tr("Roundness jitter"));
-            brush.opacityJitter = PercentSlider(c[1], L.Tr("Opacity"), brush.opacityJitter, 0, 1, L.Tr("Opacity jitter"));
-            c = UiRows.Split(rows.Row(), 2, 6);
-            brush.flowJitter = PercentSlider(c[0], L.Tr("Flow"), brush.flowJitter, 0, 1, L.Tr("Flow jitter"));
+            brush.sizeJitter = PercentSlider(rows.SliderRow(), L.Tr("Size"), brush.sizeJitter, 0, 1, L.Tr("Size jitter"));
+            brush.angleJitter = PercentSlider(rows.SliderRow(), L.Tr("Angle"), brush.angleJitter, 0, 1, L.Tr("Angle jitter"));
+            brush.roundnessJitter = PercentSlider(rows.SliderRow(), L.Tr("Roundness"), brush.roundnessJitter, 0, 1, L.Tr("Roundness jitter"));
+            brush.opacityJitter = PercentSlider(rows.SliderRow(), L.Tr("Opacity"), brush.opacityJitter, 0, 1, L.Tr("Opacity jitter"));
+            brush.flowJitter = PercentSlider(rows.SliderRow(), L.Tr("Flow"), brush.flowJitter, 0, 1, L.Tr("Flow jitter"));
             PaintGui.GroupLabel(rows.Row(16), L.Tr("Scatter"));
-            c = UiRows.Split(rows.Row(), 2, 6);
-            brush.scatter = PercentSlider(c[0], L.Tr("Scatter"), brush.scatter, 0, 10, L.Tr("How far the dabs spread across the stroke, in % of the diameter"));
-            brush.count = PaintGui.FitIntSlider(c[1], L.Tr("Count"), brush.count, 1, 16, "", L.Tr("Dabs placed at every spacing step"));
+            brush.scatter = PercentSlider(rows.SliderRow(), L.Tr("Scatter"), brush.scatter, 0, 10, L.Tr("How far the dabs spread across the stroke, in % of the diameter"));
+            brush.count = PaintGui.FitIntSlider(rows.SliderRow(), L.Tr("Count"), brush.count, 1, 16, "", L.Tr("Dabs placed at every spacing step"));
             rows.Space(4);
         }
 
@@ -183,11 +173,9 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (!ToolSection(rows, "selection-modify", L.Tr("Modify Selection"), "select_all")) return;
             bool any = document.Selection != null;
-            var row = rows.Row();
-            float split = Mathf.Round(row.width * .58f);
-            selectionRadius = Mathf.Clamp(PaintGui.FitIntSlider(Mark("radius", new Rect(row.x, row.y, split, row.height)), L.TrIn("selection", "Radius"), selectionRadius, 0, SelectionMask.MaxModifyRadius, " px",
+            selectionRadius = Mathf.Clamp(PaintGui.FitIntSlider(Mark("radius", rows.SliderRow()), L.TrIn("selection", "Radius"), selectionRadius, 0, SelectionMask.MaxModifyRadius, " px",
                 L.Tr("Radius for Grow, Shrink, Border and Feather (as GIMP's Select menu)"), any), 0, SelectionMask.MaxModifyRadius);
-            selectionEdgeLock = PaintGui.FitToggle(new Rect(row.x + split + 8, row.y, row.width - split - 8, row.height), L.TrIn("selection", "Edge lock"), selectionEdgeLock,
+            selectionEdgeLock = PaintGui.FitToggle(rows.Row(), L.TrIn("selection", "Edge lock"), selectionEdgeLock,
                 L.Tr("Selected areas continue outside the canvas (Shrink, Border and Feather do not pull away from the canvas edge)"), any);
             var c = UiRows.Split(rows.Row(24), 3, 4);
             if (PaintGui.FitButton(Mark("grow", c[0]), L.Tr("Grow"), false, any, L.Tr("Largest amount within a circle of the radius"))) TryAction(() => ModifySelection(SelectionModifyKind.Grow));

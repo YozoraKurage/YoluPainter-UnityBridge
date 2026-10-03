@@ -726,7 +726,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (PaintGui.Button(host.Spot("bake.start", bake), bakeText, true, refusal == null && GUI.enabled, refusal ?? L.Tr("Bake the checked maps from the loaded model. The model, its materials and textures are not changed."), "local_fire_department"))
                     TryAction(() => StartMeshBake());
             }
-            if (PaintGui.Button(host.Spot("bake.close", close), closeText, false, true, job != null ? L.Tr("The bake goes on; Properties ▸ Mesh Maps shows its progress.") : null)) host.CloseSoon();
+            if (PaintGui.Button(host.Spot("bake.close", close), closeText, false, true, job != null ? L.Tr("The bake goes on; Texture Set Settings ▸ Mesh Maps shows its progress.") : null)) host.CloseSoon();
         }
 
         /// <summary>下の帯の知らせ（アイコンと、折り返した文。入らない分は切り、全文はツールチップに）。</summary>

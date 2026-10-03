@@ -233,7 +233,7 @@ namespace Yozolab.YoluPainter.Editor
             var kind = e.button == 2 || e.button == 0 && (e.control || e.command) ? StencilDragKind.Move
                 : e.button == 1 || e.button == 0 && e.alt ? StencilDragKind.Scale : e.button == 0 ? StencilDragKind.Rotate : StencilDragKind.None;
             if (kind == StencilDragKind.None) return false;
-            if (CurrentStencilImage == null) { message = L.Tr("Choose a stencil image first (Brush ▸ Stencil)."); e.Use(); Repaint(); return true; }
+            if (CurrentStencilImage == null) { message = L.Tr("Choose a stencil image first (Properties ▸ Stencil)."); e.Use(); Repaint(); return true; }
             stencilDrag = kind; stencilDragView = view; stencilDragFrom = e.mousePosition;
             stencilDragStartCenter = stencilCenter; stencilDragStartSize = stencilSize; stencilDragStartAngle = stencilAngle; stencilDragSwept = 0;
             stencilDragLastAngle = StencilPointerAngle(e.mousePosition);
@@ -374,7 +374,7 @@ namespace Yozolab.YoluPainter.Editor
         }
         void DisposeStencilOverlay() { if (stencilOverlay != null) DestroyImmediate(stencilOverlay); stencilOverlay = null; stencilOverlayKey = null; }
 
-        // ───────── プロパティの欄（ブラシ ▸ ステンシル） ─────────
+        // ───────── プロパティの欄（描くツールの「ステンシル」のタブ） ─────────
 
         static string StencilModeName(StencilMode mode, StencilImage image)
         {
@@ -423,11 +423,10 @@ namespace Yozolab.YoluPainter.Editor
                 foreach (StencilTiling t in Enum.GetValues(typeof(StencilTiling))) { var item = t; menu.AddItem(new GUIContent(StencilTilingName(item)), item == stencilTiling, () => { stencilTiling = item; Repaint(); }); }
                 menu.DropDown(at);
             }, L.Tr("Repeat the image beyond its edges across the view. Without tiling nothing is painted outside the image."));
-            stencilOpacity = PercentSlider(Mark("stencil-opacity", rows.Row()), L.Tr("Overlay opacity"), stencilOpacity, 0, 1, L.Tr("How strongly the stencil is shown over the views (display only)."));
-            c = UiRows.Split(rows.Row(), 2, 6);
-            float size = PercentSlider(Mark("stencil-size", c[0]), L.TrIn("stencil", "Size"), stencilSize, MinStencilSize, 4, L.Tr("The image's height as a share of the view's height."));
+            stencilOpacity = PercentSlider(Mark("stencil-opacity", rows.SliderRow()), L.Tr("Overlay opacity"), stencilOpacity, 0, 1, L.Tr("How strongly the stencil is shown over the views (display only)."));
+            float size = PercentSlider(Mark("stencil-size", rows.SliderRow()), L.TrIn("stencil", "Size"), stencilSize, MinStencilSize, 4, L.Tr("The image's height as a share of the view's height."));
             if (size != stencilSize) StencilSize = size;
-            float angle = PaintGui.FitSlider(Mark("stencil-angle", c[1]), L.Tr("Angle"), stencilAngle, -180, 180, "0", "°", L.Tr("Rotation on the screen (clockwise)."));
+            float angle = PaintGui.FitSlider(Mark("stencil-angle", rows.SliderRow()), L.Tr("Angle"), stencilAngle, -180, 180, "0", "°", L.Tr("Rotation on the screen (clockwise)."));
             if (angle != stencilAngle) StencilAngle = angle;
             if (PaintGui.FitButton(Mark("stencil-reset", rows.Row(24)), L.Tr("Reset placement"), false, stencilDrag == StencilDragKind.None, L.Tr("Back to the middle of the view, the first size and no rotation.")))
                 ResetStencilPlacement();

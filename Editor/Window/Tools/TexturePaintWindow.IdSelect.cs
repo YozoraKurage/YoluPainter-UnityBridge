@@ -51,7 +51,7 @@ namespace Yozolab.YoluPainter.Editor
         internal BakedMeshMap UsableIdMap(out string reason)
         {
             if (meshMaps.TryGetUsable(MeshMapKind.Id, CurrentMeshMapExpectation(), out var map, out var why)) { reason = null; return map; }
-            reason = L.Tr("There is no usable ID map for this texture set: {0} Bake one (Properties ▸ Mesh Maps ▸ Bake…, check ID).", why);
+            reason = L.Tr("There is no usable ID map for this texture set: {0} Bake one (Texture Set Settings ▸ Mesh Maps ▸ Bake…, check ID).", why);
             return null;
         }
 
@@ -202,7 +202,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 if (picking) EndIdColorPick(L.Tr("Stopped picking ID colours.")); else BeginIdColorPick(e.Id);
             }
-            return next.WithIdTolerance(PaintGui.KeepIntSlider(Spot("generator.id.tolerance", Indent(rows.Row(), indent)), L.Tr("Tolerance"), next.IdTolerance, 0, IdMapColors.MaxTolerance, "",
+            return next.WithIdTolerance(PaintGui.KeepIntSlider(Spot("generator.id.tolerance", Indent(rows.SliderRow(), indent)), L.Tr("Tolerance"), next.IdTolerance, 0, IdMapColors.MaxTolerance, "",
                 L.Tr("How far (largest 8-bit channel difference) a texel's ID colour may be from a listed one. Baked ID colours of up to 4080 parts differ by 17 or more.")));
         }
 

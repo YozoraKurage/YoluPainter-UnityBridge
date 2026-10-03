@@ -20,10 +20,11 @@ namespace Yozolab.YoluPainter.Tests
             const string firstFormat = "{\"left\":[\"layers\"],\"right\":[\"color\",\"textureSet\",\"properties\"],\"leftWidth\":280.0,\"rightWidth\":320.0,\"collapsed\":[\"color\"],\"weightIds\":[\"layers\",\"properties\"],\"weights\":[3.0,0.5]}";
             var layout = DockLayout.FromJson(firstFormat);
             Assert.That(layout.version, Is.EqualTo(DockLayout.CurrentVersion));
-            Assert.That(In(layout, DockPlace.Left), Is.EqualTo(new[] { "layers" }));
+            Assert.That(In(layout, DockPlace.Left), Is.EqualTo(new[] { "layers", "textureSetSettings" }), "Texture Set Settings joins the Layers panel as a tab (Substance's Layers | Texture Set Settings)");
+            Assert.That(layout.GroupOf("layers").Active, Is.EqualTo("layers"), "the shown tab stays");
             Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "properties", "material", "assets" }), "panels the old layout did not know are added at the end of the right column");
             Assert.That(layout.GroupOf("material").collapsed && layout.GroupOf("assets").collapsed, Is.True, "folded, so the old columns keep their heights");
-            Assert.That(layout.groups.All(g => g.panels.Count == 1 && !g.Floating), Is.True, "the first format had no tabs and no separate windows");
+            Assert.That(layout.groups.Where(g => !g.panels.Contains("layers")).All(g => g.panels.Count == 1 && !g.Floating), Is.True, "the first format had no tabs and no separate windows");
             Assert.That(layout.GroupOf("color").collapsed, Is.True); Assert.That(layout.GroupOf("layers").collapsed, Is.False);
             Assert.That(layout.Weight(layout.GroupOf("layers")), Is.EqualTo(3)); Assert.That(layout.Weight(layout.GroupOf("properties")), Is.EqualTo(.5f));
             Assert.That((layout.leftWidth, layout.rightWidth), Is.EqualTo((280f, 320f)));
@@ -37,7 +38,7 @@ namespace Yozolab.YoluPainter.Tests
         {
             const string broken = "{\"left\":[\"layers\",\"unknown\",\"layers\"],\"collapsed\":[\"x\",\"color\",\"color\"],\"leftWidth\":5.0,\"weightIds\":[\"layers\"],\"weights\":[]}";
             var layout = DockLayout.FromJson(broken);
-            Assert.That(In(layout, DockPlace.Left), Is.EqualTo(new[] { "layers" }));
+            Assert.That(In(layout, DockPlace.Left), Is.EqualTo(new[] { "layers", "textureSetSettings" }));
             Assert.That(In(layout, DockPlace.Right), Is.EquivalentTo(new[] { "color", "textureSet", "properties", "material", "assets" }), "missing panels come back on the right");
             Assert.That(layout.GroupOf("color").collapsed, Is.True);
             Assert.That(layout.leftWidth, Is.EqualTo(DockLayout.MinWidth));
@@ -59,7 +60,7 @@ namespace Yozolab.YoluPainter.Tests
                 },
                 leftWidth = float.NaN, rightWidth = 9999,
             }.Normalized();
-            Assert.That(layout.groups.Select(g => g.panels.ToArray()), Is.EqualTo(new[] { new[] { "layers" }, new[] { "color" }, new[] { "textureSet" }, new[] { "material" }, new[] { "assets" }, new[] { "properties" } }), "unknown, duplicate and empty entries go; missing panels are added on the right");
+            Assert.That(layout.groups.Select(g => g.panels.ToArray()), Is.EqualTo(new[] { new[] { "layers", "textureSetSettings" }, new[] { "color" }, new[] { "textureSet" }, new[] { "material" }, new[] { "assets" }, new[] { "properties" } }), "unknown, duplicate and empty entries go; missing panels are added on the right (Texture Set Settings as a tab of Layers)");
             Assert.That(layout.GroupOf("material").collapsed && layout.GroupOf("assets").collapsed, Is.True);
             var first = layout.GroupOf("layers"); var floating = layout.GroupOf("color");
             Assert.That((first.active, first.place, first.weight), Is.EqualTo(("layers", DockPlace.Right, 1f)));
@@ -73,15 +74,33 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(In(future, DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "material", "assets", "properties" }));
         }
 
-        [Test] public void PanelsMoveWithinAndBetweenColumnsAndRoundTripAsJson()
+        /// <summary>前の版の既定の配置（右の列に 1 つずつ。テクスチャセットの設定は最後に畳んで）。配置の操作の試験はこの並びで確かめる
+        /// （今の既定の並びは <see cref="TheDefaultIsSubstancePaintersArrangement"/>）。</summary>
+        internal static DockLayout Classic() => DockLayout.FromJson("{\"right\":[\"color\",\"textureSet\",\"layers\",\"material\",\"assets\",\"properties\",\"textureSetSettings\"],\"collapsed\":[\"material\",\"assets\",\"textureSetSettings\"]}");
+
+        /// <summary>既定の配置は Substance Painter の並び: 左にアセット（シェルフ）とカラー、右に上からテクスチャセットの一覧、
+        /// 「レイヤー｜テクスチャセットの設定｜マテリアル」のタブ（レイヤーが見えている）、プロパティ。どれも畳まない。</summary>
+        [Test] public void TheDefaultIsSubstancePaintersArrangement()
         {
             var layout = DockLayout.Default();
-            Assert.That(In(layout, DockPlace.Right), Is.EqualTo(DockLayout.KnownPanels));
-            Assert.That(layout.groups.Where(g => g.collapsed).Select(g => g.Active), Is.EqualTo(new[] { "material", "assets" }), "the Material and Assets panels start folded");
-            layout.MovePanel("color", DockPlace.Right, 6); // 右の列の一番下へ（抜いた分を詰める）
-            Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "textureSet", "layers", "material", "assets", "properties", "color" }));
+            Assert.That(In(layout, DockPlace.Left), Is.EqualTo(new[] { "assets", "color" }));
+            Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "textureSet", "layers", "textureSetSettings", "material", "properties" }));
+            Assert.That(layout.Column(DockPlace.Right).Select(g => g.panels.Count), Is.EqualTo(new[] { 1, 3, 1 }));
+            Assert.That(layout.GroupOf("layers").Active, Is.EqualTo("layers"));
+            Assert.That(layout.groups.Any(g => g.collapsed || g.Floating), Is.False);
+            Assert.That(layout.groups.SelectMany(g => g.panels), Is.EquivalentTo(DockLayout.KnownPanels));
+            Assert.That(JsonUtility.ToJson(RoundTrip(layout)), Is.EqualTo(JsonUtility.ToJson(layout)), "the default reads back as it is");
+        }
+
+        [Test] public void PanelsMoveWithinAndBetweenColumnsAndRoundTripAsJson()
+        {
+            var layout = Classic();
+            Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "layers", "material", "assets", "properties", "textureSetSettings" }));
+            Assert.That(layout.groups.Where(g => g.collapsed).Select(g => g.Active), Is.EqualTo(new[] { "material", "assets", "textureSetSettings" }));
+            layout.MovePanel("color", DockPlace.Right, 7); // 右の列の一番下へ（抜いた分を詰める）
+            Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "textureSet", "layers", "material", "assets", "properties", "textureSetSettings", "color" }));
             layout.MovePanel("layers", DockPlace.Left, 0);
-            Assert.That(In(layout, DockPlace.Left), Is.EqualTo(new[] { "layers" })); Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "textureSet", "material", "assets", "properties", "color" }));
+            Assert.That(In(layout, DockPlace.Left), Is.EqualTo(new[] { "layers" })); Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "textureSet", "material", "assets", "properties", "textureSetSettings", "color" }));
             layout.MovePanel("properties", DockPlace.Left, 0);
             Assert.That(In(layout, DockPlace.Left), Is.EqualTo(new[] { "properties", "layers" }));
             layout.SetCollapsed(layout.GroupOf("color").id, true); layout.SetWeight(layout.GroupOf("layers"), 3); layout.leftWidth = 280;
@@ -95,11 +114,11 @@ namespace Yozolab.YoluPainter.Tests
 
         [Test] public void TabsJoinSwitchReorderAndSplit()
         {
-            var layout = DockLayout.Default(); string tabs = layout.GroupOf("layers").id;
+            var layout = Classic(); string tabs = layout.GroupOf("layers").id;
             layout.Join("properties", tabs);
             var g = layout.Group(tabs);
             Assert.That(g.panels, Is.EqualTo(new[] { "layers", "properties" })); Assert.That(g.Active, Is.EqualTo("properties"), "the dropped panel is shown");
-            Assert.That(layout.Column(DockPlace.Right).Count, Is.EqualTo(5)); Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "layers", "properties", "material", "assets" }));
+            Assert.That(layout.Column(DockPlace.Right).Count, Is.EqualTo(6)); Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "layers", "properties", "material", "assets", "textureSetSettings" }));
             layout.SetActive("layers"); Assert.That(g.Active, Is.EqualTo("layers"));
             layout.SetCollapsed(tabs, true); layout.SetActive("properties");
             Assert.That(g.collapsed, Is.False, "showing a tab opens a folded group");
@@ -121,27 +140,27 @@ namespace Yozolab.YoluPainter.Tests
 
         [Test] public void FloatingPanelsRememberWhereTheyCameFromAndDockBack()
         {
-            var layout = DockLayout.Default(); var at = new Rect(100, 200, 300, 400);
+            var layout = Classic(); var at = new Rect(100, 200, 300, 400);
             var g = layout.FloatPanel("layers", at);
             Assert.That((g.place, g.home, g.homeIndex, g.window), Is.EqualTo((DockPlace.Floating, DockPlace.Right, 2, at)));
-            Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "material", "assets", "properties" }));
+            Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "material", "assets", "properties", "textureSetSettings" }));
             Assert.That(layout.Column(DockPlace.Floating), Is.EqualTo(new[] { g }));
             var back = RoundTrip(layout);
             Assert.That(back.GroupOf("layers").Floating, Is.True); Assert.That(back.GroupOf("layers").window, Is.EqualTo(at)); Assert.That(back.GroupOf("layers").homeIndex, Is.EqualTo(2));
             Assert.That(layout.Dock(g.id), Is.True);
-            Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "layers", "material", "assets", "properties" }), "back where it was");
+            Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "layers", "material", "assets", "properties", "textureSetSettings" }), "back where it was");
             Assert.That(layout.Dock(g.id), Is.False, "docking a docked group does nothing");
 
             // タブのまとまりごと出して、そこから 1 つだけ自分のウィンドウへ、もう 1 つを列へ
             layout.Join("properties", g.id);
             var both = layout.FloatGroup(g.id, at);
-            Assert.That(both.panels, Is.EqualTo(new[] { "layers", "properties" })); Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "material", "assets" }));
+            Assert.That(both.panels, Is.EqualTo(new[] { "layers", "properties" })); Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "material", "assets", "textureSetSettings" }));
             var own = layout.FloatPanel("properties", new Rect(500, 200, 300, 400));
             Assert.That(own.Floating, Is.True); Assert.That(own, Is.Not.SameAs(both)); Assert.That(both.panels, Is.EqualTo(new[] { "layers" }));
             Assert.That((own.home, own.homeIndex), Is.EqualTo((both.home, both.homeIndex)), "a panel split from a separate window keeps that window's way home");
             layout.Join("properties", both.id); // 別のウィンドウのタブに戻す
             layout.MovePanel("properties", both.home, both.homeIndex); // 「このパネルを列に戻す」
-            Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "properties", "material", "assets" }));
+            Assert.That(In(layout, DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "properties", "material", "assets", "textureSetSettings" }));
             layout.MoveGroup(both.id, DockPlace.Left, 0); // 別のウィンドウを左の列へドラッグ
             Assert.That(both.Floating, Is.False); Assert.That(In(layout, DockPlace.Left), Is.EqualTo(new[] { "layers" }));
 
@@ -184,7 +203,7 @@ namespace Yozolab.YoluPainter.Tests
             var w = ScriptableObject.CreateInstance<TexturePaintWindow>();
             try
             {
-                w.LayoutOverride = new Rect(0, 0, 1200, 800); LayoutShell(w);
+                w.LayoutOverride = new Rect(0, 0, 1200, 800); w.DockLayoutForTests = Classic(); LayoutShell(w);
                 var layout = w.DockLayoutForTests;
                 string[] Texts(string panel) => w.PanelHeaderMenuItems(layout.GroupOf(panel), panel).Select(i => i.text).ToArray();
                 void Run(string panel, string text) => w.PanelHeaderMenuItems(layout.GroupOf(panel), panel).Single(i => i.text == text).action();
@@ -192,7 +211,7 @@ namespace Yozolab.YoluPainter.Tests
                 layout.Join("properties", layout.GroupOf("layers").id);
                 Assert.That(Texts("properties"), Is.EqualTo(new[] { "Open This Panel in a Separate Window", "Open Tab Group in Separate Window", "Separate from Tab Group", null, "Move to Left Column", "Fold" }));
                 Run("properties", "Separate from Tab Group");
-                Assert.That(layout.PanelsIn(DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "layers", "properties", "material", "assets" })); Assert.That(layout.GroupOf("layers").panels.Count, Is.EqualTo(1));
+                Assert.That(layout.PanelsIn(DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "layers", "properties", "material", "assets", "textureSetSettings" })); Assert.That(layout.GroupOf("layers").panels.Count, Is.EqualTo(1));
                 Run("layers", "Move to Left Column"); Assert.That(layout.PanelsIn(DockPlace.Left), Is.EqualTo(new[] { "layers" }));
                 Assert.That(Texts("layers")[2], Is.EqualTo("Move to Right Column"));
                 Run("layers", "Fold"); Assert.That(w.PanelShown("layers"), Is.False); Assert.That(Texts("layers").Last(), Is.EqualTo("Unfold"));
@@ -211,8 +230,10 @@ namespace Yozolab.YoluPainter.Tests
                 Assert.That(layout.GroupOf("properties").window.position, Is.EqualTo(tabs.window.position + new Vector2(32, 32)));
                 w.ToggleFloating("properties"); Assert.That(layout.IsFloating("properties"), Is.False);
                 w.DockAllPanels(); Assert.That(layout.Column(DockPlace.Floating), Is.Empty);
-                Assert.That(layout.PanelsIn(DockPlace.Right), Is.EquivalentTo(new[] { "color", "textureSet", "properties", "material", "assets" }));
-                w.ResetDockLayout(); Assert.That(w.DockLayoutForTests.PanelsIn(DockPlace.Right), Is.EqualTo(DockLayout.KnownPanels));
+                Assert.That(layout.PanelsIn(DockPlace.Right), Is.EquivalentTo(new[] { "color", "textureSet", "properties", "material", "assets", "textureSetSettings" }));
+                w.ResetDockLayout();
+                Assert.That(w.DockLayoutForTests.PanelsIn(DockPlace.Left), Is.EqualTo(DockLayout.Default().PanelsIn(DockPlace.Left)), "Reset Panel Layout goes back to Substance's arrangement");
+                Assert.That(w.DockLayoutForTests.PanelsIn(DockPlace.Right), Is.EqualTo(DockLayout.Default().PanelsIn(DockPlace.Right)));
                 Assert.That(() => w.PanelShown("nope"), Throws.ArgumentException);
             }
             finally { Object.DestroyImmediate(w); }
@@ -224,9 +245,10 @@ namespace Yozolab.YoluPainter.Tests
             var w = ScriptableObject.CreateInstance<TexturePaintWindow>();
             try
             {
-                w.LayoutOverride = new Rect(0, 0, 1600, 950);
+                w.LayoutOverride = new Rect(0, 0, 1600, 950); w.DockLayoutForTests = Classic(); // 左の列が無い配置から
                 var layout = w.DockLayoutForTests;
                 LayoutShell(w);
+                Assert.That(layout.Column(DockPlace.Left), Is.Empty);
                 layout.MovePanel("layers", DockPlace.Left, 0); layout.MovePanel("properties", DockPlace.Left, 1);
                 LayoutShell(w);
                 Assert.That(w.SurfaceRect.width + w.SurfaceRect.x, Is.LessThanOrEqualTo(1600 - 300 + .5f));
@@ -250,6 +272,7 @@ namespace Yozolab.YoluPainter.Tests
             try
             {
                 w.Preview.LoadDemoMesh();
+                w.DockLayoutForTests = Classic();
                 var layout = w.DockLayoutForTests;
                 // 列: テクスチャセットと、レイヤー・プロパティのタブ。カラーは別のウィンドウ
                 var tabs = layout.GroupOf("layers"); layout.Join("properties", tabs.id); layout.SetActive("layers");
@@ -280,7 +303,7 @@ namespace Yozolab.YoluPainter.Tests
                     Render("panel-window-tabs-" + language, 320, 480, () => OffscreenGui.RenderToPng(320, 480, () => w.DrawFloatingGroupForTests(tabs.id, new Rect(0, 0, 320, 480)), Path.Combine(Folder, "panel-window-tabs-" + language + ".png"), PaintTheme.PanelBg));
                 }
                 // 列のパネルを全部出すと、右の列も消えて表示域が広がる
-                layout.FloatPanel("textureSet", new Rect(0, 0, 300, 400)); layout.FloatPanel("material", new Rect(0, 0, 300, 400)); layout.FloatPanel("assets", new Rect(0, 0, 300, 400));
+                layout.FloatPanel("textureSet", new Rect(0, 0, 300, 400)); layout.FloatPanel("material", new Rect(0, 0, 300, 400)); layout.FloatPanel("assets", new Rect(0, 0, 300, 400)); layout.FloatPanel("textureSetSettings", new Rect(0, 0, 300, 400));
                 Assert.That(layout.Column(DockPlace.Right), Is.Empty);
                 LayoutShell(w);
                 Assert.That(w.SurfaceRect.xMax, Is.GreaterThan(1200 - 10));

@@ -56,8 +56,13 @@ namespace Yozolab.YoluPainter.Editor
         internal MeshBakeReport LastMeshBakeReport => lastMeshBakeReport;
         internal MeshMapView MeshMapOverlay { get => meshMapView; set { meshMapView = value; Repaint(); } }
         internal float MeshMapOverlayOpacity { get => meshMapOpacity; set => meshMapOpacity = Mathf.Clamp01(value); }
-        /// <summary>プロパティの欄のメッシュマップのセクションが開いているか（既定は閉。モデルを読み込んでから使う区画なので）。</summary>
-        internal bool ShowMeshMapPanel { get => SectionIsOpen("mesh-maps", false); set => sectionOpen["mesh-maps"] = value; }
+        /// <summary>テクスチャセットの設定のメッシュマップのセクションが見えているか（既定は閉。モデルを読み込んでから使う区画なので）。
+        /// true にするとセクションを開き、テクスチャセットの設定のタブを見せる。</summary>
+        internal bool ShowMeshMapPanel
+        {
+            get => SectionIsOpen("mesh-maps", false) && PanelShown("textureSetSettings");
+            set { sectionOpen["mesh-maps"] = value; if (value && !PanelShown("textureSetSettings")) Layout.SetActive("textureSetSettings"); }
+        }
         /// <summary><see cref="BakeMeshMaps"/>（呼んだ所で待つベイク）の進み具合（題、説明、0〜1）。true を返すと取消。既定は Unity の取消
         /// できる進捗バー（テストは差し替える）。ベイクの窓からのベイクは窓の中に進み具合を出すので、これを使わない。</summary>
         internal Func<string, string, float, bool> MeshBakeProgress = EditorUtility.DisplayCancelableProgressBar;
@@ -192,7 +197,7 @@ namespace Yozolab.YoluPainter.Editor
             var current = views.Contains(meshMapView) ? meshMapView : MeshMapView.None;
             ChoiceDropdown(rows.Row(), L.Tr("Show on canvas"), current, views.ToArray(), MeshMapViewName, v => { meshMapView = v; Repaint(); }, L.Tr("Read-only overlay; nothing is painted"));
             if (meshMapView != MeshMapView.None)
-                meshMapOpacity = (float)PaintGui.KeepSlider(rows.Row(), L.Tr("Overlay opacity"), meshMapOpacity, 0, 1, "0", "%", null, true, 100);
+                meshMapOpacity = (float)PaintGui.KeepSlider(rows.SliderRow(), L.Tr("Overlay opacity"), meshMapOpacity, 0, 1, "0", "%", null, true, 100);
             if (meshMapView == MeshMapView.Coverage)
             {
                 var row = rows.Row(18);

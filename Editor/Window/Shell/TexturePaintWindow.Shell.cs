@@ -133,6 +133,7 @@ namespace Yozolab.YoluPainter.Editor
                 DrawToolStrip();
                 DrawDocks();
             }
+            if (preview != null && preview.HasSkinnedMeshes) ApplyPendingPose(); // ポーズのスライダーを離したら焼き直す（テクスチャセットの設定を畳んでいても）
             DrawViewHeader();
             HandleSplitHandle();
             DrawStatusBar();
@@ -149,7 +150,14 @@ namespace Yozolab.YoluPainter.Editor
             float x = r.x + 8, y = r.y + 6, h = r.height - 12;
             PaintGui.ToolIcon(new Rect(x, r.y, 22, r.height), slot.Id, false, PaintTheme.Text, 20); x += 30;
             PaintGui.VLine(x - 4, r.y + 6, r.yMax - 6, PaintTheme.Separator);
-            Rect Next(float width) { var at = new Rect(x + 4, y, width, h); x += width + 8; return at; }
+            // 描くツールは右端に対称と手ぶれ補正（Shell/TexturePaintWindow.OptionPopups.cs）。左の部品は、そこまでに収まらなければ出さない
+            // （大きさ・硬さ・不透明度・流れはプロパティのブラシにもある）
+            float limit = IsBrushTool ? DrawStrokeAssistOptions(r) : float.MaxValue;
+            Rect Next(float width)
+            {
+                if (x + 4 + width > limit) { x = limit; return new Rect(-10000, y, 0, h); }
+                var at = new Rect(x + 4, y, width, h); x += width + 8; return at;
+            }
             Rect Fit(string text) => Next(PaintTheme.LabelDim.CalcSize(new GUIContent(text)).x + 6); // 説明文は文字の幅に合わせる
             switch (tool)
             {
@@ -160,6 +168,7 @@ namespace Yozolab.YoluPainter.Editor
                     brush.hardness = PaintGui.Slider(Next(130), L.Tr("Hardness"), brush.hardness * 100, 0, 100, "0", "%") / 100;
                     brush.opacity = PaintGui.Slider(Next(130), L.Tr("Opacity"), brush.opacity * 100, 0, 100, "0", "%") / 100;
                     brush.flow = PaintGui.Slider(Next(120), L.Tr("Flow"), brush.flow * 100, 0, 100, "0", "%") / 100;
+                    { float spacing = PaintGui.Slider(Mark("options.spacing", Next(120)), L.Tr("Spacing"), brush.spacing * 100, 1, 100, "0", "%", L.Tr("Distance between dabs, in % of the diameter")); if (spacing != brush.spacing * 100) brush.spacing = spacing / 100; } // Substance のツールバーと同じ
                     if (PaintGui.IconButton(Next(28), "stylus", L.Tr("Pressure controls size"), brush.pressureSize)) brush.pressureSize = !brush.pressureSize;
                     if (PaintGui.IconButton(Next(28), "opacity", L.Tr("Pressure controls opacity"), brush.pressureOpacity)) brush.pressureOpacity = !brush.pressureOpacity;
                     if (EditingMask) { var t = L.Tr("Painting the layer mask (paint hides, erase reveals)"); PaintGui.Text(Fit(t), t, PaintTheme.LabelDim, PaintTheme.Warning); }
@@ -245,6 +254,7 @@ namespace Yozolab.YoluPainter.Editor
 
         internal void SelectTool(PaintTool next, bool erase = false)
         {
+            selectedFilter = Guid.Empty; // プロパティの欄を、選んだツールに（効果の段を選んでいたら外す）
             Tool = next;
             if (next == PaintTool.Brush) brush.erase = erase;
             Repaint();

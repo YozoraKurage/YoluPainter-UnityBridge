@@ -30,7 +30,7 @@ namespace Yozolab.YoluPainter.Editor
             PaintGui.GroupLabel(rows.Row(18), L.Tr("End material"));
             if (PaintGui.FitButton(Mark("gradient.capture-end", rows.Row(24)), L.Tr("Use current material as end"))) CaptureGradientEndMaterial();
             foreach (var c in Channels) if (MaterialIncludes(c)) MaterialValueRow(rows, c, gradientEndMaterial, "gradient.end.");
-            float alpha = PaintGui.FitSlider(Mark("gradient.end-alpha", rows.Row()), L.Tr("End alpha"), gradientEndMaterial.color.a, 0, 1, "0.00", "");
+            float alpha = PaintGui.FitSlider(Mark("gradient.end-alpha", rows.SliderRow()), L.Tr("End alpha"), gradientEndMaterial.color.a, 0, 1, "0.00", "");
             var color = gradientEndMaterial.color; color.a = alpha; gradientEndMaterial.color = color;
         }
         // ドラッグで形を決めるツール（グラデーション・矩形/楕円/投げ縄選択）の途中の状態。キャンバスの画素座標（左下原点）

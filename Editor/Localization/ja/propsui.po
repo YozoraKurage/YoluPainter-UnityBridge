@@ -1,0 +1,101 @@
+# Japanese translation for YoluPainter: the Properties panel that shows only the selected thing (its title, tabs, section headers and
+# notes), the effect rows in the Layers panel, the Texture Set Settings panel, and the symmetry and stabilizer in the options bar.
+# 一般的な語（マテリアル・マスク）は msgctxt で場面を分ける（ほかの画面の表と同じキーにしないため）。
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: ja\n"
+
+# ── プロパティの欄（題・タブ・見出し） ──
+
+msgctxt "properties tab"
+msgid "Material"
+msgstr "マテリアル"
+
+msgctxt "properties tab"
+msgid "Mask"
+msgstr "マスク"
+
+msgctxt "properties tab"
+msgid "Stencil"
+msgstr "ステンシル"
+
+msgid "Back to the default values of {0}"
+msgstr "{0}を既定の値に戻す"
+
+msgid "Back to the default values."
+msgstr "既定の値に戻しました。"
+
+msgid "This tool's settings are in the options bar above the views."
+msgstr "このツールの設定は、ビューの上のオプションバーにあります。"
+
+msgid "Nothing to set here. Select a layer, a fill, a filter or a generator in the Layers panel, or a painting tool."
+msgstr "ここで設定するものはありません。レイヤーのパネルでレイヤー・塗りつぶし・フィルター・Generator を選ぶか、描くツールを選んでください。"
+
+# ── ブラシの主な値 ──
+
+msgid "Hardness of the round tip (an image tip keeps its own edge)"
+msgstr "円形の先端の硬さ（画像の先端は自分の縁のまま）"
+
+msgid "The most a stroke can cover"
+msgstr "1 回のストロークで覆える上限"
+
+msgid "How much each dab adds"
+msgstr "1 つのダブが足す量"
+
+# ── レイヤーの重なりの効果の行・マスク ──
+
+msgid "Click to edit it in Properties. Right-click for more."
+msgstr "クリックでプロパティに設定を出します。右クリックでほかの操作。"
+
+msgid "Right-click for the mask's settings."
+msgstr "右クリックでマスクの設定。"
+
+# ── テクスチャセットの設定 ──
+
+msgid "Texture Set Settings"
+msgstr "テクスチャセットの設定"
+
+msgid "whole model"
+msgstr "モデル全体"
+
+# ── オプションバーの対称・手ぶれ補正 ──
+
+msgid "Stabilizer (lazy mouse): the brush trails the pointer and smooths shaky lines. 2D canvas only."
+msgstr "手ぶれ補正（レイジーマウス）: ブラシがポインタを糸で引くように遅れて付いて行き、震えた線をなめらかにします。2D キャンバスだけ。"
+
+msgid "The string length the brush trails the pointer by (0 is off)"
+msgstr "ブラシがポインタから遅れる糸の長さ（0 で切る）"
+
+msgid "Stabilizer and taper settings"
+msgstr "手ぶれ補正と入り抜きの設定"
+
+msgid "Symmetry: mirror 3D brush strokes across the model's plane"
+msgstr "シンメトリー: 3D のブラシのストロークを、モデルの対称の面で映した所にも描く"
+
+msgid "Symmetry settings (axis, center, plane)"
+msgstr "シンメトリーの設定（軸・中心・面）"
+
+msgid "Turns off every symmetry that is on (3D mirror, 3D radial, 2D canvas), and turns the same ones on again."
+msgstr "入っている対称（3D の鏡映・3D の放射状・2D キャンバス）を全部切り、もう一度押すと同じものを入れ直します。"
+
+# ── アルファのタブ（先端の形と一覧） ──
+
+msgctxt "properties tab"
+msgid "Alpha"
+msgstr "アルファ"
+
+msgid "Alpha"
+msgstr "アルファ"
+
+msgid "Bundled (Krita)"
+msgstr "同梱（Krita）"
+
+msgid "Photoshop (.abr), GIMP (.gbr / .gih / .vbr) or a PNG; their tips are added to this list"
+msgstr "Photoshop（.abr）・GIMP（.gbr / .gih / .vbr）・PNG。先端がこの一覧に入ります"
+
+msgid "The brush uses the round tip."
+msgstr "ブラシの先端を円形にしました。"
+
+msgid "The brush uses the tip {0}."
+msgstr "ブラシの先端を {0} にしました。"

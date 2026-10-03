@@ -78,12 +78,12 @@ namespace Yozolab.YoluPainter.Editor
             if (!ToolSection(rows, "brush-effect", tool == PaintTool.Blur ? L.Tr("Blur Brush") : tool == PaintTool.Smudge ? L.Tr("Smudge") : L.Tr("Clone Stamp"), tool == PaintTool.Clone ? "content_copy" : "blur_on")) return;
             if (tool == PaintTool.Blur)
             {
-                brush.blurRadius = PaintGui.FitIntSlider(Mark("blur-radius", rows.Row()), L.Tr("Blur radius"), brush.blurRadius, 1, 64, " px");
+                brush.blurRadius = PaintGui.FitIntSlider(Mark("blur-radius", rows.SliderRow()), L.Tr("Blur radius"), brush.blurRadius, 1, 64, " px");
                 PaintGui.Paragraph(rows, L.Tr("Alpha-weighted box blur of the current layer or mask. Transparent pixels keep their RGB. Opacity, flow and pressure set the strength."), PaintTheme.TextDim);
             }
             else if (tool == PaintTool.Smudge)
             {
-                brush.smudgeStrength = PercentSlider(Mark("smudge-strength", rows.Row()), L.Tr("Smudge strength"), brush.smudgeStrength, 0, 1);
+                brush.smudgeStrength = PercentSlider(Mark("smudge-strength", rows.SliderRow()), L.Tr("Smudge strength"), brush.smudgeStrength, 0, 1);
                 PaintGui.Paragraph(rows, L.Tr("Each dab pulls pixels from the previous dab. In 3D this follows UV motion within one island; crossing a seam starts a new pickup. Mirror symmetry is unavailable."), PaintTheme.TextDim);
             }
             else

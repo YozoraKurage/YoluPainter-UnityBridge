@@ -27,6 +27,7 @@ namespace Yozolab.YoluPainter.Tests
                 d.ClearHistory();
                 w.Tool = TexturePaintWindow.PaintTool.Brush;
                 var b = w.Brush; b.material = true; b.materialChannels = (1 << 6) - 1; b.materialEmission = new Color(1, .6f, .1f, 1); w.Brush = b;
+                w.SetPropertyTab(PropertyContext.Brush, TexturePaintWindow.TabMaterial); // プロパティの欄のマテリアルのタブ（Substance のブラシの MATERIAL）
                 foreach (var language in new[] { PainterLanguage.English, PainterLanguage.Japanese })
                 {
                     L.OverrideLanguage(language);

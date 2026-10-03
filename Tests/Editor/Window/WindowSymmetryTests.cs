@@ -148,7 +148,8 @@ namespace Yozolab.YoluPainter.Tests
             Click(at); Repaint(window);
         }
 
-        [Test] public void ThePropertiesSectionSetsTheAxisCenterAndPlane()
+        /// <summary>オプションバーの対称の小さな窓（前はプロパティの欄のブラシの中）で、軸・中心・面を決める。</summary>
+        [Test] public void TheSymmetryPopupSetsTheAxisCenterAndPlane()
         {
             LoadSymmetricBox();
             window.SetToolSectionsOpen(true);

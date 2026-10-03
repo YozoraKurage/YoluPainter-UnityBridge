@@ -16,9 +16,13 @@ namespace Yozolab.YoluPainter.Editor
             ControlBg = Hex(0x18181A), ControlHover = Hex(0x36363B), ControlActive = Hex(0x404048), Border = Hex(0x111113),
             Separator = Hex(0x343438), CanvasBg = Hex(0x131314), Accent = Hex(0x3D8EF0), AccentDim = Hex(0x2B5D9C), AccentSoft = new Color(.24f, .56f, .94f, .22f),
             Text = Hex(0xD9D9DC), TextDim = Hex(0x9A9AA0), TextDisabled = Hex(0x5C5C62), Warning = Hex(0xE8B03C), Error = Hex(0xE5534B),
-            SliderFill = Hex(0x355F96), SliderFillHover = Hex(0x3F70B0);
+            SliderFill = Hex(0x355F96), SliderFillHover = Hex(0x3F70B0),
+            // プロパティの欄の大見出しの帯（パネルの地より濃い）
+            SectionBand = Hex(0x1E1E21), SectionBandHover = Hex(0x2A2A2F);
 
-        public const float MenuBarHeight = 24, OptionsBarHeight = 36, StatusBarHeight = 22, ToolStripWidth = 44, DockWidth = 300, RowHeight = 22, Padding = 8;
+        public const float MenuBarHeight = 24, OptionsBarHeight = 36, StatusBarHeight = 22, ToolStripWidth = 44, DockWidth = 300, RowHeight = 22, Padding = 8,
+            // プロパティの欄の見出しの段: 大見出しの文字の位置（▸/▾ の右）、中身の字下げ（大見出しの中身・小見出しの中身）
+            SectionTitleX = 20, SectionIndent = 12, SubsectionIndent = 10;
 
         static GUIStyle s_label, s_labelDim, s_labelSmall, s_labelBold, s_labelCenter, s_header, s_menu, s_field, s_value, s_wrap;
         public static GUIStyle Label => s_label ?? (s_label = Make(12, Text));

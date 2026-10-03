@@ -108,6 +108,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             AnchorMenuItems(m); // Anchor を置く・外す（Layers/TexturePaintWindow.Anchors.cs）
             Item(m, "Clip to Layer Below", () => document.SetLayerClipping(selectedLayer, !active.Clipping), active != null, active != null && active.Clipping, "Ctrl+Alt+G");
+            LayerChannelMenuItems(m, active); // このチャンネルに描く・チャンネルごとの合成を戻す（ペイントの層はプロパティの欄にブラシが出るので、ここから）
             m.AddSeparator("");
             Item(m, "Rasterize Path", () => document.Rasterize(selectedLayer), active?.Path != null);
             Item(m, "Bake Filters into Pixels", BakeFilters, active != null && (active.Filters.Count > 0 || active.Mask != null && active.Mask.Filters.Count > 0));
@@ -121,6 +122,29 @@ namespace Yozolab.YoluPainter.Editor
             m.AddSeparator("");
             if (chosen.Count > 1) Item(m, "Delete Layers", DeleteSelectedLayer, document.Layers.Count > 1);
             else Item(m, "Delete Layer", DeleteSelectedLayer, document.Layers.Count > 1);
+        }
+
+        /// <summary>層のチャンネルの項目: 今のチャンネルに描くか（オフならこのチャンネルでは層が無いのと同じ。中身は残る）と、自分の合成モード・
+        /// 不透明度を持つチャンネルを層の値に戻す項目。塗りつぶし・調整・グループの層ではプロパティの欄にも同じものが出る。</summary>
+        void LayerChannelMenuItems(GenericMenu m, PaintLayer active)
+        {
+            string channelName = L.Tr(channel.ToString());
+            var paint = new GUIContent(L.Tr("Paint this channel") + " (" + channelName + ")");
+            if (active != null && !active.IsGroup)
+            {
+                Guid id = active.Id; var ch = channel; bool on = active.IsChannelEnabled(channel);
+                m.AddItem(paint, on, () => { TryAction(() => document.SetChannelEnabled(id, ch, !on)); Repaint(); });
+            }
+            else m.AddDisabledItem(paint);
+            if (active == null || !active.HasChannelBlends) return;
+            foreach (var c in Channels)
+            {
+                if (!active.ChannelBlends.ContainsKey(c)) continue;
+                Guid id = active.Id; var ch = c;
+                string text = L.Tr("Own blending per channel") + "/" + L.Tr("Use the layer's blend mode and opacity in {0} again", L.Tr(c.ToString()))
+                    + " (" + L.TrIn("blend mode", BlendName(active.BlendModeIn(c))) + " · " + Mathf.RoundToInt((float)active.OpacityIn(c) * 100) + "%)";
+                m.AddItem(new GUIContent(text), false, () => { TryAction(() => document.SetChannelBlend(id, ch, default)); Repaint(); });
+            }
         }
 
         void SelectMenu(GenericMenu m)
@@ -213,7 +237,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             Item(m, "Keyboard Shortcuts", () => Dialogs.Inform(L.Tr("Keyboard Shortcuts"), L.Tr(ShortcutHelp) + "\n" + L.Tr("2D view: - / ^ (or =) rotate 15° · R + drag rotates (with Shift in 15° steps) · Shift + middle drag rotates · Shift+R resets the rotation · H flips horizontally · Ctrl+0 also resets the rotation") + "\n" + L.Tr("Shift+W ID colour select (click a part on the 2D canvas or the 3D view; needs a baked ID map)")
                 + "\n" + L.Tr("3D view: C shows one channel at a time (unlit) · Shift+B one baked mesh map at a time · Shift+C the material · Ctrl + right drag turns the environment and the light")
-                + "\n" + L.Tr("Stencil (Brush ▸ Stencil): hold T and drag on a view, left turns it (with Shift in 15° steps), middle or Ctrl+left moves it, right or Alt+left resizes it · hold N to paint without it")
+                + "\n" + L.Tr("Stencil (Properties ▸ Stencil): hold T and drag on a view, left turns it (with Shift in 15° steps), middle or Ctrl+left moves it, right or Alt+left resizes it · hold N to paint without it")
 
                 + "\n" + L.Tr("Q shows or hides the handles of the selected fill layer's projection or decal")));
             Item(m, "Implementation Limits", () => Dialogs.Inform(L.Tr("Implementation Limits"), L.Tr(LimitsHelp)));

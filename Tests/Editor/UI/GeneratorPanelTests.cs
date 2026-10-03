@@ -37,7 +37,7 @@ namespace Yozolab.YoluPainter.Tests
                 var fill = d.AddFillLayer("Worn", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(40, 120, 220, 255) } });
                 d.AddLayerMask(fill.Id); d.ClearHistory();
                 w.SelectedLayer = fill.Id;
-                w.SetSectionOpen("layer", false); w.SetSectionOpen("mask", false); w.SetSectionOpen("filters", true);
+                w.SetSectionOpen("effect", true); // 選んだ Generator の欄（効果の行で選ぶ。w.SelectedFilter）
                 int drawn = 0;
                 foreach (GeneratorType type in Enum.GetValues(typeof(GeneratorType)))
                 {
@@ -71,7 +71,9 @@ namespace Yozolab.YoluPainter.Tests
                                 Render(w, width, height, name);
                                 Assert.That(PaintGui.ShortenedTexts, Is.Zero, name + ": a UI text did not fit and was shortened with …");
                                 Assert.That((d.Revision, d.UndoCount), Is.EqualTo((revision, undo)), name + ": drawing changed the document");
-                                Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.invert").And.Member("generator.blend").And.Member("generator.add.Mask"), name);
+                                Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.invert").And.Member("generator.blend"), name);
+                                Assert.That(w.LayerPanelScreenRects.Keys, Has.Member("effect." + gen.Id), name + ": the generator is a row under its layer");
+                                Assert.That(w.LastPropertyContext, Is.EqualTo(PropertyContext.Effect), name);
                                 // Anchor はマップを読まない（崩しを UV に置くとき）: ピンの代わりに、読む Anchor・チャンネル・読み方
                                 if (type == GeneratorType.Anchor) Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.anchor").And.Member("generator.anchorChannel").And.Member("generator.anchorRead").And.No.Member("generator.pin"), name);
                                 else Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.pin"), name);
@@ -88,7 +90,7 @@ namespace Yozolab.YoluPainter.Tests
                                 PaintGui.ShortenedTexts = 0; float used = 0;
                                 OffscreenGui.RenderToPng(300, 900, () => used = w.DrawFilterSectionOnly(new Rect(0, 0, 300, 900)), Path.Combine(Folder, name + ".png"), PaintTheme.PanelBg);
                                 Assert.That(PaintGui.ShortenedTexts, Is.Zero, name + ": cut text");
-                                Assert.That(used, Is.GreaterThan(200).And.LessThan(900), name + ": the section fits the picture");
+                                Assert.That(used, Is.GreaterThan(120).And.LessThan(900), name + ": the section fits the picture");
                             }
                         }
                     }

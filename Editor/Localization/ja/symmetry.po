@@ -51,8 +51,8 @@ msgstr "映したダブは、このテクスチャセットのいちばん近い
 
 # ── 3D ビューの見出し ──
 
-msgid "Symmetry: mirror 3D brush strokes across the model's plane (set the axis in the Brush tool's Symmetry section)"
-msgstr "シンメトリー: 3D のブラシのストロークを、モデルの対称の面で映した所にも描きます（軸はブラシツールのシンメトリーの欄で選びます）"
+msgid "Symmetry: mirror 3D brush strokes across the model's plane (set the axis with the options bar's symmetry menu)"
+msgstr "シンメトリー: 3D のブラシのストロークを、モデルの対称の面で映した所にも描きます（軸はオプションバーのシンメトリーのメニューで選びます）"
 
 # ── 映した側を塗らなかったときの知らせ ──
 

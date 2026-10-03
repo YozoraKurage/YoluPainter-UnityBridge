@@ -54,6 +54,7 @@ namespace Yozolab.YoluPainter.Tests
             EditorShaderCompiler.TolerateErrorLogsIfBroken();
             var w = EditorWindow.CreateWindow<TexturePaintWindow>();
             w.position = new Rect(40, 40, 1200, 800);
+            w.DockLayoutForTests = DockLayoutTests.Classic(); // 右の列に 1 つずつの配置で（既定の配置は DockLayoutTests）
             Repaint(w);
             return w;
         }
@@ -94,11 +95,11 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(panel.ShownPanels, Is.EqualTo(new[] { "layers" }));
             Assert.That(panel.titleContent.text, Is.EqualTo("Layers"));
             Repaint(panel); // 持ち主のレイヤーのパネルを、このウィンドウで描ける
-            Assert.That(Layout.PanelsIn(DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "material", "assets", "properties" }));
+            Assert.That(Layout.PanelsIn(DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "material", "assets", "properties", "textureSetSettings" }));
             panel.Close();
             Assert.That(PainterPanelWindow.All, Is.Empty);
             Assert.That(Layout.IsFloating("layers"), Is.False, "closing the window puts the panel back, it is never lost");
-            Assert.That(Layout.PanelsIn(DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "layers", "material", "assets", "properties" }), "back where it was");
+            Assert.That(Layout.PanelsIn(DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "layers", "material", "assets", "properties", "textureSetSettings" }), "back where it was");
         }
 
         [Test] public void EscapeCancelsAHeaderDragAndAShortDropOnTheCanvasFloats()
@@ -264,7 +265,8 @@ namespace Yozolab.YoluPainter.Tests
             panel = OnlyPanelWindow(); panel.position = new Rect(200, 200, 300, 260);
             Repaint(panel); Repaint(painter);
             var column = painter.PanelHeaderRectForTests("textureSet");
-            var bottom = painter.DockScreenOriginForTests + new Vector2(column.center.x, 770) - panel.ScreenOriginForTests;
+            var last = painter.PanelHeaderRectForTests(Layout.Column(DockPlace.Right).Last().Active); // 一番下の見出し（畳んだテクスチャセットの設定）の下の縁
+            var bottom = painter.DockScreenOriginForTests + new Vector2(column.center.x, Mathf.Max(770, last.yMax - 2)) - panel.ScreenOriginForTests;
             Mouse(panel, EventType.MouseDown, new Vector2(40, 12)); Mouse(panel, EventType.MouseDrag, new Vector2(40, 40));
             Mouse(panel, EventType.MouseDrag, bottom); Mouse(panel, EventType.MouseUp, bottom);
             Assert.That(Layout.IsFloating("color"), Is.False);

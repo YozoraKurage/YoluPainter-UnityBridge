@@ -120,17 +120,83 @@ namespace Yozolab.YoluPainter.Editor
             return clicked;
         }
 
-        /// <summary>パネルの見出し（折りたためる）。開閉の状態を返す。</summary>
-        public static bool SectionHeader(Rect r, string title, bool open, string icon = null)
+        /// <summary>プロパティの欄の大見出し（折りたためる）: 全幅の帯（濃い地・太字）、左端に ▸/▾。開閉の状態を返す。reset を渡すと右端に
+        /// 「既定に戻す」のボタンを出し、押されたら呼ぶ（見出しの開閉は変えない）。</summary>
+        public static bool SectionHeader(Rect r, string title, bool open, string icon = null, Action reset = null, string resetTooltip = null)
         {
-            bool clicked = Clickable(r, out _, out bool hover);
-            Fill(r, hover ? PaintTheme.ControlHover : PaintTheme.PanelHeader);
-            HLine(r.x, r.xMax, r.yMax - 1, PaintTheme.Border);
-            Icon(new Rect(r.x + 4, r.y, 16, r.height), open ? "expand_more" : "chevron_right", PaintTheme.TextDim, 16);
-            float x = r.x + 22;
-            if (icon != null) { Icon(new Rect(x, r.y, 16, r.height), icon, PaintTheme.TextDim, 15); x += 20; }
-            Text(new Rect(x, r.y, r.width - x + r.x, r.height), title, PaintTheme.Header);
+            if (Repainting)
+            {
+                Fill(r, Hover(r) ? PaintTheme.SectionBandHover : PaintTheme.SectionBand);
+                HLine(r.x, r.xMax, r.y, PaintTheme.Border);
+                HLine(r.x, r.xMax, r.yMax - 1, PaintTheme.Border);
+            }
+            float right = r.xMax - 2;
+            if (reset != null)
+            {
+                var b = new Rect(right - 22, r.y + 2, 22, r.height - 4); right = b.x - 2;
+                if (IconButton(b, "restart_alt", resetTooltip, false, true, 14)) reset();
+            }
+            bool clicked = Clickable(r, out _, out _);
+            Icon(new Rect(r.x + 3, r.y, 16, r.height), open ? "expand_more" : "chevron_right", PaintTheme.Text, 15);
+            float x = r.x + PaintTheme.SectionTitleX;
+            if (icon != null) { Icon(new Rect(x, r.y, 16, r.height), icon, PaintTheme.TextDim, 14); x += 20; }
+            string shown = Fit(title, right - x, PaintTheme.Header, false); // 層の名前などを含むので詰めても数えない
+            Text(new Rect(x, r.y, right - x, r.height), shown, PaintTheme.Header);
+            Tooltip(new Rect(r.x, r.y, right - r.x, r.height), shown != title ? title : null);
             return clicked ? !open : open;
+        }
+
+        /// <summary>大見出しの中の小見出し（一段下。帯ではなく ▸/▾ と文字と、右へ伸びる細い線）。開閉の状態を返す。reset は
+        /// <see cref="SectionHeader"/> と同じ。</summary>
+        public static bool SubsectionHeader(Rect r, string title, bool open, Action reset = null, string resetTooltip = null)
+        {
+            bool hover = Hover(r);
+            float right = r.xMax;
+            if (reset != null)
+            {
+                var b = new Rect(right - 20, r.y + 1, 20, r.height - 2); right = b.x - 2;
+                if (IconButton(b, "restart_alt", resetTooltip, false, true, 13)) reset();
+            }
+            bool clicked = Clickable(new Rect(r.x, r.y, right - r.x, r.height), out _, out _);
+            if (hover && Repainting) Rounded(new Rect(r.x - 2, r.y, right - r.x + 2, r.height), PaintTheme.ControlHover, 3);
+            Icon(new Rect(r.x, r.y, 14, r.height), open ? "expand_more" : "chevron_right", PaintTheme.TextDim, 13);
+            float x = r.x + 16;
+            string shown = Fit(title, right - x - 4, PaintTheme.LabelBold);
+            Text(new Rect(x, r.y, right - x, r.height), shown, PaintTheme.LabelBold, open ? PaintTheme.Text : PaintTheme.TextDim);
+            float line = x + TextWidth(shown, PaintTheme.LabelBold) + 6;
+            if (line < right - 4) HLine(line, right - 4, Mathf.Round(r.center.y), PaintTheme.Separator);
+            return clicked ? !open : open;
+        }
+
+        /// <summary>アイコンと名前のタブの帯（プロパティの欄の頭。Substance Painter のブラシ｜アルファ｜ステンシル｜マテリアル）。押されたタブの
+        /// 番号を返す（押されなければ active）。幅が足りなければ名前を詰め、さらに狭ければアイコンだけ。</summary>
+        public static int TabStrip(Rect r, string[] labels, string[] icons, int active, string[] tooltips = null)
+        {
+            Fill(r, PaintTheme.PanelHeader);
+            HLine(r.x, r.xMax, r.yMax - 1, PaintTheme.Border);
+            int n = labels.Length, result = active;
+            if (n == 0) return active;
+            float w = (r.width - 4) / n;
+            for (int i = 0; i < n; i++)
+            {
+                var t = new Rect(Mathf.Round(r.x + 2 + i * w), r.y + 2, Mathf.Round(w) - 1, r.height - 3);
+                bool on = i == active;
+                if (Clickable(t, out bool pressed, out bool hover) && !on) result = i;
+                if (on) Rounded(t, PaintTheme.PanelBg, 3); else if (pressed || hover) Rounded(t, PaintTheme.ControlHover, 3);
+                if (on) Fill(new Rect(t.x + 4, t.yMax - 2, t.width - 8, 2), PaintTheme.Accent);
+                var color = on ? Color.white : PaintTheme.TextDim;
+                float labelWidth = TextWidth(labels[i], PaintTheme.Header);
+                if (t.width >= labelWidth + 34)
+                {
+                    float x = t.center.x - (labelWidth + 20) / 2;
+                    Icon(new Rect(x, t.y, 16, t.height), icons[i], color, 15);
+                    Text(new Rect(x + 20, t.y, labelWidth + 2, t.height), labels[i], PaintTheme.Header, color);
+                }
+                else if (t.width >= 40) Text(t, Fit(labels[i], t.width - 6, PaintTheme.Header, false), new GUIStyle(PaintTheme.Header) { alignment = TextAnchor.MiddleCenter }, color);
+                else Icon(t, icons[i], color, 15);
+                Tooltip(t, tooltips != null && i < tooltips.Length && tooltips[i] != null ? labels[i] + "\n" + tooltips[i] : labels[i]);
+            }
+            return result;
         }
 
         /// <summary>折りたたまない見出し（ドックのパネル名）。</summary>
@@ -146,30 +212,50 @@ namespace Yozolab.YoluPainter.Editor
         // ───────── スライダー ─────────
         static int s_editingId; static string s_editingText; static bool s_editFocus;
 
+        /// <summary>2 行のスライダー（<see cref="Slider"/>）の行の高さ。欄の関数はスライダーの行を <see cref="UiRows.SliderRow"/> で取る。</summary>
+        public const float SliderRowHeight = 34;
+        /// <summary>この高さ以上の矩形には 2 行の形で描く（オプションバー・レイヤーのパネルの 1 行の形と分ける）。</summary>
+        const float TwoLineMinHeight = 30, TwoLineLabelHeight = 15;
+
         /// <summary>
-        /// 値が中に出るスライダー（Substance Painter のもの）。押した位置の値になり、ドラッグで動かす。ダブルクリックで数値を打てる
-        /// （Enter で決める、Esc でやめる）。label は左、値は右に重ねて描く。
+        /// スライダー。押した位置の値になり、ドラッグで動かす。ダブルクリックで数値を打てる（Enter で決める、Esc でやめる）。
+        /// 高さで形が決まる: 1 行（オプションバー・パネルの上の行。値が中に出る）と、2 行（プロパティの欄。Substance Painter と同じく
+        /// 1 行目に名前と値の箱、2 行目に全幅の細い溝とつまみ。値の箱を押すと数値を打てる）。値は矩形の左右の端に比例する（どちらの形でも
+        /// 同じ位置で同じ値）。trackInset は 2 行目の右に空ける幅（筆圧のペンのボタン）。
         /// </summary>
-        public static float Slider(Rect r, string label, float value, float min, float max, string format = "0.##", string suffix = "", string tooltip = null, bool enabled = true)
+        public static float Slider(Rect r, string label, float value, float min, float max, string format = "0.##", string suffix = "", string tooltip = null, bool enabled = true, float trackInset = 0)
         {
             int id = GUIUtility.GetControlID(FocusType.Keyboard, r);
             enabled &= GUI.enabled; // ストロークの間など、GUI が止められているときは動かさない
-            if (s_editingId == id) return EditNumber(r, id, value, min, max);
-            bool hover = enabled && Hover(r);
+            bool two = r.height >= TwoLineMinHeight;
+            string text = value.ToString(format, CultureInfo.InvariantCulture) + suffix;
+            var box = two ? TwoLineValueBox(r, Mathf.Max(TextWidth(min.ToString(format, CultureInfo.InvariantCulture) + suffix, PaintTheme.Value), TextWidth(max.ToString(format, CultureInfo.InvariantCulture) + suffix, PaintTheme.Value), TextWidth(text, PaintTheme.Value))) : r;
+            var track = two ? new Rect(r.x, r.y + TwoLineLabelHeight, Mathf.Max(1, r.width - trackInset), r.height - TwoLineLabelHeight) : r;
+            if (s_editingId == id)
+            {
+                if (!two) return EditNumber(r, id, value, min, max);
+                // 2 行の形: 名前と溝はそのまま見せ、値の箱の所（狭ければ左へ広げる）を入力欄にする
+                float tEdit = max > min ? Mathf.Clamp01((value - min) / (max - min)) : 0, fromEdit = min < 0 && max > 0 ? Mathf.Clamp01(-min / (max - min)) : 0;
+                if (Repainting) DrawTwoLineSlider(r, track, box, label, "", fromEdit, tEdit, enabled, false, false, enabled ? PaintTheme.Text : PaintTheme.TextDisabled);
+                float editWidth = Mathf.Min(r.width, Mathf.Max(box.width, 90));
+                return EditNumber(new Rect(r.xMax - editWidth, r.y, editWidth, TwoLineLabelHeight + 3), id, value, min, max);
+            }
+            var hit = two ? new Rect(r.x, r.y, track.width, r.height) : r; // 2 行目の右のボタンは押さない
+            bool hover = enabled && Hover(hit);
             float t = max > min ? Mathf.Clamp01((value - min) / (max - min)) : 0;
             if (enabled)
                 switch (E.GetTypeForControl(id))
                 {
                     case EventType.MouseDown:
-                        if (E.button == 0 && r.Contains(E.mousePosition))
+                        if (E.button == 0 && hit.Contains(E.mousePosition))
                         {
-                            if (E.clickCount == 2) { s_editingId = id; s_editingText = value.ToString(format, CultureInfo.InvariantCulture); s_editFocus = true; E.Use(); return value; }
+                            if (E.clickCount == 2 || two && box.Contains(E.mousePosition)) { s_editingId = id; s_editingText = value.ToString(format, CultureInfo.InvariantCulture); s_editFocus = true; E.Use(); return value; }
                             GUIUtility.hotControl = id; GUIUtility.keyboardControl = 0; E.Use();
-                            value = ValueAt(r, min, max); GUI.changed = true;
+                            value = ValueAt(track, min, max); GUI.changed = true;
                         }
                         break;
                     case EventType.MouseDrag:
-                        if (GUIUtility.hotControl == id) { value = ValueAt(r, min, max); GUI.changed = true; E.Use(); }
+                        if (GUIUtility.hotControl == id) { value = ValueAt(track, min, max); GUI.changed = true; E.Use(); }
                         break;
                     case EventType.MouseUp:
                         if (GUIUtility.hotControl == id) { GUIUtility.hotControl = 0; E.Use(); }
@@ -178,20 +264,52 @@ namespace Yozolab.YoluPainter.Editor
             if (Repainting)
             {
                 bool active = GUIUtility.hotControl == id;
-                Rounded(r, PaintTheme.ControlBg, 3);
+                var color = enabled ? PaintTheme.Text : PaintTheme.TextDisabled;
                 // 0 をまたぐ範囲（角度 −180〜180 など）は 0 の位置から塗る（0 が半分まで塗られて見えないように）
                 float from = min < 0 && max > 0 ? Mathf.Clamp01(-min / (max - min)) : 0;
-                var fill = new Rect(r.x + r.width * Mathf.Min(from, t), r.y, Mathf.Max(0, r.width * Mathf.Abs(t - from)), r.height);
-                if (fill.width > 0) Rounded(fill, !enabled ? PaintTheme.ControlHover : active || hover ? PaintTheme.SliderFillHover : PaintTheme.SliderFill, 3);
-                Outline(r, hover || active ? PaintTheme.AccentDim : PaintTheme.Border, 1, 3);
-                var inner = new Rect(r.x + 7, r.y, r.width - 14, r.height);
-                var color = enabled ? PaintTheme.Text : PaintTheme.TextDisabled;
-                if (!string.IsNullOrEmpty(label)) Text(inner, label, PaintTheme.Label, color);
-                Text(inner, value.ToString(format, CultureInfo.InvariantCulture) + suffix, PaintTheme.Value, color);
+                if (two) DrawTwoLineSlider(r, track, box, label, text, from, t, enabled, hover, active, color);
+                else
+                {
+                    Rounded(r, PaintTheme.ControlBg, 3);
+                    var fill = new Rect(r.x + r.width * Mathf.Min(from, t), r.y, Mathf.Max(0, r.width * Mathf.Abs(t - from)), r.height);
+                    if (fill.width > 0) Rounded(fill, !enabled ? PaintTheme.ControlHover : active || hover ? PaintTheme.SliderFillHover : PaintTheme.SliderFill, 3);
+                    Outline(r, hover || active ? PaintTheme.AccentDim : PaintTheme.Border, 1, 3);
+                    var inner = new Rect(r.x + 7, r.y, r.width - 14, r.height);
+                    if (!string.IsNullOrEmpty(label)) Text(inner, label, PaintTheme.Label, color);
+                    Text(inner, text, PaintTheme.Value, color);
+                }
             }
-            Tooltip(r, tooltip);
+            Tooltip(hit, tooltip);
             return value;
         }
+
+        /// <summary>2 行の形の、1 行目の右の値の箱（値の幅は min・max・今の値の広いほう。動かしても箱が揺れない）。</summary>
+        internal static Rect TwoLineValueBox(Rect r, float valueWidth)
+        {
+            float w = Mathf.Min(r.width, Mathf.Max(34, valueWidth + 12));
+            return new Rect(r.xMax - w, r.y, w, TwoLineLabelHeight + 1);
+        }
+
+        /// <summary>2 行の形: 1 行目に名前と値の箱、2 行目に細い溝（0 か min から値までを塗る）と丸いつまみ。</summary>
+        static void DrawTwoLineSlider(Rect r, Rect track, Rect box, string label, string text, float from, float t, bool enabled, bool hover, bool active, Color color)
+        {
+            if (!string.IsNullOrEmpty(label)) Text(new Rect(r.x + 1, r.y, Mathf.Max(0, box.x - r.x - 5), TwoLineLabelHeight), label, PaintTheme.Label, color);
+            Rounded(box, PaintTheme.ControlBg, 3);
+            Outline(box, hover || active ? PaintTheme.AccentDim : PaintTheme.Border, 1, 3);
+            Text(new Rect(box.x + 4, box.y, box.width - 8, box.height), text, PaintTheme.Value, color);
+            float cy = Mathf.Round(track.center.y + 1);
+            var groove = new Rect(track.x + 1, cy - 2, track.width - 2, 4);
+            Rounded(groove, PaintTheme.ControlBg, 2);
+            Outline(groove, PaintTheme.Border, 1, 2);
+            var fill = new Rect(groove.x + groove.width * Mathf.Min(from, t), groove.y, Mathf.Max(0, groove.width * Mathf.Abs(t - from)), groove.height);
+            if (fill.width > 0) Rounded(fill, !enabled ? PaintTheme.ControlHover : active || hover ? PaintTheme.SliderFillHover : PaintTheme.Accent, 2);
+            const float knob = 10;
+            float kx = Mathf.Clamp(track.x + track.width * t, track.x + knob / 2, track.xMax - knob / 2);
+            var k = new Rect(kx - knob / 2, cy - knob / 2, knob, knob);
+            Rounded(k, !enabled ? PaintTheme.TextDisabled : active || hover ? Color.white : PaintTheme.Text, knob / 2);
+            Outline(k, PaintTheme.Border, 1, knob / 2);
+        }
+
         public static int IntSlider(Rect r, string label, int value, int min, int max, string suffix = "", string tooltip = null, bool enabled = true)
             => Mathf.RoundToInt(Slider(r, label, value, min, max, "0", suffix, tooltip, enabled));
 
@@ -360,10 +478,16 @@ namespace Yozolab.YoluPainter.Editor
     {
         readonly Rect area; float y;
         public UiRows(Rect area, float top = 6) { this.area = area; y = area.y + top; }
-        public float Width => area.width - 2 * PaintTheme.Padding;
+        /// <summary>行の左の字下げ（左右の余白の内側から。プロパティの欄の見出しの段に合わせて、振り分けの側が決める）。<see cref="FullRow"/> には効かない。</summary>
+        public float Indent { get; set; }
+        public float Width => area.width - 2 * PaintTheme.Padding - Indent;
         public float Used => y - area.y;
-        public Rect Row(float height = PaintTheme.RowHeight, float gap = 4) { var r = new Rect(area.x + PaintTheme.Padding, y, Width, height); y += height + gap; return r; }
+        public Rect Row(float height = PaintTheme.RowHeight, float gap = 4) { var r = new Rect(area.x + PaintTheme.Padding + Indent, y, Width, height); y += height + gap; return r; }
         public Rect FullRow(float height, float gap = 0) { var r = new Rect(area.x, y, area.width, height); y += height + gap; return r; }
+        /// <summary>2 行のスライダーの行（<see cref="PaintGui.SliderRowHeight"/>。1 行目に名前と値、2 行目に全幅の溝）。</summary>
+        public Rect SliderRow(float gap = 4) => Row(PaintGui.SliderRowHeight, gap);
+        /// <summary>左の端から by だけ字下げした、右の余白までの行（小見出しの行）。</summary>
+        public Rect IndentedRow(float by, float height, float gap = 0) { var r = new Rect(area.x + by, y, area.width - by - PaintTheme.Padding, height); y += height + gap; return r; }
         public void Space(float h) => y += h;
         /// <summary>行を幅で n 等分した rect（間は gap）。</summary>
         public static Rect[] Split(Rect r, int n, float gap = 4)

@@ -38,8 +38,8 @@ msgstr "色分けの元: {0}。2D キャンバスか 3D ビューで部品をク
 msgid "unknown"
 msgstr "不明"
 
-msgid "There is no usable ID map for this texture set: {0} Bake one (Properties ▸ Mesh Maps ▸ Bake…, check ID)."
-msgstr "このテクスチャセットに使える ID マップがありません: {0} ベイクしてください（プロパティ ▸ メッシュマップ ▸ ベイク…で ID にチェック）。"
+msgid "There is no usable ID map for this texture set: {0} Bake one (Texture Set Settings ▸ Mesh Maps ▸ Bake…, check ID)."
+msgstr "このテクスチャセットに使える ID マップがありません: {0} ベイクしてください（テクスチャセットの設定 ▸ メッシュマップ ▸ ベイク…で ID にチェック）。"
 
 msgid "Load a model (or the demo cube) to pick on the 3D view."
 msgstr "3D ビューで選ぶには、モデル（かデモのキューブ）を読み込んでください。"

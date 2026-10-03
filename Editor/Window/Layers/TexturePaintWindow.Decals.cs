@@ -130,11 +130,11 @@ namespace Yozolab.YoluPainter.Editor
             var p = active.Projection; var next = p;
             try
             {
-                double depth = PaintGui.KeepSlider(Spot("decal.depth", rows.Row()), L.TrIn("decal", "Depth edge"), 1 - p.DepthHardness, 0, 1, "0", "%",
+                double depth = PaintGui.KeepSlider(Spot("decal.depth", rows.SliderRow()), L.TrIn("decal", "Depth edge"), 1 - p.DepthHardness, 0, 1, "0", "%",
                     L.Tr("How softly the decal fades towards the box's front and back faces (0 %: a hard cut)."), true, 100);
-                double angle = PaintGui.KeepSlider(Spot("decal.angle", rows.Row()), L.TrIn("decal", "Back faces"), p.BackfaceAngle, 0, FillProjection.MaxBackfaceAngle, "0", "°",
+                double angle = PaintGui.KeepSlider(Spot("decal.angle", rows.SliderRow()), L.TrIn("decal", "Back faces"), p.BackfaceAngle, 0, FillProjection.MaxBackfaceAngle, "0", "°",
                     L.Tr("Faces turned more than this from the side the image is seen from are hidden (180°: none)."));
-                double soft = PaintGui.KeepSlider(Spot("decal.angle.edge", rows.Row()), L.TrIn("decal", "Face edge"), 1 - p.BackfaceHardness, 0, 1, "0", "%",
+                double soft = PaintGui.KeepSlider(Spot("decal.angle.edge", rows.SliderRow()), L.TrIn("decal", "Face edge"), 1 - p.BackfaceHardness, 0, 1, "0", "%",
                     L.Tr("How softly faces fade out towards that angle (0 %: a hard cut)."), true, 100);
                 next = p.WithCulling(1 - depth, angle, 1 - soft);
             }

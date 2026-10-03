@@ -287,7 +287,7 @@ namespace Yozolab.YoluPainter.Editor
                     case GeneratorType.EdgeWear:
                     case GeneratorType.Dirt:
                         if (g.Type == GeneratorType.Dirt)
-                            next = next.WithBalance(PaintGui.KeepSlider(Spot("generator.balance", Indent(rows.Row(), indent)), L.Tr("AO ↔ Cavities"), next.Balance, 0, 1, "0", "%",
+                            next = next.WithBalance(PaintGui.KeepSlider(Spot("generator.balance", Indent(rows.SliderRow(), indent)), L.Tr("AO ↔ Cavities"), next.Balance, 0, 1, "0", "%",
                                 L.Tr("0 %: ambient occlusion only. 100 %: cavities (concave curvature) only."), true, 100));
                         NoteRow(rows, L.Tr("Curvature comes from the model's bake; painted Height does not change it."), NoteKind.Plain, indent);
                         break;
@@ -318,22 +318,21 @@ namespace Yozolab.YoluPainter.Editor
                 // レベル: 低と高は入れ違わない（0.001 以上離す）。ID の色は 0 か 1 なので、範囲とやわらかさは出さない（反転は出す）
                 if (g.Type != GeneratorType.IdColor)
                 {
-                    var c = PaintGui.LabeledColumns(Indent(rows.Row(), indent), L.TrIn("generator", "Range"), PropertyLabelWidth, 2);
-                    double low = PaintGui.KeepSlider(Spot("generator.low", c[0]), L.TrIn("generator", "Low"), next.Low, 0, 1, "0.###", "", L.Tr("Base values at or below this give 0"));
-                    double high = PaintGui.KeepSlider(Spot("generator.high", c[1]), L.TrIn("generator", "High"), next.High, 0, 1, "0.###", "", L.Tr("Base values at or above this give 1"));
+                    PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.TrIn("generator", "Range"));
+                    double low = PaintGui.KeepSlider(Spot("generator.low", Indent(rows.SliderRow(), indent)), L.TrIn("generator", "Low"), next.Low, 0, 1, "0.###", "", L.Tr("Base values at or below this give 0"));
+                    double high = PaintGui.KeepSlider(Spot("generator.high", Indent(rows.SliderRow(), indent)), L.TrIn("generator", "High"), next.High, 0, 1, "0.###", "", L.Tr("Base values at or above this give 1"));
                     if (low != next.Low) low = Math.Max(0, Math.Min(low, next.High - GeneratorSettings.MinLevelRange));
                     if (high != next.High) high = Math.Min(1, Math.Max(high, low + GeneratorSettings.MinLevelRange));
-                    double softness = PaintGui.KeepSlider(Spot("generator.softness", Indent(rows.Row(), indent)), L.TrIn("generator", "Softness"), next.Softness, 0, 1, "0", "%",
+                    double softness = PaintGui.KeepSlider(Spot("generator.softness", Indent(rows.SliderRow(), indent)), L.TrIn("generator", "Softness"), next.Softness, 0, 1, "0", "%",
                         L.Tr("0 %: a straight ramp from low to high. 100 %: a smooth S curve."), true, 100);
                     next = next.WithLevels(low, high, softness);
                 }
                 next = next.WithInvert(PaintGui.FitToggle(Spot("generator.invert", Indent(rows.Row(), indent)), L.TrIn("generator", "Invert"), next.Invert, L.Tr("Swap 0 and 1 after the range")));
                 // 崩し
                 PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.Tr("Breakup"), L.Tr("Seeded noise that wears the result away in patches, so edges and dirt do not look uniform (100 %: gone where the noise is strongest). The same seed always gives the same result."));
-                var b = UiRows.Split(Indent(rows.Row(), indent), 2, 6);
-                double amount = PaintGui.KeepSlider(Spot("generator.noise", b[0]), L.TrIn("filter", "Amount"), next.NoiseAmount, 0, 1, "0", "%", null, true, 100);
-                int seed = PaintGui.KeepIntField(Spot("generator.seed", b[1]), L.TrIn("filter", "Seed"), next.NoiseSeed, int.MinValue, int.MaxValue, L.Tr("The same seed gives the same noise. Drag to change, click to type."));
-                double scale = PaintGui.KeepSlider(Spot("generator.scale", Indent(rows.Row(), indent)), L.TrIn("generator", "Size"), next.NoiseScale, .005, .5, "0.###", "", L.Tr("The size of the largest features, as a fraction of the model's bounding-box diagonal (or of the UV square)"), amount > 0);
+                double amount = PaintGui.KeepSlider(Spot("generator.noise", Indent(rows.SliderRow(), indent)), L.TrIn("filter", "Amount"), next.NoiseAmount, 0, 1, "0", "%", null, true, 100);
+                int seed = PaintGui.KeepIntField(Spot("generator.seed", Indent(rows.Row(), indent)), L.TrIn("filter", "Seed"), next.NoiseSeed, int.MinValue, int.MaxValue, L.Tr("The same seed gives the same noise. Drag to change, click to type."));
+                double scale = PaintGui.KeepSlider(Spot("generator.scale", Indent(rows.SliderRow(), indent)), L.TrIn("generator", "Size"), next.NoiseScale, .005, .5, "0.###", "", L.Tr("The size of the largest features, as a fraction of the model's bounding-box diagonal (or of the UV square)"), amount > 0);
                 next = next.WithNoise(amount, scale, seed, next.NoiseSpace);
                 ChoiceDropdown(Spot("generator.space", Indent(rows.Row(), indent)), L.TrIn("generator", "Placed"), next.NoiseSpace, (GeneratorNoiseSpace[])Enum.GetValues(typeof(GeneratorNoiseSpace)), NoiseSpaceName,
                     s => { if (s != g.NoiseSpace) ApplyFilterSettings(e.Id, e.Settings.WithGenerator(g.WithNoise(g.NoiseAmount, g.NoiseScale, g.NoiseSeed, s))); },
@@ -348,14 +347,15 @@ namespace Yozolab.YoluPainter.Editor
 
         /// <summary>プロパティの欄の区画（"layer"・"mask"・"filters" など）を開く・閉じる（オフスクリーンで描く試験が、見たい区画を上に出すため）。</summary>
         internal void SetSectionOpen(string key, bool open) => sectionOpen[key] = open;
-        /// <summary>選んだ層のフィルターの区画の中身だけを area に描く（欄と同じ部品と幅。オフスクリーンで見た目を確かめる試験用）。使った高さ。</summary>
+        /// <summary>選んだ効果の段の欄の中身だけを area に描く（欄と同じ部品と幅。オフスクリーンで見た目を確かめる試験用）。使った高さ。</summary>
         internal float DrawFilterSectionOnly(Rect area)
         {
-            var active = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
+            var (e, target) = SelectedEffect();
             PaintGui.Fill(area, PaintTheme.PanelBg);
-            if (active == null) return 0;
+            if (e == null) return 0;
+            BeginSpots("properties");
             var rows = new UiRows(area, 6);
-            DrawFilters(rows, active);
+            DrawFilterParameters(rows, e, target);
             return rows.Used;
         }
 
@@ -374,7 +374,7 @@ namespace Yozolab.YoluPainter.Editor
             if (list == null) return ConfirmInactiveFillImages(documents); // 塗りつぶしの画像も（TexturePaintWindow.FillImages.cs）
             if (Dialogs.Confirm(L.Tr("Generators without mesh maps"), L.Tr("These generators have no usable mesh maps, so the exported images would not have their effect (the layers pass through unchanged):\n{0}\n\nBake the mesh maps first, or export anyway?", list), L.Tr("Export Anyway"), L.Tr("Cancel")))
                 return ConfirmInactiveFillImages(documents);
-            message = L.Tr("Nothing was exported: some generators have no usable mesh maps. Bake them (Properties ▸ Filters ▸ the generator) first.");
+            message = L.Tr("Nothing was exported: some generators have no usable mesh maps. Bake them (Texture Set Settings ▸ Mesh Maps) first.");
             return false;
         }
         /// <summary>保存の知らせに添える文（.ylp には Generator がそのまま残る。合成の画像だけが効きなし）。無ければ空。</summary>

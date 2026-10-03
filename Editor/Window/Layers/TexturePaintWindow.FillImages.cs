@@ -209,9 +209,9 @@ namespace Yozolab.YoluPainter.Editor
                 double ou = KeepNumber(Spot("projection.offset.u", c[0]), "U", p.OffsetU, .005f, "0.###", -FillProjection.MaxOffset, FillProjection.MaxOffset, L.Tr("Shifts the image (in image widths)"));
                 double ov = KeepNumber(Spot("projection.offset.v", c[1]), "V", p.OffsetV, .005f, "0.###", -FillProjection.MaxOffset, FillProjection.MaxOffset, L.Tr("Shifts the image (in image heights)"));
                 next = next.WithOffset(ou, ov);
-                next = next.WithRotation(PaintGui.KeepSlider(Spot("projection.rotation", rows.Row()), L.TrIn("projection", "Rotation"), p.Rotation, -180, 180, "0.#", "°", L.Tr("Turns the image counter-clockwise about the projected square's centre")));
+                next = next.WithRotation(PaintGui.KeepSlider(Spot("projection.rotation", rows.SliderRow()), L.TrIn("projection", "Rotation"), p.Rotation, -180, 180, "0.#", "°", L.Tr("Turns the image counter-clockwise about the projected square's centre")));
                 if (p.Mode == FillProjectionMode.Triplanar)
-                    next = next.WithBlendWidth(PaintGui.KeepSlider(Spot("projection.blend", rows.Row()), L.TrIn("projection", "Blend"), p.BlendWidth, 0, 1, "0", "%",
+                    next = next.WithBlendWidth(PaintGui.KeepSlider(Spot("projection.blend", rows.SliderRow()), L.TrIn("projection", "Blend"), p.BlendWidth, 0, 1, "0", "%",
                         L.Tr("Where the surface turns between the box's axes: 0 %: a hard switch to the axis it faces most; 100 %: mixed in proportion to the normal."), true, 100));
             }
             catch (ArgumentException ex) { message = ex.Message; next = p; }

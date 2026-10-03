@@ -99,7 +99,7 @@ namespace Yozolab.YoluPainter.Editor
             if (radial != brush.radialSymmetry3D) RadialSymmetry3D = radial;
             var ra = UiRows.Split(rows.Row(), 3, 4);
             for (int i = 0; i < 3; i++) if (PaintGui.Button(Mark("symmetry-radial-" + (SymmetryAxis)i, ra[i]), ((SymmetryAxis)i).ToString(), brush.radialSymmetryAxis == (SymmetryAxis)i)) RadialSymmetryAxis = (SymmetryAxis)i;
-            brush.radialSymmetryCount = PaintGui.FitIntSlider(Mark("symmetry-count", rows.Row()), L.Tr("Copies"), brush.radialSymmetryCount, 2, 16);
+            brush.radialSymmetryCount = PaintGui.FitIntSlider(Mark("symmetry-count", rows.SliderRow()), L.Tr("Copies"), brush.radialSymmetryCount, 2, 16);
             bool ignore = PaintGui.FitToggle(Mark("symmetry-visibility", rows.Row()), L.Tr("Ignore visibility"), brush.symmetryIgnoreVisibility,
                 L.Tr("Symmetry copies paint back-facing and occluded surfaces. The original dab still paints visible surfaces only."));
             if (ignore != brush.symmetryIgnoreVisibility) SymmetryIgnoreVisibility = ignore;
@@ -120,7 +120,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             brush.canvasSymmetryX = PaintGui.NumberField(Mark("symmetry-2d-x", rows.Row()), L.Tr("Center X"), brush.canvasSymmetryX * document.Width, "0.##", " px", 1, 0, document.Width) / document.Width;
             brush.canvasSymmetryY = PaintGui.NumberField(Mark("symmetry-2d-y", rows.Row()), L.Tr("Center Y"), brush.canvasSymmetryY * document.Height, "0.##", " px", 1, 0, document.Height) / document.Height;
-            brush.canvasSymmetryCount = PaintGui.FitIntSlider(Mark("symmetry-2d-count", rows.Row()), L.Tr("Copies"), brush.canvasSymmetryCount, 2, 16);
+            brush.canvasSymmetryCount = PaintGui.FitIntSlider(Mark("symmetry-2d-count", rows.SliderRow()), L.Tr("Copies"), brush.canvasSymmetryCount, 2, 16);
             if (PaintGui.FitButton(Mark("symmetry-2d-center", rows.Row()), L.Tr("Canvas center"))) brush.canvasSymmetryX = brush.canvasSymmetryY = .5f;
             PaintGui.Paragraph(rows, L.Tr("Axes use document pixels, independent of canvas view rotation and flip. Smudge and Clone cannot be combined with symmetry."), PaintTheme.TextDim);
             rows.Space(4);
@@ -129,7 +129,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>3D ビューの見出しの、シンメトリーの切り替え（ストロークの間は変えられない）。</summary>
         void DrawSymmetryHeaderToggle(Rect r)
         {
-            if (PaintGui.IconButton(Mark("symmetry-header", r), "flip", L.Tr("Symmetry: mirror 3D brush strokes across the model's plane (set the axis in the Brush tool's Symmetry section)"), symmetry, stroke == null, 16))
+            if (PaintGui.IconButton(Mark("symmetry-header", r), "flip", L.Tr("Symmetry: mirror 3D brush strokes across the model's plane (set the axis with the options bar's symmetry menu)"), symmetry, stroke == null, 16))
                 Symmetry = !symmetry;
         }
 

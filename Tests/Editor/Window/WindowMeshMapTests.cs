@@ -203,7 +203,7 @@ namespace Yozolab.YoluPainter.Tests
         {
             Invoke(window, "CreateDocument", 256); Invoke(window, "BindDocument");
             Assert.That(window.Preview.LoadDemoMesh().CanPaint, Is.True); QuickBake(window);
-            OpenLayerPanels();
+            OpenLayerPanels(); ShowTextureSetSettings();
             ClickLayerControl("meshmap.bake");
             var bake = MeshBakeWindow.For(window);
             Assert.That(bake, Is.Not.Null, "Bake… in the panel opens the bake window");
