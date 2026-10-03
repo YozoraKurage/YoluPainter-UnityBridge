@@ -209,7 +209,8 @@ namespace Yozolab.YoluPainter.Editor
         void HelpMenu(GenericMenu m)
         {
             Item(m, "Keyboard Shortcuts", () => Dialogs.Inform(L.Tr("Keyboard Shortcuts"), L.Tr(ShortcutHelp) + "\n" + L.Tr("2D view: - / ^ (or =) rotate 15° · R + drag rotates (with Shift in 15° steps) · Shift + middle drag rotates · Shift+R resets the rotation · H flips horizontally · Ctrl+0 also resets the rotation") + "\n" + L.Tr("Shift+W ID colour select (click a part on the 2D canvas or the 3D view; needs a baked ID map)")
-                + "\n" + L.Tr("3D view: C shows one channel at a time (unlit) · Shift+B one baked mesh map at a time · Shift+C the material · Ctrl + right drag turns the environment and the light")));
+                + "\n" + L.Tr("3D view: C shows one channel at a time (unlit) · Shift+B one baked mesh map at a time · Shift+C the material · Ctrl + right drag turns the environment and the light")
+                + "\n" + L.Tr("Stencil (Brush ▸ Stencil): hold T and drag on a view, left turns it (with Shift in 15° steps), middle or Ctrl+left moves it, right or Alt+left resizes it · hold N to paint without it")));
             Item(m, "Implementation Limits", () => Dialogs.Inform(L.Tr("Implementation Limits"), L.Tr(LimitsHelp)));
             Item(m, "Plugins…", ShowPluginList);
             m.AddSeparator("");

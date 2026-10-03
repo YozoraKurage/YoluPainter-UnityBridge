@@ -40,13 +40,14 @@ namespace Yozolab.YoluPainter.Editor
                 TryAction(()=>
                 {
                     RememberColor();
-                    if(EditingMask) stroke=document.BeginMaskStroke(selectedLayer,GetBrush());
+                    // ステンシル（使うなら）はストロークの始めの置き場で（Tools/TexturePaintWindow.Stencil.cs）
+                    if(EditingMask) stroke=document.BeginMaskStroke(selectedLayer,StrokeBrush(surfaceStroke));
                     else
                     {
                         if(document.GetLayer(selectedLayer).IsGroup) throw new InvalidOperationException("A group has no pixels. Select a layer inside it to paint, or paint the group's mask.");
                         // 今のチャンネル 1 つ、またはマテリアルの組（Tools/TexturePaintWindow.MaterialBrush.cs）。ロックで断るときは何も変えず、層で無効の
                         // チャンネルはストロークの中で有効にする（ストロークと同じ 1 回の Undo。取消で戻る）
-                        stroke=document.BeginMaterialStroke(selectedLayer,StrokeChannels(),GetBrush());
+                        stroke=document.BeginMaterialStroke(selectedLayer,StrokeChannels(),StrokeBrush(surfaceStroke));
                     }
                     strokeCanvasSymmetry=surfaceStroke ? null : CanvasSymmetryNow();
                     effectSurfaceIsland=-1;
@@ -133,7 +134,7 @@ namespace Yozolab.YoluPainter.Editor
                 var dab=BuildStrokeSurfaceDab(hit,radius);
                 if(dab.WasClipped)throw new InvalidOperationException(dab.Diagnostic);
                 if(!String.IsNullOrEmpty(dab.Diagnostic))message=dab.Diagnostic;
-                if(CurrentBrushEffect == BrushEffect.Paint) foreach(var pixel in dab.Pixels)stroke.ApplyPixel(pixel.X,pixel.Y,pixel.Coverage,pressure);
+                if(CurrentBrushEffect == BrushEffect.Paint) PaintSurfacePixels(dab,hit,pressure); // ステンシルがあればテクセルの点を画面へ写して読む
                 else ApplySurfaceEffect(dab,hit,pressure);
             }
             else

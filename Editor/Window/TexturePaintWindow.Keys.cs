@@ -21,7 +21,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void HandleKeys(Event e)
         {
-            NoteViewKeyUp(e);
+            NoteViewKeyUp(e); NoteStencilKeyUp(e);
             if(e.type!=EventType.KeyDown)return;
             // キーが届いた時点で文字の欄にフォーカスがあったか（Enter で確定して外れる前の状態を見る）
             editingText=GUIUtility.keyboardControl!=0; tookKey=KeyCode.None;
@@ -63,6 +63,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>修飾キー無しの 1 文字のショートカット（ツール・色・ブラシの大きさ・表示）。文字の入力中は使わない。</summary>
         bool HandleToolKeys(Event e)
         {
+            if (HandleStencilKeys(e)) return true; // T・N を押しているあいだ（ステンシル。Tools/TexturePaintWindow.Stencil.cs）
             if (HandleViewKeys(e)) return true; // 表示の回転・反転（ストロークの最中は断る）
             if (HandleModelShowKeys(e)) return true; // 3D ビューで見せるもの: C・Shift+C・Shift+B（Model/TexturePaintWindow.ModelShow.cs。ストロークの最中は断る）
             if (e.type != EventType.KeyDown || stroke != null || toolDragging || GUIUtility.keyboardControl != 0 || e.control || e.command || e.alt) return false;

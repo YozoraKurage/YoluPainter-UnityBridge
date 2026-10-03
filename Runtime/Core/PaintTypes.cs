@@ -135,7 +135,7 @@ namespace Yozolab.YoluPainter.Core
                 Tip = Tip, Tips = Tips == null ? null : (BrushTip[])Tips.Clone(), TipSelection = TipSelection, Angle = Angle, Roundness = Roundness, FollowDirection = FollowDirection,
                 SizeJitter = SizeJitter, AngleJitter = AngleJitter, RoundnessJitter = RoundnessJitter, OpacityJitter = OpacityJitter, FlowJitter = FlowJitter,
                 Scatter = Scatter, Count = Count, Seed = Seed, Texture = Texture, TextureDepth = TextureDepth, TextureScale = TextureScale,
-                Stabilizer = Stabilizer, TaperIn = TaperIn, TaperOut = TaperOut, CurveInterpolation = CurveInterpolation, CanvasSymmetry = CanvasSymmetry?.Clone() }.WithDynamicsOf(this);
+                Stabilizer = Stabilizer, TaperIn = TaperIn, TaperOut = TaperOut, CurveInterpolation = CurveInterpolation, CanvasSymmetry = CanvasSymmetry?.Clone() }.WithDynamicsOf(this).WithStencilOf(this);
         }
         public void Validate()
         {

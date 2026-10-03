@@ -62,7 +62,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             var pixels = new List<BrushPixel>(dab.Pixels.Count);
             foreach (var p in dab.Pixels) pixels.Add(new BrushPixel(p.X, p.Y, p.Coverage));
-            stroke.ApplyDab(pixels, hit.UV.x * document.Width, hit.UV.y * document.Height, pressure);
+            stroke.ApplyDab(pixels, hit.UV.x * document.Width, hit.UV.y * document.Height, pressure, SurfaceStencilPoints(dab, hit));
         }
         void DrawCloneSource(CanvasView view)
         {

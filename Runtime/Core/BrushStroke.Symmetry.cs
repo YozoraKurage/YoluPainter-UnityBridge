@@ -68,7 +68,7 @@ namespace Yozolab.YoluPainter.Core
                         double coverage = pixels[key], ceiling = s.OpacityScale;
                         if (dual != null) { MoveTo(cursor, tx, ty); coverage = DualBrush.Combine(dual.Mode, coverage, cursor.Dual == null ? 0 : cursor.Dual[local]); }
                         if (s.Textured) ceiling *= 1 - settings.TextureDepth * (1 - settings.Texture.SampleTiled((x + .5) / settings.TextureScale, (y + .5) / settings.TextureScale));
-                        if (coverage > 0 && ceiling > 0) changed |= ApplyPixelAt(cursor, true, tx, ty, local, coverage, s.Pressure, ceiling, s.FlowScale);
+                        if (coverage > 0 && ceiling > 0) changed |= ApplyPixelAt(cursor, true, tx, ty, local, coverage, s.Pressure, ceiling, s.FlowScale, null); // ステンシルは ApplyPixelAt が画素の位置で読む
                     }
                 }
                 finally { EndPass(); ReleaseEffectDab(); }

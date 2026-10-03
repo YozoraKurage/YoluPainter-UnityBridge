@@ -34,11 +34,15 @@ namespace Yozolab.YoluPainter.Core
         {
             public SparseTileSurface Surface; public BrushSettings Settings;
             public Rgba32 StrokeColor, DabColor; public Random ColorRandom; public bool TipColors;
+            /// <summary>The surface takes the stencil's colour (Colour mode, a channel the stencil names, painting); the channel it paints.</summary>
+            public bool StencilColor; public PaintChannel StencilChannel;
             public readonly Dictionary<TileCoord, TileStorage> Before = new Dictionary<TileCoord, TileStorage>();
         }
         private readonly Target[] targets;
         /// <summary>True when some target keeps per-tip colours (then a pixel at the ceiling still moves toward the dab colour).</summary>
         private readonly bool anyTipColors;
+        /// <summary>The stencil the stroke paints through (<see cref="BrushSettings.Stencil"/>; null = none).</summary>
+        private readonly BrushStencil stencil;
         /// <summary>What the stroke keeps for one tile it has touched (created together with the first target's entry in Before).</summary>
         private sealed class StrokeTile
         {
@@ -49,6 +53,9 @@ namespace Yozolab.YoluPainter.Core
             public bool[] Captured; public TileStorage[] Before; public float[][] Paint;
             /// <summary>Per target: the last pixel pass (<see cref="passSerial"/>) that changed a pixel of the tile.</summary>
             public long[] ChangedInPass;
+            /// <summary>With a stencil: what it gave each pixel the first time a dab reached it (NaN: not read yet) and its colour. A pixel's
+            /// place on the stencil does not change during a stroke, so it is read once (overlapping dabs would read it again and again).</summary>
+            public double[] StencilAmount; public Rgba32[] StencilColor;
             public StrokeTile(int targets, float[] wash)
             {
                 Wash = wash; Captured = new bool[targets]; Before = new TileStorage[targets]; Paint = new float[targets][];
@@ -151,8 +158,13 @@ namespace Yozolab.YoluPainter.Core
                     if (s.ColorPerTip) { t.TipColors = true; anyTipColors = true; }
                 }
                 t.DabColor = t.StrokeColor;
+                // ステンシルの色: 色のモードで、ステンシルが名指すチャンネルを塗る面だけ（消す・マスク・効果は量だけ）
+                if (s.Stencil != null && s.Effect == BrushEffect.Paint && !s.Erase && s.PaintedChannel.HasValue && s.Stencil.PaintsColorInto(s.PaintedChannel.Value))
+                { t.StencilColor = true; t.StencilChannel = s.PaintedChannel.Value; }
                 targets[k] = t;
             }
+            stencil = settings.Stencil;
+            foreach (var t in targets) if (t.Settings.Stencil != stencil) throw new ArgumentException("Every surface of a stroke paints through the same stencil.", nameof(paint));
             cursor = new TileCursor(targets.Length);
             width = targets[0].Surface.Width; height = targets[0].Surface.Height; tileSize = targets[0].Surface.TileSize;
             foreach (var t in targets)
@@ -316,7 +328,13 @@ namespace Yozolab.YoluPainter.Core
         }
         /// <summary>Paints a supplied geometric coverage (e.g. mesh-surface brush). Coordinates outside the canvas
         /// are clipped. Callers must union duplicate triangle/pixel coverage for each geometric dab before calling.</summary>
-        public bool ApplyPixel(int x, int y, double coverage, double pressure = 1)
+        /// <remarks>With a stencil the pixel reads it through <see cref="BrushStencil.CanvasToImage"/>; a stencil without one needs
+        /// <see cref="ApplyPixel(int,int,double,double,StencilPoint)"/>.</remarks>
+        public bool ApplyPixel(int x, int y, double coverage, double pressure = 1) => ApplyPixel(x, y, coverage, pressure, null);
+        /// <summary>Paints a supplied geometric coverage through the stencil read at <paramref name="at"/> (the pixel's point on the
+        /// stencil: the 3D view projects the texel's point on the model to the screen). Without a stencil the point is not used.</summary>
+        public bool ApplyPixel(int x, int y, double coverage, double pressure, StencilPoint at) => ApplyPixel(x, y, coverage, pressure, (StencilPoint?)at);
+        bool ApplyPixel(int x, int y, double coverage, double pressure, StencilPoint? at)
         {
             CheckOpen();
             try
@@ -328,13 +346,22 @@ namespace Yozolab.YoluPainter.Core
                 {
                     if (settings.Effect != BrushEffect.Paint) throw new InvalidOperationException("Pixel effects need a complete dab; use ApplyDab to freeze its source before writing.");
                     int tile = tileSize; BeginPass();
-                    try { changed = ApplyPixelAt(cursor, true, x / tile, y / tile, (y % tile) * tile + x % tile, coverage, pressure, 1, 1); }
+                    try { changed = ApplyPixelAt(cursor, true, x / tile, y / tile, (y % tile) * tile + x % tile, coverage, pressure, 1, 1, at); }
                     finally { EndPass(); }
                 }
                 if (changed) document.PixelsChanged();
                 return changed;
             }
             catch { Cancel(); throw; }
+        }
+        /// <summary>The stencil at canvas pixel (x, y): at the given point, else through the stencil's canvas mapping (default when the
+        /// stroke has no stencil).</summary>
+        private StencilSample StencilAt(int x, int y, StencilPoint? at)
+        {
+            if (stencil == null) return default;
+            if (at.HasValue) return stencil.Sample(at.Value);
+            if (!stencil.CanvasToImage.HasValue) throw new InvalidOperationException("The stencil of this stroke has no mapping from the canvas; give each pixel its point on the stencil.");
+            return stencil.SampleCanvas(x, y);
         }
         private void Stamp(PendingDab dab, double sizeFactor)
         {
@@ -493,6 +520,7 @@ namespace Yozolab.YoluPainter.Core
             s.Hardness = settings.Hardness; s.Pressure = pressure; s.OpacityScale = opacityScale; s.FlowScale = flowScale;
             if (settings.CanvasSymmetry != null && settings.CanvasSymmetry.Enabled) return SymmetricDab(s, extent);
             if (minX > maxX || minY > maxY) return false;
+            if (stencil != null && !stencil.CanvasToImage.HasValue) throw new InvalidOperationException("The stencil of this stroke has no mapping from the canvas, so 2D dabs cannot read it.");
             if (!PrepareEffectDab(minX, maxX, minY, maxY, x, y)) return false;
             int tile = tileSize, tx0 = minX / tile, ty0 = minY / tile, columns = maxX / tile - tx0 + 1, rows = maxY / tile - ty0 + 1;
             bool[] safe = null; int safeCount = 0, degree = CoreParallelism.Degree;
@@ -610,7 +638,7 @@ namespace Yozolab.YoluPainter.Core
                         ceilingScale *= 1 - settings.TextureDepth * (1 - grain);
                         if (ceilingScale <= 0) continue;
                     }
-                    changed |= ApplyPixelAt(c, collect, tx, ty, row + lx, coverage, pressure, ceilingScale, flowScale);
+                    changed |= ApplyPixelAt(c, collect, tx, ty, row + lx, coverage, pressure, ceilingScale, flowScale, null); // ステンシルは ApplyPixelAt が読む
                 }
             }
             return changed;
@@ -638,11 +666,26 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>One pixel of a pass: (tx, ty) is its tile, local its index in the tile. The same arithmetic and the same budget
         /// checks in the same order as a per-pixel lookup; only the dictionary lookups are made once per tile. The coverage is accumulated
         /// once and applied to every target with that target's colour and pixels before the stroke.</summary>
-        private bool ApplyPixelAt(TileCursor c, bool collect, int tx, int ty, int local, double coverage, double pressure, double opacityScale, double flowScale)
+        /// <param name="at">With a stencil: the pixel's point on it (null: through its canvas mapping).</param>
+        private bool ApplyPixelAt(TileCursor c, bool collect, int tx, int ty, int local, double coverage, double pressure, double opacityScale, double flowScale, in StencilPoint? at)
         {
             MoveTo(c, tx, ty);
             double selected = selection == null ? 1 : (c.Selected == null ? 0 : c.Selected.Get(local * 4).A) / 255.0;
             if (selected <= 0) return false;
+            StencilSample through = default; bool stencilRead = false;
+            if (stencil != null)
+            {
+                // ステンシルも紙の質感と同じく天井に効かせる（重なったダブでステンシルの量を越えない）。画素ごとに初めの 1 回だけ読む
+                var known = c.Stroke?.StencilAmount;
+                if (known != null && !double.IsNaN(known[local])) through = new StencilSample(known[local], c.Stroke.StencilColor[local], stencil.Mode == StencilMode.Color);
+                else
+                {
+                    through = StencilAt(tx * tileSize + local % tileSize, ty * tileSize + local / tileSize, at); stencilRead = true;
+                    if (known != null) { known[local] = through.Amount; c.Stroke.StencilColor[local] = through.Color; }
+                }
+                if (through.Amount <= 0) return false;
+                opacityScale *= through.Amount;
+            }
             double ceiling = settings.Opacity * opacityScale * (settings.PressureOpacity ? pressure : 1);
             double flow = coverage * settings.Flow * flowScale * (settings.PressureFlow ? pressure : 1);
             if (settings.Effect == BrushEffect.Smudge) flow *= settings.SmudgeStrength;
@@ -657,11 +700,18 @@ namespace Yozolab.YoluPainter.Core
             if (!any) return false;
             if (st == null)
             {
-                // タイルを初めて触る: 共有の被覆率と、この画素を塗るチャンネルの写しを合わせて 1 回で予算と比べる（1 チャンネルなら以前と同じ 1 回）
-                long nextBytes = rollbackBytes + 64 + (long)tile * tile * 4;
+                // タイルを初めて触る: 共有の被覆率と、この画素を塗るチャンネルの写しを合わせて 1 回で予算と比べる（1 チャンネルなら以前と同じ 1 回）。
+                // ステンシルがあれば、画素ごとに読んだ値（double と色で 12 バイト）も
+                long nextBytes = rollbackBytes + 64 + (long)tile * tile * (stencil != null ? 16 : 4);
                 for (int k = 0; k < n; k++) if (accepts[k]) nextBytes += CaptureBytes(k, c.Coord, c.Surfaces[k]);
                 EnsureEffectBudget(nextBytes);
                 st = new StrokeTile(n, new float[tile * tile]);
+                if (stencil != null)
+                {
+                    st.StencilAmount = new double[tile * tile]; for (int i = 0; i < st.StencilAmount.Length; i++) st.StencilAmount[i] = double.NaN;
+                    st.StencilColor = new Rgba32[tile * tile];
+                    if (stencilRead) { st.StencilAmount[local] = through.Amount; st.StencilColor[local] = through.Color; }
+                }
                 for (int k = 0; k < n; k++) if (accepts[k]) Capture(k, st, c.Coord, c.Surfaces[k]);
                 strokeTiles.Add(c.Coord, st); c.Stroke = st; rollbackBytes = nextBytes;
             }
@@ -697,6 +747,8 @@ namespace Yozolab.YoluPainter.Core
                     }
                     paint = new Rgba32(MathUtil.ToByte(p[o]), MathUtil.ToByte(p[o + 1]), MathUtil.ToByte(p[o + 2]), MathUtil.ToByte(p[o + 3]));
                 }
+                // ステンシルの色（色のモード）: その画素のステンシルの色を、塗りつぶしの画像と同じ読み方でこのチャンネルの値にする（アルファは描画色のもの）
+                if (t.StencilColor && through.HasColor) paint = stencil.PaintFor(t.StencilChannel, through.Color, t.StrokeColor.A);
                 TileStorage original = st.Before[k];
                 Rgba32 start = original == null ? Rgba32.Transparent : original.Get(local * 4), next;
                 if (settings.Effect != BrushEffect.Paint)

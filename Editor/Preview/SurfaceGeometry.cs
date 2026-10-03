@@ -24,7 +24,11 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>Texture pixel coordinates, with (0,0) at bottom left.</summary>
         public int X, Y;
         public float Coverage;
-        public SurfacePixel(int x, int y, float coverage) { X = x; Y = y; Coverage = coverage; }
+        /// <summary>The texel centre's point on the model (the snapshot's space; of the triangle that gave the coverage). The stencil
+        /// projects it to the screen.</summary>
+        public Vector3 Position;
+        public SurfacePixel(int x, int y, float coverage) { X = x; Y = y; Coverage = coverage; Position = default; }
+        public SurfacePixel(int x, int y, float coverage, Vector3 position) { X = x; Y = y; Coverage = coverage; Position = position; }
     }
 
     public sealed class SurfaceDabResult
@@ -381,7 +385,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 outcomes[k] = new RayOutcome { HasHit = hasHit, Hit = visible, CameraDistance = distance,
                     Tests = budget.MaxRayTriangleTests - work.RemainingTriangleTests, Visits = budget.MaxRayNodeVisits - work.RemainingNodeVisits, Exceeded = work.Exceeded };
             }
-            long tests = 0, visits = 0; var pixels = new Dictionary<int, float>(); int collected = result.CandidatePixels;
+            long tests = 0, visits = 0; var pixels = new Dictionary<int, float>(); var points = new Dictionary<int, Vector3>(); int collected = result.CandidatePixels;
             for (int i = 0; i < candidates.Count; i++)
             {
                 // 元の逐次の処理がこの候補を見ていた時点の、候補の画素の数（断るときに同じ数を返す）
@@ -422,13 +426,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 }
                 float coverage = c.Distance <= hardness || hardness >= 0.9999f ? 1 : 1 - Mathf.SmoothStep(0, 1, (c.Distance - hardness) / (1 - hardness));
                 int key = c.Y * width + c.X;
-                if (!pixels.TryGetValue(key, out float current) || coverage > current) pixels[key] = coverage;
+                if (!pixels.TryGetValue(key, out float current) || coverage > current) { pixels[key] = coverage; points[key] = c.Position; }
             }
             result.CandidatePixels = collected;
             if (stop != null) return result.Reject(stop);
             // Deterministic bottom-left row order and max-union prevent shared-edge double paint.
             var keys = new List<int>(pixels.Keys); keys.Sort();
-            foreach (int key in keys) result.Pixels.Add(new SurfacePixel(key % width, key / width, pixels[key]));
+            foreach (int key in keys) result.Pixels.Add(new SurfacePixel(key % width, key / width, pixels[key], points[key]));
             return result;
         }
 
@@ -450,7 +454,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             { result.Diagnostic = "Surface binding does not match the current snapshot."; return result; }
             budget = budget ?? new SurfaceBrushBudget(); hardness = Mathf.Clamp01(hardness);
             var rayWork = new RayQueryBudget { RemainingTriangleTests = budget.MaxRayTriangleTests, RemainingNodeVisits = budget.MaxRayNodeVisits };
-            var queue = new Queue<int>(); var visited = new HashSet<int>(); var pixels = new Dictionary<int, float>();
+            var queue = new Queue<int>(); var visited = new HashSet<int>(); var pixels = new Dictionary<int, float>(); var points = new Dictionary<int, Vector3>();
             queue.Enqueue(hit.TriangleIndex); visited.Add(hit.TriangleIndex);
             float radiusSquared = radiusWorld * radiusWorld; int processed = 0;
             while (queue.Count > 0)
@@ -498,12 +502,12 @@ namespace Yozolab.YoluPainter.Editor.Preview
                     }
                     float coverage = normalizedDistance <= hardness || hardness >= 0.9999f ? 1 : 1 - Mathf.SmoothStep(0, 1, (normalizedDistance - hardness) / (1 - hardness));
                     int key = y * width + x;
-                    if (!pixels.TryGetValue(key, out float current) || coverage > current) pixels[key] = coverage;
+                    if (!pixels.TryGetValue(key, out float current) || coverage > current) { pixels[key] = coverage; points[key] = position; }
                 }
             }
             // Deterministic bottom-left row order and max-union prevent shared-edge double paint.
             var keys = new List<int>(pixels.Keys); keys.Sort();
-            foreach (int key in keys) result.Pixels.Add(new SurfacePixel(key % width, key / width, pixels[key]));
+            foreach (int key in keys) result.Pixels.Add(new SurfacePixel(key % width, key / width, pixels[key], points[key]));
             return result;
         }
 

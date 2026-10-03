@@ -142,7 +142,7 @@ namespace Yozolab.YoluPainter.Editor
             projectPath=null; projectToken=null; savedRevision=-1; importedPsdPath=null; externalConflict=false; ResetCanvasView(); NewProjectRecord();
             ResetSetsBaseline(false);
         }
-        void OnLostFocus() { FinishStroke(false); CancelShapeDrag(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); preview?.CancelNavigation(); SaveRecovery(); }
+        void OnLostFocus() { FinishStroke(false); CancelShapeDrag(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); ReleaseStencilInput(); preview?.CancelNavigation(); SaveRecovery(); }
         void BeforeReload() { FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); EndLightingDrag(true); preview?.CancelNavigation(); SaveRecovery(); }
         void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); SaveRecovery(); } }
         void OnDisable()
@@ -150,7 +150,7 @@ namespace Yozolab.YoluPainter.Editor
             DisposePenInput();
             FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); preview?.CancelNavigation(); SaveRecovery();
             EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; EditorApplication.projectChanged-=OnUnityProjectChanged; UnhookResources(); DisposeAssetThumbnails(); L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
-            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeDecalOverlay(); DisposeThumbnails(); DisposeColorPanel(); DisposeTextureSetTextures(); DisposeMaterialChannelTextures(); DisposeModelShowTextures(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
+            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeDecalOverlay(); DisposeStencilOverlay(); DisposeThumbnails(); DisposeColorPanel(); DisposeTextureSetTextures(); DisposeMaterialChannelTextures(); DisposeModelShowTextures(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
             if(selectionOverlay!=null){DestroyImmediate(selectionOverlay);selectionOverlay=null;overlayFor=null;}
         }
         void Tick()
@@ -194,6 +194,7 @@ namespace Yozolab.YoluPainter.Editor
             if(e.type==EventType.MouseMove) Repaint(); // マウスの乗った部品の見た目
             // スライダーのドラッグ中の変更は 1 つの Undo にまとめる。離したところで区切る。
             if(e.rawType==EventType.MouseUp) document.EndCoalescing();
+            SyncStencil(); // ステンシルの画像がまだプロジェクトにあるか（Tools/TexturePaintWindow.Stencil.cs）
             HandleModelPicker(e); HandleEnvironmentPicker(e); // 環境のテクスチャを選ぶ窓（Model/TexturePaintWindow.Display3D.cs）
             HandleKeys(e);
             if(e.type==EventType.KeyDown&&HandleToolKeys(e))return false;
@@ -208,7 +209,7 @@ namespace Yozolab.YoluPainter.Editor
             if(canvasRect.width>0) DrawCanvas();
             if(surfaceRect.width>0 && e.type==EventType.Repaint)
             {
-                PaintGui.Fill(surfaceRect,PaintTheme.CanvasBg); SyncSymmetryPlane(); SyncShapeOverlay(); SyncEnvironment(); preview.Render(surfaceRect); NoteDisplayProblems(); DrawRadialSymmetryAxis(); DrawPathMarkers(); DrawShapeGizmo(pointerAtStart);
+                PaintGui.Fill(surfaceRect,PaintTheme.CanvasBg); SyncSymmetryPlane(); SyncShapeOverlay(); SyncEnvironment(); preview.Render(surfaceRect); DrawStencilOverlay3D(); NoteDisplayProblems(); DrawRadialSymmetryAxis(); DrawPathMarkers(); DrawShapeGizmo(pointerAtStart);
                 // 3D の描画（PreviewRenderUtility）の後はイベントのマウスの位置が (0,0) になっているので、外枠のマウスの乗った見た目のために戻す
                 if(Event.current!=null) Event.current.mousePosition=pointerAtStart;
             }

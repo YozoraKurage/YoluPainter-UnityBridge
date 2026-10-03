@@ -163,7 +163,7 @@ namespace Yozolab.YoluPainter.Core
         /// data rather than colour (and on masks): such strokes paint the Value exactly as without dynamics.</summary>
         public BrushSettings ForChannel(PaintChannel? channel)
         {
-            var copy = Clone();
+            var copy = Clone(); copy.PaintedChannel = channel; // ステンシルの色を受けるチャンネルかを、ストロークが面ごとに見る（BrushStencil.cs）
             if (channel == null || !CarriesColor(channel.Value))
             { copy.ForegroundBackgroundJitter = 0; copy.HueJitter = 0; copy.SaturationJitter = 0; copy.BrightnessJitter = 0; copy.Purity = 0; }
             return copy;

@@ -37,7 +37,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>初めは閉じておくセクション（細かい設定。Photoshop のブラシ設定の一覧のように、見出しだけを並べる）。</summary>
         static readonly HashSet<string> ToolSectionsClosedAtFirst = new HashSet<string> { "brush-jitter", "brush-texture", "brush-dual", "brush-color", "brush-fade" };
         /// <summary>ツールのセクションのキー（テストがすべて開いて描くため）。</summary>
-        internal static readonly string[] ToolSectionKeys = { "brush-effect", "brush", "brush-material", "brush-stroke", "brush-symmetry", "brush-jitter", "brush-texture", "brush-dual", "brush-color", "brush-fade", "surface-pick", "selection-modify", "id-map", "move", "path" };
+        internal static readonly string[] ToolSectionKeys = { "brush-effect", "brush", "brush-material", "brush-stencil", "brush-stroke", "brush-symmetry", "brush-jitter", "brush-texture", "brush-dual", "brush-color", "brush-fade", "surface-pick", "selection-modify", "id-map", "move", "path" };
         internal void SetToolSectionsOpen(bool open) { foreach (var key in ToolSectionKeys) sectionOpen[key] = open; }
 
         /// <summary>ツールのセクションの見出し（開いていれば true）。初めの開閉は <see cref="ToolSectionsClosedAtFirst"/>。</summary>
@@ -74,6 +74,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             BrushTipSection(rows);
             MaterialSection(rows); // マテリアルで塗る（Tools/TexturePaintWindow.MaterialBrush.cs）
+            StencilSection(rows); // ステンシル（Tools/TexturePaintWindow.Stencil.cs）
             StrokeAssistSection(rows);
             SymmetrySection(rows); // 3D ビューのシンメトリー（Model/TexturePaintWindow.Symmetry.cs）
             JitterSection(rows);

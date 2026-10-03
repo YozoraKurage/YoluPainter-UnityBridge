@@ -714,6 +714,16 @@ namespace Yozolab.YoluPainter.Editor.Preview
             gui = new Vector2(viewRect.x + v.x * viewRect.width, viewRect.y + (1 - v.y) * viewRect.height);
             return true;
         }
+        /// <summary>カメラの写し（射影 × ワールドからカメラ。rect に合わせてから読む）。点を多く写すとき（ステンシルがテクセルの点を画面へ写す）に、
+        /// 点ごとの <see cref="TryWorldToGui"/> の代わりに使う（<see cref="GuiProjection"/>）。カメラが無ければ false。</summary>
+        public bool TryGetGuiProjection(Rect viewRect, out GuiProjection projection)
+        {
+            projection = default;
+            if (preview == null || viewRect.width <= 0 || viewRect.height <= 0) return false;
+            UpdateCamera(viewRect);
+            projection = new GuiProjection(preview.camera.projectionMatrix * preview.camera.worldToCameraMatrix, viewRect);
+            return true;
+        }
         /// <summary>The camera ray through a GUI point of the 3D view (also outside the model). False without a camera or view.</summary>
         public bool TryGuiRay(Rect viewRect, Vector2 guiPosition, out Ray ray)
         {

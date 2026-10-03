@@ -7,6 +7,7 @@ using NUnit.Framework;
 using UnityEngine;
 using Yozolab.YoluPainter.Core;
 using Yozolab.YoluPainter.Core.Paths;
+using Yozolab.YoluPainter.Core.Shelf;
 using Yozolab.YoluPainter.Editor;
 using Object = UnityEngine.Object;
 
@@ -71,6 +72,9 @@ namespace Yozolab.YoluPainter.Tests
                 w.Brush.tipId = "lib:nowhere/a-tip-that-is-not-installed-anywhere"; w.SetTexture(tip);
                 w.Brush.dualEnabled = true; w.Brush.dualTipId = tip;
                 w.Symmetry = true; w.SymmetryOffset = -123.4567f; // シンメトリーの欄（切り替えた後の有効な部品と長い数値）と 3D ビューの対称の面
+                // ステンシルの欄（長い名前の画像、色として読む・マスクの編集中の知らせ、繰り返し）
+                var stencil = w.ImageResources.Add("A stencil image with a rather long name for its box", ImageContent.FromPixels(new byte[] { 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 0 }, 2, 2), ResourceOrigin.None, ResourceColorSpace.Srgb, out _);
+                w.SetStencil(stencil.Id); w.StencilTilingSetting = StencilTiling.Both;
                 d.SetSelection(SelectionMask.All(d));
                 var layer = d.AddLayer("Model path"); d.SetChannelEnabled(layer.Id, PaintChannel.Color, true);
                 d.SetPath(layer.Id, new SurfacePath(Guid.NewGuid(), PaintChannel.Color, "another-model", new PathBrush(), new[] { new PathPoint(0, .3, .3) }), new SparseTileSurface(d.Width, d.Height, d.TileSize));

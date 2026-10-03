@@ -78,12 +78,15 @@ namespace Yozolab.YoluPainter.Core
         static byte Byte255(double v) => (byte)Math.Max(0, Math.Min(255, Math.Floor(v + .5)));
 
         /// <summary>面のダブを丸ごと適用する。効果の読み元は全画素を書き込む前に凍結。指先の中心は UV の画素座標で、継ぎ目を跨ぐときは呼び手が ResetEffectDirection する。</summary>
-        public bool ApplyDab(IReadOnlyList<BrushPixel> pixels, double centerX, double centerY, double pressure = 1)
+        /// <param name="stencilPoints">With a stencil, each pixel's point on it (the same order as pixels; null reads the stencil through
+        /// its canvas mapping).</param>
+        public bool ApplyDab(IReadOnlyList<BrushPixel> pixels, double centerX, double centerY, double pressure = 1, IReadOnlyList<StencilPoint> stencilPoints = null)
         {
             CheckOpen();
             try
             {
                 if (pixels == null) throw new ArgumentNullException(nameof(pixels));
+                if (stencilPoints != null && stencilPoints.Count != pixels.Count) throw new ArgumentException("Give one stencil point per pixel.", nameof(stencilPoints));
                 MathUtil.RequireFinite(centerX, nameof(centerX)); MathUtil.RequireFinite(centerY, nameof(centerY)); MathUtil.RequireFinite(pressure, nameof(pressure));
                 if (Math.Abs(centerX) > 10000000 || Math.Abs(centerY) > 10000000 || pressure < 0 || pressure > 1) throw new ArgumentOutOfRangeException("dab");
                 int x0 = width, y0 = height, x1 = -1, y1 = -1;
@@ -97,8 +100,12 @@ namespace Yozolab.YoluPainter.Core
                 bool changed = false; BeginPass();
                 try
                 {
-                    foreach (var p in pixels) if (p.X >= 0 && p.Y >= 0 && p.X < width && p.Y < height)
-                        changed |= ApplyPixelAt(cursor, true, p.X / tileSize, p.Y / tileSize, (p.Y % tileSize) * tileSize + p.X % tileSize, p.Coverage, pressure, 1, 1);
+                    for (int i = 0; i < pixels.Count; i++)
+                    {
+                        var p = pixels[i];
+                        if (p.X < 0 || p.Y < 0 || p.X >= width || p.Y >= height) continue;
+                        changed |= ApplyPixelAt(cursor, true, p.X / tileSize, p.Y / tileSize, (p.Y % tileSize) * tileSize + p.X % tileSize, p.Coverage, pressure, 1, 1, stencilPoints == null ? (StencilPoint?)null : stencilPoints[i]);
+                    }
                 }
                 finally { EndPass(); ReleaseEffectDab(); }
                 if (changed) document.PixelsChanged(); return changed;
