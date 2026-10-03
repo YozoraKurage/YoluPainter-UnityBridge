@@ -77,7 +77,7 @@ namespace Yozolab.YoluPainter.Core
         internal static Source ContentSource(PaintLayer layer, PaintChannel channel)
         {
             var chain = layer.ActiveChain(channel);
-            bool projected = layer.Kind == LayerKind.Fill && layer.HasFillImage(channel);
+            bool projected = layer.IsProjectedFill(channel); // 画像のチャンネルと、デカールの値のチャンネル
             if (chain.Length == 0 && !projected) return null;
             var s = new Source { Layer = layer, Channel = channel, Chain = chain, FilterRevision = layer.FilterRevision };
             if (layer.Kind == LayerKind.Fill)
@@ -150,7 +150,12 @@ namespace Yozolab.YoluPainter.Core
                 int m = Tiles(Halo(s.Chain, s.Chain.Length));
                 return AnyTile(s.Surface, tx0 - m, ty0 - m, tx1 + m, ty1 + m);
             }
-            if (s.IsFill) return s.Sampler != null ? s.Sampler.MayCover : s.Fill != Rgba32.Transparent;
+            if (s.IsFill)
+            {
+                if (s.Sampler == null) return s.Fill != Rgba32.Transparent;
+                int grow = Tiles(Expansion(s.Chain)); // デカールは箱の届くタイルだけ（ぼかしの広がりの分は広げて）
+                return s.Sampler.MayCoverTiles(tx0 - grow, ty0 - grow, tx1 + grow, ty1 + grow);
+            }
             if (s.Surface == null) return false;
             int e = Tiles(Expansion(s.Chain));
             return AnyTile(s.Surface, tx0 - e, ty0 - e, tx1 + e, ty1 + e);

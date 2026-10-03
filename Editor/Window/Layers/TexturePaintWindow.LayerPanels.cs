@@ -61,9 +61,9 @@ namespace Yozolab.YoluPainter.Editor
         bool SectionIsOpen(string key, bool openByDefault) => sectionOpen.TryGetValue(key, out var open) ? open : openByDefault;
 
         static string LayerKindName(PaintLayer layer)
-            => layer.IsGroup ? L.Tr("Group") : layer.Kind == LayerKind.Fill ? L.Tr("Fill Layer") : layer.Kind == LayerKind.Adjustment ? L.Tr("Adjustment Layer") : layer.Path != null ? L.Tr("Path") : L.Tr("Layer");
+            => layer.IsGroup ? L.Tr("Group") : layer.IsDecal ? L.TrIn("layer kind", "Decal") : layer.Kind == LayerKind.Fill ? L.Tr("Fill Layer") : layer.Kind == LayerKind.Adjustment ? L.Tr("Adjustment Layer") : layer.Path != null ? L.Tr("Path") : L.Tr("Layer");
         static string LayerKindIcon(PaintLayer layer)
-            => layer.IsGroup ? "folder" : layer.Kind == LayerKind.Fill ? "format_color_fill" : layer.Kind == LayerKind.Adjustment ? "tune" : layer.Path != null ? "conversion_path" : "brush";
+            => layer.IsGroup ? "folder" : layer.IsDecal ? "sticker" : layer.Kind == LayerKind.Fill ? "format_color_fill" : layer.Kind == LayerKind.Adjustment ? "tune" : layer.Path != null ? "conversion_path" : "brush";
         static string AdjustmentName(AdjustmentType type) => type == AdjustmentType.Levels ? "Levels" : type == AdjustmentType.HueSaturation ? "Hue / Saturation" : "Invert";
         static bool IsScalarChannel(PaintChannel c) => c == PaintChannel.Roughness || c == PaintChannel.Metallic || c == PaintChannel.Height;
 
@@ -137,7 +137,7 @@ namespace Yozolab.YoluPainter.Editor
         void DrawFill(UiRows rows, PaintLayer active)
         {
             PaintGui.GroupLabel(rows.Row(16), L.Tr("Fill Value") + " · " + L.Tr(channel.ToString()));
-            bool image = active.HasFillImage(channel); // 画像があれば、値は画像を使えないときの代わり
+            bool image = active.HasFillImage(channel); // 画像があれば、値は画像を使えないときの代わり（デカールの値だけのチャンネルは、形の中の値）
             if (active.FillValues.TryGetValue(channel, out var value))
             {
                 var row = rows.Row();
@@ -166,7 +166,8 @@ namespace Yozolab.YoluPainter.Editor
             else if (PaintGui.Button(Spot("fill.add", rows.Row()), L.Tr("Add a Value for This Channel"), false, GUI.enabled, L.Tr("The fill starts with the brush color"), "add"))
                 TryAction(() => document.SetFillValue(active.Id, channel, GetBrush().Color));
             DrawFillImage(rows, active); // チャンネルの画像（TexturePaintWindow.FillImages.cs）
-            NoteRow(rows, L.Tr("A fill covers the whole canvas. Paint its mask to choose where it shows."));
+            NoteRow(rows, active.IsDecal ? L.Tr("A decal shows only inside its box on the model (see Projection), in the shape of its image. Paint its mask to hide parts of it.")
+                : L.Tr("A fill covers the whole canvas. Paint its mask to choose where it shows."));
         }
 
         /// <summary>色の選択（別のウィンドウ）から。選んでいるあいだに文書やレイヤーが替わっていたら何もしない。ドラッグは 1 回の Undo に

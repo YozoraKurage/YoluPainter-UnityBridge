@@ -43,7 +43,10 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// projection (int algorithm version, int mode, int wrap, doubles tiles u, v, offset u, v, rotation, blend width, placement centre
     /// x, y, z, rotation x, y, z, size x, y, z); the bit on another kind of layer or in an older archive (12–15), an unknown mode, wrap or
     /// algorithm version and values out of range are refused. A document without fill images is laid out as version 15, only the version
-    /// number differs. Older archives still load.</summary>
+    /// number differs. Version 17 adds decals: projection mode 5 (<see cref="FillProjectionMode.Decal"/>) and wrap 2
+    /// (<see cref="FillWrap.None"/>); a decal's projection block ends with its culling (doubles depth hardness, back-face angle, back-face
+    /// hardness). Mode 5 or wrap 2 in an older archive is refused. A document without decals is laid out as version 16 (only the version
+    /// number differs). Older archives still load.</summary>
     public static class DocumentBinary
     {
         /// <summary>The version that added per-channel blend modes and opacities (attribute bit 2).</summary>
@@ -52,7 +55,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
         internal const int IdColorVersion = 15;
         /// <summary>The version that added fill layers' images and projection (attribute bit 3 and the block after the fill values).</summary>
         internal const int FillImageVersion = 16;
-        const int Version = FillImageVersion;
+        /// <summary>The version that added decals (projection mode 5, wrap 2 and the culling after the projection).</summary>
+        internal const int DecalVersion = 17;
+        const int Version = DecalVersion;
         /// <summary>The version <see cref="Write"/> produces.</summary>
         public const int CurrentVersion = Version;
         /// <summary>The version that added the shape gradient (generator type 5 and its volume after the generator block).</summary>
@@ -224,7 +229,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                                 if (!channelEnabled) disabled.Add((PaintChannel)channelValue);
                             }
                             if (fillImages && kind != (int)LayerKind.Fill) throw new InvalidDataException("Only fill layers have images and a projection.");
-                            var images = fillImages ? ReadFillImages(reader, values, out projection) : null;
+                            var images = fillImages ? ReadFillImages(reader, values, version, out projection) : null;
                             if (kind == (int)LayerKind.Adjustment)
                             {
                                 if (version < 4) throw new InvalidDataException("Adjustment layers require archive version 4.");
@@ -326,7 +331,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 catch (EndOfStreamException ex) { throw new InvalidDataException("Native archive is truncated.", ex); }
             }
         }
-        /// <summary>Version 16: a fill layer's images (channel and resource ID per image, by channel) and its projection.</summary>
+        /// <summary>Version 16: a fill layer's images (channel and resource ID per image, by channel) and its projection; version 17 ends a
+        /// decal's with its culling.</summary>
         static void WriteFillImages(BinaryWriter writer, PaintLayer layer)
         {
             var images = layer.FillImages.OrderBy(e => e.Key).ToArray();
@@ -335,10 +341,11 @@ namespace Yozolab.YoluPainter.Core.Persistence
             var p = layer.Projection; var v = p.Placement;
             writer.Write(FillProjection.AlgorithmVersion); writer.Write((int)p.Mode); writer.Write((int)p.Wrap);
             foreach (double d in new[] { p.TileU, p.TileV, p.OffsetU, p.OffsetV, p.Rotation, p.BlendWidth, v.CenterX, v.CenterY, v.CenterZ, v.RotationX, v.RotationY, v.RotationZ, v.SizeX, v.SizeY, v.SizeZ }) writer.Write(d);
+            if (p.IsDecal) { writer.Write(p.DepthHardness); writer.Write(p.BackfaceAngle); writer.Write(p.BackfaceHardness); } // 版 17: デカールだけ
         }
-        /// <summary>The version 16 fill images block. Unknown values are refused, never replaced by defaults.</summary>
+        /// <summary>The version 16 fill images block (version 17: the decal and its culling). Unknown values are refused, never replaced by defaults.</summary>
         static System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<PaintChannel, Guid>> ReadFillImages(BinaryReader reader,
-            System.Collections.Generic.Dictionary<PaintChannel, Rgba32> values, out FillProjection projection)
+            System.Collections.Generic.Dictionary<PaintChannel, Rgba32> values, int version, out FillProjection projection)
         {
             int count = ReadCount(reader, 6, "fill images");
             var images = new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<PaintChannel, Guid>>();
@@ -352,13 +359,16 @@ namespace Yozolab.YoluPainter.Core.Persistence
             }
             int algorithm = reader.ReadInt32(), mode = reader.ReadInt32(), wrap = reader.ReadInt32();
             if (algorithm != FillProjection.AlgorithmVersion) throw new InvalidDataException("Fill projection algorithm version " + algorithm + " is not supported by this reader; source retained unchanged.");
-            if (!Enum.IsDefined(typeof(FillProjectionMode), mode)) throw new InvalidDataException("Unknown fill projection " + mode + "; a newer reader is required (source retained unchanged).");
-            if (!Enum.IsDefined(typeof(FillWrap), wrap)) throw new InvalidDataException("Unknown fill wrap " + wrap + "; a newer reader is required (source retained unchanged).");
-            var d = new double[15]; for (int k = 0; k < d.Length; k++) d[k] = reader.ReadDouble();
+            if (!Enum.IsDefined(typeof(FillProjectionMode), mode) || mode == (int)FillProjectionMode.Decal && version < DecalVersion) throw new InvalidDataException("Unknown fill projection " + mode + "; a newer reader is required (source retained unchanged).");
+            if (!Enum.IsDefined(typeof(FillWrap), wrap) || wrap == (int)FillWrap.None && version < DecalVersion) throw new InvalidDataException("Unknown fill wrap " + wrap + "; a newer reader is required (source retained unchanged).");
+            bool decal = mode == (int)FillProjectionMode.Decal;
+            var d = new double[decal ? 18 : 15]; for (int k = 0; k < d.Length; k++) d[k] = reader.ReadDouble();
             try
             {
-                projection = new FillProjection((FillProjectionMode)mode, (FillWrap)wrap, d[0], d[1], d[2], d[3], d[4], d[5],
-                    new ShapeVolume(GeneratorShape.Box, d[6], d[7], d[8], d[9], d[10], d[11], d[12], d[13], d[14], 0));
+                var placement = new ShapeVolume(GeneratorShape.Box, d[6], d[7], d[8], d[9], d[10], d[11], d[12], d[13], d[14], 0);
+                projection = decal
+                    ? new FillProjection((FillProjectionMode)mode, (FillWrap)wrap, d[0], d[1], d[2], d[3], d[4], d[5], placement, d[15], d[16], d[17])
+                    : new FillProjection((FillProjectionMode)mode, (FillWrap)wrap, d[0], d[1], d[2], d[3], d[4], d[5], placement);
             }
             catch (ArgumentException ex) { throw new InvalidDataException("Invalid fill projection: " + ex.Message, ex); }
             if (count == 0 && projection.Equals(FillProjection.Default)) throw new InvalidDataException("An empty fill images block (no images, default projection) is never written.");

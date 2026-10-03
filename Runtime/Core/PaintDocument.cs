@@ -154,7 +154,7 @@ namespace Yozolab.YoluPainter.Core
             if (Kind == LayerKind.Fill)
             {
                 if (x < 0 || y < 0 || x >= document.Width || y >= document.Height) throw new ArgumentOutOfRangeException("pixel");
-                if (fillImages.ContainsKey(channel)) return document.FillSampler(this, channel).Pixel(x, y); // 投影した画像（フィルターの前）
+                if (IsProjectedFill(channel)) return document.FillSampler(this, channel).Pixel(x, y); // 投影した画像・デカール（フィルターの前）
                 return fillValues.TryGetValue(channel, out var value) ? value : Rgba32.Transparent;
             }
             return channels.TryGetValue(channel, out var surface) ? surface.GetPixel(x, y) : Rgba32.Transparent;
@@ -177,11 +177,11 @@ namespace Yozolab.YoluPainter.Core
             if (coord.X < 0 || coord.Y < 0 || (long)coord.X * tile >= document.Width || (long)coord.Y * tile >= document.Height) throw new ArgumentOutOfRangeException(nameof(coord));
             Array.Clear(destination, 0, length);
             int w = Math.Min(tile, document.Width - coord.X * tile), h = Math.Min(tile, document.Height - coord.Y * tile);
-            if (fillImages.ContainsKey(channel))
+            if (IsProjectedFill(channel))
             {
-                // 投影した画像（フィルターの前の、層そのものの画素）。評価してキャッシュには入れない
+                // 投影した画像・デカール（フィルターの前の、層そのものの画素）。評価してキャッシュには入れない
                 var sampler = document.FillSampler(this, channel);
-                if (!sampler.MayCover) return false;
+                if (!sampler.MayCoverTiles(coord.X, coord.Y, coord.X + 1, coord.Y + 1)) return false;
                 sampler.FillRows(coord.X * tile, coord.Y * tile, w, 0, h, destination, tile);
                 return true;
             }

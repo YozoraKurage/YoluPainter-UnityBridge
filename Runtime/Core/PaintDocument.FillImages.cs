@@ -70,8 +70,8 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>Bytes of image mipmaps kept now.</summary>
         public long FillImageCacheBytes { get { return chainBytes; } }
 
-        /// <summary>True when a fill layer has an image channel.</summary>
-        public bool HasFillImages { get { foreach (var layer in layers) if (layer.Kind == LayerKind.Fill && layer.FillImages.Count > 0) return true; return false; } }
+        /// <summary>True when a fill layer has an image channel or is a decal (it reads the mesh maps even without an image).</summary>
+        public bool HasFillImages { get { foreach (var layer in layers) if (layer.Kind == LayerKind.Fill && (layer.FillImages.Count > 0 || layer.IsDecal)) return true; return false; } }
         bool HasMapProjections { get { foreach (var layer in layers) if (layer.ReadsMeshMapsForFill) return true; return false; } }
 
         /// <summary>The fill value a channel gets when an image is set on a channel that had none (shown where the image cannot be used).</summary>
@@ -119,8 +119,9 @@ namespace Yozolab.YoluPainter.Core
                 }, 96));
         }
 
-        /// <summary>Replaces a fill layer's projection, as one undo step (slider and gizmo drags coalesce). With images it changes pixels, so
-        /// it is refused under Lock Image Pixels, Lock Transparent Pixels and Lock All; without images only under Lock All.</summary>
+        /// <summary>Replaces a fill layer's projection, as one undo step (slider and gizmo drags coalesce). With images, or as a decal before
+        /// or after, it changes pixels, so it is refused under Lock Image Pixels, Lock Transparent Pixels and Lock All; otherwise only under
+        /// Lock All. Moving a decal (a decal before and after, without filters) reports only the tiles either placement may cover as changed.</summary>
         public void SetFillProjection(Guid id, FillProjection projection, bool coalesce = false)
         {
             EnsureNoStroke(); if (projection == null) throw new ArgumentNullException(nameof(projection));
@@ -128,9 +129,48 @@ namespace Yozolab.YoluPainter.Core
             var layer = GetLayer(id);
             if (layer.Kind != LayerKind.Fill) throw new InvalidOperationException("Only fill layers have a projection.");
             var old = layer.Projection; if (old.Equals(projection)) return;
-            if (layer.FillImages.Count > 0) { RefuseLockedPixels(layer, erase: false); RefuseLockedTransparency(layer); } else RefuseLockedAttributes(layer);
-            Execute(LayerScoped(layer, null, () => { layer.Projection = projection; FillChanged(layer); }, () => { layer.Projection = old; FillChanged(layer); }, 160),
-                coalesce ? (object)("fillProjection", id) : null);
+            if (layer.FillImages.Count > 0 || old.IsDecal || projection.IsDecal) { RefuseLockedPixels(layer, erase: false); RefuseLockedTransparency(layer); } else RefuseLockedAttributes(layer);
+            var command = old.IsDecal && projection.IsDecal && !HasAnyActiveFilters(layer)
+                ? DecalScoped(layer, () => { layer.Projection = projection; FillChanged(layer); }, () => { layer.Projection = old; FillChanged(layer); }, 160)
+                : LayerScoped(layer, null, () => { layer.Projection = projection; FillChanged(layer); }, () => { layer.Projection = old; FillChanged(layer); }, 160);
+            Execute(command, coalesce ? (object)("fillProjection", id) : null);
+        }
+
+        static bool HasAnyActiveFilters(PaintLayer layer) { foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel))) if (layer.HasActiveFilters(c)) return true; return false; }
+
+        /// <summary>A history command for an edit of a decal that only moves where it shows: marks the tiles the decal may cover before and
+        /// after it (in the channels it has values for) instead of the whole canvas; every tile when that cannot be told.</summary>
+        DelegateCommand DecalScoped(PaintLayer layer, Action apply, Action revert, long cost)
+        {
+            void Run(Action change)
+            {
+                var tiles = new HashSet<TileCoord>();
+                bool known = AddDecalTiles(layer, tiles);
+                change();
+                known = known && AddDecalTiles(layer, tiles);
+                if (!known) MarkLayerChanged(layer, null);
+                else foreach (var channel in layer.FillValues.Keys) foreach (var coord in tiles) MarkTileChanged(channel, coord);
+                MarkClippedLayersChanged();
+            }
+            return new DelegateCommand(() => Run(apply), () => Run(revert), cost);
+        }
+        /// <summary>The tiles a decal layer may cover now, from the maps as last resolved (what the display shows); false when not known.</summary>
+        bool AddDecalTiles(PaintLayer layer, ICollection<TileCoord> into)
+        {
+            if (!layer.IsDecal || !generatorResolved) return false;
+            var positions = generatorMaps[(int)MeshMapKind.Position];
+            if (FillImageSampler.PlacementProblem(layer.Projection, Width, Height, generatorMaps, generatorReasons, generatorFrame) != null) return true; // 置けない: どこにも出ない
+            return FillImageSampler.AddDecalTiles(layer.Projection, positions, generatorFrame, DecalTileBounds(positions), into);
+        }
+
+        PositionTileBounds decalTileBounds;
+        /// <summary>The Position map's per-tile bounds (made once per map and kept while it is the one resolved).</summary>
+        internal PositionTileBounds DecalTileBounds(BakedMeshMap positions)
+        {
+            if (positions == null) return null;
+            var bounds = decalTileBounds;
+            if (bounds == null || !ReferenceEquals(bounds.Map, positions) || bounds.TileSize != TileSize) decalTileBounds = bounds = PositionTileBounds.Of(positions, TileSize);
+            return bounds;
         }
 
         /// <summary>The layer's fill content changed: a new fill revision (unique in the document) and its evaluated tiles and sampler forgotten.</summary>
@@ -169,8 +209,49 @@ namespace Yozolab.YoluPainter.Core
             return new FillImageStatus(id, resolved.Resource, sampler.Reason, conversion, FillImageColor.UsesLuminance(channel), sampler.Mips?.Levels ?? 0, sampler.Mips?.Bytes ?? 0);
         }
 
+        /// <summary>Why a decal layer is not shown now (its maps are missing, stale or of another size, the model root is not known), or
+        /// null when it is placed. Its channels are then transparent everywhere.</summary>
+        public string GetDecalProblem(Guid layerId)
+        {
+            var layer = GetLayer(layerId);
+            if (!layer.IsDecal) throw new ArgumentException("'" + layer.Name + "' is not a decal.", nameof(layerId));
+            PollGeneratorInputs();
+            var maps = GeneratorMapSnapshot(out _, out var frame);
+            return FillImageSampler.PlacementProblem(layer.Projection, Width, Height, maps, generatorReasons, frame);
+        }
+
+        /// <summary>Where a decal reaches, for a view: a width × height grid over the texture set (row-major from the bottom row; each cell
+        /// reads the texel at its centre) of the decal's coverage, 0..255 (its box, depth and facing; not its image). Null when the decal is not
+        /// placed now (<see cref="GetDecalProblem"/>).</summary>
+        public byte[] DecalCoverage(Guid layerId, int width, int height)
+        {
+            var layer = GetLayer(layerId);
+            if (!layer.IsDecal) throw new ArgumentException("'" + layer.Name + "' is not a decal.", nameof(layerId));
+            if (width < 1 || height < 1 || width > Width || height > Height) throw new ArgumentOutOfRangeException(nameof(width), "The grid must be 1 to the texture set's size on each side.");
+            PollGeneratorInputs();
+            var maps = GeneratorMapSnapshot(out _, out var frame);
+            var sampler = FillImageSampler.BindDecal(layer.Projection, null, null, null, new Rgba32(255, 255, 255, 255), Width, Height, maps, generatorReasons, frame, DecalTileBounds);
+            if (!sampler.Placed) return null;
+            var result = new byte[width * height]; int w = Width, h = Height;
+            CoreParallelism.For(height, CoreParallelism.Degree, j =>
+            {
+                int y = (int)((j + .5) * h / height);
+                for (int i = 0; i < width; i++) result[j * width + i] = MathUtil.ToByte(sampler.DecalCoverage((int)((i + .5) * w / width), y));
+            });
+            return result;
+        }
+
+        /// <summary>Baking (merging, flattening) a decal that is not shown now would leave it out: refused with the reason.</summary>
+        void RefuseUnplacedDecal(PaintLayer layer)
+        {
+            if (!layer.IsDecal || !layer.FillValues.Keys.Any(layer.IsChannelEnabled)) return;
+            string problem = GetDecalProblem(layer.Id);
+            if (problem != null) throw new InvalidOperationException("'" + layer.Name + "': the decal cannot be baked because it is not shown now (" + problem + ") Baking would leave it out. Bake the mesh maps (Position and World Normal) first. Nothing was changed.");
+        }
+
         /// <summary>One line per fill image channel (enabled, layer visible) that shows its fill value instead of its image now, naming the
-        /// layer, the channel and the reason. Exports and saves list these instead of writing a composite without the image silently.</summary>
+        /// layer, the channel and the reason, and one per decal that is not shown (it would be missing from the images). Exports and saves
+        /// list these instead of writing a composite without the image silently.</summary>
         public IReadOnlyList<string> InactiveFillImages()
         {
             var notes = new List<string>();
@@ -178,12 +259,19 @@ namespace Yozolab.YoluPainter.Core
             PollGeneratorInputs();
             foreach (var layer in layers)
                 if (layer.Kind == LayerKind.Fill)
+                {
+                    if (layer.IsDecal && layer.FillValues.Keys.Any(layer.IsChannelEnabled))
+                    {
+                        string problem = GetDecalProblem(layer.Id);
+                        if (problem != null) { notes.Add("'" + layer.Name + "' (decal): the decal is not shown: " + problem); continue; }
+                    }
                     foreach (var entry in layer.FillImages.OrderBy(e => e.Key))
                     {
                         if (!layer.IsChannelEnabled(entry.Key)) continue;
                         var sampler = FillSampler(layer, entry.Key);
                         if (!sampler.Active) notes.Add("'" + layer.Name + "' (" + entry.Key + "): the image is not projected: " + sampler.Reason);
                     }
+                }
             return notes;
         }
 
@@ -269,24 +357,48 @@ namespace Yozolab.YoluPainter.Core
             catch (Exception ex) { return new ResolvedImage { Reason = "Reading the image resource failed: " + ex.Message }; }
         }
 
-        /// <summary>The bound sampler of an image channel (made again when the layer's fill revision or the maps it reads changed).</summary>
+        /// <summary>The bound sampler of an image channel, or of any channel with a value of a decal (made again when the layer's fill
+        /// revision or the maps it reads changed).</summary>
         internal FillImageSampler FillSampler(PaintLayer layer, PaintChannel channel)
         {
-            var id = layer.FillImages[channel];
+            bool hasImage = layer.FillImages.TryGetValue(channel, out var id);
             long mapsRevision = 0; IReadOnlyList<BakedMeshMap> maps = null; GeneratorModelFrame frame = null;
             if (layer.Projection.ReadsMeshMaps) maps = GeneratorMapSnapshot(out mapsRevision, out frame);
             if (samplers.TryGetValue((layer.Id, channel), out var bound) && bound.FillRevision == layer.FillRevision && bound.MapsRevision == mapsRevision) return bound.Sampler;
             layer.FillValues.TryGetValue(channel, out var fallback);
-            var resolved = Resolved(id);
             FillImageSampler sampler;
-            if (resolved.Content == null) sampler = FillImageSampler.Constant(resolved.Reason, fallback);
+            if (layer.Projection.IsDecal) sampler = DecalSampler(layer, channel, hasImage ? id : (Guid?)null, fallback, maps, frame);
             else
             {
-                var chain = Chain(resolved.Content, FillImageColor.ConversionFor(resolved.ColorSpace, channel), FillImageColor.UsesLuminance(channel), out string why);
-                sampler = chain == null ? FillImageSampler.Constant(why, fallback) : FillImageSampler.Bind(layer.Projection, chain, fallback, Width, Height, maps, generatorReasons, frame);
+                var resolved = Resolved(id);
+                if (resolved.Content == null) sampler = FillImageSampler.Constant(resolved.Reason, fallback);
+                else
+                {
+                    var chain = Chain(resolved.Content, FillImageColor.ConversionFor(resolved.ColorSpace, channel), FillImageColor.UsesLuminance(channel), out string why);
+                    sampler = chain == null ? FillImageSampler.Constant(why, fallback) : FillImageSampler.Bind(layer.Projection, chain, fallback, Width, Height, maps, generatorReasons, frame);
+                }
             }
             samplers[(layer.Id, channel)] = new BoundSampler { FillRevision = layer.FillRevision, MapsRevision = mapsRevision, Sampler = sampler };
             return sampler;
+        }
+
+        /// <summary>A decal's channel: its own image (or its value, with the reason when the image cannot be read) and the shape image, the
+        /// image of the first channel in channel order that has one, when that is another channel.</summary>
+        FillImageSampler DecalSampler(PaintLayer layer, PaintChannel channel, Guid? image, Rgba32 value, IReadOnlyList<BakedMeshMap> maps, GeneratorModelFrame frame)
+        {
+            ImageMipChain own = null, shape = null; string ownReason = null;
+            if (image.HasValue) own = ChainOf(image.Value, channel, out ownReason);
+            PaintChannel shapeChannel = channel; bool any = false;
+            foreach (var c in layer.FillImages.Keys) if (!any || c < shapeChannel) { shapeChannel = c; any = true; }
+            if (any && shapeChannel != channel) shape = ChainOf(layer.FillImages[shapeChannel], shapeChannel, out _);
+            return FillImageSampler.BindDecal(layer.Projection, own, ownReason, shape, value, Width, Height, maps, generatorReasons, frame, DecalTileBounds);
+        }
+        /// <summary>The mipmap of the image an ID resolves to as a channel reads it, or null with the reason.</summary>
+        ImageMipChain ChainOf(Guid id, PaintChannel channel, out string reason)
+        {
+            var resolved = Resolved(id);
+            if (resolved.Content == null) { reason = resolved.Reason; return null; }
+            return Chain(resolved.Content, FillImageColor.ConversionFor(resolved.ColorSpace, channel), FillImageColor.UsesLuminance(channel), out reason);
         }
 
         ImageMipChain Chain(ImageContent content, FillImageConversion conversion, bool luminance, out string reason)
@@ -313,7 +425,7 @@ namespace Yozolab.YoluPainter.Core
                 if (chainBytes <= fillImageCacheBudget) break;
                 if (keep.HasValue && entry.Key.Equals(keep.Value)) continue;
                 chains.Remove(entry.Key); chainBytes -= entry.Value.Chain.Bytes;
-                foreach (var s in samplers.Where(s => ReferenceEquals(s.Value.Sampler.Mips, entry.Value.Chain)).Select(s => s.Key).ToList()) samplers.Remove(s);
+                foreach (var s in samplers.Where(s => ReferenceEquals(s.Value.Sampler.Mips, entry.Value.Chain) || ReferenceEquals(s.Value.Sampler.Shape, entry.Value.Chain)).Select(s => s.Key).ToList()) samplers.Remove(s);
             }
         }
     }

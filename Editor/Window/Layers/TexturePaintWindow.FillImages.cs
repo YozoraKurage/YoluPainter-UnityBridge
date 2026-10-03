@@ -183,23 +183,24 @@ namespace Yozolab.YoluPainter.Editor
                 case FillProjectionMode.Triplanar: return L.TrIn("projection", "Tri-planar");
                 case FillProjectionMode.Planar: return L.TrIn("projection", "Planar");
                 case FillProjectionMode.Spherical: return L.TrIn("projection", "Spherical");
+                case FillProjectionMode.Decal: return L.TrIn("projection", "Decal");
                 default: return L.TrIn("projection", "Cylindrical");
             }
         }
-        static string WrapName(FillWrap wrap) => wrap == FillWrap.Repeat ? L.TrIn("projection", "Repeat") : L.TrIn("projection", "Clamp to edge");
+        static string WrapName(FillWrap wrap) => wrap == FillWrap.Repeat ? L.TrIn("projection", "Repeat") : wrap == FillWrap.Clamp ? L.TrIn("projection", "Clamp to edge") : L.TrIn("projection", "Transparent");
 
         /// <summary>塗りつぶしの層の投影の欄。数値の欄・スライダーは 1 回の Undo にまとめる（マウスを離して区切る）。</summary>
         void DrawFillProjection(UiRows rows, PaintLayer active)
         {
             var p = active.Projection; var next = p;
-            if (active.FillImages.Count == 0) NoteRow(rows, L.Tr("Choose an image for a channel (Layer ▸ Image) to project it; these settings apply to every image of this layer."));
+            if (active.FillImages.Count == 0 && !p.IsDecal) NoteRow(rows, L.Tr("Choose an image for a channel (Layer ▸ Image) to project it; these settings apply to every image of this layer."));
             try
             {
                 ChoiceDropdown(Spot("projection.mode", rows.Row()), L.Tr("Projection"), p.Mode, (FillProjectionMode[])Enum.GetValues(typeof(FillProjectionMode)), ProjectionName,
                     mode => TryAction(() => SetProjectionMode(active.Id, mode)),
-                    L.Tr("UV: the image laid on the UV square. Tri-planar: three projections along the box's axes, mixed where the surface turns (no UV seams). Planar: through the box's front face. Spherical and cylindrical: around the box's centre."));
+                    L.Tr("UV: the image laid on the UV square. Tri-planar: three projections along the box's axes, mixed where the surface turns (no UV seams). Planar: through the box's front face. Spherical and cylindrical: around the box's centre. Decal: through the box's front face, only inside the box, cut out by the image's alpha."));
                 ChoiceDropdown(Spot("projection.wrap", rows.Row()), L.TrIn("projection", "Outside"), p.Wrap, (FillWrap[])Enum.GetValues(typeof(FillWrap)), WrapName,
-                    wrap => TryAction(() => document.SetFillProjection(active.Id, active.Projection.WithWrap(wrap))), L.Tr("Repeat the image, or continue its edge pixels."));
+                    wrap => TryAction(() => document.SetFillProjection(active.Id, active.Projection.WithWrap(wrap))), L.Tr("Repeat the image, continue its edge pixels, or leave it transparent outside the image."));
                 var c = PaintGui.LabeledColumns(rows.Row(), L.TrIn("projection", "Tiling"), ShapeVectorLabelWidth, 2);
                 double tu = KeepNumber(Spot("projection.tile.u", c[0]), "U", p.TileU, .01f, "0.###", FillProjection.MinTiles, FillProjection.MaxTiles, L.Tr("How many times the image repeats across the projected square (U)"));
                 double tv = KeepNumber(Spot("projection.tile.v", c[1]), "V", p.TileV, .01f, "0.###", FillProjection.MinTiles, FillProjection.MaxTiles, L.Tr("How many times the image repeats across the projected square (V)"));
@@ -215,6 +216,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             catch (ArgumentException ex) { message = ex.Message; next = p; }
             if (!next.Equals(p)) TryAction(() => document.SetFillProjection(active.Id, next, coalesce: true));
+            if (p.IsDecal && DrawDecalCulling(rows, active)) return; // デカールの間引きと、置けない理由（TexturePaintWindow.Decals.cs）
             if (p.Mode != FillProjectionMode.Uv) DrawProjectionPlacement(rows, active);
             // 使えない理由（マップが無いなど）: 画像のチャンネルのうち最初のもの
             foreach (var entry in active.FillImages.OrderBy(e => e.Key))
@@ -231,6 +233,7 @@ namespace Yozolab.YoluPainter.Editor
             var layer = document.GetLayer(layerId); var p = layer.Projection;
             if (p.Mode == mode) return;
             var next = p.WithMode(mode);
+            if (mode == FillProjectionMode.Decal && p.Wrap == FillWrap.Repeat && p.TileU == 1 && p.TileV == 1) next = next.WithWrap(FillWrap.None); // デカールは画像を 1 回
             if (mode != FillProjectionMode.Uv && p.Placement.Equals(FillProjection.DefaultPlacement) && preview != null && preview.HasModel) next = next.WithPlacement(ModelPlacement(mode));
             document.EndCoalescing();
             document.SetFillProjection(layerId, next);
@@ -244,6 +247,7 @@ namespace Yozolab.YoluPainter.Editor
         ShapeVolume ModelPlacement(FillProjectionMode mode)
         {
             if (preview == null || !preview.HasModel) return FillProjection.DefaultPlacement;
+            if (mode == FillProjectionMode.Decal) return DecalFitPlacement(document.Layers.FirstOrDefault(l => l.Id == selectedLayer)); // ビューから見た正面（TexturePaintWindow.Decals.cs）
             var b = preview.Bounds; var inverse = Quaternion.Inverse(preview.ModelRootRotation);
             var center = inverse * (b.center - preview.ModelRootPosition); var size = inverse * b.size;
             double Size(float s) => Math.Max(ShapeVolume.MinSize, Math.Min(ShapeVolume.MaxSize, Math.Abs(s) * 1.02));
@@ -280,6 +284,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 var s = VectorRow(rows, "projection.size", L.TrIn("shape gradient", "Size"), v.SizeX, v.SizeY, v.SizeZ, .01f, "0.###", ShapeVolume.MinSize, ShapeVolume.MaxSize,
                     p.Mode == FillProjectionMode.Planar ? L.Tr("Planar: the image spans the box's X and Y (seen from its −Z side); Z is not used.")
+                    : p.Mode == FillProjectionMode.Decal ? L.Tr("Decal: the image spans the box's X and Y (seen from its −Z side); Z is how deep it reaches into the surface.")
                     : p.Mode == FillProjectionMode.Cylindrical ? L.Tr("Cylindrical: the image goes once around the box's Y axis and spans its Y size; X and Z are not used.")
                     : L.Tr("Tri-planar: each face's image spans the box's two other sizes."), 0);
                 next = next.WithSize(s[0], s[1], s[2]);
@@ -301,7 +306,7 @@ namespace Yozolab.YoluPainter.Editor
             foreach (var (set, d) in documents) { d.ImageResources = resources; foreach (var line in d.InactiveFillImages()) lines.Add((named ? set + ": " : "") + line); }
             if (lines.Count == 0) return true;
             string list = string.Join("\n", lines.Take(12)) + (lines.Count > 12 ? "\n… " + (lines.Count - 12) : "");
-            if (Dialogs.Confirm(L.Tr("Fill images not projected"), L.Tr("These fill channels cannot project their image now, so the exported images would show their fill value there instead:\n{0}\n\nFix them first (bake the mesh maps, choose an image), or export anyway?", list), L.Tr("Export Anyway"), L.Tr("Cancel")))
+            if (Dialogs.Confirm(L.Tr("Fill images not projected"), L.Tr("These fill channels cannot project their image now, so the exported images would show their fill value there instead (a decal: nothing):\n{0}\n\nFix them first (bake the mesh maps, choose an image), or export anyway?", list), L.Tr("Export Anyway"), L.Tr("Cancel")))
                 return true;
             message = L.Tr("Nothing was exported: some fill images cannot be projected now.");
             return false;

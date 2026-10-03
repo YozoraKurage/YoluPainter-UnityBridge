@@ -1,0 +1,82 @@
+# Japanese translation for YoluPainter: decals (a fill layer's projection "Decal": dropping an image on the model in the 3D view,
+# the decal's depth and back-face culling, the reach shown on the 2D canvas).
+# 一般的な語は msgctxt "decal"・"projection"・"layer kind" で場面を分ける。
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# ── 投影の種類・層の種類 ──
+
+msgctxt "projection"
+msgid "Decal"
+msgstr "デカール"
+
+msgctxt "layer kind"
+msgid "Decal"
+msgstr "デカール"
+
+msgctxt "projection"
+msgid "Transparent"
+msgstr "透明"
+
+msgid "Decal: the image spans the box's X and Y (seen from its −Z side); Z is how deep it reaches into the surface."
+msgstr "デカール: 画像はボックスの X と Y に広がる（−Z の側から見て）。Z は面の手前と奥へ届く深さ。"
+
+msgid "A decal shows only inside its box on the model (see Projection), in the shape of its image. Paint its mask to hide parts of it."
+msgstr "デカールはモデルの上のボックスの中だけに、画像の形で出る（投影の欄）。一部を隠すにはマスクを塗る。"
+
+# ── 間引き ──
+
+msgctxt "decal"
+msgid "Depth edge"
+msgstr "奥行きの縁"
+
+msgctxt "decal"
+msgid "Back faces"
+msgstr "裏向きの面"
+
+msgctxt "decal"
+msgid "Face edge"
+msgstr "面の向きの縁"
+
+msgid "How softly the decal fades towards the box's front and back faces (0 %: a hard cut)."
+msgstr "ボックスの手前と奥の面に向かってデカールをどれだけ柔らかく薄くするか（0 %: くっきり切る）。"
+
+msgid "Faces turned more than this from the side the image is seen from are hidden (180°: none)."
+msgstr "画像を見る側からこれ以上向きの変わった面には出さない（180°: どの面にも出す）。"
+
+msgid "How softly faces fade out towards that angle (0 %: a hard cut)."
+msgstr "その角度に向かって面をどれだけ柔らかく薄くするか（0 %: くっきり切る）。"
+
+msgid "The decal shows inside its box on the model, cut out by the alpha of its first image (Color first); every channel's value shows in that shape."
+msgstr "デカールはモデルの上のボックスの中に、最初の画像（Color が先）のアルファで切り抜いて出る。どのチャンネルの値もその形で出る。"
+
+msgid "The decal is not shown: {0}"
+msgstr "デカールは出ていない: {0}"
+
+msgid "Bake Position and World Normal"
+msgstr "Position と World Normal をベイク"
+
+msgid "Bakes the two mesh maps a decal reads (for the checked texture sets), keeping the other maps."
+msgstr "デカールが読む 2 つのメッシュマップを（チェックしたテクスチャセットで）ベイクする。ほかのマップはそのまま。"
+
+# ── 置く ──
+
+msgid "Load a model (or the demo cube) and show the 3D view to place a decal."
+msgstr "デカールを置くには、モデル（かデモのキューブ）を読み込んで 3D ビューを出す。"
+
+msgid "Drop the image on the model to place a decal there."
+msgstr "画像をモデルの上に落とすと、そこにデカールを置く。"
+
+msgid "That face belongs to the texture set {0}. Switch to it (double-click the face) to place a decal there."
+msgstr "その面はテクスチャセット {0} のもの。そこにデカールを置くには、そのセットに切り替える（面をダブルクリック）。"
+
+msgid "That face belongs to no texture set of this project."
+msgstr "その面はこのプロジェクトのどのテクスチャセットにも属さない。"
+
+msgid "Placed {0} as a decal in {1}. Drag the handles in the 3D view to move, turn or size it."
+msgstr "{0} を {1} のデカールとして置いた。3D ビューのハンドルをドラッグすると、動かす・回す・大きさを変えることができる。"
+
+msgid "Placed {0} as a decal in {1}, but it is not shown yet: {2}"
+msgstr "{0} を {1} のデカールとして置いたが、まだ出ていない: {2}"

@@ -198,6 +198,7 @@ namespace Yozolab.YoluPainter.Core
         void RefuseInactiveGenerators(PaintLayer layer, bool content, bool mask)
         {
             PollGeneratorInputs();
+            if (content) RefuseUnplacedDecal(layer); // 置けないデカール（PaintDocument.FillImages.cs）
             var stacks = new List<(IEnumerable<FilterEffect> effects, string where)>();
             if (content) stacks.Add((layer.FilterList, ""));
             if (mask && layer.Mask != null) stacks.Add((layer.Mask.FilterList, " (mask)"));

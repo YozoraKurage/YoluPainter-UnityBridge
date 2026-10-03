@@ -559,7 +559,8 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>キャンバス（2D・3D の表示域）へ落としたもの: パネルの格子からのアセットは置く（このプロジェクトに無ければ取り込んでから）、
-        /// Unity の Project ウィンドウからのテクスチャは取り込んで置く。</summary>
+        /// Unity の Project ウィンドウからのテクスチャは取り込んで置く。画像を 3D ビューのモデルへ落とすと、その面にデカールとして置く
+        /// （Layers/TexturePaintWindow.Decals.cs。モデルの外・ほかのテクスチャセットの面では受け取らない）。</summary>
         bool HandleResourceDrop(Event e)
         {
             if (e.type != EventType.DragUpdated && e.type != EventType.DragPerform) return false;
@@ -568,13 +569,25 @@ namespace Yozolab.YoluPainter.Editor
             string key = DragAndDrop.GetGenericData(ResourceDragKey) as string;
             var textures = key == null ? DragAndDrop.objectReferences.OfType<Texture2D>().Where(t => !string.IsNullOrEmpty(AssetDatabase.GetAssetPath(t))).ToList() : null;
             if (key == null && (textures == null || textures.Count == 0)) return false;
-            DragAndDrop.visualMode = stroke == null ? DragAndDropVisualMode.Copy : DragAndDropVisualMode.Rejected;
-            if (e.type == EventType.DragPerform && stroke == null)
+            bool decal = surfaceRect.Contains(e.mousePosition) && !canvasRect.Contains(e.mousePosition) && !(key != null && TrySmartKind(key, out _));
+            string decalRefusal = null;
+            if (decal && !DecalTarget(e.mousePosition, out _, out decalRefusal) && e.type == EventType.DragUpdated) message = decalRefusal;
+            DragAndDrop.visualMode = stroke == null && decalRefusal == null ? DragAndDropVisualMode.Copy : DragAndDropVisualMode.Rejected;
+            if (e.type == EventType.DragPerform && stroke == null && decalRefusal == null)
             {
                 DragAndDrop.AcceptDrag();
+                var at = e.mousePosition;
                 TryAction(() =>
                 {
                     if (key != null && TrySmartKind(key, out _)) { PlaceSmartAsset(key); return; } // スマートマテリアルは選んだ層の上、スマートマスクは選んだ層のマスクへ
+                    if (decal)
+                    {
+                        // 3D ビュー: 落とした所の面にデカール（画像はこのプロジェクトに無ければ取り込む）
+                        var image = key != null && TryParseAssetKey(key, out var from, out string fromId) ? ImportAsset(from, fromId) : ImportUnityTexture(textures[0]);
+                        PlaceDecal(image.Id, at);
+                        selectedAsset = AssetKey(AssetSource.Project, image.Id.ToString("D"));
+                        return;
+                    }
                     if (key != null && TryParseAssetKey(key, out var source, out string id))
                     {
                         var image = ImportAsset(source, id);

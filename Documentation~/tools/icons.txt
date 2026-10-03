@@ -68,6 +68,7 @@ tools/id-select phosphor swatches
 close fluent dismiss
 search fluent search
 target fluent target
+sticker fluent sticker
 sync fluent arrow_sync
 local_fire_department fluent fire
 grid_on fluent grid

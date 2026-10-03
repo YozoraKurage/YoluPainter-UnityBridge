@@ -22,9 +22,9 @@ namespace Yozolab.YoluPainter.Editor
             if (layer.Kind == LayerKind.Fill)
             {
                 if (!layer.FillValues.TryGetValue(channel, out var fill)) return null;
-                if (layer.HasFillImage(channel))
+                if (layer.HasFillImage(channel) || layer.IsDecal)
                 {
-                    // 投影した画像: 評価した出力（キャッシュを合成と共有）。印は出力の印（塗りつぶしの版・マップ）
+                    // 投影した画像・デカール: 評価した出力（キャッシュを合成と共有）。印は出力の印（塗りつぶしの版・マップ）
                     var c = channel; var stamp = layer.OutputStamp(c, 0, 0, (document.Width + document.TileSize - 1) / document.TileSize, (document.Height + document.TileSize - 1) / document.TileSize);
                     return Thumbnail((layer.Id, (int)channel), unchecked((stamp.Filters * 31 + stamp.Input) * 31 + stamp.Maps) | long.MinValue, (x, y) => layer.GetOutputPixel(c, x, y));
                 }

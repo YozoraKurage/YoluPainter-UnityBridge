@@ -24,6 +24,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 if(DisplayTexture!=null) EditorGUI.DrawTextureTransparent(image,DisplayTexture,ScaleMode.StretchToFill);
                 DrawMeshMapOverlay(image);
+                DrawDecalOverlay(image); // 選んだデカールの届く範囲（Layers/TexturePaintWindow.Decals.cs）
                 if(document.Selection!=null){EnsureSelectionOverlay(); GUI.DrawTexture(image,selectionOverlay,ScaleMode.StretchToFill,true);}
             }
             finally{if(turned)GL.PopMatrix();}

@@ -8,8 +8,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// (opaque values, as SoCo) and Invert / Levels / Hue/Saturation adjustment layers with any of the 26 PSD blend modes (pass-through or isolated for groups), clipping, a
     /// raster mask (enabled, disabled, density), visibility, opacity and the layer locks (lspf) map both ways. Anything without an exact PSD form here
     /// (translucent fill values, adjustment settings between PSD's steps, inverted masks, clipped groups, layers or masks with filters) is
-    /// refused instead of being flattened into pixels. The one exception is a fill channel with a projected image: it is written as the
-    /// pixels it shows, and the export reports that the image reference and the projection are not carried (<see cref="PsdCodec.NotCarriedIntoExport"/>).</summary>
+    /// refused instead of being flattened into pixels. The one exception is a fill channel with a projected image (and every channel of a
+    /// decal): it is written as the pixels it shows, and the export reports that the image reference and the projection are not carried
+    /// (<see cref="PsdCodec.NotCarriedIntoExport"/>).</summary>
     public static class PsdBridge
     {
         /// <summary>Export a native channel. The merged image is the CPU composite of that channel. Each layer is written with its opacity
@@ -79,7 +80,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             if (layer.IsGroup && layer.Clipping) throw new InvalidOperationException("Group '" + layer.Name + "' is clipped. Photoshop's handling of a clipped folder is not verified (psd-tools treats it as unsupported in Photoshop), so it is not exported; turn its clipping off or export from the native project. Native project can still be saved losslessly.");
             if (layer.Filters.Count > 0 || layer.Mask != null && layer.Mask.Filters.Count > 0)
                 throw new InvalidOperationException("Layer '" + layer.Name + "' has non-destructive filters" + (HasGenerator(layer) ? " or generators" : "") + ". PSD has no exact form for them here (Photoshop keeps smart filters inside smart objects, which this exporter does not write, and has no mesh-map generators), and writing only the filtered pixels would drop the filter stack silently. Bake the filters into the layer (or remove them) before exporting PSD. Native project can still be saved losslessly.");
-            bool projected = layer.Kind == LayerKind.Fill && layer.HasFillImage(channel);
+            bool projected = layer.IsProjectedFill(channel); // 画像のチャンネルと、デカールの全部のチャンネル
             if (layer.Kind == LayerKind.Fill && !projected && layer.FillValues.TryGetValue(channel, out var fillValue) && fillValue.A != 255)
                 throw new InvalidOperationException("Fill layer '" + layer.Name + "': a PSD solid colour fill is opaque, and this fill's " + channel + " value has alpha " + fillValue.A + ". Use the layer opacity instead. Native project can still be saved losslessly.");
             if (layer.Kind != LayerKind.Raster && layer.Kind != LayerKind.Group && layer.Kind != LayerKind.Adjustment && layer.Kind != LayerKind.Fill) throw new InvalidOperationException("PSD projection does not write " + layer.Kind + " layers yet. Native project can still be saved losslessly.");
@@ -161,13 +162,25 @@ namespace Yozolab.YoluPainter.Core.Persistence
             bool flipGreen = channel == PaintChannel.Normal && source.NormalSettings.FileDirection == NormalYDirection.DirectX;
             for (int y = 0; y < height; y++) Buffer.BlockCopy(rgba, y * row, pixels, (height - 1 - y) * row, row);
             if (flipGreen) for (int i = 1; i < pixels.Length; i += 4) pixels[i] = (byte)(255 - pixels[i]);
-            var status = source.GetFillImageStatus(layer.Id, channel);
-            string image = status.Image != null ? "\"" + status.Image.Name + "\"" : status.ResourceId.ToString();
-            notes.Add(new PsdDiagnostic(PsdCodec.NotCarriedIntoExport, "Fill layer '" + layer.Name + "' (" + channel + "): the image " + image + " and its " + layer.Projection.Mode
-                + " projection are written as the layer's pixels; the PSD keeps neither the image reference nor the projection" + (status.Active ? "." : " (the image is not projected now: " + status.Reason + " The pixels are the fill value.)"), -1, 0));
+            if (layer.IsDecal)
+            {
+                // デカール: 画像・値・置き場・間引きは残らない（画素だけ）
+                string problem = source.GetDecalProblem(layer.Id);
+                string what = layer.HasFillImage(channel) ? "its image " + ImageName(source.GetFillImageStatus(layer.Id, channel)) : "its value";
+                notes.Add(new PsdDiagnostic(PsdCodec.NotCarriedIntoExport, "Decal '" + layer.Name + "' (" + channel + "): " + what + " as placed on the model is written as the layer's pixels; the PSD keeps neither the image reference nor the decal's placement and culling"
+                    + (problem == null ? "." : " (the decal is not shown now: " + problem + " The pixels are transparent.)"), -1, 0));
+            }
+            else
+            {
+                var status = source.GetFillImageStatus(layer.Id, channel);
+                notes.Add(new PsdDiagnostic(PsdCodec.NotCarriedIntoExport, "Fill layer '" + layer.Name + "' (" + channel + "): the image " + ImageName(status) + " and its " + layer.Projection.Mode
+                    + " projection are written as the layer's pixels; the PSD keeps neither the image reference nor the projection" + (status.Active ? "." : " (the image is not projected now: " + status.Reason + " The pixels are the fill value.)"), -1, 0));
+            }
             return new PsdRasterLayer { Id = UniqueId(guid, 0, usedIds), Name = layer.Name, Left = 0, Top = 0, Width = width, Height = height, Opacity = opacity,
                 Visible = layer.Visible && layer.IsChannelEnabled(channel), BlendMode = layer.BlendMode, Clipping = layer.Clipping, Mask = mask, PixelsRgba = pixels, Locks = layer.Locks };
         }
+
+        static string ImageName(FillImageStatus status) => status.Image != null ? "\"" + status.Image.Name + "\"" : status.ResourceId.ToString();
 
         /// <summary>Native mask (hide amount in alpha, bottom-left origin) → PSD mask (255 shows, top-down). The rectangle is the
         /// bounding box of the samples that differ from the default colour; the default colour is whichever of 255 / 0 gives

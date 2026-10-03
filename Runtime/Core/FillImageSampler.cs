@@ -109,18 +109,77 @@ namespace Yozolab.YoluPainter.Core
     }
 
     /// <summary>
+    /// Where each tile of a Position map has covered texels, and the box (in the map's raw 16-bit values) that holds them: lets a decal
+    /// skip the tiles its box cannot reach without reading their texels. Immutable; made once per map and tile size.
+    /// </summary>
+    internal sealed class PositionTileBounds
+    {
+        internal readonly BakedMeshMap Map; internal readonly int TileSize, Columns, Rows;
+        /// <summary>Per tile (row-major from the bottom): min x, y, z, max x, y, z of the covered texels; Any false when none is covered.</summary>
+        readonly ushort[] box; readonly bool[] any;
+
+        PositionTileBounds(BakedMeshMap map, int tileSize)
+        {
+            Map = map; TileSize = tileSize; Columns = (map.Width + tileSize - 1) / tileSize; Rows = (map.Height + tileSize - 1) / tileSize;
+            box = new ushort[Columns * Rows * 6]; any = new bool[Columns * Rows];
+            int width = map.Width, height = map.Height; var data = map.Data; var coverage = map.Coverage;
+            CoreParallelism.For(Rows, CoreParallelism.Degree, ty =>
+            {
+                for (int tx = 0; tx < Columns; tx++)
+                {
+                    int lx = ushort.MaxValue, ly = ushort.MaxValue, lz = ushort.MaxValue, hx = 0, hy = 0, hz = 0; bool covered = false;
+                    for (int y = ty * tileSize, y1 = Math.Min(height, y + tileSize); y < y1; y++)
+                        for (int x = tx * tileSize, x1 = Math.Min(width, x + tileSize), i = y * width + x; x < x1; x++, i++)
+                        {
+                            if (coverage[i] == 0) continue;
+                            covered = true; int vx = data[i * 3], vy = data[i * 3 + 1], vz = data[i * 3 + 2];
+                            if (vx < lx) lx = vx; if (vx > hx) hx = vx; if (vy < ly) ly = vy; if (vy > hy) hy = vy; if (vz < lz) lz = vz; if (vz > hz) hz = vz;
+                        }
+                    int t = ty * Columns + tx; any[t] = covered;
+                    if (covered) { box[t * 6] = (ushort)lx; box[t * 6 + 1] = (ushort)ly; box[t * 6 + 2] = (ushort)lz; box[t * 6 + 3] = (ushort)hx; box[t * 6 + 4] = (ushort)hy; box[t * 6 + 5] = (ushort)hz; }
+                }
+            });
+        }
+        internal static PositionTileBounds Of(BakedMeshMap positions, int tileSize) => new PositionTileBounds(positions, tileSize);
+
+        /// <summary>True when tile (tx, ty) has covered texels whose box, taken by the affine map l = m · v + k into a placement's space,
+        /// can meet the box |l_i| ≤ half_i (a conservative test: the image of the tile's box is bounded by its centre ± Σ |m_ij| e_j).</summary>
+        internal bool Meets(int tx, int ty, double[] m, double[] k, double hx, double hy, double hz)
+        {
+            if (tx < 0 || ty < 0 || tx >= Columns || ty >= Rows) return false;
+            int t = ty * Columns + tx; if (!any[t]) return false;
+            double cx = (box[t * 6] + (double)box[t * 6 + 3]) * .5, cy = (box[t * 6 + 1] + (double)box[t * 6 + 4]) * .5, cz = (box[t * 6 + 2] + (double)box[t * 6 + 5]) * .5;
+            double ex = (box[t * 6 + 3] - (double)box[t * 6]) * .5, ey = (box[t * 6 + 4] - (double)box[t * 6 + 1]) * .5, ez = (box[t * 6 + 5] - (double)box[t * 6 + 2]) * .5;
+            for (int i = 0; i < 3; i++)
+            {
+                double centre = m[i * 3] * cx + m[i * 3 + 1] * cy + m[i * 3 + 2] * cz + k[i];
+                double reach = Math.Abs(m[i * 3]) * ex + Math.Abs(m[i * 3 + 1]) * ey + Math.Abs(m[i * 3 + 2]) * ez;
+                double half = i == 0 ? hx : i == 1 ? hy : hz;
+                if (Math.Abs(centre) - reach > half * (1 + 1e-9) + 1e-12) return false;
+            }
+            return true;
+        }
+    }
+
+    /// <summary>
     /// A fill channel's image bound to its projection, mipmap and (for the model projections) the mesh maps it reads: evaluates pixels
     /// (<see cref="FillProjection"/> has the formulas). Read-only; workers share it. When it cannot project (<see cref="Reason"/>),
-    /// every pixel is the channel's fill value.
+    /// every pixel is the channel's fill value. A decal's channel (<see cref="BindDecal"/>) has its own image or only its value, the
+    /// decal's shape image and its coverage; it is transparent everywhere while the decal cannot be placed.
     /// </summary>
     internal sealed class FillImageSampler
     {
-        const double InvTwoPi = 1 / (2 * Math.PI), InvPi = 1 / Math.PI, InvLn2 = 1.4426950408889634;
-        /// <summary>Why the channel shows its fill value instead of the image, or null when it projects.</summary>
+        const double InvTwoPi = 1 / (2 * Math.PI), InvPi = 1 / Math.PI, InvLn2 = 1.4426950408889634, ToDegrees = 180 / Math.PI;
+        /// <summary>Why the channel shows its fill value instead of the image, or null when it projects. A placed decal's channel whose
+        /// image cannot be read has the reason and draws its value inside the decal.</summary>
         internal readonly string Reason;
         internal readonly Rgba32 Fallback;
         internal readonly ImageMipChain Mips;
-        readonly FillProjectionMode mode; readonly bool clamp; readonly int width, height;
+        /// <summary>A decal's shape image read by a channel that is not the shape channel (null: the channel is the shape, or there is none).</summary>
+        internal readonly ImageMipChain Shape;
+        readonly FillProjectionMode mode; readonly bool clamp, none; readonly int width, height;
+        // デカール: 置けたか（マップがそろったか）、箱の半分の大きさ、奥行きと裏向きの縁の幅、タイルの外接箱
+        readonly bool decal, placed; readonly double halfX, halfY, halfZ, depthBand, backAngle, backBand; readonly PositionTileBounds tileBounds;
         // UV 変換 (s′, t′) = A (s, t) + b
         readonly double a00, a01, a10, a11, b0, b1;
         // Uv: 段 0 のテクセル座標 = (ux, uy, uc)·(x + .5, y + .5, 1)、(vx, vy, vc) も同じ。足跡は一定
@@ -131,15 +190,29 @@ namespace Yozolab.YoluPainter.Core
         readonly int w0, h0;
 
         internal bool Active => Reason == null;
-        /// <summary>False when nothing it writes has alpha (inactive with a transparent fill value).</summary>
-        internal bool MayCover => Active || Fallback != Rgba32.Transparent;
+        /// <summary>A decal's channel (placed or not).</summary>
+        internal bool IsDecal => decal;
+        /// <summary>A decal that could be placed (its maps and the model root are known).</summary>
+        internal bool Placed => placed;
+        /// <summary>False when nothing it writes has alpha (inactive with a transparent fill value; a decal not placed, or with neither an
+        /// image nor a visible value).</summary>
+        internal bool MayCover => decal ? placed && (Mips != null || Fallback.A > 0) : Active || Fallback != Rgba32.Transparent;
 
-        FillImageSampler(string reason, Rgba32 fallback) { Reason = reason; Fallback = fallback; }
+        FillImageSampler(string reason, Rgba32 fallback, bool decal = false) { Reason = reason; Fallback = fallback; this.decal = decal; }
 
-        FillImageSampler(FillProjection p, ImageMipChain mips, Rgba32 fallback, int width, int height, BakedMeshMap positions, BakedMeshMap normals, GeneratorModelFrame frame)
+        FillImageSampler(FillProjection p, ImageMipChain mips, Rgba32 fallback, int width, int height, BakedMeshMap positions, BakedMeshMap normals, GeneratorModelFrame frame,
+            string reason = null, ImageMipChain shape = null, PositionTileBounds bounds = null)
         {
-            Fallback = fallback; Mips = mips; mode = p.Mode; clamp = p.Wrap == FillWrap.Clamp; this.width = width; this.height = height;
-            w0 = mips.Widths[0]; h0 = mips.Heights[0];
+            Fallback = fallback; Mips = mips; mode = p.Mode; clamp = p.Wrap == FillWrap.Clamp; none = p.Wrap == FillWrap.None; this.width = width; this.height = height;
+            Reason = reason; Shape = shape;
+            if (p.IsDecal)
+            {
+                decal = placed = true; tileBounds = bounds;
+                halfX = p.Placement.SizeX * .5; halfY = p.Placement.SizeY * .5; halfZ = p.Placement.SizeZ * .5;
+                depthBand = 1 - p.DepthHardness; backAngle = p.BackfaceAngle; backBand = (1 - p.BackfaceHardness) * p.BackfaceAngle;
+            }
+            var reference = mips ?? shape; // UV の変換の段 0 の大きさ（値だけのチャンネルは形の画像の、それも無ければ使わない）
+            w0 = reference?.Widths[0] ?? 1; h0 = reference?.Heights[0] ?? 1;
             double phi = -p.Rotation * Math.PI / 180, c = Math.Cos(phi), sn = Math.Sin(phi);
             a00 = p.TileU * c; a01 = -p.TileU * sn; b0 = p.TileU * (.5 - .5 * c + .5 * sn) + p.OffsetU;
             a10 = p.TileV * sn; a11 = p.TileV * c; b1 = p.TileV * (.5 - .5 * sn - .5 * c) + p.OffsetV;
@@ -150,6 +223,59 @@ namespace Yozolab.YoluPainter.Core
             var v = p.Placement; invSx = 1 / v.SizeX; invSy = 1 / v.SizeY; invSz = 1 / v.SizeZ; keep = 1 - p.BlendWidth;
             position = positions.Data; positionCoverage = positions.Coverage;
             if (normals != null) { normal = normals.Data; normalCoverage = normals.Coverage; }
+            PlacementTransform(v, positions, frame, out m, out k, out nm);
+        }
+
+        /// <summary>A sampler that writes the fill value everywhere, with the reason.</summary>
+        internal static FillImageSampler Constant(string reason, Rgba32 fallback) => new FillImageSampler(reason ?? "The image cannot be used.", fallback);
+
+        /// <summary>A decal's channel: its image's mipmap (or null: the value, with ownReason when the image cannot be read), the shape
+        /// image's mipmap when another channel holds the shape (null: this channel is the shape, or there is none), its value and the
+        /// resolved maps. A decal whose maps are missing, of another size or whose model root is not known is transparent everywhere, with
+        /// the reason.</summary>
+        internal static FillImageSampler BindDecal(FillProjection p, ImageMipChain own, string ownReason, ImageMipChain shape, Rgba32 value, int width, int height,
+            IReadOnlyList<BakedMeshMap> maps, IReadOnlyList<string> mapReasons, GeneratorModelFrame frame, Func<BakedMeshMap, PositionTileBounds> bounds)
+        {
+            string why = PlacementProblem(p, width, height, maps, mapReasons, frame);
+            if (why != null) return new FillImageSampler(why, value, decal: true);
+            var positions = maps[(int)MeshMapKind.Position];
+            return new FillImageSampler(p, own, value, width, height, positions, maps[(int)MeshMapKind.WorldNormal], frame, ownReason, shape, bounds?.Invoke(positions));
+        }
+
+        /// <summary>Why the model projection cannot be placed now (a map it reads is missing or of another size, the model root is not
+        /// known), or null.</summary>
+        internal static string PlacementProblem(FillProjection p, int width, int height, IReadOnlyList<BakedMeshMap> maps, IReadOnlyList<string> mapReasons, GeneratorModelFrame frame)
+        {
+            if (!p.ReadsMeshMaps) return null;
+            foreach (var kind in p.UsedMaps)
+            {
+                var map = maps == null || (int)kind >= maps.Count ? null : maps[(int)kind];
+                if (map == null)
+                {
+                    string why = mapReasons != null && (int)kind < mapReasons.Count ? mapReasons[(int)kind] : null;
+                    return "The " + p.Mode + " projection needs the " + kind + " map: " + (why ?? kind + " map is not available.");
+                }
+                if (map.Width != width || map.Height != height) return kind + " map is " + map.Width + "×" + map.Height + ", the texture set " + width + "×" + height + ". Bake it again.";
+            }
+            if (frame == null) return "Where the model root is is not known, so the projection cannot be placed on the model (load the model).";
+            return null;
+        }
+
+        /// <summary>Adds the tiles a decal at projection p may cover (its box meets the tile's covered positions; depth and facing are
+        /// not looked at) to into. False when it cannot be told (the maps are not there): the caller then assumes every tile.</summary>
+        internal static bool AddDecalTiles(FillProjection p, BakedMeshMap positions, GeneratorModelFrame frame, PositionTileBounds bounds, ICollection<TileCoord> into)
+        {
+            if (positions == null || frame == null || bounds == null || !ReferenceEquals(bounds.Map, positions)) return false;
+            PlacementTransform(p.Placement, positions, frame, out var m, out var k, out _);
+            double hx = p.Placement.SizeX * .5, hy = p.Placement.SizeY * .5, hz = p.Placement.SizeZ * .5;
+            for (int ty = 0; ty < bounds.Rows; ty++) for (int tx = 0; tx < bounds.Columns; tx++) if (bounds.Meets(tx, ty, m, k, hx, hy, hz)) into.Add(new TileCoord(tx, ty));
+            return true;
+        }
+
+        /// <summary>The affine map from a Position map's raw 16-bit values to a placement's space (l = m · v + k) and the rotation that
+        /// takes a world normal there (nm): snapshot space (the bake's bounding box) → the model root's space (frame) → the placement's.</summary>
+        static void PlacementTransform(ShapeVolume v, BakedMeshMap positions, GeneratorModelFrame frame, out double[] m, out double[] k, out double[] nm)
+        {
             // p = min + v · extent / 65535（スナップショットの空間）→ ルートの空間 R0ᵀ (p − t0) → 置き場の空間 Rsᵀ (… − c)。形のグラデーションと同じ組み方
             var prov = positions.Provenance; var r0 = frame.RotationMatrix(); var rs = v.RotationMatrix();
             var a = new double[9]; // A = Rsᵀ R0ᵀ
@@ -166,8 +292,17 @@ namespace Yozolab.YoluPainter.Core
             }
         }
 
-        /// <summary>A sampler that writes the fill value everywhere, with the reason.</summary>
-        internal static FillImageSampler Constant(string reason, Rgba32 fallback) => new FillImageSampler(reason ?? "The image cannot be used.", fallback);
+        /// <summary>True when the channel can have pixels in the tiles [tx0, tx1) × [ty0, ty1) (a decal: only where its box meets the
+        /// tiles' positions).</summary>
+        internal bool MayCoverTiles(int tx0, int ty0, int tx1, int ty1)
+        {
+            if (!MayCover) return false;
+            if (!decal || tileBounds == null) return true;
+            for (int ty = Math.Max(0, ty0); ty < Math.Min(tileBounds.Rows, ty1); ty++)
+                for (int tx = Math.Max(0, tx0); tx < Math.Min(tileBounds.Columns, tx1); tx++)
+                    if (tileBounds.Meets(tx, ty, m, k, halfX, halfY, halfZ)) return true;
+            return false;
+        }
 
         /// <summary>Binds the projection to the mipmap and the resolved maps (indexed by <see cref="MeshMapKind"/>), or a constant sampler with
         /// the reason when a map it uses is missing (mapReasons), of another size, or the model root is not known.</summary>
@@ -176,17 +311,8 @@ namespace Yozolab.YoluPainter.Core
             BakedMeshMap positions = null, normals = null;
             if (p.ReadsMeshMaps)
             {
-                foreach (var kind in p.UsedMaps)
-                {
-                    var map = maps == null || (int)kind >= maps.Count ? null : maps[(int)kind];
-                    if (map == null)
-                    {
-                        string why = mapReasons != null && (int)kind < mapReasons.Count ? mapReasons[(int)kind] : null;
-                        return Constant("The " + p.Mode + " projection needs the " + kind + " map: " + (why ?? kind + " map is not available."), fallback);
-                    }
-                    if (map.Width != width || map.Height != height) return Constant(kind + " map is " + map.Width + "×" + map.Height + ", the texture set " + width + "×" + height + ". Bake it again.", fallback);
-                }
-                if (frame == null) return Constant("Where the model root is is not known, so the projection cannot be placed on the model (load the model).", fallback);
+                string why = PlacementProblem(p, width, height, maps, mapReasons, frame);
+                if (why != null) return Constant(why, fallback);
                 positions = maps[(int)MeshMapKind.Position];
                 if (p.Mode == FillProjectionMode.Triplanar) normals = maps[(int)MeshMapKind.WorldNormal];
             }
@@ -212,6 +338,7 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>The channel's pixel (x, y) of the texture set.</summary>
         internal Rgba32 Pixel(int x, int y)
         {
+            if (decal) return placed ? DecalPixel(x, y) : Rgba32.Transparent;
             if (Reason != null) return Fallback;
             var acc = new Acc();
             if (mode == FillProjectionMode.Uv)
@@ -256,6 +383,54 @@ namespace Yozolab.YoluPainter.Core
             }
             return acc.Resolve(Fallback);
         }
+
+        /// <summary>A placed decal's pixel: transparent outside its box, where it is culled and on texels without a position or normal;
+        /// inside, the channel's colour with its alpha times the shape and the coverage.</summary>
+        Rgba32 DecalPixel(int x, int y)
+        {
+            if (!DecalPoint(x, y, out double lx, out double ly, out double lz, out double cover)) return Rgba32.Transparent;
+            double s = lx * invSx + .5, t = ly * invSy + .5, dsx = 0, dtx = 0, dsy = 0, dty = 0;
+            if (Mips != null || Shape != null)
+            {
+                // 足跡（平面と同じく、軸ごとにモデルの上で近いほうの隣との差）
+                int ix = Neighbor(x, y, 1, 0, lx, ly, lz, out int sx, out double ax0, out double ay0, out double az0);
+                int iy = Neighbor(x, y, 0, 1, lx, ly, lz, out int sy, out double bx0, out double by0, out double bz0);
+                if (ix >= 0) { dsx = sx * (ax0 * invSx + .5 - s); dtx = sx * (ay0 * invSy + .5 - t); }
+                if (iy >= 0) { dsy = sy * (bx0 * invSx + .5 - s); dty = sy * (by0 * invSy + .5 - t); }
+            }
+            if (Shape != null)
+            {
+                var shape = new Acc(); SampleAt(Shape, s, t, dsx, dtx, dsy, dty, 1, ref shape);
+                cover *= shape.Alpha / 255;
+                if (!(cover > 0)) return Rgba32.Transparent;
+            }
+            if (Mips == null) return new Rgba32(Fallback.R, Fallback.G, Fallback.B, MathUtil.ToByte(Fallback.A / 255.0 * cover));
+            var acc = new Acc(); SampleAt(Mips, s, t, dsx, dtx, dsy, dty, 1, ref acc);
+            return acc.Resolve(cover);
+        }
+
+        /// <summary>A placed decal's texel: its point in the placement's space and the coverage c (box, depth, facing; 0..1). False where
+        /// c = 0 (outside the box, culled, no position or normal).</summary>
+        bool DecalPoint(int x, int y, out double lx, out double ly, out double lz, out double cover)
+        {
+            int i = y * width + x; lx = ly = lz = cover = 0;
+            if (positionCoverage[i] == 0 || normalCoverage[i] == 0) return false;
+            Point(i, out lx, out ly, out lz);
+            if (Math.Abs(lx) > halfX || Math.Abs(ly) > halfY || Math.Abs(lz) > halfZ) return false;
+            // 奥行き: 箱の真ん中の面から −Z・+Z の面へ
+            double d = Math.Abs(lz) / halfZ; cover = depthBand <= 0 || d <= 1 - depthBand ? 1 : (1 - d) / depthBand;
+            // 面の向き: 置き場の空間の法線と −Z（画像を見る側）のなす角
+            double rnx = normal[i * 3] / 65535.0 * 2 - 1, rny = normal[i * 3 + 1] / 65535.0 * 2 - 1, rnz = normal[i * 3 + 2] / 65535.0 * 2 - 1;
+            double nx = nm[0] * rnx + nm[1] * rny + nm[2] * rnz, ny = nm[3] * rnx + nm[4] * rny + nm[5] * rnz, nz = nm[6] * rnx + nm[7] * rny + nm[8] * rnz;
+            double length = Math.Sqrt(nx * nx + ny * ny + nz * nz);
+            if (!(length > 1e-9)) return false; // 法線の無いテクセル
+            double facing = -nz / length, angle = Math.Acos(facing < -1 ? -1 : facing > 1 ? 1 : facing) * ToDegrees;
+            if (angle > backAngle) return false;
+            if (backBand > 0 && angle > backAngle - backBand) cover *= (backAngle - angle) / backBand;
+            return cover > 0;
+        }
+        /// <summary>A placed decal's coverage (0..1: its box, depth and facing, not its image) at texel (x, y); 0 when it is not placed.</summary>
+        internal double DecalCoverage(int x, int y) => decal && placed && DecalPoint(x, y, out _, out _, out _, out double cover) ? cover : 0;
 
         void Point(int i, out double lx, out double ly, out double lz)
         {
@@ -308,31 +483,34 @@ namespace Yozolab.YoluPainter.Core
         }
 
         /// <summary>Samples base coordinates (s, t) with their derivatives per pixel through the UV transform.</summary>
-        void SampleAt(double s, double t, double dsx, double dtx, double dsy, double dty, double weight, ref Acc acc)
+        void SampleAt(double s, double t, double dsx, double dtx, double dsy, double dty, double weight, ref Acc acc) => SampleAt(Mips, s, t, dsx, dtx, dsy, dty, weight, ref acc);
+        void SampleAt(ImageMipChain chain, double s, double t, double dsx, double dtx, double dsy, double dty, double weight, ref Acc acc)
         {
+            int cw = chain.Widths[0], ch = chain.Heights[0];
             double sp = a00 * s + a01 * t + b0, tp = a10 * s + a11 * t + b1;
-            double cx = w0 * (a00 * dsx + a01 * dtx), cy = h0 * (a10 * dsx + a11 * dtx), ex = w0 * (a00 * dsy + a01 * dty), ey = h0 * (a10 * dsy + a11 * dty);
+            double cx = cw * (a00 * dsx + a01 * dtx), cy = ch * (a10 * dsx + a11 * dtx), ex = cw * (a00 * dsy + a01 * dty), ey = ch * (a10 * dsy + a11 * dty);
             double rho = Math.Max(Math.Sqrt(cx * cx + cy * cy), Math.Sqrt(ex * ex + ey * ey));
-            Sample(sp * w0 - .5, tp * h0 - .5, rho, weight, ref acc);
+            Sample(chain, sp * cw - .5, tp * ch - .5, rho, weight, ref acc);
         }
 
         /// <summary>Level-0 texel coordinates (u0, v0) with the footprint ρ: bilinear at level 0, or trilinear between the mipmap levels.</summary>
-        void Sample(double u0, double v0, double rho, double weight, ref Acc acc)
+        void Sample(double u0, double v0, double rho, double weight, ref Acc acc) => Sample(Mips, u0, v0, rho, weight, ref acc);
+        void Sample(ImageMipChain chain, double u0, double v0, double rho, double weight, ref Acc acc)
         {
-            int last = Mips.Levels - 1;
-            if (!(rho > 1) || last == 0) { Bilinear(0, u0, v0, weight, ref acc); return; }
+            int last = chain.Levels - 1;
+            if (!(rho > 1) || last == 0) { Bilinear(chain, 0, u0, v0, weight, ref acc); return; }
             double lod = Math.Log(rho) * InvLn2;
-            if (lod >= last) { Bilinear(last, Level(last, u0, true), Level(last, v0, false), weight, ref acc); return; }
+            if (lod >= last) { Bilinear(chain, last, Level(chain, last, u0, true), Level(chain, last, v0, false), weight, ref acc); return; }
             int k = (int)lod; double f = lod - k;
-            Bilinear(k, Level(k, u0, true), Level(k, v0, false), weight * (1 - f), ref acc);
-            if (f > 0) Bilinear(k + 1, Level(k + 1, u0, true), Level(k + 1, v0, false), weight * f, ref acc);
+            Bilinear(chain, k, Level(chain, k, u0, true), Level(chain, k, v0, false), weight * (1 - f), ref acc);
+            if (f > 0) Bilinear(chain, k + 1, Level(chain, k + 1, u0, true), Level(chain, k + 1, v0, false), weight * f, ref acc);
         }
-        double Level(int level, double c0, bool horizontal)
-            => level == 0 ? c0 : (c0 + .5) * (horizontal ? Mips.Widths[level] / (double)w0 : Mips.Heights[level] / (double)h0) - .5;
+        static double Level(ImageMipChain chain, int level, double c0, bool horizontal)
+            => level == 0 ? c0 : (c0 + .5) * (horizontal ? chain.Widths[level] / (double)chain.Widths[0] : chain.Heights[level] / (double)chain.Heights[0]) - .5;
 
-        void Bilinear(int level, double u, double v, double weight, ref Acc acc)
+        void Bilinear(ImageMipChain chain, int level, double u, double v, double weight, ref Acc acc)
         {
-            int w = Mips.Widths[level], h = Mips.Heights[level];
+            int w = chain.Widths[level], h = chain.Heights[level];
             double fu = Math.Floor(u), fv = Math.Floor(v), fx = u - fu, fy = v - fv;
             int iu = (int)fu, iv = (int)fv;
             for (int dy = 0; dy < 2; dy++)
@@ -342,13 +520,17 @@ namespace Yozolab.YoluPainter.Core
                 for (int dx = 0; dx < 2; dx++)
                 {
                     double wgt = weight * wy * (dx == 0 ? 1 - fx : fx); if (wgt <= 0) continue;
-                    Mips.Read(level, Wrap(iu + dx, w), ty, out int r, out int g, out int b, out int a);
+                    int tx = Wrap(iu + dx, w);
+                    if (tx < 0 || ty < 0) { acc.Add(wgt, 0, 0, 0, 0); continue; } // 画像の外（Wrap None）: 透明な黒
+                    chain.Read(level, tx, ty, out int r, out int g, out int b, out int a);
                     acc.Add(wgt, r, g, b, a);
                 }
             }
         }
+        /// <summary>The texel index on an axis of n texels, or −1 outside the image when the wrap is None.</summary>
         int Wrap(int i, int n)
         {
+            if (none) return i < 0 || i >= n ? -1 : i;
             if (clamp) return i < 0 ? 0 : i >= n ? n - 1 : i;
             i %= n; return i < 0 ? i + n : i;
         }
@@ -371,6 +553,17 @@ namespace Yozolab.YoluPainter.Core
                 byte alpha = MathUtil.ToByte(a / 255);
                 if (alpha == 0) return zw > 0 ? new Rgba32(MathUtil.ToByte(zr / zw / 255), MathUtil.ToByte(zg / zw / 255), MathUtil.ToByte(zb / zw / 255), 0) : Rgba32.Transparent;
                 return new Rgba32(MathUtil.ToByte(r / a / 255), MathUtil.ToByte(g / a / 255), MathUtil.ToByte(b / a / 255), alpha);
+            }
+            /// <summary>The weighted alpha (0..255, not rounded; 0 when nothing was read).</summary>
+            public double Alpha => count == 0 ? 0 : same ? (first >> 24 & 0xff) : a;
+            /// <summary>The straight colour with its alpha times scale (0..1), rounded once: the colour where the alpha rounds to 0 too
+            /// (the read texels' colour; transparent pixels keep RGB).</summary>
+            public Rgba32 Resolve(double scale)
+            {
+                if (count == 0) return Rgba32.Transparent;
+                if (same) return new Rgba32((byte)first, (byte)(first >> 8), (byte)(first >> 16), MathUtil.ToByte((first >> 24 & 0xff) / 255.0 * scale));
+                if (!(a > 0)) return zw > 0 ? new Rgba32(MathUtil.ToByte(zr / zw / 255), MathUtil.ToByte(zg / zw / 255), MathUtil.ToByte(zb / zw / 255), 0) : Rgba32.Transparent;
+                return new Rgba32(MathUtil.ToByte(r / a / 255), MathUtil.ToByte(g / a / 255), MathUtil.ToByte(b / a / 255), MathUtil.ToByte(a / 255 * scale));
             }
         }
     }
