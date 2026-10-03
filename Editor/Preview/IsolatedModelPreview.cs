@@ -120,13 +120,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
             {
                 ThrowIfDisposed();
                 if (shading == value) return;
-                shading = value;
+                shading = value; contentVersion++;
                 if (shading == PreviewShading.Neutral) MaterialView.Reset(materials.Count); // 複製と詰めたテクスチャを放す
                 ApplyRendererMaterials();
             }
         }
         /// <summary>マテリアルの欄で変えた値（マテリアル表示の複製に重ねる。元のマテリアルには入らない）。</summary>
-        public PreviewMaterialEdits MaterialEdits { get => MaterialView.Edits; set => MaterialView.Edits = value; }
+        public PreviewMaterialEdits MaterialEdits { get => MaterialView.Edits; set { MaterialView.Edits = value; contentVersion++; } }
         /// <summary>スロットの元のマテリアルの対応（元が変わっていれば決め直す）。範囲外は null。</summary>
         public PreviewMaterialBinding MaterialBinding(int slot) => slot >= 0 && slot < materials.Count ? MaterialView.Binding(slot) : null;
         /// <summary>マテリアル表示で、そのスロットを中立で見せている理由（マテリアルで見せている・中立の表示なら null）。</summary>
@@ -145,8 +145,35 @@ namespace Yozolab.YoluPainter.Editor.Preview
         }
         /// <summary>試験用: スロットの、プロパティに入れた詰めたテクスチャ。</summary>
         internal RenderTexture MaterialPackedTexture(int slot, string property) => MaterialView.PackedTexture(slot, property);
-        /// <summary>シェーダーのコンパイルを待っているか（マテリアル表示ではコンパイルが済むまで描き直す）。</summary>
-        public bool CompilingShaders => shading == PreviewShading.Material && ShaderUtil.anythingCompiling;
+        /// <summary>
+        /// マテリアル表示で描いているマテリアルの、前に向けて描くパス（LightMode が無い・Always・ForwardBase・ForwardAdd）がまだコンパイル
+        /// されていないか（非同期のコンパイルのあいだは仮のシアンで描かれるので、済むまで描き直す）。Unity が何かをコンパイルしていても、それが
+        /// このプレビューのマテリアルでなければ false（シーンビューのシェーダーの変種のコンパイルにつられて描き直さない）。
+        /// </summary>
+        public bool CompilingShaders
+        {
+            get
+            {
+                if (shading != PreviewShading.Material || !ShaderUtil.anythingCompiling) return false;
+                foreach (var (renderer, _) in slotRenderers)
+                {
+                    if (renderer == null) continue;
+                    foreach (var m in renderer.sharedMaterials) if (m != null && m.shader != null && !ForwardPassesCompiled(m)) return true;
+                }
+                return false;
+            }
+        }
+        static readonly ShaderTagId LightModeTag = new ShaderTagId("LightMode");
+        static bool ForwardPassesCompiled(Material m)
+        {
+            for (int p = 0; p < m.passCount; p++)
+            {
+                string mode = m.shader.FindPassTagValue(p, LightModeTag).name;
+                if (!string.IsNullOrEmpty(mode) && mode != "Always" && mode != "ForwardBase" && mode != "ForwardAdd") continue;
+                if (!ShaderUtil.IsPassCompiled(m, p)) return false;
+            }
+            return true;
+        }
 
         /// <summary>
         /// マテリアル表示に塗った中身を渡す（slots に無いスロットは元のマテリアルのテクスチャのまま）。中立の表示のあいだは何もしない
@@ -154,7 +181,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// </summary>
         public void SetMaterialChannels(IReadOnlyDictionary<int, PreviewSlotChannels> slots)
         {
-            ThrowIfDisposed();
+            ThrowIfDisposed(); contentVersion++;
             if (shading != PreviewShading.Material) return;
             for (int i = 0; i < materials.Count; i++)
             {
@@ -616,12 +643,21 @@ namespace Yozolab.YoluPainter.Editor.Preview
             preview.camera.nearClipPlane = Mathf.Max(0.00001f, Mathf.Min(distance * 0.02f, ModelRadius * 0.01f));
             preview.camera.farClipPlane = Mathf.Max(distance + ModelRadius * 20, preview.camera.nearClipPlane + 1);
         }
+        /// <summary>
+        /// 3D ビューを rect に描く（Repaint のときだけ）。絵は変わったときだけ描き直し、それ以外は前の絵を貼る（<see cref="RenderCached"/>。
+        /// IsolatedModelPreview.RenderCache.cs）。
+        /// </summary>
         public void Render(Rect rect)
         {
             ThrowIfDisposed();
             if (Event.current != null && Event.current.type != EventType.Repaint) return;
             if (!HasModel || rect.width < 2 || rect.height < 2) return;
-            EnsurePreview(); UpdateCamera(rect);
+            var texture = RenderCached(rect, EditorGUIUtility.pixelsPerPoint);
+            if (texture != null) GUI.DrawTexture(rect, texture, ScaleMode.StretchToFill, false);
+        }
+        /// <summary>カメラで rect の大きさに描き、描いたテクスチャ（PreviewRenderUtility の描き先）を返す（<see cref="RenderCached"/> が呼ぶ）。</summary>
+        Texture DrawPreview(Rect rect)
+        {
             foreach (var material in materials) material.SetFloat("_PreviewLit", LitPreview ? 1 : 0);
             ApplyScene(); UpdateSymmetryPlaneObject(); UpdateRegionHighlightObject();
             Texture texture = null;
@@ -641,7 +677,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 try { texture = preview.EndPreview(); }
                 finally { Unsupported.useScriptableRenderPipeline = previousPipelineFlag; }
             }
-            if (texture != null) GUI.DrawTexture(rect, texture, ScaleMode.StretchToFill, false);
+            return texture;
         }
         /// <summary>モデルの空間の点が 3D ビューのどこに見えるか（GUI 座標）。カメラの後ろなら false。</summary>
         public bool TryWorldToGui(Rect viewRect, Vector3 world, out Vector2 gui)
@@ -811,7 +847,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         }
         public void SetPaintTexture(Texture texture, int materialSlot = -1)
         {
-            ThrowIfDisposed();
+            ThrowIfDisposed(); contentVersion++; // 中身は描き先の中で変わることがあるので、渡されたら描き直す
             for (int i = 0; i < materials.Count; i++)
             {
                 bool selected = texture != null && (materialSlot < 0 || materialSlot == i);
@@ -823,7 +859,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// 元のマテリアルのテクスチャと色に戻す。表示だけで、元のマテリアルには触れない。</summary>
         public void SetPaintTextures(IReadOnlyDictionary<int, Texture> textures)
         {
-            ThrowIfDisposed();
+            ThrowIfDisposed(); contentVersion++; // 中身は描き先の中で変わることがあるので、渡されたら描き直す
             for (int i = 0; i < materials.Count; i++)
             {
                 Texture texture = null;
@@ -835,7 +871,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>スロットごとのノーマルマップ（<see cref="SetNormalTexture"/> と同じ形）。normals に無いスロットと null は使わない。</summary>
         public void SetNormalTextures(IReadOnlyDictionary<int, Texture> normals)
         {
-            ThrowIfDisposed();
+            ThrowIfDisposed(); contentVersion++; // 中身は描き先の中で変わることがあるので、渡されたら描き直す
             for (int i = 0; i < materials.Count; i++)
             {
                 Texture normal = null;
@@ -851,7 +887,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>ノーマルマップ（接空間、リニアの RGB、OpenGL の Y+）をスロットの照明に使う。null で使わない。表示だけで、元のマテリアルには触れない。</summary>
         public void SetNormalTexture(Texture normalMap, int materialSlot = -1)
         {
-            ThrowIfDisposed();
+            ThrowIfDisposed(); contentVersion++; // 中身は描き先の中で変わることがあるので、渡されたら描き直す
             for (int i = 0; i < materials.Count; i++)
             {
                 bool selected = normalMap != null && (materialSlot < 0 || materialSlot == i);
@@ -865,6 +901,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             ThrowIfDisposed();
             if (!HasModel) return null;
             EnsurePreview(); var rect = new Rect(0, 0, width, height); UpdateCamera(rect); ApplyScene(); UpdateSymmetryPlaneObject(); UpdateRegionHighlightObject();
+            ForgetRenderedPicture(); // 3D ビューと同じ描き先に描くので、次の 3D ビューの描画は描き直す
             bool previousPipelineFlag = Unsupported.useScriptableRenderPipeline, previousAsync = ShaderUtil.allowAsyncCompilation;
             // 試験の画像は、元のシェーダーのコンパイルを待った絵にする（非同期のあいだは仮のシアンで描かれる）
             ShaderUtil.allowAsyncCompilation = false;
@@ -911,6 +948,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         }
         void ClearModel()
         {
+            contentVersion++;
             CancelNavigation(); geometry = null; attributes = null;
             ModelRootPosition = Vector3.zero; ModelRootRotation = Quaternion.identity;
             foreach (var e in entries) e.Skin?.Dispose();

@@ -110,8 +110,9 @@ namespace Yozolab.YoluPainter.Editor
         // ───────── 元のマテリアルの変化に追いつく ─────────
 
         int watchedMaterialState;
-        /// <summary>Tick から: マテリアル表示のあいだ、元のマテリアルが外で変わった（インスペクターで値を変えた・Undo した）・シェーダーの
-        /// コンパイルを待っているときに 3D ビューを描き直させる。</summary>
+        /// <summary>Tick から: マテリアル表示のあいだ、元のマテリアルが外で変わった（インスペクターで値を変えた・Undo した）ときに 3D ビューの
+        /// 中身を作り直させる。このプレビューのマテリアルのシェーダーのコンパイルを待つ描き直しは、プレビューが知らせる（<see cref="IsolatedModelPreview.WantsRepaint"/>。
+        /// 0.25 秒ごとと、終わったとき）。前は Unity が何かをコンパイルしているあいだ毎回、中身ごと作り直させていた。</summary>
         void WatchSourceMaterials()
         {
             if (preview == null || previewShading != PreviewShading.Material || !preview.HasModel) return;
@@ -121,7 +122,7 @@ namespace Yozolab.YoluPainter.Editor
                 var m = preview.SourceMaterial(i);
                 state = state * 31 + (m == null ? 0 : EditorUtility.GetDirtyCount(m) * 7 + (m.shader != null ? m.shader.GetInstanceID() : 0));
             }
-            if (state != watchedMaterialState || preview.CompilingShaders) { watchedMaterialState = state; repaintPixels = true; Repaint(); }
+            if (state != watchedMaterialState) { watchedMaterialState = state; repaintPixels = true; Repaint(); }
         }
 
         // ───────── 見出しとメニュー ─────────

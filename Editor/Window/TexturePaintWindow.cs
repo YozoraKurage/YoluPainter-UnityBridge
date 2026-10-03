@@ -72,7 +72,7 @@ namespace Yozolab.YoluPainter.Editor
         void OnEnable()
         {
             minSize = new Vector2(980,640); wantsMouseMove = true; wantsMouseEnterLeaveWindow = true; L.LanguageChanged += Repaint; PainterToolIcons.Changed += Repaint;
-            compositor = CreateCompositor(); preview = new IsolatedModelPreview();
+            compositor = CreateCompositor(); preview = new IsolatedModelPreview(); ApplyPreviewFrameRate(); // 3D を描く回数の上限（Model/TexturePaintWindow.RedrawRate.cs）
             if (materialEdits == null) materialEdits = new PreviewMaterialEdits();
             materialEdits.Touch(); preview.MaterialEdits = materialEdits; preview.Shading = previewShading; BindPreviewScene();
             if (String.IsNullOrEmpty(recoveryRoot)) recoveryRoot=Path.GetFullPath(Path.Combine("Library","YoluPainter","recovery-"+Guid.NewGuid().ToString("N")));
@@ -117,7 +117,7 @@ namespace Yozolab.YoluPainter.Editor
             if(otherSource>0) return "This project already holds "+((document.AllocatedBytes+otherSource)>>20)+" MiB of layer pixels ("+(otherSource>>20)+" MiB in the other texture sets), above the "+(budget>>20)+" MiB budget in Project Settings > YoluPainter; nothing more can be added to this texture set until the budget is raised.";
             return "This document already holds "+(document.AllocatedBytes>>20)+" MiB of layer pixels, above the "+(source>>20)+" MiB budget in Project Settings > YoluPainter; nothing more can be added until the budget is raised.";
         }
-        void SettingsChanged(){var note=ApplyBudgets();var resourceNote=ApplyResourceBudget();if(note!=null||resourceNote!=null)message=note??resourceNote;libraryListing=null;ApplyCompositorSettings();Repaint();}
+        void SettingsChanged(){var note=ApplyBudgets();var resourceNote=ApplyResourceBudget();if(note!=null||resourceNote!=null)message=note??resourceNote;libraryListing=null;ApplyCompositorSettings();ApplyPreviewFrameRate();Repaint();}
         internal static void OpenSettings()=>SettingsService.OpenProjectSettings(PainterSettingsProvider.Path);
         /// <summary>今のテクスチャセットの文書を新しく結び付けたとき（新しいプロジェクト・開く・取り込み）: 予算を入れ、表示を作り直し、
         /// メッシュマップ（前の文書のもの）を捨てる。</summary>
@@ -167,7 +167,7 @@ namespace Yozolab.YoluPainter.Editor
             // 描いていないあいだは GPU の写しを手放す（Update が来ないと合成器は古い写しを捨てられない）
             if(compositor!=null && compositor.ResidentBytes>0 && EditorApplication.timeSinceStartup-lastComposite>GpuCacheIdleSeconds) compositor.ReleaseResidentCaches();
             RebuildCompositorIfPending(); // 「表示の合成」の設定が変わったのをストロークの終わりまで待っていたら
-            WatchSourceMaterials(); ReconcileMaterialEdits();
+            WatchSourceMaterials(); ReconcileMaterialEdits(); RepaintPreviewIfWanted();
         }
         long thumbnailRepaintAsked=-1;
         internal const double GpuCacheIdleSeconds=120;
@@ -192,6 +192,7 @@ namespace Yozolab.YoluPainter.Editor
             // 合成（GPU への転送と合成、Normal の出力、3D のプレビューの更新）は描くときだけ。入力のイベント（ストローク中の MouseDrag
             // など）のたびに合成すると 1 回の処理が重くなり、OS がマウスの移動をまとめて届く点がまばらになる。表示の前には必ず
             // Repaint が来るので、その間の変更はまとめて 1 回で合成する。
+            if(e.type==EventType.Repaint) CountRepaint(); // 描き直しの回数（RedrawRate.cs）
             if(e.type==EventType.Repaint && DisplayNeedsCompositing) RefreshDisplayForFrame(); // 時間で区切る。残りは次の描画へ（Compositing.cs）
             LayoutShell();
             SyncPolygonFillHover(); // ポインタの下の範囲の強調を、ツール・モデル・範囲の種類に合わせる（Tools/TexturePaintWindow.PolygonFill.cs）

@@ -216,6 +216,31 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(PainterSettings.DisplayFrameBudgetMs, Is.EqualTo(PainterSettings.DefaultDisplayFrameBudgetMs)); Assert.That(PainterSettings.Warnings, Is.Empty);
         }
 
+        /// <summary>3D ビューを 1 秒に描く回数の上限: 既定 60、保存して読み直せる、範囲外（負・240 超）は保存を断り読み込みで既定に直す、0 は上限なし。
+        /// この項目の無い以前のファイルは既定で、知らせも無い。</summary>
+        [Test] public void ThePreviewFrameRateLimitIsSavedAndRangeChecked()
+        {
+            Assert.That(PainterSettings.PreviewFrameRateLimit, Is.EqualTo(60));
+            var personal = PainterSettings.PersonalSettings; personal.previewFrameRateLimit = 30;
+            PainterSettings.Save(null, personal);
+            PainterSettings.ProjectRoot = project; // 読み直す
+            Assert.That(PainterSettings.PreviewFrameRateLimit, Is.EqualTo(30));
+            foreach (int bad in new[] { -1, PainterSettings.MaxPreviewFrameRateLimit + 1 })
+            {
+                personal.previewFrameRateLimit = bad;
+                Assert.That(() => PainterSettings.Save(null, personal), Throws.ArgumentException.With.Message.Contains("3D view frame rate limit"), bad.ToString());
+            }
+            Assert.That(PainterSettings.PreviewFrameRateLimit, Is.EqualTo(30), "a refused save changes nothing");
+            personal.previewFrameRateLimit = 0; PainterSettings.Save(null, personal);
+            Assert.That(PainterSettings.PreviewFrameRateLimit, Is.Zero, "0 = no limit");
+            File.WriteAllText(PainterSettings.PersonalPath, "{\"schema\":1,\"previewFrameRateLimit\":-3}");
+            PainterSettings.ProjectRoot = project;
+            Assert.That(PainterSettings.PreviewFrameRateLimit, Is.EqualTo(60)); Assert.That(PainterSettings.Warnings, Has.Some.Contains("3D view frame rate limit"));
+            File.WriteAllText(PainterSettings.PersonalPath, "{\"schema\":1,\"recoveryIntervalSeconds\":20}");
+            PainterSettings.ProjectRoot = project;
+            Assert.That(PainterSettings.PreviewFrameRateLimit, Is.EqualTo(60)); Assert.That(PainterSettings.Warnings, Is.Empty);
+        }
+
         [Test] public void TheSettingsPageListsThreadChoicesUpToThisMachine()
         {
             PainterSettings.ProcessorCountOverride = 12;

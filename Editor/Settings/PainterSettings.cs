@@ -63,6 +63,9 @@ namespace Yozolab.YoluPainter.Editor
             /// 少しずつ合成する（窓を止めない。ストロークの所は時間に関わらずその回に出す）。0 は分けない（変わった所を 1 回で全部合成する。
             /// 以前の動き）。この項目の無い以前のファイルは既定。保存・書き出しの合成には関わらない。</summary>
             public int displayFrameBudgetMs = DefaultDisplayFrameBudgetMs;
+            /// <summary>3D ビューを 1 秒に描く回数の上限（絵が変わり続けるとき。カメラのドラッグ・ストローク）。0 は上限なし。描かなかった変更は次に
+            /// 描く。この項目の無い以前のファイルは既定。何も変わらなければ、上限に関わらず描かない。</summary>
+            public int previewFrameRateLimit = DefaultPreviewFrameRateLimit;
             /// <summary>自分の置き場（アセットのパネルの「自分の置き場」。ほかのプロジェクトと同じフォルダを指せば共有できる）。空なら
             /// UserSettings/YoluPainter/Library。相対パスはプロジェクトのフォルダから。この項目の無い以前のファイルは既定。</summary>
             public string libraryFolder = "";
@@ -88,6 +91,7 @@ namespace Yozolab.YoluPainter.Editor
         public const int MaxCpuThreads = 1024;
         /// <summary>表示の合成の 1 回の描画の時間（ms）の既定と上限。</summary>
         public const int DefaultDisplayFrameBudgetMs = 10, MaxDisplayFrameBudgetMs = 100;
+        public const int DefaultPreviewFrameRateLimit = 60, MaxPreviewFrameRateLimit = 240;
         /// <summary>この GPU のメモリ（MiB）。テストは差し替える。</summary>
         internal static int? GraphicsMemoryMiBOverride;
         public static int GraphicsMemoryMiB => GraphicsMemoryMiBOverride ?? Math.Max(256, SystemInfo.graphicsMemorySize);
@@ -176,6 +180,7 @@ namespace Yozolab.YoluPainter.Editor
         public static int CpuThreads { get { Load(); return personal.cpuThreads; } }
         /// <summary>表示の合成に 1 回の描画で使う時間（ms。0 = 分けない）。</summary>
         public static int DisplayFrameBudgetMs { get { Load(); return personal.displayFrameBudgetMs; } }
+        public static int PreviewFrameRateLimit { get { Load(); return personal.previewFrameRateLimit; } }
         /// <summary>このマシンの論理プロセッサの数（自動のときのスレッドの数）。テストは差し替える。</summary>
         internal static int? ProcessorCountOverride;
         public static int ProcessorCount => ProcessorCountOverride ?? Math.Max(1, Environment.ProcessorCount);
@@ -270,6 +275,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             if (p.cpuThreads != Automatic) Range(ref p.cpuThreads, 1, MaxCpuThreads, Automatic, "CPU threads (-1 = automatic)");
             Range(ref p.displayFrameBudgetMs, 0, MaxDisplayFrameBudgetMs, defaultsPersonal.displayFrameBudgetMs, "Display compositing time per frame (ms, 0 = no limit)");
+            Range(ref p.previewFrameRateLimit, 0, MaxPreviewFrameRateLimit, defaultsPersonal.previewFrameRateLimit, "3D view frame rate limit (per second, 0 = no limit)");
             if (p.brushImportFolder == null && fix) p.brushImportFolder = "";
             if (s.projectBrushFolder == null && fix) s.projectBrushFolder = "";
             if (p.brushFolder == null && fix) p.brushFolder = "";

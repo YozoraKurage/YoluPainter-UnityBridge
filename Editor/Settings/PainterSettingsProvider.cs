@@ -155,6 +155,17 @@ namespace Yozolab.YoluPainter.Editor
             EditorGUILayout.LabelField(" ", CompositingNote(p.displayCompositing, gpuUnavailable), EditorStyles.wordWrappedMiniLabel);
             p.cpuThreads = ThreadsPopup(p.cpuThreads);
             p.displayFrameBudgetMs = FrameBudgetPopup(p.displayFrameBudgetMs);
+            p.previewFrameRateLimit = PreviewFrameRatePopup(p.previewFrameRateLimit);
+        }
+        internal static readonly int[] PreviewFrameRateChoices = { 0, 15, 30, 60, 120 };
+        static int PreviewFrameRatePopup(int value)
+        {
+            var values = PreviewFrameRateChoices.Contains(value) ? PreviewFrameRateChoices : PreviewFrameRateChoices.Concat(new[] { value }).OrderBy(v => v).ToArray();
+            var names = values.Select(v => new GUIContent(v == 0 ? "No limit" : v + " per second" + (v == PainterSettings.DefaultPreviewFrameRateLimit ? " (default)" : ""))).ToArray();
+            return EditorGUILayout.IntPopup(new GUIContent("3D view frame rate limit",
+                "How many times a second the 3D view may draw itself while its picture keeps changing (dragging the camera, painting). The 3D view is drawn " +
+                "only when something it shows changed (the camera, the model, the textures, the material, the lighting, the overlays); other repaints of " +
+                "the window reuse the last picture, whatever is chosen here. A change not drawn because of the limit is drawn a moment later."), value, names, values);
         }
         internal static readonly int[] FrameBudgetChoices = { 0, 4, 6, 8, 10, 12, 16, 25, 33, 50 };
         static int FrameBudgetPopup(int value)
