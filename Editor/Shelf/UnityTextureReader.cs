@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
+using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using Yozolab.YoluPainter.Core.Shelf;
@@ -111,20 +112,33 @@ namespace Yozolab.YoluPainter.Editor
             return result;
         }
 
-        /// <summary>Draws mip 0 into a temporary render texture of the same size and reads it back (see the class summary).</summary>
+        internal const int ReadbackBandBytes = 1024 * 1024;
+        /// <summary>RGBA8 の同期転送と CPU の読み戻し台を、1 回あたりこのバイト数以内の行の束にする。</summary>
+        internal static int ReadbackBandHeight(int width, int height) => Math.Min(height, Math.Max(1, ReadbackBandBytes / checked(width * 4)));
+
+        /// <summary>Draws mip 0 into a temporary render texture of the same size and reads it back in bounded row bands (see the class summary).</summary>
         static Color32[] ReadThroughGpu(Texture texture, bool srgbSampling, Material decode = null)
         {
             int w = texture.width, h = texture.height;
             var descriptor = new RenderTextureDescriptor(w, h, RenderTextureFormat.ARGB32, 0) { sRGB = srgbSampling, useMipMap = false, autoGenerateMips = false, msaaSamples = 1 };
             var previous = RenderTexture.active;
             var rt = RenderTexture.GetTemporary(descriptor);
-            var read = new Texture2D(w, h, TextureFormat.RGBA32, false, true);
+            Texture2D read = null;
             try
             {
+                int band = ReadbackBandHeight(w, h);
+                read = new Texture2D(w, band, TextureFormat.RGBA32, false, true);
                 if (decode == null) Graphics.Blit(texture, rt); else Graphics.Blit(texture, rt, decode);
                 RenderTexture.active = rt;
-                read.ReadPixels(new Rect(0, 0, w, h), 0, 0, false);
-                return read.GetPixels32(0);
+                var pixels = new Color32[checked(w * h)];
+                for (int y = 0; y < h; y += band)
+                {
+                    int rows = Math.Min(band, h - y);
+                    read.ReadPixels(new Rect(0, y, w, rows), 0, 0, false);
+                    // Texture2D の CPU データを借り、その場で写す。配列を Dispose したり、次の ReadPixels まで保持しない。
+                    NativeArray<Color32>.Copy(read.GetRawTextureData<Color32>(), 0, pixels, y * w, rows * w);
+                }
+                return pixels;
             }
             finally
             {

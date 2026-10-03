@@ -1,5 +1,5 @@
-# 重い試験（1 件 4 秒以上。2026-10-03 の batch-gl の記録の中央値）。担当のふだんの全件（run-tests.sh の絞り込み無し）では飛ばし、
-# 統合（--priority）と --full のときだけ回す。1 行 1 件「クラス.メソッド」（名前空間 Yozolab.YoluPainter.Tests の下）。
+# 重い試験（1 件 4 秒以上）。通常の統合全件では飛ばし、リリース前（--release または --full）か、指定した絞り込みで回す。
+# 担当は絞り込みと core-tests.sh まで。1 行 1 件「クラス.メソッド」（名前空間 Yozolab.YoluPainter.Tests の下）。
 # 足す・外すときは test-durations.sh の遅い順を見る。消した試験の行は残しても害は無い（当たらないだけ）。
 TextureSetTests.TheMemoryBudgetsCoverTheWholeProject
 BurstKernelTests.EveryModeAndBytePairGivesTheManagedBytes
@@ -23,6 +23,9 @@ ResourceWindowTests.UnreadableTexturesReadEveryValueInBothColourSpaces
 SmartMaterialOffscreenTests.BuiltInsOnTheDemoCubeHaveEveryGeneratorWorkingAndPinsFollowTheBake
 GradientDisplayTests.FourKGradientDragReportsTheTimeAndEvaluatedBlocks
 WindowTests.DirectFillGradientAndStopsReopenFromYlpAndScalarChannelsStayIndependent
+WindowTests.OpenGlWindowPaintingSetSwitchAndReopenStayWithinWarmGraphicsMemory
+GpuReadbackMemoryTests.BakeWorkBuffersGrowOnlyWhenTheDispatchNeedsThemAndKeepTheTailResults
+GpuReadbackMemoryTests.OpenGlImageReadbacksKeepPixelsAssetsAndWarmMemoryAcrossFrames
 WindowTests.DroppingAnImageOnTheModelPlacesADecalFacingTheSurfaceAsOneUndoStep
 WindowTests.TheDecalMovesWithTheGizmoAsOneUndoStepAndEscapeOrFocusLossCancels
 WindowTests.MaterialPolygonFillUsesAllChannelsIn2DAnd3D

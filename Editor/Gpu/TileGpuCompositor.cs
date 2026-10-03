@@ -1014,7 +1014,7 @@ namespace Yozolab.YoluPainter.Editor
         /// 触れるタイルだけ CPU の正本の式で上書きする。触れないタイルではグループの寄与は無い（分離は透明、通過は下のまま）ので正しい。</summary>
         void CompositeBlockWithCpuGroups(PaintDocument doc, IReadOnlyList<CpuCompositor.StackEntry> plan, PaintChannel channel, int bx, int by)
         {
-            if (blocks.TryGetValue(BlockKey(bx, by), out var state)) { Release(state.Below); ResidentBytesRemove(state.Below); ReleaseGroupCopies(state.Groups); blocks.Remove(BlockKey(bx, by)); }
+            if (blocks.TryGetValue(BlockKey(bx, by), out var state)) { ResidentBytesRemove(state.Below); Release(state.Below); ReleaseGroupCopies(state.Groups); blocks.Remove(BlockKey(bx, by)); }
             LastBlockCount++;
             var top = LevelAt(0);
             Clear(top.A);

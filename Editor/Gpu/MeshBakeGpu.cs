@@ -108,7 +108,9 @@ namespace Yozolab.YoluPainter.Editor
 
         string PrepareOnMain(MeshBakeRayScene scene)
         {
+            ReleaseOnMain();
             string unavailable = Unavailable(); if (unavailable != null) return unavailable;
+            if (scene == null) return L.Tr("No ray scene was supplied.");
             if (scene.SceneCount < 1 || scene.SceneCount > 2) return "unexpected scene count";
             int nodeTotal = 0, triTotal = 0;
             for (int i = 0; i < scene.SceneCount; i++) { nodeTotal += scene.NodeFirst[i].Length; triTotal += scene.TriangleOriginal[i].Length; }
@@ -133,28 +135,49 @@ namespace Yozolab.YoluPainter.Editor
                 nodes = new ComputeBuffer(nodeData.Length, Marshal.SizeOf<GpuNode>()); nodes.SetData(nodeData);
                 tris = new ComputeBuffer(triData.Length, Marshal.SizeOf<GpuTri>()); tris.SetData(triData);
                 aoDirs = Directions(scene.AoU, scene.AoCos, scene.AoSin); thDirs = Directions(scene.ThicknessU, scene.ThicknessCos, scene.ThicknessSin);
-                jobs = new ComputeBuffer(DispatchJobs, Marshal.SizeOf<GpuJob>()); results = new ComputeBuffer(DispatchJobs, Marshal.SizeOf<GpuResult>());
+                jobs = new ComputeBuffer(FirstDispatchJobs, Marshal.SizeOf<GpuJob>()); results = new ComputeBuffer(FirstDispatchJobs, Marshal.SizeOf<GpuResult>());
+                jobData = new GpuJob[FirstDispatchJobs]; resultData = new GpuResult[FirstDispatchJobs];
+                UploadedBytes = bytes - (long)(DispatchJobs - FirstDispatchJobs) * (Marshal.SizeOf<GpuJob>() + Marshal.SizeOf<GpuResult>());
+                chunk = FirstDispatchJobs;
+                raysPerJob = Math.Max(1, (scene.WantAo ? scene.AoU.Length : 0) + (scene.WantThickness ? scene.ThicknessU.Length : 0));
+                shader.SetBuffer(kernel, "_Nodes", nodes); shader.SetBuffer(kernel, "_Tris", tris); shader.SetBuffer(kernel, "_AoDirs", aoDirs); shader.SetBuffer(kernel, "_ThDirs", thDirs);
+                shader.SetBuffer(kernel, "_Jobs", jobs); shader.SetBuffer(kernel, "_Results", results);
+                shader.SetInt("_NodeBase0", nodeBases[0]); shader.SetInt("_NodeBase1", nodeBases[1]); shader.SetInt("_TriBase0", triBases[0]); shader.SetInt("_TriBase1", triBases[1]);
+                shader.SetInt("_NodeCount0", nodeCounts[0]); shader.SetInt("_NodeCount1", nodeCounts[1]);
+                shader.SetInt("_AoCount", scene.AoU.Length); shader.SetInt("_ThCount", scene.ThicknessU.Length);
+                shader.SetFloat("_AoCos2", (float)scene.AoCos2); shader.SetFloat("_ThCos2", (float)scene.ThicknessCos2); shader.SetFloat("_AoMax", (float)scene.AoMax); shader.SetFloat("_ThMax", (float)scene.ThicknessMax);
+                shader.SetFloat("_RayOffset", (float)scene.RayOffset); shader.SetFloat("_Grazing", (float)scene.GrazingLimit);
+                shader.SetInt("_AoAnyHit", scene.AoAnyHit ? 1 : 0); shader.SetInt("_AoIgnoreBack", scene.AoIgnoreBackfaces ? 1 : 0);
+                shader.SetInt("_WantAo", scene.WantAo ? 1 : 0); shader.SetInt("_WantThickness", scene.WantThickness ? 1 : 0);
+                return null;
             }
-            catch (Exception ex) { ReleaseOnMain(); return "GPU buffers could not be created (" + ex.Message + ")"; }
-            jobData = new GpuJob[DispatchJobs]; resultData = new GpuResult[DispatchJobs];
-            UploadedBytes = bytes; chunk = FirstDispatchJobs;
-            raysPerJob = Math.Max(1, (scene.WantAo ? scene.AoU.Length : 0) + (scene.WantThickness ? scene.ThicknessU.Length : 0));
-            shader.SetBuffer(kernel, "_Nodes", nodes); shader.SetBuffer(kernel, "_Tris", tris); shader.SetBuffer(kernel, "_AoDirs", aoDirs); shader.SetBuffer(kernel, "_ThDirs", thDirs);
-            shader.SetBuffer(kernel, "_Jobs", jobs); shader.SetBuffer(kernel, "_Results", results);
-            shader.SetInt("_NodeBase0", nodeBases[0]); shader.SetInt("_NodeBase1", nodeBases[1]); shader.SetInt("_TriBase0", triBases[0]); shader.SetInt("_TriBase1", triBases[1]);
-            shader.SetInt("_NodeCount0", nodeCounts[0]); shader.SetInt("_NodeCount1", nodeCounts[1]);
-            shader.SetInt("_AoCount", scene.AoU.Length); shader.SetInt("_ThCount", scene.ThicknessU.Length);
-            shader.SetFloat("_AoCos2", (float)scene.AoCos2); shader.SetFloat("_ThCos2", (float)scene.ThicknessCos2); shader.SetFloat("_AoMax", (float)scene.AoMax); shader.SetFloat("_ThMax", (float)scene.ThicknessMax);
-            shader.SetFloat("_RayOffset", (float)scene.RayOffset); shader.SetFloat("_Grazing", (float)scene.GrazingLimit);
-            shader.SetInt("_AoAnyHit", scene.AoAnyHit ? 1 : 0); shader.SetInt("_AoIgnoreBack", scene.AoIgnoreBackfaces ? 1 : 0);
-            shader.SetInt("_WantAo", scene.WantAo ? 1 : 0); shader.SetInt("_WantThickness", scene.WantThickness ? 1 : 0);
-            return null;
+            catch (Exception ex) { ReleaseOnMain(); return L.Tr("GPU buffers could not be prepared ({0}).", ex.Message); }
         }
         static ComputeBuffer Directions(double[] u, double[] cos, double[] sin)
         {
             var data = new Vector4[Math.Max(1, u.Length)];
             for (int i = 0; i < u.Length; i++) data[i] = new Vector4((float)u[i], (float)cos[i], (float)sin[i], 0);
-            var buffer = new ComputeBuffer(data.Length, 16); buffer.SetData(data); return buffer;
+            var buffer = new ComputeBuffer(data.Length, 16);
+            try { buffer.SetData(data); return buffer; }
+            catch { buffer.Release(); throw; }
+        }
+
+        /// <summary>仕事と結果の台を、実際の Dispatch が必要とする大きさまで増やす。前回の GetData は完了済み。
+        /// 最大容量の予算は Prepare で先に拒否するので、増やしてもその予算を超えない。</summary>
+        void EnsureJobCapacity(int needed)
+        {
+            int previous = jobData.Length;
+            if (needed <= previous) return;
+            int capacity = Math.Min(DispatchJobs, Math.Max(needed, previous * 2));
+            try
+            {
+                jobs.Release(); jobs = null; results.Release(); results = null;
+                jobData = new GpuJob[capacity]; resultData = new GpuResult[capacity];
+                jobs = new ComputeBuffer(capacity, Marshal.SizeOf<GpuJob>()); results = new ComputeBuffer(capacity, Marshal.SizeOf<GpuResult>());
+                shader.SetBuffer(kernel, "_Jobs", jobs); shader.SetBuffer(kernel, "_Results", results);
+                UploadedBytes += (long)(capacity - previous) * (Marshal.SizeOf<GpuJob>() + Marshal.SizeOf<GpuResult>());
+            }
+            catch { ReleaseOnMain(); throw; }
         }
 
         public void Trace(MeshBakeRayJob[] input, int count, MeshBakeRayResult[] output) => OnMain(() => TraceOnMain(input, count, output));
@@ -169,6 +192,7 @@ namespace Yozolab.YoluPainter.Editor
                 int n = Math.Min(Math.Min(chunk, limit), count - start);
                 using var gate = GpuHeavyWorkGate.Enter(); // 開発環境のテストの台だけ: 台をまたいで GPU の重い仕事を 1 つずつ（待つ時間は測らない）
                 clock.Restart();
+                EnsureJobCapacity(n);
                 for (int i = 0; i < n; i++)
                 {
                     ref var j = ref input[start + i];
@@ -199,6 +223,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             nodes?.Release(); tris?.Release(); aoDirs?.Release(); thDirs?.Release(); jobs?.Release(); results?.Release();
             nodes = tris = aoDirs = thDirs = jobs = results = null; jobData = null; resultData = null; UploadedBytes = 0;
+            shader = null; kernel = -1;
         }
     }
 }
