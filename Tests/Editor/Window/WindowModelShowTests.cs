@@ -132,6 +132,8 @@ namespace Yozolab.YoluPainter.Tests
             window.ModelShowChoices().First().choose(); Assert.That(window.IsStroking, Is.True);
             Key(window, KeyCode.Escape);
             window.View = TexturePaintWindow.ViewMode.Split;
+            // 1200px の窓の分割では 3D が 274px しかなく、右の操作の分だけ左へ寄せる（設計どおり）。中央に置けるだけの幅で確かめる
+            window.position = new Rect(40, 40, 1600, 800);
             foreach (bool swap in new[] { false, true })
             {
                 window.ViewsSwapped = swap; Repaint(window);

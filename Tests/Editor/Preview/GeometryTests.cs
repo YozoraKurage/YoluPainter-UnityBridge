@@ -314,6 +314,31 @@ namespace Yozolab.YoluPainter.Tests.Editor
             }
             finally { Object.DestroyImmediate(source); Object.DestroyImmediate(mesh); }
         }
+
+        static float Next(float v) => System.BitConverter.Int32BitsToSingle(System.BitConverter.SingleToInt32Bits(v) + 1);
+
+        [Test]
+        public void SoftEdgeCoverageNeverGoesBelowZeroSoAStrokeKeepsItsEdgeTexels()
+        {
+            // 1 − SmoothStep は単精度で計算すると縁で −2.4e−7 ほどになりうる（Linux の Mono で Unity の CoreModule を動かすと出る。
+            // このエディタの中のこの条件では 0 だった）。BrushStroke.ApplyPixel は負の覆いを断り、3D のストロークが取り消されるので、0 で押さえる。
+            for (float t = .999f; t <= 1; t = Next(t)) Assert.That(SurfaceGeometry.EdgeCoverage(t), Is.GreaterThanOrEqualTo(0f), t.ToString("R"));
+            using (var preview = new IsolatedModelPreview())
+            {
+                preview.LoadDemoMesh(); var geometry = preview.Geometry;
+                var camera = new Vector3(1.6f, .4f, -2); var target = new Vector3(.1f, .1f, -.5f);
+                Assert.That(geometry.TryRaycast(new Ray(camera, target - camera), out var hit, true), Is.True);
+                var dab = geometry.BuildSurfaceDabs(hit, .022f, 2048, 2048, camera, .8f);
+                Assert.That(dab.Pixels.Count, Is.GreaterThan(0));
+                Assert.That(dab.Pixels.Min(p => p.Coverage), Is.GreaterThanOrEqualTo(0f));
+                var document = new Yozolab.YoluPainter.Core.PaintDocument(2048, 2048, 128); var layer = document.AddLayer("Paint");
+                using (var stroke = document.BeginStroke(layer.Id, Yozolab.YoluPainter.Core.PaintChannel.Color, new Yozolab.YoluPainter.Core.BrushSettings()))
+                {
+                    foreach (var pixel in dab.Pixels) stroke.ApplyPixel(pixel.X, pixel.Y, pixel.Coverage);
+                    Assert.That(stroke.Commit(), Is.True);
+                }
+            }
+        }
     }
 
     [ExecuteAlways]

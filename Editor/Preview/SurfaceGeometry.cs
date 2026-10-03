@@ -406,6 +406,11 @@ namespace Yozolab.YoluPainter.Editor.Preview
             barycentric = new Vector3(1 - u - v, u, v); return true;
         }
 
+        /// <summary>The soft edge's coverage, 1 − SmoothStep. Single-precision rounding gives about −2.4e−7 at the very edge, and
+        /// BrushStroke.ApplyPixel refuses a negative coverage, so it is held at 0
+        /// (a coverage of 0 changes nothing).</summary>
+        internal static float EdgeCoverage(float t) => Mathf.Max(0f, 1 - Mathf.SmoothStep(0, 1, t));
+
         /// <summary>
         /// The texture pixels a spherical surface dab covers, with coverage. Triangles are visited breadth-first from the hit (the same
         /// order as always) and their candidate texels collected in that order; the visibility rays from the camera, which dominate the
@@ -540,7 +545,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                         (o.Hit.Position - c.Position).sqrMagnitude > visibilityEpsilon * visibilityEpsilon ||
                         Array.IndexOf(adjacency[c.Triangle], o.Hit.TriangleIndex) < 0) continue;
                 }
-                float coverage = c.Distance <= hardness || hardness >= 0.9999f ? 1 : 1 - Mathf.SmoothStep(0, 1, (c.Distance - hardness) / (1 - hardness));
+                float coverage = c.Distance <= hardness || hardness >= 0.9999f ? 1 : EdgeCoverage((c.Distance - hardness) / (1 - hardness));
                 int key = c.Y * width + c.X;
                 if (!pixels.TryGetValue(key, out var current) || coverage > current.Coverage) pixels[key] = new SurfacePixel(c.X, c.Y, coverage, c.Triangle, c.Position);
             }
@@ -616,7 +621,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                             (visible.Position - position).sqrMagnitude > visibilityEpsilon * visibilityEpsilon ||
                             Array.IndexOf(adjacency[triangleIndex], visible.TriangleIndex) < 0) continue;
                     }
-                    float coverage = normalizedDistance <= hardness || hardness >= 0.9999f ? 1 : 1 - Mathf.SmoothStep(0, 1, (normalizedDistance - hardness) / (1 - hardness));
+                    float coverage = normalizedDistance <= hardness || hardness >= 0.9999f ? 1 : EdgeCoverage((normalizedDistance - hardness) / (1 - hardness));
                     int key = y * width + x;
                     if (!pixels.TryGetValue(key, out var current) || coverage > current.Coverage) pixels[key] = new SurfacePixel(x, y, coverage, triangleIndex, position);
                 }

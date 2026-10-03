@@ -23,7 +23,7 @@ namespace Yozolab.YoluPainter.Tests
                 window.CreateProject(new NewProjectSettings { Model = null, Resolution = 512, Template = ProjectTemplate.Pbr });
                 Invoke(window, "LoadDemoCube");
                 var first = window.CurrentTextureSet;
-                var second = window.AddTextureSet(1, "Second");
+                var second = window.AddTextureSet(-1, "Second"); // デモのキューブのマテリアルは 1 つ: マテリアルに結び付けないセット
                 Repaint(window);
                 var at = At(window, 120, 120);
                 Mouse(window, EventType.MouseDown, at); Mouse(window, EventType.MouseUp, at);
