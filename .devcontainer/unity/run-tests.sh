@@ -92,13 +92,17 @@ fi
 if [[ -n "$SHARDS" && "$SHARDS" != 1 ]]; then
   want="${MODE:-batch-gl}"
   if [[ "$SHARDS" == auto ]]; then
+    # 今空いている台の数だけに分ける（担当が多いとき、1 人の全件が GUI の台を全部取って、ほかの依頼を待たせないように。
+    # 2026-10-03: 担当 7 人で台 5 つが 1 人の全件で埋まった）。空きが無ければ分けずに 1 組で待つ
     SHARDS=0
     for n in $(runner_numbers) 0; do
       [[ "$(runner_live_mode "$n")" == "$want" ]] || continue
       [[ "$n" == 0 && ( -n "$SHA" || -n "$SOURCE_DIR" ) ]] && continue
-      SHARDS=$((SHARDS + 1))
+      d="$(runner_project "$n")/TestDaemon"
+      if ( exec 7>"$d/client.lock"; flock -n 7 ); then SHARDS=$((SHARDS + 1)); fi
     done
     (( SHARDS > 3 )) && SHARDS=3
+    (( SHARDS < 1 )) && SHARDS=1
   fi
 fi
 if [[ -n "$SHARDS" ]] && (( SHARDS > 1 )); then
