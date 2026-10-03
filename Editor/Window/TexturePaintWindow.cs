@@ -143,10 +143,12 @@ namespace Yozolab.YoluPainter.Editor
             ResetSetsBaseline(false);
         }
         void OnLostFocus() { ClearPolygonFillHover(); pickHoverPointer = new Vector2(-100, -100); FinishStroke(false); CancelShapeDrag(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); ReleaseStencilInput(); preview?.CancelNavigation(); SaveRecovery(); }
-        void BeforeReload() { FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); EndLightingDrag(true); preview?.CancelNavigation(); preview?.CancelPreparation(); SaveRecoveryBeforeLifecycleChange(); }
+        void BeforeReload() { FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); EndLightingDrag(true); preview?.CancelNavigation(); preview?.CancelPreparation(); CaptureMaterialInspector(); DisposeMaterialInspector(); SaveRecoveryBeforeLifecycleChange(); }
         void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); SaveRecoveryBeforeLifecycleChange(); } }
         void OnDisable()
         {
+            PaintMenuSession.CloseFor(this);
+            CaptureMaterialInspector(); DisposeMaterialInspector();
             DisposePenInput();
             FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); preview?.CancelNavigation(); SaveRecoveryBeforeLifecycleChange(); recoveryWriter=null; lastRecoveryRequest=null;
             EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; EditorApplication.projectChanged-=OnUnityProjectChanged; UnhookResources(); DisposeAssetThumbnails(); L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
@@ -167,7 +169,7 @@ namespace Yozolab.YoluPainter.Editor
             // 描いていないあいだは GPU の写しを手放す（Update が来ないと合成器は古い写しを捨てられない）
             if(compositor!=null && compositor.ResidentBytes>0 && EditorApplication.timeSinceStartup-lastComposite>GpuCacheIdleSeconds) compositor.ReleaseResidentCaches();
             RebuildCompositorIfPending(); // 「表示の合成」の設定が変わったのをストロークの終わりまで待っていたら
-            WatchSourceMaterials(); ReconcileMaterialEdits(); RepaintPreviewIfWanted();
+            CaptureMaterialInspector(); WatchSourceMaterials(); ReconcileMaterialEdits(); RepaintPreviewIfWanted();
         }
         long thumbnailRepaintAsked=-1;
         internal const double GpuCacheIdleSeconds=120;
@@ -184,6 +186,7 @@ namespace Yozolab.YoluPainter.Editor
             if(document==null) return;
             NoteNewAnchorIssues(); // キーの Undo・ドラッグの並べ替えなど TryAction を通らない編集の後も（文書が変わったときだけ見る）
             var e=Event.current; var pointerAtStart=e.mousePosition; // 途中のクリップや 3D の描画の後でも同じ位置を使う
+            PaintMenuSession.HandleOwnerEvent(this, e);
             // 診断がオフなら bool の判定だけ。オンのときはイベントが Use/座標変換される前に読み、最後に計器を重ねる。
             if(penInputEnabled)
             {

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -11,18 +10,16 @@ using Yozolab.YoluPainter.Editor.Preview;
 
 namespace Yozolab.YoluPainter.Editor
 {
-    /// <summary>
-    /// マテリアルの欄: 今のテクスチャセットのスロットの元のマテリアル（シェーダー・lilToon なら版とバリアント・マテリアル表示の対応と注意）と、
-    /// シェーダーのプロパティの一覧（[HideInInspector] は出さない。切り替え・スライダー・色・数値・ベクトル・選択肢、テクスチャは名前と
-    /// 「塗ったチャンネルが入る」印だけ）。値を変えるとプレビューの複製だけが変わり（<see cref="PreviewMaterialEdits"/>。マテリアル表示で見える）、
-    /// 変えたものに印・プロパティごとと全部の「元に戻す」。元のマテリアルに入れるのは「マテリアルに反映…」（一覧で確かめ、Unity の Undo に 1 つ）だけ。
-    /// </summary>
+    /// <summary>元のマテリアルの見出しとチャンネルの流し込み先、そのシェーダーのインスペクター。
+    /// 編集先は保存しない複製。元のアセットへは確認付きの反映だけで書き込む。</summary>
     public sealed partial class TexturePaintWindow
     {
-        string materialFilter = "";
-        Vector2 materialScroll;
+        Vector2 materialScroll, materialHeaderScroll;
+        float materialHeaderHeight = 200;
         Shader materialInfoShader; LilToon.LilToonReport materialInfoLil; List<MaterialPropertyInfo> materialInfos;
-        const float MaterialRowHeight = 24, MaterialLabelWidth = 72;
+        const float MaterialLabelWidth = 72;
+        PreviewMaterialInspector materialInspector;
+        internal PreviewMaterialInspector MaterialInspector => materialInspector;
         /// <summary>欄の部品の画面上の矩形（Repaint のたびに覚え直す。GUI モードの試験が本物のマウスの入力で押すため）。</summary>
         internal readonly Dictionary<string, Rect> MaterialControlScreenRects = new Dictionary<string, Rect>();
         Rect MaterialSpot(string id, Rect r)
@@ -44,69 +41,67 @@ namespace Yozolab.YoluPainter.Editor
             return materialInfos;
         }
 
-        /// <summary>欄に出すプロパティ: [HideInInspector] と、同じ名前で何度も宣言された見出し用のもの（lilToon の _DummyProperty など。
-        /// どれを変えても同じ 1 つの値）を除き、絞り込みの文字を名前か説明に含むもの。</summary>
-        internal List<MaterialPropertyInfo> VisibleMaterialProperties(Material source)
-        {
-            var all = MaterialProperties(source);
-            var repeated = new HashSet<string>(all.GroupBy(p => p.Name).Where(g => g.Count() > 1).Select(g => g.Key));
-            return all.Where(p => !p.Hidden && !repeated.Contains(p.Name) && (string.IsNullOrEmpty(materialFilter) || p.Name.IndexOf(materialFilter, StringComparison.OrdinalIgnoreCase) >= 0
-                || (p.Description ?? "").IndexOf(materialFilter, StringComparison.OrdinalIgnoreCase) >= 0)).ToList();
-        }
-        internal string MaterialFilter { get => materialFilter; set => materialFilter = value ?? ""; }
-
         void DrawMaterialPanel(Rect r)
         {
             if (Event.current.type == EventType.Repaint) MaterialControlScreenRects.Clear();
             PaintGui.Fill(r, PaintTheme.PanelBg);
             var source = PanelMaterial;
-            var rows = new UiRows(r, 8);
-            bool was = GUI.enabled; GUI.enabled = was && stroke == null;
+            bool was = GUI.enabled; GUI.enabled = was && stroke == null && !toolDragging;
             try
             {
-                // 1 行目: 見せるマテリアル（元のマテリアル・プロジェクトのマテリアル・シェーダーから選ぶ。Model/TexturePaintWindow.PreviewMaterial.cs）。
-                // 元のマテリアルが無いスロットでも選べる
-                if (preview != null && preview.HasModel) DrawPreviewMaterialRow(rows, source);
-                if (source == null)
+                // 短いドックでも取消・反映と編集欄を残す。上の情報が長いときは見出しだけスクロールする。
+                float headHeight = source == null ? r.height : Mathf.Min(200, Mathf.Max(48, r.height - 64 - 96));
+                var header = new Rect(r.x, r.y, r.width, headHeight);
+                MaterialSpot("material.header", header);
+                var rows = new UiRows(new Rect(0, 0, r.width - 16, materialHeaderHeight), 8);
+                materialHeaderScroll = GUI.BeginScrollView(header, materialHeaderScroll, new Rect(0, 0, r.width - 16, materialHeaderHeight), false, false, GUIStyle.none, GUI.skin.verticalScrollbar);
+                var binding = source != null ? preview.MaterialBinding(materialSlot) : null;
+                try
                 {
-                    PaintGui.Notice(rows, preview != null && preview.HasModel ? L.Tr("This material slot has no source material (the demo cube or an unassigned slot). Choose a material or a shader above to see the painted maps with it.") : L.Tr("Load a model to see and adjust its material."), "info", PaintTheme.TextDim);
-                    return;
+                    // 1 行目: 見せるマテリアル（元のマテリアル・プロジェクトのマテリアル・シェーダーから選ぶ。Model/TexturePaintWindow.PreviewMaterial.cs）。
+                    // 元のマテリアルが無いスロットでも選べる
+                    if (preview != null && preview.HasModel) DrawPreviewMaterialRow(rows, source);
+                    if (source == null)
+                    {
+                        PaintGui.Notice(rows, preview != null && preview.HasModel ? L.Tr("This material slot has no source material (the demo cube or an unassigned slot). Choose a material or a shader above to see the painted maps with it.") : L.Tr("Load a model to see and adjust its material."), "info", PaintTheme.TextDim);
+                        DisposeMaterialInspector(); return;
+                    }
+                    EnsureMaterialInspector(source);
+                    PaintGui.ValueBox(rows.Row(), L.Tr("Shader"), source.shader != null ? source.shader.name : "-", MaterialLabelWidth, null, null, true);
+                    bool usable = binding != null && binding.CanShow;
+                    var viewRow = rows.Row();
+                    PaintGui.ValueBox(new Rect(viewRow.x, viewRow.y, viewRow.width - 28, viewRow.height), L.Tr("3D view"), binding?.Summary ?? "-", MaterialLabelWidth, usable ? PaintTheme.TextDim : PaintTheme.Warning, binding?.Unusable, true);
+                    DrawChannelRoutesToggle(new Rect(viewRow.xMax - 24, viewRow.y, 24, viewRow.height), binding); // 流し込み先の一覧を開く
+                    bool on = PaintGui.ToggleButton(MaterialSpot("material.shading", rows.Row(24)), L.Tr("Show This Material in 3D"), previewShading == PreviewShading.Material,
+                        L.Tr("Material shading: the 3D view draws a preview copy of this material with the painted maps. Off: neutral shading."), "auto_awesome", GUI.enabled);
+                    if (on != (previewShading == PreviewShading.Material)) Shading = on ? PreviewShading.Material : PreviewShading.Neutral;
+                    DrawMaterialNotes(rows, source, binding);
+                    DrawPaintedTextureSummary(rows, binding);
                 }
-                var binding = preview.MaterialBinding(materialSlot);
-                PaintGui.ValueBox(rows.Row(), L.Tr("Shader"), source.shader != null ? source.shader.name : "-", MaterialLabelWidth, null, null, true);
-                bool usable = binding != null && binding.CanShow;
-                var viewRow = rows.Row();
-                PaintGui.ValueBox(new Rect(viewRow.x, viewRow.y, viewRow.width - 28, viewRow.height), L.Tr("3D view"), binding?.Summary ?? "-", MaterialLabelWidth, usable ? PaintTheme.TextDim : PaintTheme.Warning, binding?.Unusable, true);
-                DrawChannelRoutesToggle(new Rect(viewRow.xMax - 24, viewRow.y, 24, viewRow.height), binding); // 流し込み先の一覧を開く
-                bool on = PaintGui.ToggleButton(MaterialSpot("material.shading", rows.Row(24)), L.Tr("Show This Material in 3D"), previewShading == PreviewShading.Material,
-                    L.Tr("Material shading: the 3D view draws a preview copy of this material with the painted maps. Off: neutral shading."), "auto_awesome", GUI.enabled);
-                if (on != (previewShading == PreviewShading.Material)) Shading = on ? PreviewShading.Material : PreviewShading.Neutral;
-                DrawMaterialNotes(rows, source, binding);
-                DrawChannelRoutes(rows, source, binding);
-                materialFilter = PaintGui.SearchField(MaterialSpot("material.filter", rows.Row()), materialFilter, L.Tr("Filter properties"), L.Tr("Show the properties whose name or description contains this")) ?? "";
-                // 下の 2 行（変えた数・ボタン）を残して、残りをプロパティの一覧にする
-                const float footer = 4 + 18 + 4 + 26 + 8;
-                float top = r.y + rows.Used + 2;
-                var list = new Rect(r.x, top, r.width, Mathf.Max(MaterialRowHeight, r.yMax - footer - top));
-                DrawMaterialPropertyList(list, source, binding);
-                DrawMaterialFooter(new Rect(r.x + PaintTheme.Padding, list.yMax + 4, r.width - 2 * PaintTheme.Padding, footer - 4), source);
+                finally
+                {
+                    if (Event.current.type == EventType.Repaint && !Mathf.Approximately(materialHeaderHeight, rows.Used + 4)) { materialHeaderHeight = rows.Used + 4; Repaint(); }
+                    GUI.EndScrollView();
+                }
+                DrawMaterialFooter(new Rect(r.x + PaintTheme.Padding, header.yMax + 4, r.width - 2 * PaintTheme.Padding, 52), source);
+                float top = header.yMax + 64;
+                if (top < r.yMax) DrawMaterialInspector(new Rect(r.x + 4, top, r.width - 8, r.yMax - top), source, binding);
             }
             finally { GUI.enabled = was; }
         }
 
         bool materialNotesOpen;
-        /// <summary>見せ方の注意。1 つならそのまま、2 つ以上なら数の行（押すと開く・閉じる。閉じていてもツールチップに全文）。</summary>
+        /// <summary>見せ方の注意は短い数の行にまとめる（押すと開く・閉じる。閉じていてもツールチップに全文）。</summary>
         void DrawMaterialNotes(UiRows rows, Material source, PreviewMaterialBinding binding)
         {
             if (binding == null) return;
             var notes = MaterialNotes(source, binding);
-            if (notes.Count == 1) { PaintGui.Notice(rows, notes[0], "warning", PaintTheme.Warning); return; }
             if (notes.Count == 0) return;
             var head = MaterialSpot("material.notes", rows.Row(20));
             if (Event.current.type == EventType.MouseDown && Event.current.button == 0 && head.Contains(Event.current.mousePosition) && GUI.enabled) { materialNotesOpen = !materialNotesOpen; Event.current.Use(); Repaint(); }
             PaintGui.Icon(new Rect(head.x, head.y, 16, head.height), "warning", PaintTheme.Warning, 14);
             PaintGui.Icon(new Rect(head.xMax - 16, head.y, 16, head.height), materialNotesOpen ? "expand_less" : "expand_more", PaintTheme.TextDim, 16);
-            PaintGui.Text(new Rect(head.x + 22, head.y, head.width - 40, head.height), L.Tr("{0} notes on how the 3D view shows this material", notes.Count), PaintTheme.LabelDim, PaintTheme.Warning);
+            PaintGui.Text(new Rect(head.x + 22, head.y, head.width - 40, head.height), L.Tr("Material notes ({0})", notes.Count), PaintTheme.LabelDim, PaintTheme.Warning);
             PaintGui.Tooltip(head, string.Join("\n\n", notes));
             if (materialNotesOpen) foreach (var note in notes) PaintGui.Notice(rows, note, "warning", PaintTheme.Warning);
         }
@@ -134,125 +129,80 @@ namespace Yozolab.YoluPainter.Editor
                 TryAction(ApplyMaterialEdits);
         }
 
-        /// <summary>プロパティの一覧（見えている行だけを描く。多いシェーダー（lilToon は 480 を超える）でも重くしない）。</summary>
-        void DrawMaterialPropertyList(Rect list, Material source, PreviewMaterialBinding binding)
+        internal void EnsureMaterialInspector(Material source)
         {
-            var e = Event.current;
-            var props = VisibleMaterialProperties(source);
-            float content = props.Count * MaterialRowHeight;
-            bool overflow = content > list.height + .5f;
-            materialScroll.y = Mathf.Clamp(materialScroll.y, 0, Mathf.Max(0, content - list.height));
-            PaintGui.Rounded(list, PaintTheme.MenuBg, 0);
-            if (props.Count == 0) { PaintGui.Text(new Rect(list.x + PaintTheme.Padding, list.y, list.width - 16, MaterialRowHeight), L.Tr("No property matches the filter."), PaintTheme.LabelDim); return; }
-            var used = new HashSet<PaintChannel>(YlpContent.UsedChannels(document));
-            int first = Mathf.Max(0, Mathf.FloorToInt(materialScroll.y / MaterialRowHeight)), last = Mathf.Min(props.Count - 1, Mathf.CeilToInt((materialScroll.y + list.height) / MaterialRowHeight));
-            PaintGui.BeginScroll(list, materialScroll);
-            for (int i = first; i <= last; i++)
-            {
-                var row = new Rect(PaintTheme.Padding, i * MaterialRowHeight + 1, list.width - 2 * PaintTheme.Padding - (overflow ? 6 : 0), MaterialRowHeight - 2);
-                DrawMaterialProperty(row, source, binding, props[i], used);
-            }
-            PaintGui.EndScroll();
-            // 押すための矩形（見えている範囲に切り詰める）
-            if (e.type == EventType.Repaint)
-                for (int i = first; i <= last; i++)
-                {
-                    float y = list.y + i * MaterialRowHeight - materialScroll.y;
-                    if (y + MaterialRowHeight <= list.y || y >= list.yMax) continue;
-                    MaterialSpot("material.prop." + props[i].Name, Rect.MinMaxRect(list.x + PaintTheme.Padding, Mathf.Max(y + 1, list.y), list.xMax - PaintTheme.Padding - (overflow ? 6 : 0) - 24, Mathf.Min(y + MaterialRowHeight - 1, list.yMax)));
-                    if (materialEdits.Find(source, props[i].Name) != null)
-                        MaterialSpot("material.revert." + props[i].Name, new Rect(list.xMax - PaintTheme.Padding - (overflow ? 6 : 0) - 22, y + 1, 22, MaterialRowHeight - 2));
-                }
-            if (e.type == EventType.ScrollWheel && list.Contains(e.mousePosition) && overflow)
-            { materialScroll.y = Mathf.Clamp(materialScroll.y + e.delta.y * 14, 0, content - list.height); e.Use(); Repaint(); }
-            if (overflow) PaintGui.Rounded(new Rect(list.xMax - 6, list.y + list.height * materialScroll.y / content, 4, Mathf.Max(8, list.height * list.height / content)), PaintTheme.ControlActive, 2);
+            if (materialInspector == null) materialInspector = new PreviewMaterialInspector();
+            materialInspector.Sync(source, materialEdits);
         }
 
-        /// <summary>プロパティの 1 行: 変えた印・値の部品・元に戻す。</summary>
-        void DrawMaterialProperty(Rect row, Material source, PreviewMaterialBinding binding, MaterialPropertyInfo info, HashSet<PaintChannel> used)
+        void DrawPaintedTextureSummary(UiRows rows, PreviewMaterialBinding binding)
         {
-            var edit = materialEdits.Find(source, info.Name);
-            var value = edit != null ? edit.value : MaterialPropertyEdit.Read(source, info.Name, info.Type);
-            string tip = info.Name + (string.IsNullOrWhiteSpace(info.Description) || info.Description == info.Name ? "" : "\n" + info.Description) + "\n" + info.Type;
-            if (edit != null) PaintGui.Dot(new Rect(row.x - 7, row.y, 6, row.height), PaintTheme.Accent, 5);
-            var control = new Rect(row.x, row.y, row.width - 24, row.height);
-            Vector4? next = null;
-            switch (info.Control)
-            {
-                case MaterialPropertyControl.Toggle:
-                {
-                    bool v = value.x != 0;
-                    bool picked = PaintGui.Toggle(control, PaintGui.Fit(info.Label, control.width - 23, PaintTheme.Label, false), v, tip);
-                    if (picked != v) next = new Vector4(picked ? 1 : 0, 0, 0, 0);
-                    break;
-                }
-                case MaterialPropertyControl.Slider:
-                case MaterialPropertyControl.IntSlider:
-                {
-                    bool integer = info.Control == MaterialPropertyControl.IntSlider;
-                    double picked = PaintGui.KeepSlider(control, info.Label, value.x, info.Range.x, info.Range.y, integer ? "0" : "0.###", "", tip, true, 1, labelIsData: true);
-                    if (picked != value.x) next = new Vector4(integer ? Mathf.Round((float)picked) : (float)picked, 0, 0, 0);
-                    break;
-                }
-                case MaterialPropertyControl.Float:
-                case MaterialPropertyControl.Int:
-                {
-                    bool integer = info.Control == MaterialPropertyControl.Int;
-                    string text = integer ? value.x.ToString("0", CultureInfo.InvariantCulture) : value.x.ToString("0.###", CultureInfo.InvariantCulture);
-                    string label = PaintGui.Fit(info.Label, control.width - 14 - PaintGui.TextWidth(text, PaintTheme.Value) - 8, PaintTheme.Label, false);
-                    float picked = PaintGui.NumberField(control, label, value.x, integer ? "0" : "0.###", "", integer ? 1 : .01f, float.MinValue, float.MaxValue, tip);
-                    if (picked != value.x) next = new Vector4(integer ? Mathf.Round(picked) : picked, 0, 0, 0);
-                    break;
-                }
-                case MaterialPropertyControl.Enum:
-                {
-                    float lw = Mathf.Round(control.width * .45f);
-                    string option = info.Options.Where(o => o.value == value.x).Select(o => o.label).FirstOrDefault() ?? value.x.ToString("0.###", CultureInfo.InvariantCulture);
-                    var captured = info;
-                    PaintGui.FitDropdown(control, PaintGui.Fit(info.Label, lw - 6, PaintTheme.Label, false), option, at =>
-                    {
-                        var menu = new GenericMenu();
-                        foreach (var (label, v) in captured.Options) { float chosen = v; menu.AddItem(new GUIContent(label), chosen == value.x, () => SetMaterialValue(source, captured, new Vector4(chosen, 0, 0, 0))); }
-                        menu.DropDown(at);
-                    }, tip, GUI.enabled, lw, true);
-                    break;
-                }
-                case MaterialPropertyControl.Color:
-                {
-                    float sw = Mathf.Min(64, control.width * .35f);
-                    PaintGui.Text(new Rect(control.x, control.y, control.width - sw - 6, control.height), PaintGui.Fit(info.Label, control.width - sw - 6, PaintTheme.Label, false), PaintTheme.Label, GUI.enabled ? PaintTheme.Text : PaintTheme.TextDisabled);
-                    PaintGui.Tooltip(new Rect(control.x, control.y, control.width - sw - 6, control.height), tip);
-                    var captured = info;
-                    PaintGui.ColorSwatch(new Rect(control.xMax - sw, control.y + 2, sw, control.height - 4), new Color(value.x, value.y, value.z, value.w),
-                        c => SetMaterialValue(source, captured, new Vector4(c.r, c.g, c.b, c.a)), true, tip + (info.Hdr ? "\nHDR" : ""), GUI.enabled, info.Hdr);
-                    break;
-                }
-                case MaterialPropertyControl.Vector:
-                {
-                    var cells = PaintGui.LabeledColumns(control, PaintGui.Fit(info.Label, control.width * .32f - 6, PaintTheme.Label, false), Mathf.Round(control.width * .32f), 4, 2);
-                    var v = value;
-                    for (int k = 0; k < 4; k++)
-                    {
-                        float picked = PaintGui.NumberField(cells[k], "", v[k], "0.##", "", .01f, float.MinValue, float.MaxValue, tip);
-                        if (picked != v[k]) { v[k] = picked; next = v; }
-                    }
-                    break;
-                }
-                case MaterialPropertyControl.Texture:
-                {
-                    var painted = binding != null && binding.CanShow ? binding.Channels.Where(c => c.Property == info.Name && used.Contains(c.Channel)).Select(c => L.Tr(c.Channel.ToString())).ToList() : new List<string>();
-                    var texture = source.GetTexture(info.Name);
-                    string shown = painted.Count > 0 ? L.Tr("painted {0}", string.Join(" + ", painted)) : texture != null ? texture.name : L.Tr("None");
-                    float lw = Mathf.Round(control.width * .45f);
-                    PaintGui.ValueBox(control, PaintGui.Fit(info.Label, lw - 6, PaintTheme.Label, false), shown, lw, painted.Count > 0 ? PaintTheme.Accent : PaintTheme.TextDim,
-                        tip + (painted.Count > 0 ? "\n" + L.Tr("The material view puts the painted {0} here (the material keeps {1}).", string.Join(" + ", painted), texture != null ? texture.name : L.Tr("None")) : ""), true);
-                    break;
-                }
-            }
-            if (next.HasValue) SetMaterialValue(source, info, next.Value);
-            if (edit != null && PaintGui.IconButton(new Rect(row.xMax - 22, row.y, 22, row.height), "restart_alt", L.Tr("Back to the material's own value"), false, GUI.enabled, 15))
-                TryAction(() => { materialEdits.Revert(source, info.Name); repaintPixels = true; Repaint(); });
+            if (binding == null) return;
+            var used = YlpContent.UsedChannels(document);
+            string list = string.Join(" · ", binding.Channels.Where(c => used.Contains(c.Channel)).Select(c => L.Tr(c.Channel.ToString()) + " → " + c.Property));
+            PaintGui.Notice(rows, L.Tr("Painted textures: {0}", list.Length == 0 ? L.Tr("not shown") : list), "info", PaintTheme.TextDim);
+            var row = rows.Row(18);
+            PaintGui.Text(row, L.Tr("Painted maps take priority here."), PaintTheme.LabelDim, PaintTheme.TextDim);
+            PaintGui.Tooltip(row, L.Tr("Painted maps take priority in these slots. The inspector edits the underlying texture; routing above changes where paint is shown."));
         }
+
+        void DrawMaterialInspector(Rect area, Material source, PreviewMaterialBinding binding)
+        {
+            // オフスクリーンでも実際に使うネイティブの文字色に背景を合わせる。
+            PaintGui.Fill(area, EditorStyles.label.normal.textColor.grayscale > .5f ? new Color32(56, 56, 56, 255) : new Color32(194, 194, 194, 255));
+            MaterialSpot("material.inspector", area);
+            var enabled = GUI.enabled; var skin = GUI.skin; var color = GUI.color; var background = GUI.backgroundColor; var content = GUI.contentColor;
+            var matrix = GUI.matrix;
+            float label = EditorGUIUtility.labelWidth, field = EditorGUIUtility.fieldWidth;
+            int indent = EditorGUI.indentLevel; bool wide = EditorGUIUtility.wideMode, hierarchy = EditorGUIUtility.hierarchyMode;
+            bool mixed = EditorGUI.showMixedValue;
+            GUI.skin = EditorGUIUtility.GetBuiltinSkin(EditorSkin.Inspector);
+            GUILayout.BeginArea(area);
+            try
+            {
+                materialScroll = EditorGUILayout.BeginScrollView(materialScroll);
+                try
+                {
+                    // MaterialEditor.PropertiesGUI は、通常のインスペクターが用意する縦のグループを閉じて開き直す。
+                    EditorGUILayout.BeginVertical();
+                    try
+                    {
+                        EditorGUIUtility.wideMode = area.width >= 330; EditorGUIUtility.labelWidth = Mathf.Clamp(area.width * .42f, 70, 160); EditorGUI.indentLevel = 0;
+                        // 流し込み先の詳細はインスペクターと一緒にスクロールする。開いても反映・取消のボタンと編集欄を押し出さない。
+                        if (materialRoutesOpen && binding != null && binding.CanShow)
+                        {
+                            float height = 20 + Enum.GetValues(typeof(PaintChannel)).Length * (PaintTheme.RowHeight + 4) + 28;
+                            var routes = new UiRows(new Rect(0, 0, Mathf.Max(0, area.width - 20), height), 4);
+                            PaintGui.Fill(new Rect(0, 0, area.width, height), PaintTheme.PanelBg);
+                            DrawChannelRoutes(routes, source, binding);
+                            GUILayout.Space(routes.Used + 8);
+                        }
+                        if (materialInspector.Problem != null)
+                        {
+                            EditorGUI.HelpBox(new Rect(0, 0, area.width - 20, 100), materialInspector.Problem, MessageType.Warning);
+                            if (GUI.Button(new Rect(0, 106, area.width - 20, 24), L.Tr("Retry Inspector"))) materialInspector.Retry();
+                        }
+                        else if (materialInspector.Inspect(materialEdits)) { repaintPixels = true; Repaint(); }
+                    }
+                    finally { EditorGUILayout.EndVertical(); }
+                }
+                finally { EditorGUILayout.EndScrollView(); }
+            }
+            finally
+            {
+                GUILayout.EndArea();
+                GUI.enabled = enabled; GUI.skin = skin; GUI.color = color; GUI.backgroundColor = background; GUI.contentColor = content; GUI.matrix = matrix;
+                EditorGUI.showMixedValue = mixed;
+                EditorGUIUtility.labelWidth = label; EditorGUIUtility.fieldWidth = field; EditorGUI.indentLevel = indent; EditorGUIUtility.wideMode = wide; EditorGUIUtility.hierarchyMode = hierarchy;
+            }
+        }
+
+        void CaptureMaterialInspector()
+        {
+            if (materialInspector != null && materialInspector.Capture(materialEdits)) { repaintPixels = true; Repaint(); }
+        }
+
+        internal void DisposeMaterialInspector() { materialInspector?.Dispose(); materialInspector = null; }
 
         /// <summary>プレビューの複製の値を変える（元のマテリアルは変えない）。</summary>
         internal void SetMaterialValue(Material source, MaterialPropertyInfo info, Vector4 value)
@@ -264,6 +214,7 @@ namespace Yozolab.YoluPainter.Editor
         internal void ApplyMaterialEdits()
         {
             if (stroke != null) { message = L.Tr("Finish the stroke first."); return; }
+            CaptureMaterialInspector();
             var source = PanelMaterial;
             if (IsMadeMaterial(source)) // シェーダーから作ったプレビューだけのマテリアル（Model/TexturePaintWindow.PreviewMaterial.cs）
             {

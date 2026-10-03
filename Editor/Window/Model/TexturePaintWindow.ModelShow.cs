@@ -12,8 +12,8 @@ namespace Yozolab.YoluPainter.Editor
     /// 3D ビューで見せるもの（Substance Painter の C・B・M に当たる）: マテリアル（描き方どおり。中立かマテリアル表示）/ 1 つのチャンネルだけ
     /// （Color・Roughness・Metallic・Height・Normal の出力・Emission・選んだ層のマスクを、照明・環境・影・トーンマッピングなしでそのまま）/
     /// 焼いたメッシュマップだけ。キーは C（チャンネルを順に。最後の次はマテリアル）、Shift+B（メッシュマップを順に）、Shift+C（マテリアルへ）。
-    /// B は筆のまま（Shift+B だけを使う）、M は矩形選択のまま。文字の欄の入力中は使わず、ストロークの最中は断って知らせる。3D ビューの見出しの
-    /// ボタンと 3D メニューからも選べる。描き込み・ピック・ブラシのカーソルは見せ方によらない。見せ方は窓の状態（.ylp には入らない）。
+    /// B は筆のまま（Shift+B だけを使う）、M は矩形選択のまま。文字の欄の入力中は使わず、ストロークの最中は断って知らせる。3D ビューの左上の
+    /// ドロップダウンと 3D メニューからも選べる。描き込み・ピック・ブラシのカーソルは見せ方によらない。見せ方は窓の状態（.ylp には入らない）。
     /// </summary>
     public sealed partial class TexturePaintWindow
     {
@@ -102,7 +102,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 case ModelShowKind.Channel: return L.Tr(modelShowChannel.ToString());
                 case ModelShowKind.Mask: return L.Tr("Layer mask");
-                case ModelShowKind.MeshMap: return MeshMapLabel(modelShowMap);
+                case ModelShowKind.MeshMap: return L.Tr("{0} (mesh map)", MeshMapGridLabel(modelShowMap));
                 default: return L.Tr("Material");
             }
         }
@@ -204,26 +204,23 @@ namespace Yozolab.YoluPainter.Editor
 
         // ───────── 見出しとメニュー ─────────
 
-        /// <summary>3D ビューの見出しの、見せるもののボタン（押すとメニュー）。right はそこから左へ置く右端。左端を返す。</summary>
-        float DrawModelShowButton(Rect bar, float right)
+        /// <summary>3D ビューの左上に、今見せているものを常に出す。右の操作と狭い表示では重ならない幅。</summary>
+        float DrawModelShowDropdown(Rect bar, float left, float right)
         {
             string label = ModelShowName();
-            float w = Mathf.Clamp(PaintGui.TextWidth(label, PaintTheme.Label) + 34, 64, 132);
-            var r = new Rect(right - w - 4, bar.y + 2, w, 22);
+            float w = Mathf.Min(Mathf.Clamp(PaintGui.TextWidth(label, PaintTheme.Label) + 28, 86, 220), Mathf.Max(0, right - left - 4));
+            var r = new Rect(left, bar.y + 2, w, 22);
             modelShowButtonForTests = r;
-            bool solo = modelShow != ModelShowKind.Material;
-            if (PaintGui.Button(r, PaintGui.Fit(label, w - 30, PaintTheme.Label, false), solo, preview.HasModel && stroke == null,
-                L.Tr("What the 3D view shows: the material, or one channel or one baked mesh map unlit, as it is (C: channels · Shift+B: mesh maps · Shift+C: the material)"), "visibility"))
+            if (w > 0 && PaintGui.Button(r, PaintGui.Fit(label, Mathf.Max(0, w - 24), PaintTheme.Label, false) + " ▾", modelShow != ModelShowKind.Material, true,
+                L.Tr("What the 3D view shows: the material, or one channel or one baked mesh map unlit, as it is (C: channels · Shift+B: mesh maps · Shift+C: the material)")))
                 ShowModelShowMenu(r);
-            return r.x;
+            return r.xMax + 8;
         }
         internal Rect modelShowButtonForTests;
 
         void ShowModelShowMenu(Rect at)
         {
-            var m = new GenericMenu();
-            ModelShowItems(m, "");
-            m.DropDown(at);
+            ModelShowMenu().DropDown(at);
         }
 
         /// <summary>3D メニューの「見せるもの」。</summary>
@@ -231,18 +228,54 @@ namespace Yozolab.YoluPainter.Editor
 
         void ModelShowItems(GenericMenu m, string prefix)
         {
-            bool free = stroke == null && !toolDragging && preview.HasModel;
-            AddItem(m, prefix + L.Tr("Material"), () => ShowMaterialIn3D(), free, modelShow == ModelShowKind.Material, "Shift+C");
+            foreach (var item in ModelShowChoices())
+                AddItem(m, prefix + item.path, item.choose, item.reason == null, item.on, item.keys);
+        }
+
+        internal PaintMenu ModelShowMenu()
+        {
+            var m = new PaintMenu(); string group = null;
+            foreach (var item in ModelShowChoices())
+            {
+                string text = item.path; int slash = text.IndexOf('/');
+                if (slash >= 0)
+                {
+                    string next = text.Substring(0, slash);
+                    if (next != group) { m.AddSeparator(""); m.AddHeading(next); group = next; }
+                    text = text.Substring(slash + 1);
+                }
+                var content = new GUIContent(item.keys == null ? text : Shortcut(text, item.keys));
+                if (item.reason == null) m.AddRadioItem(content, item.on, () => { TryAction(item.choose); Repaint(); });
+                else m.AddDisabledItem(content, item.on);
+            }
+            return m;
+        }
+
+        /// <summary>共通ドロップダウンに渡せる、表示名・選択・無効の理由。GUI の部品には依存しない。</summary>
+        internal List<(string path, Action choose, string reason, bool on, string keys)> ModelShowChoices()
+        {
+            var items = new List<(string, Action, string, bool, string)>();
+            string locked = ModelShowRefusal() ?? (!preview.HasModel ? L.Tr("Load a model first.") : null);
+            void Add(string path, Action action, string reason, bool on, string keys = null)
+            {
+                string why = locked ?? reason;
+                items.Add((why == null ? path : path + " · " + why, action, why, on, keys));
+            }
+            Add(L.Tr("Material"), () => ShowMaterialIn3D(), null, modelShow == ModelShowKind.Material, "Shift+C");
             var used = YlpContent.UsedChannels(document);
             foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel)))
             {
                 var ch = c;
-                AddItem(m, prefix + L.Tr("Channel") + "/" + L.Tr(c.ToString()) + (used.Contains(c) ? "" : " " + L.Tr("(not used)")), () => ShowChannelIn3D(ch), free, modelShow == ModelShowKind.Channel && modelShowChannel == c, c == used.FirstOrDefault() ? "C" : null);
+                Add(L.Tr("Channel") + "/" + L.Tr(c.ToString()) + (used.Contains(c) ? "" : " " + L.Tr("(not used)")), () => ShowChannelIn3D(ch), null, modelShow == ModelShowKind.Channel && modelShowChannel == c, c == used.FirstOrDefault() ? "C" : null);
             }
-            AddItem(m, prefix + L.Tr("Channel") + "/" + L.Tr("Layer mask"), () => ShowMaskIn3D(), free && SelectedMaskLayer != null, modelShow == ModelShowKind.Mask);
+            Add(L.Tr("Channel") + "/" + L.Tr("Layer mask"), () => ShowMaskIn3D(), SelectedMaskLayer == null ? L.Tr("The selected layer has no mask to show.") : null, modelShow == ModelShowKind.Mask);
             var maps = meshMaps.Maps.Select(x => x.Kind).ToList();
-            if (maps.Count == 0) m.AddDisabledItem(new GUIContent(prefix + L.Tr("Mesh Map") + "/" + L.Tr("(none baked)")));
-            foreach (var kind in maps) { var k = kind; AddItem(m, prefix + L.Tr("Mesh Map") + "/" + MeshMapLabel(kind), () => ShowMeshMapIn3D(k), free, modelShow == ModelShowKind.MeshMap && modelShowMap == kind, kind == maps[0] ? "Shift+B" : null); }
+            foreach (MeshMapKind kind in Enum.GetValues(typeof(MeshMapKind)))
+            {
+                var k = kind;
+                Add(L.Tr("Mesh Map") + "/" + MeshMapLabel(kind), () => ShowMeshMapIn3D(k), maps.Contains(kind) ? null : L.Tr("not baked for this texture set"), modelShow == ModelShowKind.MeshMap && modelShowMap == kind, maps.Count > 0 && kind == maps[0] ? "Shift+B" : null);
+            }
+            return items;
         }
 
         /// <summary>訳した文字のままメニューに足す（<see cref="Item"/> は文字を訳すので、ここは訳したものを渡す）。</summary>

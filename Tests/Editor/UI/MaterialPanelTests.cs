@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEngine;
 using Yozolab.YoluPainter.Core;
@@ -15,8 +14,8 @@ namespace Yozolab.YoluPainter.Tests
 {
     /// <summary>
     /// マテリアルの欄を、窓を開かずに描く（batch-gl。PNG はテストプロジェクトの Logs/YoluPainterSnapshots/material-panel に残す）: モデルが無い・
-    /// Standard・lilToon（変えた値と注意あり）・メインのテクスチャだけのシェーダー・絞り込みで何も無い、を英語と日本語で、既定のドックの幅では
-    /// UI の文字を … で詰めず、最も狭いドックでも描けること。マテリアルの表示にした窓全体も描く。欄は自前の部品だけで描く。
+    /// Standard・lilToon（変えた値と注意あり）・メインのテクスチャだけのシェーダーを英語と日本語で、既定のドックの幅では
+    /// 見出しの文字を … で詰めず、最も狭いドックでも描けること。複製の MaterialEditor とマテリアル表示の窓全体も描く。
     /// </summary>
     public sealed class MaterialPanelTests
     {
@@ -24,18 +23,10 @@ namespace Yozolab.YoluPainter.Tests
         /// <summary>既定のドック（300）から枠の 1 を引いた幅と、それより少し狭い幅。</summary>
         static readonly int[] PanelWidths = { 299, 285 };
         const int NarrowestPanel = 220 - 1;
-        static readonly Regex Standard = new Regex(@"\bLegacySection\s*\(|\bEditorGUILayout\.|\bGUILayout\.|\bEditorGUI\.|\bEditorStyles\.", RegexOptions.Compiled);
 
         readonly List<Object> made = new List<Object>();
 
         [TearDown] public void CleanUp() { foreach (var o in made) if (o != null) Object.DestroyImmediate(o); made.Clear(); L.OverrideLanguage(PainterLanguage.English); }
-
-        [Test] public void ThePanelUsesOnlyThePaintKit()
-        {
-            string path = Path.Combine(PackagePaths.Physical("Editor"), "Window/Panels/TexturePaintWindow.MaterialPanel.cs");
-            var found = File.ReadAllLines(path).Select((l, i) => (code: l.Split(new[] { "//" }, StringSplitOptions.None)[0], line: i + 1)).Where(x => Standard.IsMatch(x.code)).Select(x => x.line).ToList();
-            Assert.That(found, Is.Empty, "Unity's standard controls are used on lines " + string.Join(", ", found));
-        }
 
         [Test] public void EveryStateDrawsInBothLanguagesWithoutShortenedText()
         {
@@ -56,6 +47,8 @@ namespace Yozolab.YoluPainter.Tests
                         {
                             int before = PaintGui.ShortenedTexts;
                             Draw(w, width, 640, state + "-" + lang + "-" + width);
+                            if (state == "standard" || state == "chosen-shader")
+                                Assert.That(w.Preview.MaterialBinding(0).Summary, Does.Contain(L.Tr("Standard (built-in)")), "the cached binding follows the current UI language");
                             Assert.That(PaintGui.ShortenedTexts - before, Is.Zero, state + " " + lang + " " + width + ": a UI text did not fit and was shortened with …");
                         }
                         Draw(w, NarrowestPanel, 420, state + "-" + lang + "-narrowest");
@@ -68,10 +61,11 @@ namespace Yozolab.YoluPainter.Tests
                 {
                     L.OverrideLanguage(language);
                     string path = Path.Combine(Folder, "window-material-" + language + ".png");
-                    OffscreenGui.RenderWindow(w, 1400, 900, path);
+                    using (new OffscreenInspectorLogs()) OffscreenGui.RenderWindow(w, 1400, 900, path);
                     Assert.That(File.Exists(path), Is.True);
                 }
-                Assert.That(w.MaterialEdits.Count, Is.EqualTo(1), "drawing changes nothing");
+                Assert.That(w.MaterialInspector.Editor.target, Is.SameAs(w.MaterialInspector.Copy));
+                Assert.That(w.MaterialInspector.Problem, Is.Null);
             }
             finally
             {
@@ -135,11 +129,10 @@ namespace Yozolab.YoluPainter.Tests
                     w.SetMaterialValue(material, info, new Vector4(.25f, 0, 0, 0));
                     w.Shading = PreviewShading.Material; w.RefreshPreviewTextures();
                 });
-            yield return ("filtered-out", () => w.MaterialFilter = "no property is called this");
             // 見せるマテリアルをシェーダーから作り、チャンネルの流し込み先を開いて 1 つを手で指定（Model/TexturePaintWindow.PreviewMaterial.cs）
             yield return ("chosen-shader", () =>
             {
-                w.MaterialFilter = ""; w.SetModel(Model(new Material(Shader.Find("Unlit/Texture")))); w.Document.AddLayer("Height"); Paint(w.Document, PaintChannel.Height);
+                w.SetModel(Model(new Material(Shader.Find("Unlit/Texture")))); w.Document.AddLayer("Height"); Paint(w.Document, PaintChannel.Height);
                 Assert.That(w.UsePreviewShader(Shader.Find("Standard")), Is.True, w.StatusMessage);
                 Assert.That(w.SetChannelRoute(PaintChannel.Height, "_DetailMask", PreviewPacking.Value), Is.True, w.StatusMessage);
                 w.MaterialRoutesOpen = true; w.Shading = PreviewShading.Material; w.RefreshPreviewTextures();
@@ -166,7 +159,7 @@ namespace Yozolab.YoluPainter.Tests
         {
             var draw = typeof(TexturePaintWindow).GetMethod("DrawMaterialPanel", BindingFlags.NonPublic | BindingFlags.Instance);
             string path = Path.Combine(Folder, name + ".png");
-            OffscreenGui.RenderToPng(width, height, () => draw.Invoke(w, new object[] { new Rect(0, 0, width, height) }), path, PaintTheme.PanelBg);
+            using (new OffscreenInspectorLogs()) OffscreenGui.RenderToPng(width, height, () => draw.Invoke(w, new object[] { new Rect(0, 0, width, height) }), path, PaintTheme.PanelBg);
             Assert.That(File.Exists(path), Is.True, name);
         }
     }

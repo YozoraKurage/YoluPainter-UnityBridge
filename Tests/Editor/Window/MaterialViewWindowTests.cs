@@ -109,12 +109,9 @@ namespace Yozolab.YoluPainter.Tests
             w.SetModel(Model(material));
             var props = w.MaterialProperties(material);
             Assert.That(props.Any(p => p.Name == "_Glossiness"), Is.True);
-            w.MaterialFilter = "gloss";
-            Assert.That(w.VisibleMaterialProperties(material).Select(p => p.Name), Is.EquivalentTo(new[] { "_Glossiness", "_GlossMapScale", "_MetallicGlossMap", "_GlossyReflections" }), "filtered by name or description");
-            w.MaterialFilter = "smoothness";
-            Assert.That(w.VisibleMaterialProperties(material).Select(p => p.Name), Is.EquivalentTo(new[] { "_Glossiness", "_GlossMapScale", "_SmoothnessTextureChannel" }), "the description counts too");
-            w.MaterialFilter = "";
-            Assert.That(w.VisibleMaterialProperties(material).Any(p => p.Hidden), Is.False, "[HideInInspector] properties are not listed");
+            w.EnsureMaterialInspector(material);
+            Assert.That(w.MaterialInspector.Editor.target, Is.SameAs(w.MaterialInspector.Copy));
+            Assert.That(w.MaterialInspector.Copy, Is.Not.SameAs(material));
             w.SetMaterialValue(material, props.Single(p => p.Name == "_Glossiness"), new Vector4(.25f, 0, 0, 0));
             w.SetMaterialValue(material, props.Single(p => p.Name == "_Color"), new Vector4(0, 0, 1, 1));
             Assert.That(material.GetFloat("_Glossiness"), Is.EqualTo(gloss), "the panel changes the preview copy only");

@@ -1,0 +1,35 @@
+msgid "Painted textures: {0}"
+msgstr "塗ったチャンネルの流し込み先: {0}"
+
+msgid "Painted maps take priority here."
+msgstr "この流し込み先では塗った画像を優先します。"
+
+msgid "Material notes ({0})"
+msgstr "表示の注意（{0}件）"
+
+msgid "Painted maps take priority in these slots. The inspector edits the underlying texture; routing above changes where paint is shown."
+msgstr "この流し込み先では塗った画像を優先します。インスペクターでは元に重ねるテクスチャを編集し、流し込み先は上で変更できます。"
+
+msgid "Retry Inspector"
+msgstr "インスペクターを再試行"
+
+msgid "The inspector changed the shader. Choose a shader above instead; that change was cancelled."
+msgstr "インスペクターでのシェーダー変更を取り消しました。シェーダーは上の欄で選んでください。"
+
+msgid "The shader inspector could not be drawn: {0}. Other panels are still available."
+msgstr "シェーダーのインスペクターを表示できませんでした: {0}。ほかのパネルは引き続き使えます。"
+
+msgid "{0}: a preview-only texture cannot be saved in the material. Choose a texture asset."
+msgstr "{0}: プレビューだけのテクスチャはマテリアルに保存できません。テクスチャのアセットを選んでください。"
+
+msgid "{0}: the texture dimension does not match this shader property."
+msgstr "{0}: テクスチャの次元がシェーダーのプロパティと一致しません。"
+
+msgid "{0} (mesh map)"
+msgstr "{0}（メッシュマップ）"
+
+msgid "Load a model first."
+msgstr "先にモデルを読み込んでください。"
+
+msgid "not baked for this texture set"
+msgstr "このテクスチャセットでは未ベイク"

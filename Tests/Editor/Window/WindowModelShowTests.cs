@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -16,6 +17,47 @@ namespace Yozolab.YoluPainter.Tests
     /// </summary>
     public sealed partial class WindowTests
     {
+        [Test] public void TheShowDropdownStaysAtThe3DViewsLeftAndNamesUnavailableMaps()
+        {
+            window.Preview.LoadDemoMesh();
+            window.View = TexturePaintWindow.ViewMode.Model; Repaint(window);
+            Assert.That(window.modelShowButtonForTests.x, Is.GreaterThanOrEqualTo(window.SurfaceRect.x));
+            Assert.That(window.modelShowButtonForTests.x, Is.LessThan(window.SurfaceRect.center.x));
+            var items = window.ModelShowChoices();
+            var maps = items.Where(x => x.path.StartsWith("Mesh Map/")).ToList();
+            Assert.That(maps.Count, Is.EqualTo(System.Enum.GetValues(typeof(MeshMapKind)).Length));
+            Assert.That(maps.All(x => x.reason != null && x.path.Contains("not baked")), Is.True);
+            Assert.That(window.ModelShowMenu().Build().Count(x => x.Label.Contains("not baked") && !x.Enabled), Is.EqualTo(maps.Count), "unavailable maps stay visible even when none are baked");
+            Assert.That(items.Single(x => x.path.StartsWith("Channel/Layer mask")).reason, Does.Contain("no mask"));
+            items.Single(x => x.path == "Channel/Roughness (not used)").choose();
+            Assert.That(window.ModelShowName(), Is.EqualTo("Roughness"));
+            window.MeshMaps.Put(new[] { TestMeshMaps.Make(MeshMapKind.AmbientOcclusion, window.Document.Width, window.Document.Height, (x, y, c) => .5) });
+            var ao = window.ModelShowChoices().Single(x => x.path == "Mesh Map/Ambient occlusion");
+            Assert.That(ao.reason, Is.Null); ao.choose(); Assert.That(window.ModelShowName(), Is.EqualTo("AO (mesh map)"));
+            window.ShowMaterialIn3D(); window.View = TexturePaintWindow.ViewMode.Split; Repaint(window); BeginLine(200, 200);
+            Assert.That(window.ModelShowChoices().All(x => x.reason != null && x.reason.Contains("Finish the stroke")), Is.True);
+            window.ModelShowChoices().First().choose(); Assert.That(window.IsStroking, Is.True);
+            Key(window, KeyCode.Escape);
+            window.View = TexturePaintWindow.ViewMode.Split;
+            foreach (bool swap in new[] { false, true })
+            {
+                window.ViewsSwapped = swap; Repaint(window);
+                float expected = Mathf.Max(window.SurfaceRect.x + 8, window.viewModeButtonsEndForTests + 8);
+                Assert.That(window.modelShowButtonForTests.x, Is.EqualTo(expected).Within(.1f));
+                Assert.That(window.modelShowButtonForTests.xMax, Is.LessThanOrEqualTo(window.SurfaceRect.xMax));
+            }
+            var button = window.modelShowButtonForTests;
+            Mouse(window, EventType.MouseDown, button.center); Mouse(window, EventType.MouseUp, button.center);
+            Assert.That(PaintMenuSession.Current, Is.Not.Null);
+            var popup = PaintMenuSession.Current.Windows[0];
+            int roughness = popup.Nodes.FindIndex(x => x.Label.StartsWith("Roughness"));
+            Assert.That(roughness, Is.GreaterThanOrEqualTo(0));
+            int steps = popup.Nodes.Take(roughness + 1).Count(x => x.Enabled && !x.Heading && !x.Separator);
+            for (int i = 0; i < steps; i++) popup.Key(new Event { type = EventType.KeyDown, keyCode = KeyCode.DownArrow });
+            popup.Key(new Event { type = EventType.KeyDown, keyCode = KeyCode.Return });
+            Assert.That(window.ModelShowName(), Is.EqualTo("Roughness")); Assert.That(PaintMenuSession.Current, Is.Null);
+        }
+
         [Test] public void TheShowKeysSwitchWhatThe3DViewShowsAndWaitForTheStroke()
         {
             window.Preview.LoadDemoMesh();
