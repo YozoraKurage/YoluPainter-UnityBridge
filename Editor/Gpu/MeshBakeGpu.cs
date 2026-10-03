@@ -59,9 +59,13 @@ namespace Yozolab.YoluPainter.Editor
 
         public string Name => name;
 
+        /// <summary>これがあると GPU のベイクを使えないと答える（CPU で焼く）。開発環境のテストの台に .devcontainer の common.sh が設定する。</summary>
+        public const string OffEnvironmentVariable = "YOLUPAINTER_GPU_BAKE_OFF";
         /// <summary>この環境で使えない理由（使えれば null）。主スレッドで呼ぶ。</summary>
         public static string Unavailable()
         {
+            // 開発環境のテストの台だけ: GPU のベイクの compute で GPU のデバイスが消えて Unity が落ちる件（2026-10-03）の原因が分かるまで止める
+            if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable(OffEnvironmentVariable))) return "GPU baking is turned off in this environment (" + OffEnvironmentVariable + ")";
             if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null) return "no graphics device";
             if (!SystemInfo.supportsComputeShaders) return "this graphics device has no compute shaders";
             var cs = AssetDatabase.LoadAssetAtPath<ComputeShader>(ShaderPath);

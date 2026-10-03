@@ -64,6 +64,9 @@ if [[ "${YOLUPAINTER_GPU:-1}" != 0 && -e /dev/dxg && -d /usr/lib/wsl/lib ]]; the
   # すると、GPU のドライバの層でまとめて落ちた。Editor/Gpu/GpuHeavyWorkGate.cs が読む。空にすれば止める）
   export YOLUPAINTER_GPU_HEAVY_LOCK="${YOLUPAINTER_GPU_HEAVY_LOCK-$HOME/.cache/yolupainter-tests/gpu-heavy.lock}"
   [[ -z "$YOLUPAINTER_GPU_HEAVY_LOCK" ]] || mkdir -p "$(dirname "$YOLUPAINTER_GPU_HEAVY_LOCK")"
+  # GPU のベイク（compute のレイ）を止めて CPU で焼く（2026-10-03: WSL の更新の後、1 台だけでも GPU のベイクの中で GPU のデバイスが消えて
+  # Unity が落ちるようになった。原因が分かるまで。GPU のベイクの試験は「使えない」で飛ぶ。YOLUPAINTER_GPU_BAKE_OFF= で戻す）
+  export YOLUPAINTER_GPU_BAKE_OFF="${YOLUPAINTER_GPU_BAKE_OFF-1}"
   # 複数の GPU があるときは MESA_D3D12_DEFAULT_ADAPTER_NAME（部分一致）で選べる。
 fi
 
