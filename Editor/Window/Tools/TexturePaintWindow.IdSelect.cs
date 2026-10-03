@@ -64,7 +64,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 if (preview == null || !preview.HasModel) { why = L.Tr("Load a model (or the demo cube) to pick on the 3D view."); return false; }
                 if (!preview.TryPick(surfaceRect, pointer, out var hit)) { why = L.Tr("Nothing of the model under the pointer."); return false; }
-                if (hit.MaterialSlot != materialSlot) { OtherSlotPressed(hit.MaterialSlot); return false; }
+                if (!PickSlotInCurrentSet(hit.MaterialSlot)) { OtherSlotPressed(hit.MaterialSlot); return false; }
                 if (!IdMapColors.TryGetAtUv(map, hit.UV.x, hit.UV.y, out rgb)) { why = L.Tr("The ID map has no colour where that face lies in UV."); return false; }
                 return true;
             }
@@ -175,6 +175,7 @@ namespace Yozolab.YoluPainter.Editor
             if (PaintGui.Button(Mark("idselect-bake-panel", rows.Row(26, 4)), map != null ? L.Tr("Bake ID Map Again…") : L.Tr("Bake ID Map…"), map == null, stroke == null && meshBakeJob == null,
                     L.Tr("Open the bake window with the ID map checked"), "local_fire_department"))
                 TryAction(OpenIdBake);
+            IdColorAssignmentRows(rows, Repaint);
             rows.Space(4);
         }
 

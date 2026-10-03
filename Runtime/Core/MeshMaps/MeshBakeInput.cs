@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
+using System.Linq;
 
 namespace Yozolab.YoluPainter.Core.MeshMaps
 {
@@ -28,6 +29,8 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         public bool HasColors => Colors != null;
         public string Hash { get; }
         public string TopologyHash { get; }
+        internal readonly string[] MaterialKeys;
+        public string MaterialIdentityHash { get; }
         /// <summary>頂点法線の出どころ（"authored"、"reconstructed-crease-60" など。知らせるだけで、照合は法線の値そのもので行う）。</summary>
         public string NormalSource { get; }
         internal readonly double MinX, MinY, MinZ, MaxX, MaxY, MaxZ;
@@ -43,7 +46,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         /// <param name="renderers">三角形ごとのレンダラー（メッシュ）の番号、または null（すべて 0）。</param>
         /// <param name="rendererNames">レンダラーの名前（名前での対応づけに使う）、または null。</param>
         public MeshBakeInput(float[] corners, float[] normals, float[] uvs, int[] slots, int uvChannel = 0, string normalSource = null,
-            float[] tangents = null, float[] colors = null, int[] renderers = null, IReadOnlyList<string> rendererNames = null)
+            float[] tangents = null, float[] colors = null, int[] renderers = null, IReadOnlyList<string> rendererNames = null, IReadOnlyList<string> materialKeys = null)
         {
             if (corners == null) throw new ArgumentNullException(nameof(corners));
             if (uvs == null) throw new ArgumentNullException(nameof(uvs));
@@ -66,6 +69,10 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             foreach (float v in uvs) if (float.IsNaN(v) || float.IsInfinity(v)) throw new ArgumentException("The mesh contains non-finite UVs.", nameof(uvs));
             if (normals != null) foreach (float v in normals) if (float.IsNaN(v) || float.IsInfinity(v)) throw new ArgumentException("The mesh contains non-finite normals.", nameof(normals));
             foreach (int s in slots) if (s < -1) throw new ArgumentOutOfRangeException(nameof(slots), "Material slots must be -1 or more.");
+            if (materialKeys != null && materialKeys.Count != count) throw new ArgumentException("Material identities must hold one key per triangle.", nameof(materialKeys));
+            MaterialKeys = materialKeys == null ? null : new List<string>(materialKeys).ToArray();
+            if (MaterialKeys != null && MaterialKeys.Any(k => k != null && k.Length > 128)) throw new ArgumentException("Material identity key too long.", nameof(materialKeys));
+            MaterialIdentityHash = IdColorAssignments.Hash(string.Concat((MaterialKeys ?? Array.Empty<string>()).Select(k => (k?.Length ?? -1).ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + (k ?? ""))));
             Corners = (float[])corners.Clone(); Uvs = (float[])uvs.Clone(); Slots = (int[])slots.Clone();
             Normals = normals == null ? null : (float[])normals.Clone();
             Tangents = tangents == null ? null : (float[])tangents.Clone(); Colors = colors == null ? null : (float[])colors.Clone();

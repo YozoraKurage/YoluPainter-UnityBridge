@@ -134,6 +134,14 @@ namespace Yozolab.YoluPainter.Editor.Preview
             return grid.Find(triangles, uv);
         }
 
+        /// <summary>UV の点に重なる全三角形（昇順）。呼び手のリストを再利用する。</summary>
+        public void TrianglesAtUv(int slot, Vector2 uv, List<int> result)
+        {
+            if (result == null) throw new ArgumentNullException(nameof(result)); result.Clear();
+            if (!grids.TryGetValue(slot, out var grid)) grids.Add(slot, grid = new UvGrid(triangles, slot));
+            grid.Find(triangles, uv, result);
+        }
+
         /// <summary>範囲の UV の輪郭（範囲の中で 1 回だけ現れる UV の辺。2 点ずつ並べた UV）。辺は UV アイランドと同じ丸めで比べ、つぶれた辺は
         /// 入れない。辺を 64 ビットの鍵にして並べ、1 回だけのものを拾う（辞書より速く、大きな範囲でも少ない記憶）。鍵ごとに覚える。</summary>
         public Vector2[] UvOutline(int triangle, SurfaceRegionKind kind)
@@ -199,13 +207,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
             }
             int Cell(float v, float origin, float width) => Mathf.Clamp((int)((v - origin) / width), 0, size - 1);
 
-            public int Find(IReadOnlyList<SurfaceTriangle> triangles, Vector2 p)
+            public int Find(IReadOnlyList<SurfaceTriangle> triangles, Vector2 p, List<int> result = null)
             {
-                if (items.Length == 0) return -1;
+                if (items.Length == 0 || float.IsNaN(p.x) || float.IsNaN(p.y) || float.IsInfinity(p.x) || float.IsInfinity(p.y)) return -1;
                 float fx = (p.x - x0) / cellW, fy = (p.y - y0) / cellH;
                 if (fx < -1e-4f || fy < -1e-4f || fx > size + 1e-4f || fy > size + 1e-4f) return -1;
                 int c = Mathf.Clamp((int)fx, 0, size - 1) + Mathf.Clamp((int)fy, 0, size - 1) * size;
-                for (int k = start[c]; k < start[c + 1]; k++) { int i = items[k]; if (Contains(triangles[i], p)) return i; }
+                for (int k = start[c]; k < start[c + 1]; k++) { int i = items[k]; if (!Contains(triangles[i], p)) continue; if (result == null) return i; result.Add(i); }
                 return -1;
             }
 

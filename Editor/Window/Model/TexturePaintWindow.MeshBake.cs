@@ -108,7 +108,7 @@ namespace Yozolab.YoluPainter.Editor
             if (!textureSets.Contains(set)) { refusal = L.Tr("The texture set {0} is no longer in the project.", set.Name); return null; }
             if (set.MaterialSlot >= preview.MaterialSlotCount) { refusal = L.Tr("The texture set {0} paints material slot {1}, which the loaded model does not have.", set.Name, set.MaterialSlot); return null; }
             var d = set.Document;
-            var settings = meshBakeSettings.Clone();
+            var settings = meshBakeSettings.WithIdContext(CurrentMeshBakeInput(), CurrentHighPolyInput(), d.IdColors);
             settings.Width = d.Width; settings.Height = d.Height; settings.TargetSlot = set.MaterialSlot;
             try { settings.Validate(); }
             catch (ArgumentException ex) { refusal = L.Tr("Mesh maps were not baked: {0}", ex.Message); return null; }
@@ -635,6 +635,7 @@ namespace Yozolab.YoluPainter.Editor
                     BakeChoice(host, rows.Row(), L.Tr("Colors from"), s.IdSource, IdSourceChoices, IdSourceName, v => meshBakeSettings.IdSource = v,
                         L.Tr("What gets its own colour in the ID map"));
                     NoteRow(rows, IdSourceDescription(s.IdSource));
+                    IdColorAssignmentRows(rows, host.Repaint);
                     if ((s.IdSource == MeshIdSource.MaterialSlot || s.IdSource == MeshIdSource.Mesh) && highPolyModel == null)
                         NoteRow(rows, L.Tr("Without a high poly, every texel of one texture set has the same slot and mesh, so this ID map is one colour. Use mesh parts, UV islands or vertex colours, or choose a high poly."), NoteKind.Warning);
                     break;
@@ -665,12 +666,13 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>ID の色の元の並び（ドロップダウン）。</summary>
-        static readonly MeshIdSource[] IdSourceChoices = { MeshIdSource.MeshPart, MeshIdSource.UvIsland, MeshIdSource.MaterialSlot, MeshIdSource.Mesh, MeshIdSource.VertexColor };
+        static readonly MeshIdSource[] IdSourceChoices = { MeshIdSource.MeshPart, MeshIdSource.UvIsland, MeshIdSource.MaterialSlot, MeshIdSource.MaterialAsset, MeshIdSource.Mesh, MeshIdSource.VertexColor };
         /// <summary>ID の色の元の説明（右の設定の、元の選択の下）。</summary>
         static string IdSourceDescription(MeshIdSource source)
         {
             switch (source)
             {
+                case MeshIdSource.MaterialAsset: return L.Tr("Slots using the same material asset share an ID colour, including the high poly. Different assets keep different colours; names are not compared.");
                 case MeshIdSource.MeshPart: return L.Tr("Each connected piece of the mesh (triangles sharing edges in 3D, across UV seams) gets its own colour, split the same way as the polygon fill's Mesh Part.");
                 case MeshIdSource.UvIsland: return L.Tr("Each UV island gets its own colour, split the same way as the polygon fill's UV Island.");
                 case MeshIdSource.Mesh: return L.Tr("Each mesh (renderer) gets its own colour; with a high poly, each of its meshes.");

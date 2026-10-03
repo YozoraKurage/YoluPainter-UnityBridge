@@ -45,6 +45,7 @@ namespace Yozolab.YoluPainter.Editor
         void HandleCanvasInput(Event e)
         {
             if(HandleStencilInput(e))return; // T ＋ ドラッグでステンシルを動かす（2D と 3D。Tools/TexturePaintWindow.Stencil.cs）
+            HandlePickHover(e);
             if((canvasRect.width>0||canvasRotating)&&HandleCanvasRotateInput(e))return; // R ＋ ドラッグ・Shift ＋ 中ボタンのドラッグで表示を回す
             if(HandleShapeGizmo(e))return; // 3D ビューの形のグラデーションのハンドル（Model/TexturePaintWindow.ShapeGizmo.cs）
             if(HandleResourceDrop(e))return; // アセットのパネル・Project ウィンドウから落とした画像をレイヤーとして置く

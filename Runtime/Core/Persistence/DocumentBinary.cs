@@ -49,7 +49,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// hardness). Mode 5 or wrap 2 in an older archive is refused. A document without decals is laid out as version 16 (only the version
     /// number differs). Version 18 appends the path material to each present 2D/3D path: a byte count (0 means the legacy single
     /// channel, otherwise 1..6), followed by the channel (int) and straight RGBA8 value for each entry. Unknown or repeated channels
-    /// and counts above 6 are refused. Older archives still load.</summary>
+    /// and counts above 6 are refused. Version 19 may end the document, after all layers, with an optional manual ID colour block
+    /// ("YLID", the count, the binding fingerprint, then sorted part numbers and RGB); an empty assignment is not written, and an unknown
+    /// tag, count, fingerprint, RGB or a repeated part is refused. Older archives read as no manual colours. Older archives still load.</summary>
     public static class DocumentBinary
     {
         /// <summary>The version that added per-channel blend modes and opacities (attribute bit 2).</summary>
@@ -62,7 +64,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
         internal const int DecalVersion = 17;
         /// <summary>The version that added the path material (channel count, channels and values after each present path).</summary>
         internal const int MaterialPathVersion = 18;
-        const int Version = MaterialPathVersion;
+        /// <summary>The version that added the optional manual ID colour block after the layers.</summary>
+        internal const int ManualIdColorsVersion = 19;
+        const int Version = ManualIdColorsVersion;
         /// <summary>The version <see cref="Write"/> produces.</summary>
         public const int CurrentVersion = Version;
         /// <summary>The version that added the shape gradient (generator type 5 and its volume after the generator block).</summary>
@@ -149,6 +153,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     writer.Write(canvasPath != null);
                     if (canvasPath != null) WriteCanvasPath(writer, canvasPath);
                 }
+                if (document.IdColors.Colors.Count > 0) WriteIdColors(writer, document.IdColors);
                 writer.Flush(); return stream.ToArray();
             }
         }
@@ -326,6 +331,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         }
                         if (locks != LayerLocks.None) lockedLayers.Add((layer, locks));
                     }
+                    if (version >= ManualIdColorsVersion && stream.Position != stream.Length) doc.SetIdColors(ReadIdColors(reader));
                     if (stream.Position != stream.Length) throw new InvalidDataException("Trailing native data requires a newer reader.");
                     try { doc.ValidateStructure(); }
                     catch (InvalidOperationException ex) { throw new InvalidDataException("Invalid layer groups: " + ex.Message, ex); }
@@ -336,6 +342,31 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 catch (EndOfStreamException ex) { throw new InvalidDataException("Native archive is truncated.", ex); }
             }
         }
+        static void WriteIdColors(BinaryWriter writer, MeshMaps.IdColorAssignments colors)
+        {
+            writer.Write(0x44494C59); // YLID
+            writer.Write(colors.Colors.Count);
+            if (colors.Colors.Count == 0) return;
+            WriteString(writer, colors.Binding);
+            foreach (var item in colors.Colors.OrderBy(x => x.Key)) { writer.Write(item.Key); writer.Write(item.Value); }
+        }
+        static MeshMaps.IdColorAssignments ReadIdColors(BinaryReader reader)
+        {
+            if (reader.ReadInt32() != 0x44494C59) throw new InvalidDataException("Unknown trailing native data.");
+            int count = ReadCount(reader, MeshMaps.IdColorAssignments.MaxParts, "manual ID colours");
+            if (count == 0) throw new InvalidDataException("Empty manual ID colour block.");
+            string binding = ReadString(reader);
+            var colors = new System.Collections.Generic.Dictionary<int, int>(); int previous = -1;
+            for (int i = 0; i < count; i++)
+            {
+                int part = reader.ReadInt32(), rgb = reader.ReadInt32();
+                if (part <= previous) throw new InvalidDataException("Manual ID colour parts must be unique and sorted.");
+                colors.Add(part, rgb); previous = part;
+            }
+            try { return new MeshMaps.IdColorAssignments(binding, colors); }
+            catch (ArgumentException ex) { throw new InvalidDataException("Invalid manual ID colours.", ex); }
+        }
+
         /// <summary>Version 16: a fill layer's images (channel and resource ID per image, by channel) and its projection; version 17 ends a
         /// decal's with its culling.</summary>
         static void WriteFillImages(BinaryWriter writer, PaintLayer layer)

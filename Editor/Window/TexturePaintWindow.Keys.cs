@@ -67,6 +67,7 @@ namespace Yozolab.YoluPainter.Editor
             if (HandleViewKeys(e)) return true; // 表示の回転・反転（ストロークの最中は断る）
             if (HandleModelShowKeys(e)) return true; // 3D ビューで見せるもの: C・Shift+C・Shift+B（Model/TexturePaintWindow.ModelShow.cs。ストロークの最中は断る）
             if (e.type != EventType.KeyDown || stroke != null || toolDragging || GUIUtility.keyboardControl != 0 || e.control || e.command || e.alt) return false;
+            if (HandlePolygonOverlapKey(e)) { NoteTookKey(e); e.Use(); Repaint(); return true; }
             switch (e.keyCode)
             {
                 case KeyCode.B: SelectTool(PaintTool.Brush); break;

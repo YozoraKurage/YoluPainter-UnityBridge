@@ -81,6 +81,7 @@ namespace Yozolab.YoluPainter.Core
                 fillImageCacheBudget = fillImageCacheBudget, imageResources = imageResources,
             };
             copy.normalSettings = ScaledNormalSettings(normalSettings, scale, notes);
+            copy.idColors = idColors;
             string size = width + "×" + height;
             Action<long> ensure = growth =>
             {

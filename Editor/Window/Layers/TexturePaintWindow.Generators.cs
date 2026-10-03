@@ -44,6 +44,7 @@ namespace Yozolab.YoluPainter.Editor
                     bool current = set == window.currentSet;
                     int nowSlot = current ? window.materialSlot : set.MaterialSlot;
                     var nowDoc = current && window.document != null ? window.document : set.Document;
+                    nowSettings += ";idColours=" + (nowDoc?.IdColors.Key ?? "");
                     bool nowHasRoot = window.preview != null && window.preview.HasModel;
                     var nowRootPosition = nowHasRoot ? window.preview.ModelRootPosition : Vector3.zero; var nowRootRotation = nowHasRoot ? window.preview.ModelRootRotation : Quaternion.identity;
                     if (set.MeshMaps.Revision != mapsRevision || !ReferenceEquals(nowInput, input) || !ReferenceEquals(nowHigh, highPoly) || nowSettings != settings || nowSlot != slot || !ReferenceEquals(nowDoc, doc)

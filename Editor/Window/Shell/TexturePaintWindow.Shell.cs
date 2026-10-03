@@ -217,6 +217,7 @@ namespace Yozolab.YoluPainter.Editor
                     x -= 6; // 塗る・消すは 1 組
                     if (PaintGui.Button(Mark("polyfill-erase", Next(PaintGui.TextWidth(erase, PaintTheme.Label) + 20)), erase, polyFillErase, true, EditingMask ? L.Tr("Fill the mask with black (hides the layer)") : L.Tr("Erase to transparent"))) PolygonFillErase = true;
                     brush.opacity = PaintGui.Slider(Next(130), L.Tr("Opacity"), brush.opacity * 100, 0, 100, "0", "%") / 100;
+                    if (overlapCandidates.Count > 1) PolygonOverlapOptions(Next(130));
                     { var t = PolygonFillHint; PaintGui.Text(Fit(t), t, PaintTheme.LabelDim, EditingMask ? PaintTheme.Warning : PaintTheme.TextDim); }
                     break;
                 }

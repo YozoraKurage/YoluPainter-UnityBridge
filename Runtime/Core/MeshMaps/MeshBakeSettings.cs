@@ -37,7 +37,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
     /// <summary>ID の色の元。名前は由来の設定の文字列（<see cref="MeshBakeSettings.KindKey"/>）に、値はウィンドウの状態に入るので、並べ替えず
     /// 末尾に足す。MaterialSlot は全体を平らにしたスロット（レンダラーとサブメッシュの組。Unity ではサブメッシュ i がマテリアル i で描かれる）。
     /// MeshPart と UvIsland の分け方はポリゴン塗りつぶしの範囲と同じ（<see cref="MeshRegions"/>）。</summary>
-    public enum MeshIdSource { MaterialSlot = 0, Mesh = 1, VertexColor = 2, UvIsland = 3, MeshPart = 4 }
+    public enum MeshIdSource { MaterialSlot = 0, Mesh = 1, VertexColor = 2, UvIsland = 3, MeshPart = 4, MaterialAsset = 5 }
 
     /// <summary>テクセルの由来。Empty は三角形も余白も届かない所で、値は 0（データを作らない）。Overlap は UV が
     /// 別の三角形とも重なっていた所（添字の小さい三角形の値を持つ）。Padding は島の外の余白で、いちばん近い島のテクセルの写し。</summary>
@@ -89,6 +89,14 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         /// 2: 部品の数に合わせた格子の色（<see cref="IdPalette"/>。1 はハッシュの色相で、近い色がありえた）、頂点カラーは三角形ごと（1 は補間）、
         /// UV アイランドはスロットごと・1e-6 の丸め（ポリゴン塗りつぶしと同じ）。</summary>
         public const int IdAlgorithm = 2;
+        [NonSerialized] public IdColorAssignments ManualIdColors = IdColorAssignments.Empty;
+        [NonSerialized] public string IdMaterialIdentity = "";
+        public MeshBakeSettings WithIdContext(MeshBakeInput input, MeshBakeInput reference, IdColorAssignments colors)
+        {
+            var copy = Clone(); copy.ManualIdColors = colors ?? IdColorAssignments.Empty;
+            copy.IdMaterialIdentity = IdColorAssignments.Hash((input?.MaterialIdentityHash ?? "") + ";" + (reference?.MaterialIdentityHash ?? ""));
+            return copy;
+        }
         /// <summary>高ポリへの投影: 低ポリの点から外へ ReferenceFrontal だけ出た所から、内へ Frontal + Rear の範囲で最初に当たる高ポリの面。</summary>
         public double ReferenceFrontal = 0.01, ReferenceRear = 0.01;
         /// <summary>投影の向きに、位置で溶接した全部の面の平均の法線（ハードエッジでも割れない「ケージ」）を使う。false なら頂点法線。</summary>
@@ -121,6 +129,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             CheckSpread(AoSpreadDegrees, nameof(AoSpreadDegrees)); CheckSpread(ThicknessSpreadDegrees, nameof(ThicknessSpreadDegrees));
             if (!(CurvatureRadius >= MinCurvatureRadius && CurvatureRadius <= MaxCurvatureRadius)) throw new ArgumentOutOfRangeException(nameof(CurvatureRadius), "Curvature radius must be " + MinCurvatureRadius + "–" + MaxCurvatureRadius + " of the model's bounding-box diagonal.");
             if (Antialiasing < 1 || Antialiasing > MaxAntialiasing) throw new ArgumentOutOfRangeException(nameof(Antialiasing), "Antialiasing must be 1–" + MaxAntialiasing + " subsamples per side.");
+            if (ManualIdColors == null) throw new ArgumentNullException(nameof(ManualIdColors));
             if (!Enum.IsDefined(typeof(MeshIdSource), IdSource)) throw new ArgumentOutOfRangeException(nameof(IdSource));
             CheckDistance(ReferenceFrontal, nameof(ReferenceFrontal)); CheckDistance(ReferenceRear, nameof(ReferenceRear));
         }
@@ -146,7 +155,9 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                     return "samples=" + ThicknessSamples + ";max=" + R(ThicknessMaxDistance) + ";spread=" + R(ThicknessSpreadDegrees) + ";occluders=" + Occluders;
                 case MeshMapKind.TangentNormal: return "frame=unity-vertex-tangents;y=up";
                 case MeshMapKind.Height: return "normalize=max-ray-distance";
-                case MeshMapKind.Id: return "source=" + IdSource + ";algorithm=" + IdAlgorithm;
+                case MeshMapKind.Id: return "source=" + IdSource + ";algorithm=" + IdAlgorithm
+                    + (IdSource == MeshIdSource.MaterialAsset ? ";materials=" + IdMaterialIdentity : "")
+                    + (ManualIdColors.Colors.Count > 0 ? ";manual=" + ManualIdColors.Key : "");
                 case MeshMapKind.BentNormal:
                     return "samples=" + AoSamples + ";max=" + R(AoMaxDistance) + ";spread=" + R(AoSpreadDegrees) + ";backfaces=" + (AoIgnoreBackfaces ? "ignore" : "occlude") + ";occluders=" + Occluders;
                 case MeshMapKind.Opacity: return "hit=reference";

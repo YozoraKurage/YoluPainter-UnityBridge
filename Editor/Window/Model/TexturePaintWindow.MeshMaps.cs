@@ -69,14 +69,14 @@ namespace Yozolab.YoluPainter.Editor
             var geometry = preview != null ? preview.Geometry : null;
             if (geometry == null || geometry.TriangleCount == 0) { meshBakeInputFor = null; meshBakeInput = null; return null; }
             if (ReferenceEquals(geometry, meshBakeInputFor)) return meshBakeInput;
-            meshBakeInput = BuildMeshBakeInput(geometry, preview.Attributes);
+            meshBakeInput = BuildMeshBakeInput(geometry, preview.Attributes, MaterialIdentityKeys(preview));
             meshBakeInputFor = geometry;
             return meshBakeInput;
         }
 
         /// <summary>スナップショットの三角形（位置・UV0・スロット・レンダラー）と属性（頂点法線・接線・頂点カラー・レンダラー名）を
         /// 焼き込みの入力にする。属性が無い（または並びが合わない）ときは、頂点法線を形から作り直し、接線・色・名前は無し。</summary>
-        internal static MeshBakeInput BuildMeshBakeInput(SurfaceGeometry geometry, SurfaceAttributes attributes = null)
+        internal static MeshBakeInput BuildMeshBakeInput(SurfaceGeometry geometry, SurfaceAttributes attributes = null, IReadOnlyList<string> materialKeys = null)
         {
             if (geometry == null) throw new ArgumentNullException(nameof(geometry));
             var triangles = geometry.Triangles; int n = triangles.Count;
@@ -91,10 +91,10 @@ namespace Yozolab.YoluPainter.Editor
                 slots[i] = Math.Max(-1, t.MaterialSlot); renderers[i] = Math.Max(0, t.RendererIndex);
             }
             if (attributes == null || attributes.TriangleCount != n)
-                return new MeshBakeInput(corners, MeshBakeInput.ReconstructNormals(corners, MeshMapNormalCrease), uvs, slots, 0, "reconstructed-crease-" + MeshMapNormalCrease, renderers: renderers);
+                return new MeshBakeInput(corners, MeshBakeInput.ReconstructNormals(corners, MeshMapNormalCrease), uvs, slots, 0, "reconstructed-crease-" + MeshMapNormalCrease, renderers: renderers, materialKeys: materialKeys);
             var names = attributes.RendererNames;
             if (names != null) foreach (int r in renderers) if (r >= names.Count) { names = null; break; }
-            return new MeshBakeInput(corners, attributes.Normals, uvs, slots, 0, "authored", attributes.Tangents, attributes.Colors, renderers, names);
+            return new MeshBakeInput(corners, attributes.Normals, uvs, slots, 0, "authored", attributes.Tangents, attributes.Colors, renderers, names, materialKeys);
         }
 
         /// <summary>高ポリの入力。選んでいない・読めない・形が無ければ null。低ポリのモデル（の原点）が替わったら読み直す。
@@ -116,7 +116,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             var geometry = highPolyPreview.Geometry;
             if (geometry == null || geometry.TriangleCount == 0) return null;
-            if (!ReferenceEquals(geometry, highPolyInputFor)) { highPolyInput = BuildMeshBakeInput(geometry, highPolyPreview.Attributes); highPolyInputFor = geometry; }
+            if (!ReferenceEquals(geometry, highPolyInputFor)) { highPolyInput = BuildMeshBakeInput(geometry, highPolyPreview.Attributes, MaterialIdentityKeys(highPolyPreview)); highPolyInputFor = geometry; }
             return highPolyInput;
         }
         internal GameObject HighPolyModel { get => highPolyModel; set { highPolyModel = value; Repaint(); } }
@@ -132,7 +132,7 @@ namespace Yozolab.YoluPainter.Editor
             return new MeshMapExpectation
             {
                 MeshHash = input?.Hash, TopologyHash = input?.TopologyHash, ReferenceHash = CurrentHighPolyInput()?.Hash, Width = d.Width, Height = d.Height,
-                TargetSlot = slot, UvChannel = 0, Settings = meshBakeSettings,
+                TargetSlot = slot, UvChannel = 0, Settings = meshBakeSettings.WithIdContext(input, CurrentHighPolyInput(), d.IdColors),
             };
         }
 
@@ -248,6 +248,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             switch (s)
             {
+                case MeshIdSource.MaterialAsset: return L.Tr("Material asset");
                 case MeshIdSource.Mesh: return L.Tr("Mesh");
                 case MeshIdSource.VertexColor: return L.Tr("Vertex color");
                 case MeshIdSource.UvIsland: return L.Tr("UV island");

@@ -142,7 +142,7 @@ namespace Yozolab.YoluPainter.Editor
             projectPath=null; projectToken=null; savedRevision=-1; importedPsdPath=null; externalConflict=false; ResetCanvasView(); NewProjectRecord();
             ResetSetsBaseline(false);
         }
-        void OnLostFocus() { FinishStroke(false); CancelShapeDrag(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); ReleaseStencilInput(); preview?.CancelNavigation(); SaveRecovery(); }
+        void OnLostFocus() { ClearPolygonFillHover(); pickHoverPointer = new Vector2(-100, -100); FinishStroke(false); CancelShapeDrag(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); ReleaseStencilInput(); preview?.CancelNavigation(); SaveRecovery(); }
         void BeforeReload() { FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); EndLightingDrag(true); preview?.CancelNavigation(); SaveRecovery(); }
         void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); SaveRecovery(); } }
         void OnDisable()
