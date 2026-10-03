@@ -119,7 +119,7 @@ namespace Yozolab.YoluPainter.Editor
                 projectPath=saved.Path;projectToken=saved.Token;externalConflict=false;MeshMapsWereSaved();openedFormat=YlpFormat.Current;
                 foreach(var set in textureSets)set.SavedRevision=set.Document.Revision;
                 savedSetsRevision=setsRevision;
-                message="Saved "+Path.GetFileName(saved.Path)+(saved.Backup!=null?"; the previous version is kept in "+Path.GetFileName(Path.GetDirectoryName(saved.Backup))+".":".");
+                message="Saved "+Path.GetFileName(saved.Path)+(saved.Backup!=null?"; the previous version is kept in "+Path.GetFileName(Path.GetDirectoryName(saved.Backup))+".":".")+InactiveGeneratorSaveNote();
                 string asset=AssetPathOf(saved.Path);
                 if(asset!=null)AssetDatabase.ImportAsset(asset,ImportAssetOptions.ForceUpdate);
             });
@@ -252,6 +252,7 @@ namespace Yozolab.YoluPainter.Editor
             if(planned.Count==0){message="Nothing to export: no layer uses any channel.";return;}
             var clash=planned.GroupBy(t=>t.name,StringComparer.OrdinalIgnoreCase).FirstOrDefault(g=>g.Count()>1);
             if(clash!=null){message=L.Tr("Nothing was exported: texture sets {0} would write the same file {1}. Rename one in File ▸ Project Configuration.",String.Join(", ",clash.Select(t=>t.set.Name).Distinct()),clash.Key);return;}
+            if(!ConfirmInactiveGenerators(planned.Select(t=>t.set).Distinct().Select(set=>(set.Name,set.Document))))return;
             string folder=Dialogs.OpenFolder("Export images into folder",projectPath!=null?Path.GetDirectoryName(projectPath):Application.dataPath);if(String.IsNullOrEmpty(folder))return;
             var targets=planned.Select(t=>(t.set,t.channel,path:Path.Combine(folder,t.name))).ToList();
             var existing=targets.Where(t=>File.Exists(t.path)).Select(t=>Path.GetFileName(t.path)).ToList();
@@ -277,6 +278,7 @@ namespace Yozolab.YoluPainter.Editor
         }
         internal void ExportPng()
         {
+            if(!ConfirmInactiveGenerators(new[]{(currentSet.Name,document)}))return;
             string path=Dialogs.SaveFile("Export selected channel PNG",Application.dataPath,(textureSets.Count>1?Sanitize(currentSet.Name)+"_":"")+channel+".png","png");if(String.IsNullOrEmpty(path))return;
             TryAction(()=>
             {

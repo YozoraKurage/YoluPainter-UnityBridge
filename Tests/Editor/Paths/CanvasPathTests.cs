@@ -93,7 +93,10 @@ namespace Yozolab.YoluPainter.Tests
             var path = new CanvasPath(Guid.NewGuid(), PaintChannel.Color, Brush(2.5), new[] { new CanvasPoint(5.25, 6.5, .75), new CanvasPoint(40, 30.125, .5), new CanvasPoint(60, 2) });
             d.SetCanvasPath(l.Id, path);
             var bytes = DocumentBinary.Write(d);
-            Assert.That(BitConverter.ToInt32(bytes, 8), Is.EqualTo(10));
+            Assert.That(BitConverter.ToInt32(bytes, 8), Is.EqualTo(DocumentBinary.CurrentVersion)); Assert.That(DocumentBinary.CurrentVersion, Is.GreaterThanOrEqualTo(10));
+            // 版 10 として書いたもの（版 11 は Generator の段を持つ文書だけ並びが違う）も同じに読む
+            var v10 = (byte[])bytes.Clone(); BitConverter.GetBytes(10).CopyTo(v10, 8);
+            Assert.That(((CanvasPath)DocumentBinary.Read(v10).Layers[0].Path).Points, Is.EqualTo(path.Points));
             var restored = DocumentBinary.Read(bytes);
             var p = (CanvasPath)restored.Layers[0].Path;
             Assert.That((p.Id, p.Channel), Is.EqualTo((path.Id, path.Channel)));

@@ -20,6 +20,10 @@ namespace Yozolab.YoluPainter.Core
     /// first out. The cache is display state, not history or persistence.</item>
     /// <item>The working memory of one evaluation is estimated before anything is allocated (<see cref="WorkingBytes"/>) and
     /// refused above <see cref="PaintDocument.FilterWorkingBudgetBytes"/>.</item>
+    /// <item>A generator stage is a point stage that reads the texture set's mesh maps as the document resolved them
+    /// (<see cref="PaintDocument.GeneratorInputs"/>): the source carries that snapshot and its revision, which is part of the stamp,
+    /// so new or lost maps never mix with tiles evaluated from the old ones. A generator whose maps are not usable passes its
+    /// input through.</item>
     /// </list>
     /// Single-threaded like the document. Stale blocks of a stack are evaluated together, one block per worker thread with
     /// reused working arrays (a single block runs its passes' rows or column strips in parallel instead); every output pixel is
@@ -43,6 +47,9 @@ namespace Yozolab.YoluPainter.Core
             public PaintLayer Layer; public PaintChannel Channel; public bool Mask;
             public SparseTileSurface Surface; public bool IsFill; public Rgba32 Fill;
             public FilterEffect[] Chain; public long FilterRevision;
+            /// <summary>Generator stacks: the mesh maps by kind as the document resolved them, and that resolution's revision (0
+            /// without a generator).</summary>
+            public IReadOnlyList<MeshMaps.BakedMeshMap> Maps; public long MapsRevision;
             public bool Normal { get { return !Mask && Channel == PaintChannel.Normal; } }
             public int Key { get { return Mask ? MaskKey : (int)Channel; } }
         }
@@ -66,6 +73,7 @@ namespace Yozolab.YoluPainter.Core
         {
             var chain = layer.ActiveChain(channel); if (chain.Length == 0) return null;
             var s = new Source { Layer = layer, Channel = channel, Chain = chain, FilterRevision = layer.FilterRevision };
+            AttachMaps(s, layer.Document);
             if (layer.Kind == LayerKind.Fill) { s.IsFill = true; Rgba32 fill; layer.FillValues.TryGetValue(channel, out fill); s.Fill = fill; }
             else { SparseTileSurface surface; layer.TryGetChannel(channel, out surface); s.Surface = surface; }
             return s;
@@ -73,7 +81,13 @@ namespace Yozolab.YoluPainter.Core
         internal static Source MaskSource(RasterMask mask)
         {
             var chain = mask.ActiveChain(); if (chain.Length == 0) return null;
-            return new Source { Layer = mask.Owner, Mask = true, Surface = mask.Surface, Chain = chain, FilterRevision = mask.FilterRevision };
+            var s = new Source { Layer = mask.Owner, Mask = true, Surface = mask.Surface, Chain = chain, FilterRevision = mask.FilterRevision };
+            AttachMaps(s, mask.Owner.Document);
+            return s;
+        }
+        static void AttachMaps(Source s, PaintDocument document)
+        {
+            foreach (var e in s.Chain) if (e.Settings.IsGenerator) { s.Maps = document.GeneratorMapSnapshot(out s.MapsRevision); return; }
         }
         internal static int Halo(FilterEffect[] chain, int count) { int h = 0; for (int i = 0; i < count; i++) h += chain[i].Settings.HaloPixels; return h; }
         internal static int Expansion(FilterEffect[] chain) { int h = 0; foreach (var e in chain) if (e.Settings.ExpandsCoverage) h += e.Settings.HaloPixels; return h; }
@@ -142,7 +156,7 @@ namespace Yozolab.YoluPainter.Core
             else if (s.Surface == null) input = 0;
             else if (IsGlobal(s.Chain, s.Chain.Length)) input = s.Surface.Revision;
             else { int m = Tiles(Halo(s.Chain, s.Chain.Length)); input = s.Surface.MaxTileRevision(tx0 - m, ty0 - m, tx1 + m, ty1 + m); }
-            return new FilterStamp(s.FilterRevision, input);
+            return new FilterStamp(s.FilterRevision, input, s.MapsRevision);
         }
 
         // ───────────── tiles and pixels (cached) ─────────────
@@ -416,6 +430,7 @@ namespace Yozolab.YoluPainter.Core
                     var lut = new byte[256]; for (int v = 0; v < 256; v++) lut[v] = (byte)(255 - v);
                     ApplyLut(buf, cur.Area, lut, strength); return buf;
                 }
+                case FilterType.Generator: Generate(s, buf, cur, f.Generator, strength); return buf;
                 default:
                 {
                     var st = Statistics(s, k);
@@ -431,7 +446,7 @@ namespace Yozolab.YoluPainter.Core
         Stats Statistics(Source s, int k)
         {
             var key = (s.Layer.Id, s.Key, k);
-            var stamp = new FilterStamp(s.FilterRevision, s.IsFill ? Stamp(s, 0, 0, 1, 1).Input : s.Surface == null ? 0 : s.Surface.Revision);
+            var stamp = new FilterStamp(s.FilterRevision, s.IsFill ? Stamp(s, 0, 0, 1, 1).Input : s.Surface == null ? 0 : s.Surface.Revision, s.MapsRevision);
             Stats st;
             if (stats.TryGetValue(key, out st) && st.Stamp.Equals(stamp)) return st;
             int min = 255, max = 0; bool any = false;
@@ -498,8 +513,34 @@ namespace Yozolab.YoluPainter.Core
                 }
             });
         }
+        /// <summary>A generator stage in place (a point stage: the rect does not shrink). Masks: the grey hide amount is turned into
+        /// visibility, combined and turned back. Layer pixels: each colour component; alpha is unchanged and fully transparent pixels
+        /// keep their RGB. Pixels where a map has no data, and the whole stage when its maps are not usable, keep the input.</summary>
+        void Generate(Source s, byte[] buf, Rect r, GeneratorSettings g, double strength)
+        {
+            var bound = BoundGenerator.Bind(g, s.Maps, document.Width, document.Height, out _);
+            if (bound == null) return; // 入力のまま（理由は PaintDocument.GetGeneratorStatus が知らせる）
+            bool mask = s.Mask; var blend = g.Blend; var unit = MathUtil.ByteUnit;
+            ParallelRange(r.H, (y0, y1) =>
+            {
+                for (int y = y0; y < y1; y++)
+                    for (int x = 0; x < r.W; x++)
+                    {
+                        int i = (y * r.W + x) * 4;
+                        if (!mask && buf[i + 3] == 0) continue;
+                        if (!bound.TryValue(r.X0 + x, r.Y0 + y, out double v)) continue;
+                        if (mask)
+                        {
+                            byte hide = (byte)(255 - MathUtil.ToByte(BoundGenerator.Combine(blend, 1 - unit[buf[i]], v, strength)));
+                            buf[i] = hide; buf[i + 1] = hide; buf[i + 2] = hide;
+                        }
+                        else for (int c = 0; c < 3; c++) buf[i + c] = MathUtil.ToByte(BoundGenerator.Combine(blend, unit[buf[i + c]], v, strength));
+                    }
+            });
+        }
+
         /// <summary>A 32-bit integer mix (lowbias32). The noise depends only on the seed and the canvas position.</summary>
-        static uint Hash(uint h) { unchecked { h ^= h >> 16; h *= 0x7feb352dU; h ^= h >> 15; h *= 0x846ca68bU; h ^= h >> 16; return h; } }
+        internal static uint Hash(uint h) { unchecked { h ^= h >> 16; h *= 0x7feb352dU; h ^= h >> 15; h *= 0x846ca68bU; h ^= h >> 16; return h; } }
 
         byte[] Blur(Source s, byte[] buf, Rect cur, Rect next, int radius, double strength, Scratch scratch, int outSlot)
         {

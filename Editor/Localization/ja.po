@@ -599,8 +599,8 @@ msgstr ""
 "Esc で描画中のストロークやドラッグを取り消し\n"
 "既定では、このウィンドウにフォーカスがあるあいだ Unity のショートカットは働かない（Project Settings ▸ YoluPainter ▸ Unity shortcuts while painting で変えられる）"
 
-msgid "Prototype: the CPU paints the source and the GPU composites tiles. Readable static and skinned meshes (posed on a copy). One channel is painted at a time. .ylp saves; PSD with 8-bit RGB layers, groups, masks, fills and three adjustment types. Generators and anchors are not finished, and the 3D preview does not reproduce lilToon exactly. See Documentation~/STATUS.md in the package."
-msgstr "試作版です。元の画素は CPU が描き、タイルの合成は GPU が行います。読み取りできる静的メッシュとスキンメッシュ（複製にポーズを付けて表示）に対応。描けるのは一度に 1 チャンネルです。.ylp で保存し、PSD は 8 bit RGB のレイヤー・グループ・マスク・塗りつぶし・3 種類の調整レイヤーを読み書きします。ジェネレーターとアンカーは未完成で、3D プレビューは lilToon の見た目を正確には再現しません。詳しくはパッケージの Documentation~/STATUS.md を見てください。"
+msgid "Prototype: the CPU paints the source; tiles are composited on the GPU or the CPU (Project Settings ▸ YoluPainter). Readable static and skinned meshes (posed on a copy). One channel is painted at a time. .ylp saves; PSD with 8-bit RGB layers, groups, masks, fills and three adjustment types. Generators read baked mesh maps and are computed on the CPU; anchors are not implemented yet, and the 3D preview does not reproduce lilToon exactly. See Documentation~/STATUS.md in the package."
+msgstr "試作版です。元の画素は CPU が描き、タイルの合成は GPU か CPU が行います（Project Settings ▸ YoluPainter で選べます）。読み取りできる静的メッシュとスキンメッシュ（複製にポーズを付けて表示）に対応。描けるのは一度に 1 チャンネルです。.ylp で保存し、PSD は 8 bit RGB のレイヤー・グループ・マスク・塗りつぶし・3 種類の調整レイヤーを読み書きします。ジェネレーターは焼いたメッシュマップを読み、CPU で計算します。アンカーはまだ無く、3D プレビューは lilToon の見た目を正確には再現しません。詳しくはパッケージの Documentation~/STATUS.md を見てください。"
 
 msgid "Custom"
 msgstr "カスタム"

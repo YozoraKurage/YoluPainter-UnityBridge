@@ -133,6 +133,18 @@ namespace Yozolab.YoluPainter.Editor
                     if (why == null) m.AddItem(content, false, () => AddFilter(t, settings)); else m.AddDisabledItem(new GUIContent(prefix + L.Tr(label) + " — " + why));
                 }
             }
+            // メッシュマップから値を作る段（Layers/TexturePaintWindow.Generators.cs）
+            m.AddSeparator("");
+            foreach (var target in new[] { FilterTarget.Content, FilterTarget.Mask })
+            {
+                if (active == null || target == FilterTarget.Mask && active.Mask == null) continue;
+                string prefix = L.Tr("Generator") + "/" + (target == FilterTarget.Content ? "" : L.Tr("On Mask") + "/");
+                foreach (var (label, type, why) in GeneratorChoices(active.Id, target))
+                {
+                    var t = target; var ty = type;
+                    if (why == null) m.AddItem(new GUIContent(prefix + label), false, () => AddGenerator(t, ty)); else m.AddDisabledItem(new GUIContent(prefix + label + " — " + why));
+                }
+            }
         }
 
         void ModelMenu(GenericMenu m)
@@ -182,6 +194,6 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         const string ShortcutHelp = "Tools: B brush · E eraser · G fill · Shift+G gradient · M rectangle select · Shift+M ellipse select · L lasso · W magic wand · V move · P path · I eyedropper\n[ / ] brush size · X swap colors · D default colors\nCtrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo · Ctrl+S save · Ctrl+Shift+S save as · Ctrl+O open · Ctrl+N new\nCtrl+A select all · Ctrl+D deselect · Ctrl+Shift+I inverse\nF1 2D · F2 3D · F3 2D + 3D · Ctrl+0 fit · Ctrl++ / Ctrl+- zoom · wheel zoom · middle drag pan\n3D: Alt or right drag orbits, middle drag pans, wheel zooms\nEsc cancels a stroke or a drag\nBy default, Unity's own shortcuts do nothing while this window has focus (Project Settings ▸ YoluPainter ▸ Unity shortcuts while painting)";
-        const string LimitsHelp = "Prototype: the CPU paints the source and the GPU composites tiles. Readable static and skinned meshes (posed on a copy). One channel is painted at a time. .ylp saves; PSD with 8-bit RGB layers, groups, masks, fills and three adjustment types. Generators and anchors are not finished, and the 3D preview does not reproduce lilToon exactly. See Documentation~/STATUS.md in the package.";
+        const string LimitsHelp = "Prototype: the CPU paints the source; tiles are composited on the GPU or the CPU (Project Settings ▸ YoluPainter). Readable static and skinned meshes (posed on a copy). One channel is painted at a time. .ylp saves; PSD with 8-bit RGB layers, groups, masks, fills and three adjustment types. Generators read baked mesh maps and are computed on the CPU; anchors are not implemented yet, and the 3D preview does not reproduce lilToon exactly. See Documentation~/STATUS.md in the package.";
     }
 }

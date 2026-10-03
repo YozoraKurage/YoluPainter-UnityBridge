@@ -29,6 +29,7 @@ namespace Yozolab.YoluPainter.Editor
             if(material!=null&&folder==null){message="Choose a folder inside Assets for the lilToon textures.";return;}
             var plan=LilToonAssignment.Plan(document,material,folder,stem);
             if(!plan.CanApply){message="lilToon: "+String.Join(" ",plan.Refusals);Dialogs.Inform("Cannot assign to lilToon",plan.Describe());return;}
+            if(!ConfirmInactiveGenerators(new[]{(currentSet.Name,document)}))return; // マップの無い Generator を効きなしで書き出さない（確かめる）
             if(!Dialogs.Confirm("Assign to lilToon material?",plan.Describe(),"Assign","Cancel")){message="lilToon assignment cancelled; nothing was changed.";return;}
             var after=LilToonAssignment.Apply(plan,document);
             var ineffective=after.Channels.Where(c=>plan.Items.Any(i=>i.Channel==c.Channel)&&!c.IsEffective).Select(c=>c.Channel.ToString()).ToList();

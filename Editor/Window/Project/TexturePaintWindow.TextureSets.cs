@@ -111,6 +111,7 @@ namespace Yozolab.YoluPainter.Editor
             WatchHistory(set);
             repaintPixels = true; renderedRevision = -1; lightingRevision = -1; overlayRevision = -1;
             selectedFilter = Guid.Empty; renamingLayer = Guid.Empty; layerScroll = Vector2.zero;
+            ConnectGeneratorInputs(); // セットの文書の Generator に、そのセットの焼いたマップを渡す（TexturePaintWindow.Generators.cs）
         }
 
         /// <summary>プロジェクトのセットを入れ替える（新規・開く・取り込み・復旧）。走っているベイクは前のプロジェクトのものなので止める。</summary>

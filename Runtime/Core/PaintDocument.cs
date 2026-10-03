@@ -657,12 +657,15 @@ namespace Yozolab.YoluPainter.Core
         /// changed: tiles whose pixels changed (strokes, cancel, undo/redo, SetPixel/ImportTile/Clear), and every tile a
         /// layer holds when its order, visibility, opacity, blend mode or enabled channels change or it is added or
         /// removed — a layer cannot affect tiles where it has no pixels. Returns false when since is not a ChangeSerial
-        /// from this document (the caller must then recomposite everything). Can include tiles that changed back.</summary>
+        /// from this document (the caller must then recomposite everything). Can include tiles that changed back. Layers with a
+        /// generator are included when the mesh maps it reads changed (the inputs are looked at here; see
+        /// <see cref="GeneratorInputs"/>).</summary>
         public bool TryGetChangedTiles(PaintChannel channel, long since, ICollection<TileCoord> changed)
         {
             PaintLayer.ValidateChannel(channel);
             if (changed == null) throw new ArgumentNullException(nameof(changed));
             if (since < 0 || since > changeSerial) return false;
+            PollGeneratorInputs(); // 焼き直したマップなどで Generator の層が変われば、ここで「変わった」に入る
             Dictionary<TileCoord, long> serials;
             if (tileSerials.TryGetValue(channel, out serials))
                 foreach (var entry in serials) if (entry.Value > since) changed.Add(entry.Key);

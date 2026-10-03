@@ -152,7 +152,9 @@ namespace Yozolab.YoluPainter.Core
     /// changed; the compositors read <see cref="PaintLayer.CopyOutputTile"/> / <see cref="RasterMask.CopyOutputTile"/>.</para>
     /// <para>Change tracking: a filter-stack edit marks every tile the layer's output covers before and after it. A source
     /// pixel change in a filtered layer is also reported for the tiles within the stack's halo (and for every output tile when the
-    /// stack has a global filter), so <see cref="TryGetChangedTiles"/> never claims a filtered change is more local than it is.</para></summary>
+    /// stack has a global filter), so <see cref="TryGetChangedTiles"/> never claims a filtered change is more local than it is.</para>
+    /// <para>Generators are stages of the same stacks (<see cref="FilterType.Generator"/>); their inputs are in
+    /// PaintDocument.Generators.cs. Baking refuses a generator that is on but has no usable maps.</para></summary>
     public sealed partial class PaintDocument
     {
         /// <summary>Largest total halo (sum of the radii of a stack's active filters for one channel or the mask).</summary>
@@ -392,6 +394,8 @@ namespace Yozolab.YoluPainter.Core
                 foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel))) { FilterEvaluator.Forget(layer.Id, (int)c); if (stack.Length == 0) filterJournal.Remove((layer.Id, (int)c)); }
             }
             else { mask.FilterRevision = revision; FilterEvaluator.Forget(layer.Id, FilterEngine.MaskKey); if (stack.Length == 0) filterJournal.Remove((layer.Id, FilterEngine.MaskKey)); }
+            // 足した・戻した Generator が、前に（Generator が無いあいだに）解いた古いマップを読まないように
+            if (ContainsGenerator(stack)) PollGeneratorInputs();
         }
 
         /// <summary>Applies the layer's filters to its pixels and removes them, as one undo step: every channel's content stack
@@ -405,6 +409,7 @@ namespace Yozolab.YoluPainter.Core
             if (!content && !masked) return false;
             if (content && layer.Kind != LayerKind.Raster) throw new InvalidOperationException("A " + layer.Kind.ToString().ToLowerInvariant() + " layer has no pixels to bake its filters into. Remove the filters, or put the content on a paint layer.");
             if (content) RefusePathLayer(layer);
+            RefuseInactiveGenerators(layer, content, masked);
             var engine = FilterEvaluator; int tileBytes = TileSize * TileSize * 4; long estimate = 0;
             var plans = new List<(SparseTileSurface surface, List<(TileCoord coord, byte[] bytes)> tiles)>();
             if (content)

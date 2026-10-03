@@ -299,6 +299,9 @@ namespace Yozolab.YoluPainter.Tests
         {
             string path = Temp(".ylp"); File.Copy(PackagePaths.Physical("Tests/Editor/Persistence/Fixtures~/" + fixture), path);
             byte[] native = YlpStore.Load(path).Files[YlpArchive.NativeName];
+            // フィクスチャの正本は版 10。版 11 は Generator の段を持つ文書だけ並びが違うので、持たない文書は版の数のほかは同じに書き戻る
+            Assert.That(System.BitConverter.ToInt32(native, 8), Is.EqualTo(10));
+            native = (byte[])native.Clone(); System.BitConverter.GetBytes(DocumentBinary.CurrentVersion).CopyTo(native, 8);
             window.OpenProjectAt(path);
             Assert.That(window.OpenedFormat, Is.EqualTo(format), window.StatusMessage);
             var set = window.TextureSets.Single();

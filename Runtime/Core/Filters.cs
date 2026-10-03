@@ -4,8 +4,10 @@ using System.Collections.ObjectModel;
 
 namespace Yozolab.YoluPainter.Core
 {
-    /// <summary>Built-in non-destructive filters. Values are stored in the native format; append only.</summary>
-    public enum FilterType { GaussianBlur = 0, Sharpen = 1, Noise = 2, Levels = 3, Invert = 4, Normalize = 5 }
+    /// <summary>Built-in non-destructive stages of a filter stack. Values are stored in the native format; append only.
+    /// <see cref="Generator"/> is a stage that makes values from the texture set's baked mesh maps (<see cref="GeneratorSettings"/>)
+    /// instead of filtering its input; it sits in the same ordered stack as the filters.</summary>
+    public enum FilterType { GaussianBlur = 0, Sharpen = 1, Noise = 2, Levels = 3, Invert = 4, Normalize = 5, Generator = 6 }
 
     /// <summary>Which stack of a layer a filter belongs to: the layer's own pixels (per channel), or its raster mask (one scalar
     /// shared by all channels). The two are kept and shown apart.</summary>
@@ -37,6 +39,7 @@ namespace Yozolab.YoluPainter.Core
     /// <item>Invert: 255 − c per colour component. Alpha is unchanged.</item>
     /// <item>Normalize (global): stretches the smallest and largest colour component of all pixels with alpha &gt; 0 of the
     /// stage input (the whole document) to 0 and 255. A change anywhere changes every output pixel.</item>
+    /// <item>Generator (point): see <see cref="GeneratorSettings"/>; its parameters are <see cref="Generator"/>.</item>
     /// </list>
     /// On a mask stack the stored hide amount is filtered as an opaque grey image (value = hide amount, 255 = hidden).</summary>
     public sealed class FilterSettings : IEquatable<FilterSettings>
@@ -59,6 +62,8 @@ namespace Yozolab.YoluPainter.Core
         public double Gamma { get; private set; }
         public double OutputBlack { get; private set; }
         public double OutputWhite { get; private set; }
+        /// <summary>The generator's parameters when <see cref="Type"/> is <see cref="FilterType.Generator"/>; null otherwise.</summary>
+        public GeneratorSettings Generator { get; private set; }
 
         private FilterSettings(FilterType type) { Type = type; InputWhite = 1; Gamma = 1; OutputWhite = 1; }
 
@@ -71,6 +76,18 @@ namespace Yozolab.YoluPainter.Core
         { return Checked(new FilterSettings(FilterType.Levels) { InputBlack = inputBlack, InputWhite = inputWhite, Gamma = gamma, OutputBlack = outputBlack, OutputWhite = outputWhite }); }
         public static FilterSettings Invert() { return new FilterSettings(FilterType.Invert); }
         public static FilterSettings Normalize() { return new FilterSettings(FilterType.Normalize); }
+        /// <summary>A generator stage with these parameters.</summary>
+        public static FilterSettings FromGenerator(GeneratorSettings generator)
+        {
+            if (generator == null) throw new ArgumentNullException(nameof(generator));
+            return Checked(new FilterSettings(FilterType.Generator) { Generator = generator });
+        }
+        /// <summary>The same generator stage with other parameters (the type of generator may change).</summary>
+        public FilterSettings WithGenerator(GeneratorSettings generator)
+        {
+            if (Type != FilterType.Generator) throw new InvalidOperationException(Type + " is not a generator.");
+            return FromGenerator(generator);
+        }
         /// <summary>Settings of any type from stored values (loaders). Parameters a type does not use must be at their defaults.</summary>
         public static FilterSettings FromValues(FilterType type, int radius, double amount, int threshold, int seed, bool monochrome,
             double inputBlack, double inputWhite, double gamma, double outputBlack, double outputWhite)
@@ -88,13 +105,14 @@ namespace Yozolab.YoluPainter.Core
         FilterSettings Copy()
         {
             return new FilterSettings(Type) { Radius = Radius, Amount = Amount, Threshold = Threshold, Seed = Seed, Monochrome = Monochrome,
-                InputBlack = InputBlack, InputWhite = InputWhite, Gamma = Gamma, OutputBlack = OutputBlack, OutputWhite = OutputWhite };
+                InputBlack = InputBlack, InputWhite = InputWhite, Gamma = Gamma, OutputBlack = OutputBlack, OutputWhite = OutputWhite, Generator = Generator };
         }
         static FilterSettings Checked(FilterSettings s) { s.Validate(); return s; }
 
         void Validate()
         {
             if (!Enum.IsDefined(typeof(FilterType), Type)) throw new ArgumentOutOfRangeException(nameof(Type));
+            if ((Type == FilterType.Generator) != (Generator != null)) throw new ArgumentException(Type == FilterType.Generator ? "A generator stage needs its generator settings." : "Generator settings belong to a generator stage.", nameof(Generator));
             foreach (double v in new[] { Amount, InputBlack, InputWhite, Gamma, OutputBlack, OutputWhite }) MathUtil.RequireFinite(v, "filter");
             bool blur = Type == FilterType.GaussianBlur, sharpen = Type == FilterType.Sharpen, noise = Type == FilterType.Noise, levels = Type == FilterType.Levels;
             if (blur && (Radius < 1 || Radius > MaxBlurRadius)) throw new ArgumentOutOfRangeException(nameof(Radius), "Blur radius must be 1.." + MaxBlurRadius + " pixels.");
@@ -121,6 +139,8 @@ namespace Yozolab.YoluPainter.Core
         {
             get { return Type == FilterType.Normalize ? FilterLocality.Global : HaloPixels > 0 ? FilterLocality.Neighborhood : FilterLocality.Point; }
         }
+        /// <summary>True for a generator stage (it reads the texture set's mesh maps).</summary>
+        public bool IsGenerator { get { return Type == FilterType.Generator; } }
         /// <summary>How far (in pixels) an input pixel can influence output pixels (0 for point and global filters).</summary>
         public int HaloPixels { get { return Type == FilterType.GaussianBlur || Type == FilterType.Sharpen ? Radius : 0; } }
         /// <summary>True when output alpha can be non-zero where the input alpha is zero (within the halo). Only the blur spreads
@@ -136,6 +156,8 @@ namespace Yozolab.YoluPainter.Core
                     // Normalize: 0 が 1 画素でもあれば最小は 0 で、0 は 0 に写る（全部が同じ値なら何も変えない）
                     case FilterType.GaussianBlur: case FilterType.Sharpen: case FilterType.Normalize: return true;
                     case FilterType.Levels: return OutputBlack == 0;
+                    // 見える度合い 1（隠す量 0）は、最大・加算・スクリーンでは 1 のまま（マップが無い所・使えないときは入力のまま）
+                    case FilterType.Generator: return Generator.Blend == GeneratorBlend.Max || Generator.Blend == GeneratorBlend.Add || Generator.Blend == GeneratorBlend.Screen;
                     default: return false; // Invert, Noise
                 }
             }
@@ -168,6 +190,8 @@ namespace Yozolab.YoluPainter.Core
             PaintLayer.ValidateChannel(channel);
             var type = ValueTypeOf(channel);
             if (Accepts(type)) return null;
+            if (type == GraphValueType.TangentNormal && Type == FilterType.Generator)
+                return "A generator makes one value per pixel, and the " + channel + " channel holds unit vectors. Put the generator on a mask, or on Height and derive the normals from it.";
             if (type == GraphValueType.TangentNormal)
                 return Name + " has no meaning for tangent-space normals (the " + channel + " channel holds unit vectors); only the blur is defined there, and it renormalizes.";
             return "Colour noise would give the scalar " + channel + " channel different R, G and B values; use monochrome noise.";
@@ -183,6 +207,7 @@ namespace Yozolab.YoluPainter.Core
                 {
                     case FilterType.GaussianBlur: return "Gaussian blur";
                     case FilterType.Noise: return Monochrome ? "Noise (mono)" : "Noise (colour)";
+                    case FilterType.Generator: return Generator.Name;
                     default: return Type.ToString();
                 }
             }
@@ -192,10 +217,10 @@ namespace Yozolab.YoluPainter.Core
         {
             return other != null && Type == other.Type && Radius == other.Radius && Amount == other.Amount && Threshold == other.Threshold && Seed == other.Seed
                 && Monochrome == other.Monochrome && InputBlack == other.InputBlack && InputWhite == other.InputWhite && Gamma == other.Gamma
-                && OutputBlack == other.OutputBlack && OutputWhite == other.OutputWhite;
+                && OutputBlack == other.OutputBlack && OutputWhite == other.OutputWhite && Equals(Generator, other.Generator);
         }
         public override bool Equals(object obj) { return Equals(obj as FilterSettings); }
-        public override int GetHashCode() { unchecked { return ((int)Type * 397) ^ Radius ^ (Amount.GetHashCode() * 31) ^ (Seed * 17) ^ Threshold ^ Gamma.GetHashCode(); } }
+        public override int GetHashCode() { unchecked { return ((int)Type * 397) ^ Radius ^ (Amount.GetHashCode() * 31) ^ (Seed * 17) ^ Threshold ^ Gamma.GetHashCode() ^ (Generator == null ? 0 : Generator.GetHashCode()); } }
         public override string ToString()
         {
             var c = System.Globalization.CultureInfo.InvariantCulture;
@@ -205,6 +230,7 @@ namespace Yozolab.YoluPainter.Core
                 case FilterType.Sharpen: return string.Format(c, "{0} r{1} ×{2:0.##} t{3}", Name, Radius, Amount, Threshold);
                 case FilterType.Noise: return string.Format(c, "{0} {1:0.##} seed {2}", Name, Amount, Seed);
                 case FilterType.Levels: return string.Format(c, "{0} {1:0.###}–{2:0.###} γ{3:0.##} → {4:0.###}–{5:0.###}", Name, InputBlack, InputWhite, Gamma, OutputBlack, OutputWhite);
+                case FilterType.Generator: return Generator.ToString();
                 default: return Name;
             }
         }
@@ -248,11 +274,14 @@ namespace Yozolab.YoluPainter.Core
     /// Equal stamps mean equal output.</summary>
     public readonly struct FilterStamp : IEquatable<FilterStamp>
     {
-        public readonly long Filters, Input;
-        public FilterStamp(long filters, long input) { Filters = filters; Input = input; }
-        public bool Equals(FilterStamp other) { return Filters == other.Filters && Input == other.Input; }
+        /// <summary>Maps: the document's generator-input revision when the stack has a generator (its output also depends on the
+        /// texture set's mesh maps), 0 otherwise.</summary>
+        public readonly long Filters, Input, Maps;
+        public FilterStamp(long filters, long input) : this(filters, input, 0) { }
+        public FilterStamp(long filters, long input, long maps) { Filters = filters; Input = input; Maps = maps; }
+        public bool Equals(FilterStamp other) { return Filters == other.Filters && Input == other.Input && Maps == other.Maps; }
         public override bool Equals(object obj) { return obj is FilterStamp && Equals((FilterStamp)obj); }
-        public override int GetHashCode() { unchecked { return Filters.GetHashCode() * 397 ^ Input.GetHashCode(); } }
-        public override string ToString() { return Filters + ":" + Input; }
+        public override int GetHashCode() { unchecked { return (Filters.GetHashCode() * 397 ^ Input.GetHashCode()) * 31 ^ Maps.GetHashCode(); } }
+        public override string ToString() { return Maps == 0 ? Filters + ":" + Input : Filters + ":" + Input + ":m" + Maps; }
     }
 }

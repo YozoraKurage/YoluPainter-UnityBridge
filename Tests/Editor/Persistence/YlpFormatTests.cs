@@ -23,6 +23,14 @@ namespace Yozolab.YoluPainter.Tests
     {
         static readonly YlpWriterInfo Saver = new YlpWriterInfo("YoluPainter", "1.2.3", "2022.3.22f1");
         static string Fixture(string name) => PackagePaths.Physical("Tests/Editor/Persistence/Fixtures~/" + name);
+        /// <summary>フィクスチャの正本（版 10）を今の版の数にしたもの。版 11 は Generator の段を持つ文書だけ並びが違うので、持たない文書は
+        /// 版の数のほかはバイト一致で書き戻る。</summary>
+        static byte[] AtCurrentVersion(byte[] native)
+        {
+            Assert.That(BitConverter.ToInt32(native, 8), Is.EqualTo(10), "the fixtures were saved with native version 10");
+            var bytes = (byte[])native.Clone(); BitConverter.GetBytes(DocumentBinary.CurrentVersion).CopyTo(bytes, 8);
+            return bytes;
+        }
         static byte[] Json(string text) => Encoding.UTF8.GetBytes(text);
 
         [Test] public void TheRecordRoundTripsWithAndWithoutTheCreator()
@@ -115,7 +123,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(document.GetLayer(document.Layers.Single(l => l.Name == "Inner").ParentId).Name, Is.EqualTo("Group"));
             Assert.That(document.Layers.Single(l => l.Name == "Paint").Mask, Is.Not.Null);
             Assert.That(document.NormalSettings.DeriveFromHeight, Is.True);
-            Assert.That(DocumentBinary.Write(document), Is.EqualTo(native), "the native source reads and writes back byte for byte");
+            Assert.That(DocumentBinary.Write(document), Is.EqualTo(AtCurrentVersion(native)), "the native source reads and writes back byte for byte");
             Assert.That(SelectionBinary.Read(files[SelectionBinary.EntryName], document).IsEmpty, Is.False);
             AssertCompositesMatch(files, document);
             AssertWritesBackAsTheCurrentFormat(opened);
@@ -138,7 +146,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(native, Is.EqualTo(snapshot.Files[YlpArchive.NativeName]));
             var document = DocumentBinary.Read(native);
             Assert.That(opened.Project.Sets.Single().Id, Is.EqualTo(document.Id));
-            Assert.That(DocumentBinary.Write(document), Is.EqualTo(native), "the native source reads and writes back byte for byte");
+            Assert.That(DocumentBinary.Write(document), Is.EqualTo(AtCurrentVersion(native)), "the native source reads and writes back byte for byte");
             Assert.That(SelectionBinary.Write(SelectionBinary.Read(files[SelectionBinary.EntryName], document)), Is.EqualTo(files[SelectionBinary.EntryName]));
             AssertCompositesMatch(files, document);
             AssertWritesBackAsTheCurrentFormat(opened);

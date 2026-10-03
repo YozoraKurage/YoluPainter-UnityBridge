@@ -44,6 +44,13 @@ namespace Yozolab.YoluPainter.Core.Persistence
             return id;
         }
 
+        static bool HasGenerator(PaintLayer layer)
+        {
+            foreach (var e in layer.Filters) if (e.Settings.IsGenerator) return true;
+            if (layer.Mask != null) foreach (var e in layer.Mask.Filters) if (e.Settings.IsGenerator) return true;
+            return false;
+        }
+
         static PsdRasterLayer ExportLayer(PaintDocument source, PaintChannel channel, PaintLayer layer, HashSet<int> usedIds, ref long byteBudget)
         {
             if (layer.Kind == LayerKind.Adjustment)
@@ -53,7 +60,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             }
             if (layer.IsGroup && layer.Clipping) throw new InvalidOperationException("Group '" + layer.Name + "' is clipped. Photoshop's handling of a clipped folder is not verified (psd-tools treats it as unsupported in Photoshop), so it is not exported; turn its clipping off or export from the native project. Native project can still be saved losslessly.");
             if (layer.Filters.Count > 0 || layer.Mask != null && layer.Mask.Filters.Count > 0)
-                throw new InvalidOperationException("Layer '" + layer.Name + "' has non-destructive filters. PSD has no exact form for them here (Photoshop keeps smart filters inside smart objects, which this exporter does not write), and writing only the filtered pixels would drop the filter stack silently. Bake the filters into the layer (or remove them) before exporting PSD. Native project can still be saved losslessly.");
+                throw new InvalidOperationException("Layer '" + layer.Name + "' has non-destructive filters" + (HasGenerator(layer) ? " or generators" : "") + ". PSD has no exact form for them here (Photoshop keeps smart filters inside smart objects, which this exporter does not write, and has no mesh-map generators), and writing only the filtered pixels would drop the filter stack silently. Bake the filters into the layer (or remove them) before exporting PSD. Native project can still be saved losslessly.");
             if (layer.Kind == LayerKind.Fill && layer.FillValues.TryGetValue(channel, out var fillValue) && fillValue.A != 255)
                 throw new InvalidOperationException("Fill layer '" + layer.Name + "': a PSD solid colour fill is opaque, and this fill's " + channel + " value has alpha " + fillValue.A + ". Use the layer opacity instead. Native project can still be saved losslessly.");
             if (layer.Kind != LayerKind.Raster && layer.Kind != LayerKind.Group && layer.Kind != LayerKind.Adjustment && layer.Kind != LayerKind.Fill) throw new InvalidOperationException("PSD projection does not write " + layer.Kind + " layers yet. Native project can still be saved losslessly.");

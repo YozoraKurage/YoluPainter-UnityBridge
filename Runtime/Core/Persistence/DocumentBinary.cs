@@ -18,10 +18,15 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// enabled, strength, content channels, parameters); an unknown filter type or algorithm version refuses the archive instead
     /// of dropping the filter. Version 10 ends each layer (after the filters) with a canvas path flag and, when set, the 2D path
     /// (algorithm version, id, channel, brush, points as x, y, pressure); the version 8 block holds only surface paths, and a
-    /// layer with both is refused. Older archives still load.</summary>
+    /// layer with both is refused. Version 11 adds generator stages to the filter stacks: filter type 6 (<see cref="FilterType.Generator"/>,
+    /// its filter parameters at their defaults) is followed by the generator block (type, algorithm version, low, high, softness,
+    /// invert, breakup amount, scale, seed and space, blend, balance, axis, direction x, y, z, bent normal, and the pins: a count and
+    /// per pin the mesh-map kind and the 64-digit condition key); an unknown generator type, algorithm version, blend, space or map
+    /// kind refuses the archive, and type 6 in an older archive is refused. The mesh maps themselves are not in this entry (they are
+    /// derived and live next to it in the .ylp). Older archives still load.</summary>
     public static class DocumentBinary
     {
-        const int Version = 10;
+        const int Version = 11;
         /// <summary>The version <see cref="Write"/> produces.</summary>
         public const int CurrentVersion = Version;
         const long MaxArchiveBytes = 512L * 1024 * 1024;
@@ -233,8 +238,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         }
                         if (version >= 9 && reader.ReadBoolean())
                         {
-                            ReadFilters(reader, doc, layer, FilterTarget.Content);
-                            if (layer.Mask != null) ReadFilters(reader, doc, layer, FilterTarget.Mask);
+                            ReadFilters(reader, doc, layer, FilterTarget.Content, version);
+                            if (layer.Mask != null) ReadFilters(reader, doc, layer, FilterTarget.Mask, version);
                         }
                         if (version >= 10 && reader.ReadBoolean())
                         {
@@ -262,17 +267,57 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 if (content) { writer.Write(e.Channels.Count); foreach (var c in e.Channels) writer.Write((int)c); }
                 writer.Write(f.Radius); writer.Write(f.Amount); writer.Write(f.Threshold); writer.Write(f.Seed); writer.Write(f.Monochrome);
                 foreach (double v in new[] { f.InputBlack, f.InputWhite, f.Gamma, f.OutputBlack, f.OutputWhite }) writer.Write(v);
+                if (f.IsGenerator) WriteGenerator(writer, f.Generator);
             }
+        }
+        static void WriteGenerator(BinaryWriter writer, GeneratorSettings g)
+        {
+            writer.Write((int)g.Type); writer.Write(g.AlgorithmVersion);
+            writer.Write(g.Low); writer.Write(g.High); writer.Write(g.Softness); writer.Write(g.Invert);
+            writer.Write(g.NoiseAmount); writer.Write(g.NoiseScale); writer.Write(g.NoiseSeed); writer.Write((int)g.NoiseSpace);
+            writer.Write((int)g.Blend); writer.Write(g.Balance); writer.Write(g.Axis);
+            writer.Write(g.DirectionX); writer.Write(g.DirectionY); writer.Write(g.DirectionZ); writer.Write(g.UseBentNormal);
+            var pins = g.Pins.Keys.OrderBy(k => k).ToArray();
+            writer.Write(pins.Length);
+            foreach (var kind in pins) { writer.Write((int)kind); WriteString(writer, g.Pins[kind]); }
+        }
+        const int MaxGeneratorPins = 8;
+        /// <summary>The generator block (version 11). Unknown values are refused, never replaced by defaults.</summary>
+        static GeneratorSettings ReadGenerator(BinaryReader reader)
+        {
+            int type = reader.ReadInt32(), algorithm = reader.ReadInt32();
+            if (!Enum.IsDefined(typeof(GeneratorType), type)) throw new InvalidDataException("Unknown generator type " + type + "; a newer reader is required (source retained unchanged).");
+            if (algorithm != GeneratorSettings.AlgorithmVersionOf((GeneratorType)type)) throw new InvalidDataException("Generator algorithm version " + algorithm + " of " + (GeneratorType)type + " is not supported by this reader; source retained unchanged.");
+            double low = reader.ReadDouble(), high = reader.ReadDouble(), softness = reader.ReadDouble(); bool invert = reader.ReadBoolean();
+            double noiseAmount = reader.ReadDouble(), noiseScale = reader.ReadDouble(); int noiseSeed = reader.ReadInt32(), noiseSpace = reader.ReadInt32();
+            int blend = reader.ReadInt32(); double balance = reader.ReadDouble(); int axis = reader.ReadInt32();
+            double dx = reader.ReadDouble(), dy = reader.ReadDouble(), dz = reader.ReadDouble(); bool bent = reader.ReadBoolean();
+            if (!Enum.IsDefined(typeof(GeneratorBlend), blend)) throw new InvalidDataException("Unknown generator blend " + blend + "; a newer reader is required (source retained unchanged).");
+            if (!Enum.IsDefined(typeof(GeneratorNoiseSpace), noiseSpace)) throw new InvalidDataException("Unknown generator noise space " + noiseSpace + "; a newer reader is required (source retained unchanged).");
+            int count = ReadCount(reader, MaxGeneratorPins, "generator pins");
+            var pins = new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<MeshMaps.MeshMapKind, string>>();
+            for (int i = 0; i < count; i++)
+            {
+                int kind = reader.ReadInt32(); string key = ReadString(reader);
+                if (!Enum.IsDefined(typeof(MeshMaps.MeshMapKind), kind)) throw new InvalidDataException("Unknown mesh map kind " + kind + " in a generator pin; a newer reader is required (source retained unchanged).");
+                pins.Add(new System.Collections.Generic.KeyValuePair<MeshMaps.MeshMapKind, string>((MeshMaps.MeshMapKind)kind, key));
+            }
+            try
+            {
+                return GeneratorSettings.FromValues((GeneratorType)type, low, high, softness, invert, noiseAmount, noiseScale, noiseSeed, (GeneratorNoiseSpace)noiseSpace,
+                    (GeneratorBlend)blend, balance, axis, dx, dy, dz, bent, pins);
+            }
+            catch (ArgumentException ex) { throw new InvalidDataException("Invalid generator parameters: " + ex.Message, ex); }
         }
         /// <summary>Reads one filter stack and adds it through the document (the same validation as editing: value types of the
         /// channels, halo and working budget). Unknown types and algorithm versions are refused, never dropped.</summary>
-        static void ReadFilters(BinaryReader reader, PaintDocument doc, PaintLayer layer, FilterTarget target)
+        static void ReadFilters(BinaryReader reader, PaintDocument doc, PaintLayer layer, FilterTarget target, int version)
         {
             int count = ReadCount(reader, PaintDocument.MaxFiltersPerStack, "filters");
             for (int i = 0; i < count; i++)
             {
                 var id = new Guid(ReadExact(reader, 16)); int type = reader.ReadInt32(), algorithm = reader.ReadInt32();
-                if (!Enum.IsDefined(typeof(FilterType), type)) throw new InvalidDataException("Unknown filter type " + type + "; a newer reader is required (source retained unchanged).");
+                if (!Enum.IsDefined(typeof(FilterType), type) || type == (int)FilterType.Generator && version < 11) throw new InvalidDataException("Unknown filter type " + type + "; a newer reader is required (source retained unchanged).");
                 if (algorithm != FilterSettings.AlgorithmVersionOf((FilterType)type)) throw new InvalidDataException("Filter algorithm version " + algorithm + " of " + (FilterType)type + " is not supported by this reader; source retained unchanged.");
                 bool enabled = reader.ReadBoolean(); double strength = reader.ReadDouble();
                 System.Collections.Generic.List<PaintChannel> channels = null;
@@ -283,9 +328,18 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 }
                 int radius = reader.ReadInt32(); double amount = reader.ReadDouble(); int threshold = reader.ReadInt32(), seed = reader.ReadInt32(); bool mono = reader.ReadBoolean();
                 var p = new double[5]; for (int k = 0; k < 5; k++) p[k] = reader.ReadDouble();
+                GeneratorSettings generator = type == (int)FilterType.Generator ? ReadGenerator(reader) : null;
                 try
                 {
-                    var settings = FilterSettings.FromValues((FilterType)type, radius, amount, threshold, seed, mono, p[0], p[1], p[2], p[3], p[4]);
+                    FilterSettings settings;
+                    if (generator != null)
+                    {
+                        // Generator の段はフィルターのパラメーターを使わない（既定のままでなければ読み違い）
+                        if (radius != 0 || amount != 0 || threshold != 0 || seed != 0 || mono || p[0] != 0 || p[1] != 1 || p[2] != 1 || p[3] != 0 || p[4] != 1)
+                            throw new ArgumentException("A generator stage keeps the filter parameters at their defaults.");
+                        settings = FilterSettings.FromGenerator(generator);
+                    }
+                    else settings = FilterSettings.FromValues((FilterType)type, radius, amount, threshold, seed, mono, p[0], p[1], p[2], p[3], p[4]);
                     doc.AddFilter(layer.Id, target, settings, channels, -1, id, enabled, strength);
                 }
                 catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException) { throw new InvalidDataException("Invalid filter on layer '" + layer.Name + "': " + ex.Message, ex); }

@@ -10,7 +10,8 @@ namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>非破壊のフィルター: 選んだ層の「画素へのフィルター」（チャンネルごと）と「マスクへのフィルター」を分けて並べ、追加（メニュー）・
     /// 削除・並べ替え・有効/無効・強さ・パラメーターの編集をする。どれも文書の Undo に 1 回ずつ入る（スライダーのドラッグは 1 回にまとめる）。
-    /// 描いた画素は変えず、合成がフィルターを通した結果を表示する。「焼き込み」だけが画素を書き換える（1 回の Undo）。</summary>
+    /// 描いた画素は変えず、合成がフィルターを通した結果を表示する。「焼き込み」だけが画素を書き換える（1 回の Undo）。
+    /// Generator（メッシュマップから値を作る段）も同じスタックに入る（見出しの 2 つ目のボタンで足す。設定は TexturePaintWindow.Generators.cs）。</summary>
     public sealed partial class TexturePaintWindow
     {
         Guid selectedFilter;
@@ -61,6 +62,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             switch (f.Type)
             {
+                case FilterType.Generator: return GeneratorName(f.Generator.Type);
                 case FilterType.GaussianBlur: return L.Tr("Gaussian blur");
                 case FilterType.Sharpen: return L.Tr("Sharpen");
                 case FilterType.Noise: return L.Tr(f.Monochrome ? "Noise (monochrome)" : "Noise (colour)");
@@ -79,6 +81,7 @@ namespace Yozolab.YoluPainter.Editor
                 case FilterType.GaussianBlur: text += "  " + f.Radius + " px"; break;
                 case FilterType.Sharpen: text += "  " + f.Radius + " px ×" + f.Amount.ToString("0.##", c); break;
                 case FilterType.Noise: text += "  " + (f.Amount * 100).ToString("0", c) + "%"; break;
+                case FilterType.Generator: text += GeneratorSummary(e); break;
             }
             if (target == FilterTarget.Content && !e.AppliesTo(channel)) text += "  [" + string.Join(", ", e.Channels.Select(ch => L.Tr(ch.ToString()))) + "]";
             if (e.Strength < 1) text += "  · " + Math.Round(e.Strength * 100).ToString(c) + "%";
@@ -107,8 +110,11 @@ namespace Yozolab.YoluPainter.Editor
         {
             var stack = target == FilterTarget.Content ? active.Filters : active.Mask.Filters;
             var head = rows.Row(20);
-            PaintGui.GroupLabel(new Rect(head.x, head.y, head.width - 28, head.height),
+            PaintGui.GroupLabel(new Rect(head.x, head.y, head.width - 52, head.height),
                 target == FilterTarget.Content ? L.Tr("Layer pixels") + " · " + L.Tr(channel.ToString()) : L.Tr("Mask (all channels)"));
+            var generate = new Rect(head.xMax - 48, head.y - 1, 24, head.height + 2);
+            if (PaintGui.IconButton(Spot("generator.add." + target, generate), "texture", target == FilterTarget.Content ? L.Tr("Add a generator on the pixels (values from the baked mesh maps)") : L.Tr("Add a generator on the mask (where the layer shows, from the baked mesh maps)"), false, GUI.enabled, 16))
+                ShowGeneratorMenu(generate, active.Id, target);
             var add = new Rect(head.xMax - 24, head.y - 1, 24, head.height + 2);
             if (PaintGui.IconButton(Spot("filter.add." + target, add), "add", target == FilterTarget.Content ? L.Tr("Add a filter on the pixels") : L.Tr("Add a filter on the mask"), false, GUI.enabled, 16))
                 ShowFilterMenu(add, active.Id, target);
@@ -206,6 +212,9 @@ namespace Yozolab.YoluPainter.Editor
                         if (LevelsRows(rows, ref ib, ref iw, ref gamma, ref ob, ref ow, indent)) next = f.WithLevels(ib, iw, gamma, ob, ow);
                         break;
                     }
+                    case FilterType.Generator:
+                        DrawGeneratorParameters(rows, e, indent); // 変えた値はその中で文書に入れる
+                        break;
                     default:
                         NoteRow(rows, f.Type == FilterType.Normalize ? L.Tr("Uses the whole layer (global).") : L.Tr("No settings."), NoteKind.Plain, indent);
                         break;

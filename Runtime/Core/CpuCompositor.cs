@@ -232,6 +232,7 @@ namespace Yozolab.YoluPainter.Core
             if (document == null) throw new ArgumentNullException(nameof(document));
             PaintLayer.ValidateChannel(channel);
             if (x < 0 || y < 0 || x >= document.Width || y >= document.Height) throw new ArgumentOutOfRangeException("pixel");
+            document.PollGeneratorInputs();
             return EvaluatePixel(Plan(document, channel), Rgba32.Transparent, channel, x, y);
         }
         /// <summary>Explicit full-frame reference output; use CompositeRegion/CompositePixel for narrow inspection.
@@ -414,6 +415,7 @@ namespace Yozolab.YoluPainter.Core
                 throw new ArgumentOutOfRangeException("region");
             var bytes = new byte[checked(width * height * 4)];
             if (width == 0 || height == 0) return bytes;
+            document.PollGeneratorInputs(); // Generator が読むメッシュマップが変わっていれば、新しいマップで合成する
             // Same per-pixel arithmetic as CompositePixel, but each layer's tile is read once instead of one dictionary
             // lookup per pixel per layer. Tiles are independent: several are loaded into their own buffers (slots) and their
             // pixels computed on worker threads; every output pixel depends only on its own inputs, so the bytes do not depend
