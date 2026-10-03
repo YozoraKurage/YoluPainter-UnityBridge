@@ -10,6 +10,8 @@
 #   run-tests.sh --both [--sha X]                  batch-gl と GUI の台で同時に回し、両方の結果を出す（絞り込みが無ければ、GUI の台では
 #                                                  GUI でしか回らないテストだけ: Tests/Editor/Support/GuiOnlyFixtures.txt）
 #   run-tests.sh --mode gui --gui-only             GUI でしか回らないテストだけを GUI の台で
+#   run-tests.sh --shards 3 [--mode gui --gui-only] 全件を 3 組に分け、同じモードの台で同時に回して結果を合わせる（auto = 動いている台の数、
+#                                                  3 まで。--both の全件は auto。分け方は shard-filters.py、重さはテストごとの時間の履歴）
 #   run-tests.sh --runner 2                        台を決めて回す
 #   run-tests.sh --log                             失敗時に Unity ログの末尾も出す
 #
@@ -31,6 +33,7 @@ SHA=""
 SOURCE_DIR=""
 BOTH=0
 GUI_ONLY=0
+SHARDS=""
 original_args=("$@")
 
 while [[ $# -gt 0 ]]; do
@@ -44,7 +47,8 @@ while [[ $# -gt 0 ]]; do
     --source)   SOURCE_DIR="${2:?--source にフォルダが要る}"; shift 2 ;;
     --both)     BOTH=1; shift ;;
     --gui-only) GUI_ONLY=1; shift ;;
-    -h|--help)  sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --shards)   SHARDS="${2:?--shards に組の数か auto が要る}"; shift 2 ;;
+    -h|--help)  sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)          die "不明な引数: $1" ;;
   esac
 done
@@ -52,6 +56,8 @@ done
 [[ -z "$SHA" || -z "$SOURCE_DIR" ]] || die "--sha と --source は一緒に使えない"
 [[ $GUI_ONLY == 0 || ( -z "$FILTER" && -z "$CATEGORY" ) ]] || die "--gui-only は --filter・--category と一緒に使えない"
 [[ -z "$RUNNER_ARG" || "$RUNNER_ARG" =~ ^[0-9]+$ ]] || die "--runner は台の番号"
+[[ -z "$SHARDS" || "$SHARDS" == auto || "$SHARDS" =~ ^[1-9]$ ]] || die "--shards は 1〜9 か auto"
+[[ -z "$SHARDS" || ( -z "$FILTER" && -z "$CATEGORY" && -z "$RUNNER_ARG" ) ]] || die "--shards は全件だけ（--filter・--category・--runner と一緒に使えない）"
 if [[ -n "$SHA" ]]; then
   SHA="$(git -C "$PACKAGE_ROOT" rev-parse --verify "$SHA^{commit}" 2>/dev/null)" || die "コミットが無い: $SHA"
 fi
@@ -66,9 +72,13 @@ if [[ $BOTH == 1 ]]; then
   rest=()
   for a in "${original_args[@]}"; do [[ "$a" == --both ]] || rest+=("$a"); done
   out_dir="$(mktemp -d)"; trap 'rm -rf "$out_dir"' EXIT
-  "$0" ${rest[@]+"${rest[@]}"} --mode batch-gl > "$out_dir/batch-gl" 2>&1 & p1=$!
+  # 全件なら、GUI の側だけ動いている GUI の台に分けて同時に回す（--shards auto）。batch-gl の側は分けない: 1 つの台の中でも
+  # 合成や焼きが全部のコアで並列に走るので、2 台に分けても 1 組 290〜490 s（分けないと 340 s）で速くならなかった（2026-10-03 計測）
+  shard_extra=(); [[ -z "$FILTER" && -z "$CATEGORY" && -z "$SHARDS" ]] && shard_extra=(--shards auto)
+  batch_extra=(); [[ -n "$SHARDS" ]] && batch_extra=(--shards "$SHARDS")
+  "$0" ${rest[@]+"${rest[@]}"} --mode batch-gl ${batch_extra[@]+"${batch_extra[@]}"} > "$out_dir/batch-gl" 2>&1 & p1=$!
   # 全件なら GUI の台では GUI でしか回らないテストだけ（ほかは batch-gl の台で回っている。2 回回すと GUI の全件だけで 14 分かかった）
-  gui_extra=(); [[ -z "$FILTER" && -z "$CATEGORY" ]] && gui_extra=(--gui-only)
+  gui_extra=(); [[ -z "$FILTER" && -z "$CATEGORY" ]] && gui_extra=(--gui-only ${shard_extra[@]+"${shard_extra[@]}"})
   "$0" ${rest[@]+"${rest[@]}"} --mode gui ${gui_extra[@]+"${gui_extra[@]}"} > "$out_dir/gui" 2>&1 & p2=$!
   # common.sh の set -e の下では、落ちた子の wait でここから抜けて結果を出さずに終わってしまう（全件で実際に起きた）
   c1=0; wait $p1 || c1=$?; c2=0; wait $p2 || c2=$?
@@ -76,6 +86,75 @@ if [[ $BOTH == 1 ]]; then
   echo ""; echo "──── GUI ────"; cat "$out_dir/gui"
   [[ $c1 != 0 ]] && exit $c1
   exit $c2
+fi
+
+# --shards: 全件を組に分けて、同じモードの台で同時に回し、結果を合わせる
+if [[ -n "$SHARDS" && "$SHARDS" != 1 ]]; then
+  want="${MODE:-batch-gl}"
+  if [[ "$SHARDS" == auto ]]; then
+    SHARDS=0
+    for n in $(runner_numbers) 0; do
+      [[ "$(runner_live_mode "$n")" == "$want" ]] || continue
+      [[ "$n" == 0 && ( -n "$SHA" || -n "$SOURCE_DIR" ) ]] && continue
+      SHARDS=$((SHARDS + 1))
+    done
+    (( SHARDS > 3 )) && SHARDS=3
+  fi
+fi
+if [[ -n "$SHARDS" ]] && (( SHARDS > 1 )); then
+  want="${MODE:-batch-gl}"
+  kind=all; [[ $GUI_ONLY == 1 ]] && kind=gui-only
+  shard_dir="$(mktemp -d)"; trap 'rm -rf "$shard_dir"' EXIT
+  # 分け方はテストのソースのクラスから決める（回す木と同じもの）
+  if [[ -n "$SOURCE_DIR" ]]; then tests_root="$SOURCE_DIR"
+  elif [[ -n "$SHA" ]]; then tests_root="$shard_dir/tree"; mkdir -p "$tests_root"; git -C "$PACKAGE_ROOT" archive "$SHA" Tests/Editor | tar -x -C "$tests_root"
+  else tests_root="$PACKAGE_ROOT"; fi
+  mapfile -t shard_lines < <(python3 "$SCRIPT_DIR/shard-filters.py" "$SHARDS" "$kind" "$tests_root/Tests/Editor" "$tests_root/Tests/Editor/Support/GuiOnlyFixtures.txt" "$HOME/.cache/yolupainter-tests/durations")
+  [[ ${#shard_lines[@]} -gt 0 ]] || die "組に分けられなかった（shard-filters.py）"
+  rest=(); skip_next=0
+  for a in "${original_args[@]}"; do
+    if [[ $skip_next == 1 ]]; then skip_next=0; continue; fi
+    case "$a" in
+      --shards|--mode) skip_next=1 ;;  # 子には組の絞り込みとモードを付け直す
+      --gui-only) ;;                   # 組の絞り込みが GUI でしか回らないテストに限っている
+      *) rest+=("$a") ;;
+    esac
+  done
+  export YOLUPAINTER_TEST_GROUP="${YOLUPAINTER_TEST_GROUP:-$(date +%Y%m%d-%H%M%S)-$$}"
+  info "全件を ${#shard_lines[@]} 組に分けて ${want} の台で同時に回す（$( [[ $kind == gui-only ]] && echo 'GUI でしか回らないテスト' || echo '全部のテスト')）"
+  pids=(); i=0
+  for line in "${shard_lines[@]}"; do
+    i=$((i + 1))
+    printf '%s\n' "${line%%$'\t'*}" > "$shard_dir/expect-$i"
+    "$0" ${rest[@]+"${rest[@]}"} --mode "$want" --filter "${line#*$'\t'}" > "$shard_dir/out-$i" 2>&1 & pids+=($!)
+  done
+  codes=(); for p in "${pids[@]}"; do c=0; wait "$p" || c=$?; codes+=("$c"); done
+  for j in $(seq 1 $i); do
+    echo "──── 組 $j/$i（見込み $(cat "$shard_dir/expect-$j") s）────"; cat "$shard_dir/out-$j"; echo ""
+  done
+  python3 - "$shard_dir" "$i" <<'PY'
+import re, sys
+d, n = sys.argv[1], int(sys.argv[2])
+tot = {"件": 0, "成功": 0, "失敗": 0, "スキップ": 0, "不確定": 0}; secs = []; missing = 0
+for j in range(1, n + 1):
+    text = open("%s/out-%d" % (d, j), encoding="utf-8", errors="replace").read()
+    m = re.search(r"EditMode テスト: (.*)  \(([0-9.]+)s\)", text)
+    if not m: missing += 1; continue
+    secs.append(float(m.group(2)))
+    for part in m.group(1).split(" / "):
+        if part.endswith(" 件"):
+            tot["件"] += int(part.split()[0])
+        else:
+            label, _, num = part.partition(" ")
+            if label in tot: tot[label] += int(num)
+parts = ["%d 件" % tot["件"], "成功 %d" % tot["成功"], "失敗 %d" % tot["失敗"]]
+if tot["スキップ"]: parts.append("スキップ %d" % tot["スキップ"])
+if tot["不確定"]: parts.append("不確定 %d" % tot["不確定"])
+print("合計（%d 組）: EditMode テスト: %s  (いちばん長い組 %.1fs)" % (n, " / ".join(parts), max(secs) if secs else 0))
+if missing: print("結果の出なかった組: %d（上の組ごとの出力を見る）" % missing)
+PY
+  for c in "${codes[@]}"; do [[ "$c" != 0 ]] && exit "$c"; done
+  exit 0
 fi
 
 # 台を選ぶ（選んだ台のロックを持ったまま、その台の設定で自分を実行し直す）。switch-daemon.sh の中から呼ばれたときと、
@@ -227,7 +306,7 @@ if daemon_alive; then
     if [[ -s "$DAEMON_DIR/durations.tsv" ]]; then
       hist="$HOME/.cache/yolupainter-tests/durations"; mkdir -p "$hist"
       stamp="$(date +%Y%m%d-%H%M%S)-runner$UNITY_RUNNER-$(runner_live_mode "$UNITY_RUNNER")"
-      { printf '# filter=%s source=%s\n' "$FILTER" "${SOURCE_DIR:-${SHA:-/workspace}}"; cat "$DAEMON_DIR/durations.tsv"; } > "$hist/$stamp.tsv"
+      { printf '# filter=%s source=%s group=%s\n' "$FILTER" "${SOURCE_DIR:-${SHA:-/workspace}}" "${YOLUPAINTER_TEST_GROUP:-}"; cat "$DAEMON_DIR/durations.tsv"; } > "$hist/$stamp.tsv"
       ls -1t "$hist"/*.tsv 2>/dev/null | tail -n +201 | xargs -r rm -f
     fi
     exit "$code"

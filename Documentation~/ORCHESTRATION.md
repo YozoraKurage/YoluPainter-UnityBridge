@@ -36,9 +36,28 @@ YoluPainter は、指揮役（メインの Claude）と、作業者のエージ�
 - **一時停止の指示**（指揮役からの「一時停止」）を受けたら: 今の手を止め、ビルドが通らなければ通る所まで戻すか `wip:` として理由を書いて
   コミットし、`.agent/progress.md` を「一時停止」で書き直し、指揮役に短く報告して終わる。テストの依頼を待っているなら待たずに終わる。
 
+## Codex の担当
+
+Codex（OpenAI の Codex CLI）も Claude の担当と同じ決まりで動く。Codex はリポジトリの `AGENTS.md` を読み、そこから CLAUDE.md と
+この文書へ進む。
+
+- 準備（1 回）: `npm install -g @openai/codex`、ユーザーが `codex login --device-auth`（ブラウザで ChatGPT のアカウント）。掲示板の
+  トークンは `agent-board token issue codex --kind codex` で `~/.local/share/agent-board/codex.token` に置き、`codex mcp add board --url
+  http://127.0.0.1:8787/mcp --bearer-token-env-var AGENT_BOARD_TOKEN_CODEX` で登録する（名乗れる名前は codex と codex-*）。
+- 立てる: 指揮役が Claude の担当と同じく worktree を作り、依頼文を `.agent/task.md` に置いて
+  `.devcontainer/orchestration/codex-run.sh <名前>` で裏で走らせる（モデルと推論の強さは `CODEX_MODEL`・`CODEX_EFFORT` か
+  `--model`・`--effort`。ユーザーの指定は gpt-6.1-sol・xhigh で、これが既定）。様子は `codex-run.sh <名前> --status`、止めるのは `--stop`。
+- 許可: Codex の自動の審査（`--approve-for-me`、Claude の auto mode に当たる）。この devcontainer では Codex のサンドボックス（bwrap）が
+  名前空間を作れない（2026-10-03 に確かめた）ので、どのコマンドもまずサンドボックスで失敗し、「外で実行する」申請を審査役のモデルが
+  通したものだけが外で動く。審査も無しの `--bypass` はユーザーの許しがあるときだけ。どちらでも Codex のプロセスには VS Code の
+  資格情報を渡さず、`origin` への push の宛先を無効にする（うっかりの push は通らない。わざと回避されれば防げない）。
+- 報告は `.agent/codex-last.md`（最後の返答）と `.agent/progress.md`。終わったら指揮役が読んで統合する。
+- 一時停止: `codex-run.sh <名前> --stop` で止める。止める前に progress.md が新しいかを見る（Codex は止められると書き残せないので、
+  区切りごとの書き残しと wip のコミットが頼り）。再開は同じ worktree で、依頼文に「progress.md の『次にすること』から続ける」と足して立て直す。
+
 ## 止めるとき（コンテナの再起動・作り直しの前）
 
-1. 指揮役が、動いているエージェント全員に「一時停止」を送り、全員の報告を待つ。
+1. 指揮役が、動いているエージェント全員に「一時停止」を送り、全員の報告を待つ（Codex の担当は `codex-run.sh <名前> --stop`）。
 2. `.devcontainer/orchestration/status.sh` で、各 worktree の進捗メモが新しく、ビルドが通るコミットがあることを確かめる。
 3. 統合の木（`/workspace`）に未コミットの変更があれば、コミットするか、理由を残す。push できるものは push する（作業ブランチ 0.0.0 と agent-board）。
 4. `.devcontainer/orchestration/stop-all.sh` でテストの台と掲示板を止める（書き残しが古い worktree があれば止まって一覧を出す。`--force` で構わず止める）。
