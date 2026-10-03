@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using Yozolab.YoluPainter.Core.Paths;
 
 namespace Yozolab.YoluPainter.Core
@@ -94,7 +95,7 @@ namespace Yozolab.YoluPainter.Core
                 foreach (var entry in layer.Channels)
                 {
                     var surface = target.GetChannel(entry.Key);
-                    if (canvasPath != null && canvasPath.Channel == entry.Key) continue; // 下で縮尺したパスから描き直す
+                    if (canvasPath != null && canvasPath.Paints.Any(m => m.Channel == entry.Key)) continue; // 下で縮尺したパスから描き直す
                     CanvasResampler.Resample(entry.Value, surface, xs, ys, resampling, entry.Key == PaintChannel.Normal, ensure);
                 }
                 foreach (PaintChannel channel in Enum.GetValues(typeof(PaintChannel)))
@@ -110,14 +111,17 @@ namespace Yozolab.YoluPainter.Core
                 {
                     var scaled = ScaledCanvasPath(canvasPath, sx, sy, scale, layer.Name, notes);
                     target.Path = scaled;
-                    SparseTileSurface rendered;
-                    try { rendered = CanvasPathRenderer.Render(copy, scaled); }
+                    IReadOnlyDictionary<PaintChannel, SparseTileSurface> rendered;
+                    try { rendered = CanvasPathRenderer.RenderChannels(copy, scaled); }
                     catch (InvalidOperationException ex) { throw new InvalidOperationException("The path on '" + layer.Name + "' cannot be drawn at " + size + ": " + ex.Message + " Nothing was changed.", ex); }
-                    var surface = target.GetChannel(scaled.Channel);
-                    foreach (var coord in rendered.EnumerateTileCoordinates())
+                    foreach (var entry in rendered)
                     {
-                        var tile = rendered.Capture(coord);
-                        ensure(tile.ByteSize); surface.EnsureGrowth(tile.ByteSize); surface.Restore(coord, tile);
+                        var surface = target.GetChannel(entry.Key);
+                        foreach (var coord in entry.Value.EnumerateTileCoordinates())
+                        {
+                            var tile = entry.Value.Capture(coord);
+                            ensure(tile.ByteSize); surface.EnsureGrowth(tile.ByteSize); surface.Restore(coord, tile);
+                        }
                     }
                 }
                 else if (layer.Path is SurfacePath) { target.Path = layer.Path; surfacePaths.Add(layer.Id); }
@@ -208,7 +212,7 @@ namespace Yozolab.YoluPainter.Core
                 points.Add(new CanvasPoint(x, y, p.Pressure));
             }
             if (clamped) notes.Add("The path on '" + owner + "': points far outside the canvas were moved in to ±" + CanvasPoint.Limit.ToString(CultureInfo.InvariantCulture) + " px.");
-            return new CanvasPath(path.Id, path.Channel, brush, points);
+            return new CanvasPath(path.Id, path.Channel, brush, points, path.Material);
         }
 
         static string Format(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);

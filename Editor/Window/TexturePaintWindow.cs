@@ -148,12 +148,12 @@ namespace Yozolab.YoluPainter.Editor
             ResetSetsBaseline(false);
         }
         void OnLostFocus() { FinishStroke(false); CancelShapeDrag(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); preview?.CancelNavigation(); SaveRecovery(); }
-        void BeforeReload() { FinishStroke(false); CancelShapeDrag(); EndLightingDrag(true); preview?.CancelNavigation(); SaveRecovery(); }
-        void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ FinishStroke(false); CancelShapeDrag(); SaveRecovery(); } }
+        void BeforeReload() { FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); EndLightingDrag(true); preview?.CancelNavigation(); SaveRecovery(); }
+        void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); SaveRecovery(); } }
         void OnDisable()
         {
             DisposePenInput();
-            FinishStroke(false); CancelShapeDrag(); preview?.CancelNavigation(); SaveRecovery();
+            FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); preview?.CancelNavigation(); SaveRecovery();
             EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; EditorApplication.projectChanged-=OnUnityProjectChanged; UnhookResources(); DisposeAssetThumbnails(); L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
             DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeDecalOverlay(); DisposeThumbnails(); DisposeColorPanel(); DisposeTextureSetTextures(); DisposeMaterialChannelTextures(); DisposeModelShowTextures(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
             if(selectionOverlay!=null){DestroyImmediate(selectionOverlay);selectionOverlay=null;overlayFor=null;}

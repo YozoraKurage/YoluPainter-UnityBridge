@@ -175,8 +175,9 @@ namespace Yozolab.YoluPainter.Editor
                     break;
                 case PaintTool.Gradient:
                     PaintGui.EnumDropdown(Next(170), L.Tr("Shape"), gradientShape, (GradientShape[])Enum.GetValues(typeof(GradientShape)), s => L.Tr(s.ToString()), s => gradientShape = s);
-                    if (brush.material || EditingMask)
-                        PaintGui.Text(Next(210), EditingMask ? L.Tr("Mask amount → Transparent") : L.Tr("Material values → Transparent"), PaintTheme.Label);
+                    if (EditingMask) PaintGui.Text(Next(210), L.Tr("Mask amount → Transparent"), PaintTheme.Label);
+                    else if (brush.material) gradientBetweenMaterials = PaintGui.Toggle(Mark("gradient.between-toolbar", Next(210)), L.Tr("Between two materials"), gradientBetweenMaterials,
+                        L.Tr("Interpolate each channel from the brush material to the end material. Off: fade to transparent."));
                     else
                     {
                         PaintGui.Text(Next(36), L.Tr("From"), PaintTheme.Label);

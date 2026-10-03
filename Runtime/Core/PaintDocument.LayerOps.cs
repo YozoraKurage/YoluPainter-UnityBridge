@@ -169,8 +169,8 @@ namespace Yozolab.YoluPainter.Core
             foreach (var e in source.FilterList) copy.FilterList.Add(CloneEffect(e));
             if (source.FilterList.Count > 0) copy.FilterRevision = ++filterRevisionCounter;
             if (source.Mask != null) copy.Mask = CloneMask(source.Mask, copy);
-            if (source.Path is SurfacePath surfacePath) copy.Path = new SurfacePath(Guid.NewGuid(), surfacePath.Channel, surfacePath.ModelFingerprint, surfacePath.Brush, surfacePath.Points);
-            else if (source.Path is CanvasPath canvasPath) copy.Path = new CanvasPath(Guid.NewGuid(), canvasPath.Channel, canvasPath.Brush, canvasPath.Points);
+            if (source.Path is SurfacePath surfacePath) copy.Path = new SurfacePath(Guid.NewGuid(), surfacePath.Channel, surfacePath.ModelFingerprint, surfacePath.Brush, surfacePath.Points, surfacePath.Material);
+            else if (source.Path is CanvasPath canvasPath) copy.Path = new CanvasPath(Guid.NewGuid(), canvasPath.Channel, canvasPath.Brush, canvasPath.Points, canvasPath.Material);
             return copy;
         }
         static FilterEffect CloneEffect(FilterEffect e) => new FilterEffect(Guid.NewGuid(), e.Settings, e.Enabled, e.Strength, e.Channels.Count == 0 ? null : e.Channels);

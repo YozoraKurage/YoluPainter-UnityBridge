@@ -54,6 +54,21 @@ namespace Yozolab.YoluPainter.Core.Paths
         public PaintChannel Channel { get; protected set; }
         /// <summary>描く筆。半径は SurfacePath ではモデルの空間の長さ、CanvasPath では画素。</summary>
         public PathBrush Brush { get; protected set; }
+        /// <summary>保存するマテリアルの組。null は従来の Channel と Brush.Color の単チャンネル。入力の写しで保持する。</summary>
+        public IReadOnlyList<ChannelPaint> Material { get; protected set; }
+        public IReadOnlyList<ChannelPaint> Paints => Material ?? new[] { new ChannelPaint(Channel, Brush.Color) };
+        protected static IReadOnlyList<ChannelPaint> CopyMaterial(IEnumerable<ChannelPaint> material)
+        {
+            if (material == null) return null;
+            var copy = new List<ChannelPaint>(material); var seen = new HashSet<PaintChannel>();
+            if (copy.Count == 0) throw new ArgumentException("A path material needs at least one channel.", nameof(material));
+            foreach (var m in copy)
+            {
+                PaintLayer.ValidateChannel(m.Channel);
+                if (!seen.Add(m.Channel)) throw new ArgumentException("A path material repeats a channel.", nameof(material));
+            }
+            return copy.AsReadOnly();
+        }
         public abstract int PointCount { get; }
         private protected EditablePath() { }
     }
@@ -71,7 +86,7 @@ namespace Yozolab.YoluPainter.Core.Paths
         public IReadOnlyList<PathPoint> Points { get; }
         public override int PointCount => Points.Count;
 
-        public SurfacePath(Guid id, PaintChannel channel, string modelFingerprint, PathBrush brush, IEnumerable<PathPoint> points)
+        public SurfacePath(Guid id, PaintChannel channel, string modelFingerprint, PathBrush brush, IEnumerable<PathPoint> points, IEnumerable<ChannelPaint> material = null)
         {
             PaintLayer.ValidateChannel(channel);
             if (string.IsNullOrEmpty(modelFingerprint) || modelFingerprint.Length > 128) throw new ArgumentException("A model fingerprint is required.", nameof(modelFingerprint));
@@ -79,9 +94,10 @@ namespace Yozolab.YoluPainter.Core.Paths
             brush.Validate();
             var list = new List<PathPoint>(points ?? throw new ArgumentNullException(nameof(points)));
             if (list.Count > MaxPoints) throw new ArgumentException("A path has at most " + MaxPoints + " points.", nameof(points));
-            Id = id; Channel = channel; ModelFingerprint = modelFingerprint; Brush = brush.Clone(); Points = list.AsReadOnly();
+            Id = id; Channel = channel; ModelFingerprint = modelFingerprint; Brush = brush.Clone(); Material = CopyMaterial(material); Points = list.AsReadOnly();
         }
-        public SurfacePath WithPoints(IEnumerable<PathPoint> points) => new SurfacePath(Id, Channel, ModelFingerprint, Brush, points);
-        public SurfacePath WithBrush(PathBrush brush) => new SurfacePath(Id, Channel, ModelFingerprint, brush, Points);
+        public SurfacePath WithPoints(IEnumerable<PathPoint> points) => new SurfacePath(Id, Channel, ModelFingerprint, Brush, points, Material);
+        public SurfacePath WithBrush(PathBrush brush) => new SurfacePath(Id, Channel, ModelFingerprint, brush, Points, Material);
+        public SurfacePath WithMaterial(IEnumerable<ChannelPaint> material) => new SurfacePath(Id, Channel, ModelFingerprint, Brush, Points, material);
     }
 }

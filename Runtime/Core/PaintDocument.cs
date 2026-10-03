@@ -595,6 +595,9 @@ namespace Yozolab.YoluPainter.Core
             RefuseLockedAttributes(layer);
             if (enabled && layer.Kind == LayerKind.Adjustment && !layer.Adjustment.AppliesTo(channel))
                 throw new InvalidOperationException(layer.Adjustment.Type + " cannot be applied to the " + channel + " channel.");
+            if (!enabled && layer.Path != null && layer.Path.Material == null)
+                foreach (var m in layer.Path.Paints) if (m.Channel == channel)
+                    throw new InvalidOperationException("Rasterize the path before disabling a channel it draws.");
             // 有効にして初めて面ができたときは、取り消しで面も外す（空の面が残ると保存のバイト列が変わる）。やり直しでは同じ面を付け直す
             // （作り直すと、その面に描いた後の履歴が、外れた面へ画素を戻してしまう）
             bool hadSurface = layer.TryGetChannel(channel, out _);

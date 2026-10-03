@@ -213,7 +213,7 @@ namespace Yozolab.YoluPainter.Editor
                 var geometry = preview != null ? preview.Geometry : null;
                 if (geometry == null || Yozolab.YoluPainter.Editor.Preview.SurfacePathRenderer.Fingerprint(geometry) != path.ModelFingerprint)
                 { notes.Add(SetNotePrefix(set) + L.Tr("The path on the layer {0} was resampled, not redrawn: its model is not loaded. Redraw it in the Path section when it is.", layer.Name)); continue; }
-                try { var render = Yozolab.YoluPainter.Editor.Preview.SurfacePathRenderer.Render(d, geometry, path, preview.BrushBudget); d.SetPath(id, path, render.Surface); }
+                try { var render = Yozolab.YoluPainter.Editor.Preview.SurfacePathRenderer.Render(d, geometry, path, preview.BrushBudget); d.SetPath(id, path, render.Channels); }
                 catch (Exception ex) when (ex is InvalidOperationException || ex is ArgumentException)
                 { notes.Add(SetNotePrefix(set) + L.Tr("The path on the layer {0} was resampled, not redrawn: {1}", layer.Name, ex.Message)); }
             }

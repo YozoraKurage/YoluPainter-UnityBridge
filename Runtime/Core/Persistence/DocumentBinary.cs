@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Linq;
@@ -46,7 +47,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// number differs. Version 17 adds decals: projection mode 5 (<see cref="FillProjectionMode.Decal"/>) and wrap 2
     /// (<see cref="FillWrap.None"/>); a decal's projection block ends with its culling (doubles depth hardness, back-face angle, back-face
     /// hardness). Mode 5 or wrap 2 in an older archive is refused. A document without decals is laid out as version 16 (only the version
-    /// number differs). Older archives still load.</summary>
+    /// number differs). Version 18 appends the path material to each present 2D/3D path: a byte count (0 means the legacy single
+    /// channel, otherwise 1..6), followed by the channel (int) and straight RGBA8 value for each entry. Unknown or repeated channels
+    /// and counts above 6 are refused. Older archives still load.</summary>
     public static class DocumentBinary
     {
         /// <summary>The version that added per-channel blend modes and opacities (attribute bit 2).</summary>
@@ -57,7 +60,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
         internal const int FillImageVersion = 16;
         /// <summary>The version that added decals (projection mode 5, wrap 2 and the culling after the projection).</summary>
         internal const int DecalVersion = 17;
-        const int Version = DecalVersion;
+        /// <summary>The version that added the path material (channel count, channels and values after each present path).</summary>
+        internal const int MaterialPathVersion = 18;
+        const int Version = MaterialPathVersion;
         /// <summary>The version <see cref="Write"/> produces.</summary>
         public const int CurrentVersion = Version;
         /// <summary>The version that added the shape gradient (generator type 5 and its volume after the generator block).</summary>
@@ -303,8 +308,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         }
                         if (version >= 8 && reader.ReadBoolean())
                         {
-                            var path = ReadPath(reader);
-                            if (layer.Kind != LayerKind.Raster || !layer.IsChannelEnabled(path.Channel)) throw new InvalidDataException("A surface path needs a paint layer with its channel enabled.");
+                            var path = ReadPath(reader, version);
+                            if (layer.Kind != LayerKind.Raster || !PathChannelsPresent(layer, path)) throw new InvalidDataException("A surface path needs a paint layer with its channel enabled.");
                             layer.Path = path;
                         }
                         if (version >= 9 && reader.ReadBoolean())
@@ -314,9 +319,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         }
                         if (version >= 10 && reader.ReadBoolean())
                         {
-                            var path = ReadCanvasPath(reader);
+                            var path = ReadCanvasPath(reader, version);
                             if (layer.Path != null) throw new InvalidDataException("A layer has both a surface path and a canvas path.");
-                            if (layer.Kind != LayerKind.Raster || !layer.IsChannelEnabled(path.Channel)) throw new InvalidDataException("A canvas path needs a paint layer with its channel enabled.");
+                            if (layer.Kind != LayerKind.Raster || !PathChannelsPresent(layer, path)) throw new InvalidDataException("A canvas path needs a paint layer with its channel enabled.");
                             layer.Path = path;
                         }
                         if (locks != LayerLocks.None) lockedLayers.Add((layer, locks));
@@ -540,8 +545,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
             writer.Write(b.Erase); writer.Write(b.PressureSize); writer.Write(b.PressureOpacity); writer.Write(b.PressureFlow);
             writer.Write(path.Points.Count);
             foreach (var point in path.Points) { writer.Write(point.Triangle); writer.Write(point.U); writer.Write(point.V); writer.Write(point.Pressure); }
+            WritePathMaterial(writer, path);
         }
-        static Paths.SurfacePath ReadPath(BinaryReader reader)
+        static Paths.SurfacePath ReadPath(BinaryReader reader, int version)
         {
             int algorithm = reader.ReadInt32();
             if (algorithm != Paths.SurfacePath.AlgorithmVersion) throw new InvalidDataException("Surface path algorithm version " + algorithm + " is not supported by this reader; source retained unchanged.");
@@ -554,7 +560,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             {
                 for (int i = 0; i < count; i++) points[i] = new Paths.PathPoint(reader.ReadInt32(), reader.ReadDouble(), reader.ReadDouble(), reader.ReadDouble());
                 if (!Enum.IsDefined(typeof(PaintChannel), channel)) throw new ArgumentOutOfRangeException(nameof(channel));
-                return new Paths.SurfacePath(id, (PaintChannel)channel, fingerprint, brush, points);
+                return new Paths.SurfacePath(id, (PaintChannel)channel, fingerprint, brush, points, version >= MaterialPathVersion ? ReadPathMaterial(reader) : null);
             }
             catch (ArgumentException ex) { throw new InvalidDataException("Invalid surface path.", ex); }
         }
@@ -572,8 +578,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
             WriteBrush(writer, path.Brush);
             writer.Write(path.Points.Count);
             foreach (var point in path.Points) { writer.Write(point.X); writer.Write(point.Y); writer.Write(point.Pressure); }
+            WritePathMaterial(writer, path);
         }
-        static Paths.CanvasPath ReadCanvasPath(BinaryReader reader)
+        static Paths.CanvasPath ReadCanvasPath(BinaryReader reader, int version)
         {
             int algorithm = reader.ReadInt32();
             if (algorithm != Paths.CanvasPath.AlgorithmVersion) throw new InvalidDataException("Canvas path algorithm version " + algorithm + " is not supported by this reader; source retained unchanged.");
@@ -585,9 +592,35 @@ namespace Yozolab.YoluPainter.Core.Persistence
             {
                 for (int i = 0; i < count; i++) points[i] = new Paths.CanvasPoint(reader.ReadDouble(), reader.ReadDouble(), reader.ReadDouble());
                 if (!Enum.IsDefined(typeof(PaintChannel), channel)) throw new ArgumentOutOfRangeException(nameof(channel));
-                return new Paths.CanvasPath(id, (PaintChannel)channel, brush, points);
+                return new Paths.CanvasPath(id, (PaintChannel)channel, brush, points, version >= MaterialPathVersion ? ReadPathMaterial(reader) : null);
             }
             catch (ArgumentException ex) { throw new InvalidDataException("Invalid canvas path.", ex); }
+        }
+        static bool PathChannelsPresent(PaintLayer layer, Paths.EditablePath path)
+        {
+            if (path.Material == null) return layer.IsChannelEnabled(path.Channel);
+            foreach (var m in path.Material) if (!layer.TryGetChannel(m.Channel, out _)) return false;
+            return true;
+        }
+        static void WritePathMaterial(BinaryWriter writer, Paths.EditablePath path)
+        {
+            writer.Write((byte)(path.Material?.Count ?? 0));
+            if (path.Material == null) return;
+            foreach (var m in path.Material)
+            {
+                writer.Write((int)m.Channel);
+                writer.Write(m.Value.R); writer.Write(m.Value.G); writer.Write(m.Value.B); writer.Write(m.Value.A);
+            }
+        }
+        static IReadOnlyList<ChannelPaint> ReadPathMaterial(BinaryReader reader)
+        {
+            int count = reader.ReadByte();
+            if (count == 0) return null;
+            if (count > 6) throw new InvalidDataException("Invalid path material channel count.");
+            var material = new ChannelPaint[count];
+            for (int i = 0; i < count; i++) material[i] = new ChannelPaint((PaintChannel)reader.ReadInt32(),
+                new Rgba32(reader.ReadByte(), reader.ReadByte(), reader.ReadByte(), reader.ReadByte()));
+            return material;
         }
         static void WriteTiles(BinaryWriter writer, Stream stream, SparseTileSurface surface)
         {

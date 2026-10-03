@@ -13,6 +13,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
     {
         /// <summary>パスのチャンネルの画素（文書と同じ大きさ）。</summary>
         public SparseTileSurface Surface { get; internal set; }
+        public IReadOnlyDictionary<PaintChannel, SparseTileSurface> Channels { get; internal set; }
         public int Dabs { get; internal set; }
         /// <summary>面へ投影できなかった（穴・面の外・反対の面へ飛ぶ）サンプルの数。そこは描かない。</summary>
         public int Gaps { get; internal set; }
@@ -64,7 +65,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
             var layer = scratch.AddLayer("path");
             if (!layer.IsChannelEnabled(path.Channel)) scratch.SetChannelEnabled(layer.Id, path.Channel, true);
             var result = new SurfacePathRender();
-            using (var stroke = scratch.BeginStroke(layer.Id, path.Channel, brush.StrokeSettings()))
+            using (var stroke = path.Material == null ? scratch.BeginStroke(layer.Id, path.Channel, brush.StrokeSettings())
+                : scratch.BeginMaterialStroke(layer.Id, path.Material, brush.StrokeSettings()))
             {
                 void Dab(SurfaceHit hit, double pressure)
                 {
@@ -111,7 +113,10 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 }
                 stroke.Commit();
             }
-            result.Surface = layer.GetChannel(path.Channel);
+            var rendered = new Dictionary<PaintChannel, SparseTileSurface>();
+            foreach (var m in path.Paints) rendered.Add(m.Channel, layer.GetChannel(m.Channel));
+            result.Channels = rendered;
+            result.Surface = rendered[path.Material == null ? path.Channel : path.Material[0].Channel];
             return result;
         }
 

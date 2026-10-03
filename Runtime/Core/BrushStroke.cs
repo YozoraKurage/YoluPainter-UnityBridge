@@ -720,22 +720,11 @@ namespace Yozolab.YoluPainter.Core
         }
 
         // ───── whole-tile edits (TriangleFill): tiles computed from their state before the stroke, not from dabs ─────
-        // 1 チャンネル（マスクを含む）のストロークだけ。マテリアルのストローク（複数のチャンネル）では断る。
-
-        /// <summary>The single surface of a one-channel (or mask) stroke; whole-tile edits are refused for a material stroke.</summary>
-        private Target Single
-        {
-            get
-            {
-                if (targets.Length != 1) throw new InvalidOperationException("Whole-tile edits (polygon fill) paint one channel or a mask; this stroke paints " + targets.Length + " channels.");
-                return targets[0];
-            }
-        }
         /// <summary>The tile as it was before the stroke (null when absent), captured now under the rollback budget the first time a
         /// whole-tile edit asks for it. The returned object is never written to.</summary>
-        internal TileStorage OriginalTile(TileCoord coord)
+        internal TileStorage OriginalTile(TileCoord coord, int target = 0)
         {
-            CheckOpen(); var t = Single;
+            CheckOpen(); var t = targets[target];
             if (t.Before.TryGetValue(coord, out var original)) return original;
             var current = t.Surface.PeekTile(coord);
             long next = rollbackBytes + 64 + (current == null ? 0 : current.ByteSize);
@@ -746,20 +735,20 @@ namespace Yozolab.YoluPainter.Core
         }
         /// <summary>Puts after (computed from <see cref="OriginalTile"/>) in place of a captured tile, under the source budget. Commit
         /// records it like any other changed tile; Cancel puts the original back.</summary>
-        internal void ReplaceTile(TileCoord coord, TileStorage after)
+        internal void ReplaceTile(TileCoord coord, TileStorage after, int target = 0)
         {
-            CheckOpen(); var t = Single;
+            CheckOpen(); var t = targets[target];
             if (!t.Before.ContainsKey(coord)) throw new InvalidOperationException("Capture the tile with OriginalTile before replacing it.");
             t.Surface.EnsureGrowth((after == null ? 0 : after.ByteSize) - t.Surface.TileBytesAt(coord));
             t.Surface.Restore(coord, after); cursor.Reset();
         }
         /// <summary>The tile the surface holds now (read only, not a copy; null when absent).</summary>
-        internal TileStorage PeekSurfaceTile(TileCoord coord) => Single.Surface.PeekTile(coord);
+        internal TileStorage PeekSurfaceTile(TileCoord coord, int target = 0) => targets[target].Surface.PeekTile(coord);
         /// <summary>Scratch memory a whole-tile edit keeps until the stroke ends, counted in the rollback budget like the brush's own
         /// per-tile scratch (throws, changing nothing, when it does not fit).</summary>
         internal void ReserveScratch(long bytes)
         {
-            CheckOpen(); _ = Single;
+            CheckOpen();
             if (bytes < 0) throw new ArgumentOutOfRangeException(nameof(bytes));
             long next = rollbackBytes + bytes; EnsureEffectBudget(next); rollbackBytes = next;
         }
@@ -789,7 +778,7 @@ namespace Yozolab.YoluPainter.Core
                 {
                     // 有効にしたチャンネルは、何も変わらなければ戻し、変われば同じ Undo に入れる（Redo は有効にしてから画素を戻す）
                     if (command == null) document.RevertStrokeSetup(enabling);
-                    else command = new CompoundCommand(new List<IHistoryCommand> { enabling, command });
+                    else command = new PaintDocument.MaterialRegionCommand(document, parts, enabling);
                 }
                 document.FinishStroke(this, command); finished = true; ReleaseScratch();
                 return parts.Count > 0;

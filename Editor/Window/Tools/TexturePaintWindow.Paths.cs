@@ -65,9 +65,10 @@ namespace Yozolab.YoluPainter.Editor
             SurfacePath path;
             if(existing==null)
             {
-                var created=document.AddLayer("Path",null,layer.Id); selectedLayer=created.Id; layer=created;
-                if(!layer.IsChannelEnabled(channel))document.SetChannelEnabled(layer.Id,channel,true);
-                path=new SurfacePath(Guid.NewGuid(),channel,SurfacePathRenderer.Fingerprint(preview.Geometry),CurrentPathBrush(),new[]{point});
+                path=new SurfacePath(Guid.NewGuid(),channel,SurfacePathRenderer.Fingerprint(preview.Geometry),CurrentPathBrush(),new[]{point},brush.material?StrokeChannels():null);
+                var render = SurfacePathRenderer.Render(document, preview.Geometry, path, preview.BrushBudget);
+                var created = document.AddPathLayer("Path", path, render.Channels, layer.Id);
+                selectedLayer = created.Id; message = L.Tr("Added path point {0}.", 1); repaintPixels = true; return;
             }
             else path=existing.WithPoints(existing.Points.Concat(new[]{point}));
             ApplyPath(layer.Id,path,"Added path point "+path.Points.Count+".");
@@ -89,9 +90,9 @@ namespace Yozolab.YoluPainter.Editor
             CanvasPath path;
             if(existing==null)
             {
-                var created=document.AddLayer("Path",null,layer.Id); selectedLayer=created.Id; layer=created;
-                if(!layer.IsChannelEnabled(channel))document.SetChannelEnabled(layer.Id,channel,true);
-                path=new CanvasPath(Guid.NewGuid(),channel,CurrentPathBrush(true),new[]{point});
+                path=new CanvasPath(Guid.NewGuid(),channel,CurrentPathBrush(true),new[]{point},brush.material?StrokeChannels():null);
+                var created = document.AddPathLayer("Path", path, CanvasPathRenderer.RenderChannels(document, path), layer.Id);
+                selectedLayer = created.Id; message = L.Tr("Added path point {0}.", 1); repaintPixels = true; return;
             }
             else path=existing.WithPoints(existing.Points.Concat(new[]{point}));
             ApplyCanvasPath(layer.Id,path,"Added path point "+path.Points.Count+".");
@@ -134,7 +135,7 @@ namespace Yozolab.YoluPainter.Editor
         void ApplyPath(Guid layerId,SurfacePath path,string done)
         {
             var render=SurfacePathRenderer.Render(document,preview.Geometry,path,preview.BrushBudget);
-            document.SetPath(layerId,path,render.Surface);
+            document.SetPath(layerId,path,render.Channels);
             message=done+(render.Gaps>0?" "+render.Gaps+" sample(s) could not be projected onto the surface and were skipped.":"");repaintPixels=true;
         }
 
@@ -146,22 +147,22 @@ namespace Yozolab.YoluPainter.Editor
             string rasterizeTip = L.Tr("Keep the pixels and remove the path, so the layer can be painted");
             if (layer?.Path is CanvasPath canvasPath)
             {
-                PaintGui.Text(rows.Row(18), L.Tr("Canvas path: {0} point(s) on {1}", canvasPath.Points.Count, L.Tr(canvasPath.Channel.ToString())), PaintTheme.LabelDim);
+                PaintGui.Paragraph(rows, L.Tr("Canvas path: {0} point(s) on {1}", canvasPath.Points.Count, string.Join(", ", canvasPath.Paints.Select(m => L.Tr(m.Channel.ToString())))), PaintTheme.TextDim);
                 var c = UiRows.Split(rows.Row(24), 2, 6);
-                if (PaintGui.FitButton(c[0], L.TrIn("path", "Use Brush"), false, stroke == null, L.Tr("Redraw the path with the current brush")))
-                    TryAction(() => ApplyCanvasPath(layer.Id, canvasPath.WithBrush(CurrentPathBrush(true)), L.Tr("Path redrawn with the current brush.")));
+                if (PaintGui.FitButton(Mark("path.use-brush", c[0]), L.TrIn("path", "Use Brush"), false, stroke == null, L.Tr("Redraw the path with the current brush")))
+                    TryAction(() => ApplyCanvasPath(layer.Id, canvasPath.WithBrush(CurrentPathBrush(true)).WithMaterial(brush.material ? StrokeChannels() : null), L.Tr("Path redrawn with the current brush.")));
                 if (PaintGui.FitButton(c[1], L.TrIn("path", "Rasterize"), false, true, rasterizeTip)) TryAction(() => RasterizePath(layer.Id));
                 rows.Space(4);
                 return;
             }
             if (layer?.Path is SurfacePath surfacePath)
             {
-                PaintGui.Text(rows.Row(18), L.Tr("Path on the model: {0} point(s) on {1}", surfacePath.Points.Count, L.Tr(surfacePath.Channel.ToString())), PaintTheme.LabelDim);
+                PaintGui.Paragraph(rows, L.Tr("Path on the model: {0} point(s) on {1}", surfacePath.Points.Count, string.Join(", ", surfacePath.Paints.Select(m => L.Tr(m.Channel.ToString())))), PaintTheme.TextDim);
                 bool bound = preview.Geometry != null && SurfacePathRenderer.Fingerprint(preview.Geometry) == surfacePath.ModelFingerprint;
                 if (!bound) PaintGui.Notice(rows, L.Tr("This path was drawn on another model snapshot (different triangles or UVs). Load that model to edit it, or rasterize it."), "warning", PaintTheme.Warning);
                 var c = UiRows.Split(rows.Row(24), 3, 6);
-                if (PaintGui.FitButton(c[0], L.TrIn("path", "Use Brush"), false, bound && stroke == null, L.Tr("Redraw the path with the current brush")))
-                    TryAction(() => ApplyPath(layer.Id, surfacePath.WithBrush(CurrentPathBrush()), L.Tr("Path redrawn with the current brush.")));
+                if (PaintGui.FitButton(Mark("path.use-brush", c[0]), L.TrIn("path", "Use Brush"), false, bound && stroke == null, L.Tr("Redraw the path with the current brush")))
+                    TryAction(() => ApplyPath(layer.Id, surfacePath.WithBrush(CurrentPathBrush()).WithMaterial(brush.material ? StrokeChannels() : null), L.Tr("Path redrawn with the current brush.")));
                 if (PaintGui.FitButton(c[1], L.TrIn("path", "Redraw"), false, bound && stroke == null, L.Tr("Redraw on the current pose")))
                     TryAction(() => ApplyPath(layer.Id, surfacePath, L.Tr("Path redrawn.")));
                 if (PaintGui.FitButton(c[2], L.TrIn("path", "Rasterize"), false, true, rasterizeTip)) TryAction(() => RasterizePath(layer.Id));

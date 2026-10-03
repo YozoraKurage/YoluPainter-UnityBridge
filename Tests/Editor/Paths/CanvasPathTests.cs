@@ -95,7 +95,7 @@ namespace Yozolab.YoluPainter.Tests
             var bytes = DocumentBinary.Write(d);
             Assert.That(BitConverter.ToInt32(bytes, 8), Is.EqualTo(DocumentBinary.CurrentVersion)); Assert.That(DocumentBinary.CurrentVersion, Is.GreaterThanOrEqualTo(10));
             // 版 10 として書いたもの（版 11 は Generator の段を持つ文書だけ並びが違う）も同じに読む
-            var v10 = (byte[])bytes.Clone(); BitConverter.GetBytes(10).CopyTo(v10, 8);
+            var v10 = bytes.Take(bytes.Length - 1).ToArray(); BitConverter.GetBytes(10).CopyTo(v10, 8);
             Assert.That(((CanvasPath)DocumentBinary.Read(v10).Layers[0].Path).Points, Is.EqualTo(path.Points));
             var restored = DocumentBinary.Read(bytes);
             var p = (CanvasPath)restored.Layers[0].Path;
@@ -107,7 +107,7 @@ namespace Yozolab.YoluPainter.Tests
             restored.SetCanvasPath(restored.Layers[0].Id, p);
             Assert.That(restored.Composite(PaintChannel.Color), Is.EqualTo(d.Composite(PaintChannel.Color)));
             // 知らないアルゴリズムの版は断る（点 3 個 × 24、個数 4、筆 48、チャンネル 4、ID 16 の前）
-            var bad = (byte[])bytes.Clone(); BitConverter.GetBytes(2).CopyTo(bad, bytes.Length - (3 * 24 + 4 + 48 + 4 + 16 + 4));
+            var bad = (byte[])bytes.Clone(); BitConverter.GetBytes(2).CopyTo(bad, bytes.Length - (1 + 3 * 24 + 4 + 48 + 4 + 16 + 4));
             Assert.That(() => DocumentBinary.Read(bad), Throws.TypeOf<System.IO.InvalidDataException>().With.Message.Contains("Canvas path algorithm version 2"));
             // 版 9（2D のパスの欄が無い）も読む
             var plain = new PaintDocument(Size, Size, 16); var pl = plain.AddLayer("P"); pl.GetChannel(PaintChannel.Color).SetPixel(3, 4, new Rgba32(1, 2, 3));

@@ -31,6 +31,30 @@ namespace Yozolab.YoluPainter.Core
                 m => GradientRule(CopyGradient(shape, m.Value, Rgba32.Transparent), erase, KeepsAlpha(GetLayer(layerId))));
         }
 
+        /// <summary>同じチャンネルの組の始点値から終点値へ補間する。RGBA の式・量子化は単チャンネル Gradient と共通。
+        /// 組が違う・重複・未知の型なら変更前に拒否する。法線も encoded RGBA の補間（球面補間ではない）。</summary>
+        public bool GradientMaterial(Guid layerId, IReadOnlyList<ChannelPaint> channels, IReadOnlyList<ChannelPaint> toChannels,
+            GradientSettings gradient, SelectionMask region = null, bool erase = false)
+        {
+            if (gradient == null) throw new ArgumentNullException(nameof(gradient));
+            gradient.Validate();
+            if (channels == null) throw new ArgumentNullException(nameof(channels));
+            if (toChannels == null) throw new ArgumentNullException(nameof(toChannels));
+            var ends = new Dictionary<PaintChannel, Rgba32>();
+            foreach (var m in toChannels)
+            {
+                PaintLayer.ValidateChannel(m.Channel);
+                if (ends.ContainsKey(m.Channel)) throw new ArgumentException("The endpoint material repeats a channel.", nameof(toChannels));
+                ends.Add(m.Channel, m.Value);
+            }
+            if (ends.Count != channels.Count) throw new ArgumentException("Both materials must paint the same channels.", nameof(toChannels));
+            foreach (var m in channels)
+                if (!ends.ContainsKey(m.Channel)) throw new ArgumentException("Both materials must paint the same channels.", nameof(toChannels));
+            var shape = CopyGradient(gradient, gradient.From, gradient.To);
+            return EditMaterialRegion(layerId, channels, region, erase,
+                m => GradientRule(CopyGradient(shape, m.Value, ends[m.Channel]), erase, KeepsAlpha(GetLayer(layerId))));
+        }
+
         /// <summary>マスクだけにグラデーションのアルファ×不透明度で隠す/見せる量を当てる。FillMask と同じ向き。
         /// RGB は使わない。画像/透明部分のロックはマスクを妨げず、すべてのロックは拒否する。</summary>
         public bool GradientMask(Guid layerId, GradientSettings gradient, SelectionMask region = null, bool reveal = false)
@@ -99,16 +123,16 @@ namespace Yozolab.YoluPainter.Core
         }
 
         // Undo/Redo は有効化を含め何も変える前に全チャンネルの伸びを調べる。各部を順に Apply する CompoundCommand では不足する。
-        sealed class MaterialRegionCommand : IHistoryCommand
+        internal sealed class MaterialRegionCommand : IHistoryCommand
         {
             readonly PaintDocument document;
             readonly List<TileStrokeCommand> parts;
-            readonly IHistoryCommand enabling;
+            readonly IHistoryCommand enabling, state;
             public long ByteCost { get; }
-            internal MaterialRegionCommand(PaintDocument document, List<TileStrokeCommand> parts, IHistoryCommand enabling)
+            internal MaterialRegionCommand(PaintDocument document, List<TileStrokeCommand> parts, IHistoryCommand enabling, IHistoryCommand state = null)
             {
-                this.document = document; this.parts = parts; this.enabling = enabling;
-                long cost = enabling?.ByteCost ?? 0; foreach (var p in parts) cost += p.ByteCost; ByteCost = cost;
+                this.document = document; this.parts = parts; this.enabling = enabling; this.state = state;
+                long cost = (enabling?.ByteCost ?? 0) + (state?.ByteCost ?? 0); foreach (var p in parts) cost += p.ByteCost; ByteCost = cost;
             }
             public void Apply() => Restore(false);
             public void Revert() => Restore(true);
@@ -118,6 +142,7 @@ namespace Yozolab.YoluPainter.Core
                 document.EnsureSourceGrowth(growth);
                 if (!backwards) enabling?.Apply();
                 foreach (var p in parts) p.RestoreUnchecked(backwards);
+                if (backwards) state?.Revert(); else state?.Apply();
                 if (backwards) enabling?.Revert();
             }
         }

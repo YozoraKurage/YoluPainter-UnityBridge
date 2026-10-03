@@ -111,7 +111,8 @@ namespace Yozolab.YoluPainter.Editor
                 document.EnsurePixelsEditable(selectedLayer, polyFillErase); // ロックで断るなら、チャンネルを有効にする前に（何も残さない）
                 if (!layer.IsChannelEnabled(channel)) document.SetChannelEnabled(selectedLayer, channel, true);
                 if (!polyFillErase) RememberColor();
-                fill = document.BeginTriangleFill(selectedLayer, channel, BrushColor32(), brush.opacity, polyFillErase);
+                fill = brush.material ? document.BeginMaterialTriangleFill(selectedLayer, StrokeChannels(), brush.opacity, polyFillErase)
+                    : document.BeginTriangleFill(selectedLayer, channel, BrushColor32(), brush.opacity, polyFillErase);
             }
             polyFill = fill; stroke = fill.Stroke; surfaceStroke = false; polyFillOnSurface = onSurface; polyFillRegions.Clear(); polyFillLast = pointer;
             GUIUtility.hotControl = GUIUtility.GetControlID(FocusType.Passive);

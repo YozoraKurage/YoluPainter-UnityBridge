@@ -20,17 +20,17 @@ namespace Yozolab.YoluPainter.Editor
             {
                 case PaintTool.Brush: BrushSections(rows); break;
                 case PaintTool.Blur: case PaintTool.Smudge: case PaintTool.Clone: BrushEffectSection(rows); BrushSections(rows); break;
-                case PaintTool.Fill: MaterialSection(rows); SurfacePickSection(rows); break;
+                case PaintTool.PolygonFill: case PaintTool.Fill: MaterialSection(rows); SurfacePickSection(rows); break;
                 case PaintTool.Gradient:
                     MaterialSection(rows);
-                    if (brush.material && !EditingMask) NoteRow(rows, L.Tr("Each material value fades to transparent; the end color is used only with material painting off."), NoteKind.Info);
+                    GradientMaterialSection(rows);
                     break;
                 case PaintTool.SelectRectangle: case PaintTool.SelectEllipse: case PaintTool.Lasso: case PaintTool.MagicWand:
                     SurfacePickSection(rows);
                     SelectionModifySection(rows); break;
                 case PaintTool.IdSelect: IdMapSection(rows); SelectionModifySection(rows); break; // Tools/TexturePaintWindow.IdSelect.cs
                 case PaintTool.Move: TransformSection(rows); break;
-                case PaintTool.Path: PathSection(rows); break;
+                case PaintTool.Path: MaterialSection(rows); PathSection(rows); break;
             }
         }
 
