@@ -16,7 +16,7 @@ import os
 import shutil
 import sys
 
-EXCLUDED_TOP = {".git", "temp~", ".devcontainer", ".github", ".worktrees", ".claude"}  # .worktrees・.claude はエージェントの worktree の置き場
+EXCLUDED_TOP = {".git", "temp~", ".devcontainer", ".github", ".worktrees", ".claude", ".agent"}  # .worktrees・.claude はエージェントの worktree の置き場、.agent は進捗メモ
 
 
 def main(argv):
