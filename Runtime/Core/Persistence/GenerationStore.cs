@@ -4,9 +4,16 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Diagnostics;
 
 namespace Yozolab.YoluPainter.Core.Persistence
 {
+    /// <summary>Commit の段階計測。呼び出したスレッドだけを測り、各時間は重複しない。</summary>
+    public sealed class GenerationTimings
+    {
+        public double HashMilliseconds, ReadMilliseconds, WriteMilliseconds, FlushMilliseconds, CleanupMilliseconds;
+        internal static double Milliseconds(long start) => (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
+    }
     public sealed class GenerationSnapshot
     {
         public string Generation { get; internal set; }
@@ -25,6 +32,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// </summary>
     public static class GenerationStore
     {
+        [ThreadStatic] static GenerationTimings timing;
         const string FlatManifest = "DOTPAINT-MANIFEST-1", SharedManifest = "DOTPAINT-MANIFEST-2";
         public static GenerationSnapshot Load(string root)
         {
@@ -40,7 +48,14 @@ namespace Yozolab.YoluPainter.Core.Persistence
         }
 
         public static GenerationSnapshot Commit(string root, IDictionary<string, byte[]> files, string expectedToken = null, Action<string> faultInjection = null,
-            int? generationsToKeep = null, bool shareContents = false)
+            int? generationsToKeep = null, bool shareContents = false, GenerationTimings timings = null)
+        {
+            var previousTiming = timing; timing = timings;
+            try { return CommitCore(root, files, expectedToken, faultInjection, generationsToKeep, shareContents); }
+            finally { timing = previousTiming; }
+        }
+        static GenerationSnapshot CommitCore(string root, IDictionary<string, byte[]> files, string expectedToken, Action<string> faultInjection,
+            int? generationsToKeep, bool shareContents)
         {
             if (generationsToKeep.HasValue && generationsToKeep.Value < 2) throw new ArgumentOutOfRangeException(nameof(generationsToKeep), "Keep at least current and previous.");
             if (files == null || !HasNative(files.Keys)) throw new ArgumentException("A complete native document is required.");
@@ -109,8 +124,12 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     saved.WrittenContentBytes = written; saved.ReusedContentFiles = reused;
                     // 保存の確定後だけ整理する。整理の失敗は新しい current を取り消さず、次の保存で再試行する。
                     if (generationsToKeep.HasValue)
+                    {
+                        long started = Stopwatch.GetTimestamp(); var savedTiming = timing; timing = null;
                         try { Prune(root, generationsToKeep.Value, faultInjection); }
                         catch (Exception) { }
+                        finally { timing = savedTiming; if (timing != null) timing.CleanupMilliseconds += GenerationTimings.Milliseconds(started); }
+                    }
                     return saved;
                 }
                 catch { /* Keep staged/orphan generation for diagnosis. Never mutate previous source. */ throw; }
@@ -243,18 +262,36 @@ namespace Yozolab.YoluPainter.Core.Persistence
         }
         static byte[] ReadBounded(string path, long max)
         {
-            using (var s = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            long started = Stopwatch.GetTimestamp();
+            try
             {
-                if (s.Length > max || s.Length > int.MaxValue) throw new InvalidDataException("File exceeds allowed size.");
-                byte[] result = new byte[(int)s.Length]; int offset = 0;
-                while (offset < result.Length) { int n = s.Read(result, offset, result.Length - offset); if (n == 0) throw new EndOfStreamException(); offset += n; }
-                if (s.ReadByte() != -1) throw new IOException("File changed while reading."); return result;
+                using (var s = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    if (s.Length > max || s.Length > int.MaxValue) throw new InvalidDataException("File exceeds allowed size.");
+                    byte[] result = new byte[(int)s.Length]; int offset = 0;
+                    while (offset < result.Length) { int n = s.Read(result, offset, result.Length - offset); if (n == 0) throw new EndOfStreamException(); offset += n; }
+                    if (s.ReadByte() != -1) throw new IOException("File changed while reading."); return result;
+                }
             }
+            finally { if (timing != null) timing.ReadMilliseconds += GenerationTimings.Milliseconds(started); }
         }
         static void WriteDurable(string path, byte[] bytes)
-        { using (var s = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { s.Write(bytes, 0, bytes.Length); s.Flush(true); } }
+        {
+            long started = Stopwatch.GetTimestamp();
+            using (var s = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                s.Write(bytes, 0, bytes.Length);
+                if (timing != null) timing.WriteMilliseconds += GenerationTimings.Milliseconds(started);
+                started = Stopwatch.GetTimestamp(); s.Flush(true);
+                if (timing != null) timing.FlushMilliseconds += GenerationTimings.Milliseconds(started);
+            }
+        }
         public static string Hash(byte[] data)
-        { using (var hash = SHA256.Create()) return BitConverter.ToString(hash.ComputeHash(data)).Replace("-", "").ToLowerInvariant(); }
+        {
+            long started = Stopwatch.GetTimestamp();
+            try { using (var hash = SHA256.Create()) return BitConverter.ToString(hash.ComputeHash(data)).Replace("-", "").ToLowerInvariant(); }
+            finally { if (timing != null) timing.HashMilliseconds += GenerationTimings.Milliseconds(started); }
+        }
         const string NativeName = "document.utpaint";
         static bool HasNative(IEnumerable<string> names) => names.Any(n => n == NativeName || YlpFormat.TrySplitSetEntry(n, out _, out var leaf) && leaf == NativeName);
         static void ValidateName(string value)

@@ -104,7 +104,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(other.MissingFillImageNote(), Is.Null);
             // 復旧の checkpoint から別の窓が戻す
             var flags = BindingFlags.NonPublic | BindingFlags.Instance;
-            window.GetType().GetMethod("OnLostFocus", flags).Invoke(window, null);
+            window.GetType().GetMethod("OnLostFocus", flags).Invoke(window, null); window.FlushRecovery();
             var restored = NewWindow();
             restored.GetType().GetMethod("OnDisable", flags).Invoke(restored, null);
             string own = restored.RecoveryRoot; if (Directory.Exists(own)) Directory.Delete(own, true);

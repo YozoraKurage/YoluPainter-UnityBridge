@@ -355,9 +355,9 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(other.ImageResources.Count, Is.Zero);
 
             // 復旧の checkpoint（フォーカスを失ったとき）から別の窓が戻す（ドメインのリロードと同じ道）
-            window.GetType().GetMethod("OnLostFocus", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(window, null);
+            window.GetType().GetMethod("OnLostFocus", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(window, null); window.FlushRecovery();
             window.ImportBuiltInImage("value-noise");
-            window.GetType().GetMethod("OnLostFocus", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(window, null);
+            window.GetType().GetMethod("OnLostFocus", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(window, null); window.FlushRecovery();
             var restored = NewWindow(); var flags = BindingFlags.NonPublic | BindingFlags.Instance;
             restored.GetType().GetMethod("OnDisable", flags).Invoke(restored, null);
             string own = restored.RecoveryRoot; if (Directory.Exists(own)) Directory.Delete(own, true);

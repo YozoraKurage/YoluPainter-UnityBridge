@@ -1,6 +1,8 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using Yozolab.YoluPainter.Core;
@@ -11,9 +13,92 @@ namespace Yozolab.YoluPainter.Tests
 {
     public sealed partial class WindowTests
     {
+        [Test] public void FocusRecoveryReturnsWhileWritingAndKeepsLaterPaintingDirty()
+        {
+            PaintDot(window, 200, 200); byte[] expected = DocumentBinary.Write(window.Document);
+            using (var started = new ManualResetEventSlim()) using (var release = new ManualResetEventSlim())
+            {
+                window.RecoveryFaultInjection = stage => { if (stage == "snapshot") { started.Set(); if (!release.Wait(5000)) throw new TimeoutException(); } };
+                try
+                {
+                    Invoke(window, "OnLostFocus"); Assert.That(started.Wait(5000), Is.True);
+                    PaintDot(window, 400, 400); release.Set();
+                    Assert.That(window.FlushRecovery(), Is.False, "the completed snapshot must not mark later edits recovered");
+                    Assert.That(GenerationStore.Load(window.RecoveryRoot).Files[YlpFormat.SetEntry(window.Document.Id, YlpArchive.NativeName)], Is.EqualTo(expected));
+                    Invoke(window, "OnLostFocus"); Assert.That(window.FlushRecovery(), Is.True);
+                    Assert.That(GenerationStore.Load(window.RecoveryRoot).Files[YlpFormat.SetEntry(window.Document.Id, YlpArchive.NativeName)], Is.EqualTo(DocumentBinary.Write(window.Document)));
+                }
+                finally { release.Set(); window.RecoveryFaultInjection = null; window.FlushRecovery(); }
+            }
+        }
+        [TestCase("BeforeReload")] [TestCase("PlayModeChanged")] [TestCase("Close")] [TestCase("Replace")]
+        public void LifecycleWaitsForRunningRecoveryAndWritesTheLatestSnapshot(string lifecycle)
+        {
+            PaintDot(window, 200, 200); string root = window.RecoveryRoot; var id = window.Document.Id;
+            using (var started = new ManualResetEventSlim()) using (var release = new ManualResetEventSlim())
+            {
+                int writes = 0;
+                window.RecoveryFaultInjection = stage => { if (stage == "snapshot" && Interlocked.Increment(ref writes) == 1) { started.Set(); if (!release.Wait(5000)) throw new TimeoutException(); } };
+                try
+                {
+                    Invoke(window, "OnLostFocus"); Assert.That(started.Wait(5000), Is.True);
+                    PaintDot(window, 400, 400); byte[] expected = DocumentBinary.Write(window.Document);
+                    var releasing = Task.Run(() => { Thread.Sleep(100); release.Set(); });
+                    if (lifecycle == "Close") { window.Close(); window = null; }
+                    else if (lifecycle == "Replace") { UseFakeDialogs(window); window.CreateProject(new NewProjectSettings { Resolution = 512 }); }
+                    else if (lifecycle == "PlayModeChanged") Invoke(window, lifecycle, UnityEditor.PlayModeStateChange.ExitingEditMode);
+                    else Invoke(window, lifecycle);
+                    releasing.GetAwaiter().GetResult();
+                    Assert.That(writes, Is.EqualTo(2));
+                    Assert.That(GenerationStore.Load(root).Files[YlpFormat.SetEntry(id, YlpArchive.NativeName)], Is.EqualTo(expected));
+                    Assert.That(Directory.GetDirectories(root, ".staging-*").Length, Is.Zero);
+                }
+                finally { release.Set(); if (window != null) { window.RecoveryFaultInjection = null; window.FlushRecovery(); } }
+            }
+        }
+        [Test] public void ABackgroundRecoveryFailureIsVisibleAndRetriesOnNextFocusLoss()
+        {
+            PaintDot(window, 200, 200); int failures = 0;
+            window.RecoveryFaultInjection = stage => { if (stage == "before-pointer" && Interlocked.Increment(ref failures) == 1) throw new IOException("Injected write failure"); };
+            try
+            {
+                Invoke(window, "OnLostFocus"); Assert.That(window.FlushRecovery(), Is.False);
+                Assert.That(window.StatusMessage, Does.Contain("Recovery checkpoint failed"));
+                Invoke(window, "OnLostFocus"); Assert.That(window.FlushRecovery(), Is.True);
+                Assert.That(window.StatusMessage, Does.Contain("working again"));
+                Assert.That(GenerationStore.Load(window.RecoveryRoot).Files[YlpFormat.SetEntry(window.Document.Id, YlpArchive.NativeName)], Is.EqualTo(DocumentBinary.Write(window.Document)));
+            }
+            finally { window.RecoveryFaultInjection = null; window.FlushRecovery(); }
+        }
+        [TestCase("BeforeReload")] [TestCase("PlayModeChanged")] [TestCase("Close")] [TestCase("Replace")]
+        public void LifecycleRetriesAFailingRunningWriteBeforeLeavingTheDocument(string lifecycle)
+        {
+            PaintDot(window, 200, 200); string root = window.RecoveryRoot; var id = window.Document.Id;
+            byte[] expected = DocumentBinary.Write(window.Document); int attempts = 0;
+            using (var started = new ManualResetEventSlim()) using (var release = new ManualResetEventSlim())
+            {
+                window.RecoveryFaultInjection = stage =>
+                {
+                    if (stage == "snapshot" && Interlocked.Increment(ref attempts) == 1) { started.Set(); if (!release.Wait(5000)) throw new TimeoutException(); }
+                    if (stage == "before-pointer" && attempts == 1) throw new IOException("Injected write failure");
+                };
+                try
+                {
+                    Invoke(window, "OnLostFocus"); Assert.That(started.Wait(5000), Is.True);
+                    var releasing = Task.Run(() => { Thread.Sleep(100); release.Set(); });
+                    if (lifecycle == "Close") { window.Close(); window = null; }
+                    else if (lifecycle == "Replace") { UseFakeDialogs(window); window.CreateProject(new NewProjectSettings { Resolution = 512 }); }
+                    else if (lifecycle == "PlayModeChanged") Invoke(window, lifecycle, UnityEditor.PlayModeStateChange.ExitingEditMode);
+                    else Invoke(window, lifecycle);
+                    releasing.GetAwaiter().GetResult(); Assert.That(attempts, Is.EqualTo(2));
+                    Assert.That(GenerationStore.Load(root).Files[YlpFormat.SetEntry(id, YlpArchive.NativeName)], Is.EqualTo(expected));
+                }
+                finally { release.Set(); if (window != null) { window.RecoveryFaultInjection = null; window.FlushRecovery(); } }
+            }
+        }
         [Test] public void APristineWindowDeletesItsRecoveryOnClose()
         {
-            Invoke(window, "OnLostFocus"); string root = window.RecoveryRoot;
+            Invoke(window, "OnLostFocus"); window.FlushRecovery(); string root = window.RecoveryRoot;
             Assert.That(Directory.Exists(root), Is.True);
             window.Close(); window = null;
             Assert.That(Directory.Exists(root), Is.False);
@@ -21,7 +106,7 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void ASavedWindowDeletesItsRecoveryAndKeepsTheYlpOnClose()
         {
             var fake = UseFakeDialogs(window); fake.File = NewYlpPath(); PaintDot(window, 200, 200);
-            window.SaveProject(true); Invoke(window, "OnLostFocus"); string root = window.RecoveryRoot;
+            window.SaveProject(true); Invoke(window, "OnLostFocus"); window.FlushRecovery(); string root = window.RecoveryRoot;
             Assert.That(Directory.Exists(root), Is.True); Assert.That(window.IsSaved, Is.True);
             window.Close(); window = null;
             Assert.That(Directory.Exists(root), Is.False); Assert.That(File.Exists(fake.File), Is.True);
@@ -29,7 +114,7 @@ namespace Yozolab.YoluPainter.Tests
         [TestCase(false)] [TestCase(true)] public void ASavedWindowKeepsRecoveryIfItsYlpWasRemovedOrChanged(bool changed)
         {
             var fake = UseFakeDialogs(window); fake.File = NewYlpPath(); PaintDot(window, 200, 200); window.SaveProject(true);
-            Invoke(window, "SaveRecovery"); string root = window.RecoveryRoot;
+            Invoke(window, "SaveRecoveryAndWait"); string root = window.RecoveryRoot;
             if (changed) File.AppendAllText(fake.File,"changed"); else File.Delete(fake.File);
             window.Close(); window = null;
             Assert.That(Directory.Exists(root), Is.True, "a missing or externally changed .ylp cannot replace the local checkpoint");
@@ -57,7 +142,7 @@ namespace Yozolab.YoluPainter.Tests
         }
         [Test] public void AnOpenCheckpointCannotBeDiscardedOrTakenByAnotherWindow()
         {
-            PaintDot(window, 200, 200); Invoke(window, "SaveRecovery"); string root = window.RecoveryRoot;
+            PaintDot(window, 200, 200); Invoke(window, "SaveRecoveryAndWait"); string root = window.RecoveryRoot;
             var other = Open();
             try
             {
@@ -130,7 +215,11 @@ namespace Yozolab.YoluPainter.Tests
             string root = RecoveryCatalog.NewRoot(); Directory.CreateDirectory(root); File.WriteAllBytes(Path.Combine(root, "interrupted.bin"), new byte[2 << 20]);
             try
             {
-                Invoke(window, "CheckRecoveryStorage"); Assert.That(window.StatusMessage, Does.Contain("above the 1 MiB"));
+                // 通知も裏で容量を数える。前から走っていた確認を戻してから、この入力を測る。
+                var field = window.GetType().GetField("recoveryStorageTask", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                ((Task<long>)field.GetValue(window))?.GetAwaiter().GetResult(); Invoke(window, "PollRecovery");
+                Invoke(window, "CheckRecoveryStorage"); ((Task<long>)field.GetValue(window)).GetAwaiter().GetResult(); Invoke(window, "PollRecovery");
+                Assert.That(window.StatusMessage, Does.Contain("above the 1 MiB"));
                 Assert.That(File.Exists(Path.Combine(root, "interrupted.bin")), Is.True);
                 Assert.That(RecoveryCatalog.List().Single(e => e.Root == root).Problem, Is.Not.Null, "interrupted-only work is visible and can be explicitly discarded");
             }
@@ -157,11 +246,11 @@ namespace Yozolab.YoluPainter.Tests
         }
         [Test] public void RecoveryUndoAndCancelReuseTheOriginalContent()
         {
-            Invoke(window, "SaveRecovery"); string root = window.RecoveryRoot; byte[] before = DocumentBinary.Write(window.Document);
-            PaintDot(window, 200, 200); Invoke(window, "SaveRecovery");
-            window.Document.Undo(); Invoke(window, "SaveRecovery");
+            Invoke(window, "SaveRecoveryAndWait"); string root = window.RecoveryRoot; byte[] before = DocumentBinary.Write(window.Document);
+            PaintDot(window, 200, 200); Invoke(window, "SaveRecoveryAndWait");
+            window.Document.Undo(); Invoke(window, "SaveRecoveryAndWait");
             Assert.That(window.LastRecoveryWrittenBytes, Is.Zero); Assert.That(DocumentBinary.Write(window.Document), Is.EqualTo(before));
-            BeginLine(300, 300); Key(window, KeyCode.Escape); Invoke(window, "SaveRecovery");
+            BeginLine(300, 300); Key(window, KeyCode.Escape); Invoke(window, "SaveRecoveryAndWait");
             Assert.That(GenerationStore.Load(root).Files[YlpFormat.SetEntry(window.Document.Id, "document.utpaint")], Is.EqualTo(before));
         }
     }

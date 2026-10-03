@@ -137,9 +137,9 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(other.PlaceSmartAsset(Key(other.ImageResources.Smart[0])), Is.Not.Null, other.StatusMessage);
             Assert.That(other.Document.Layers.Count, Is.EqualTo(before + 3));
             // 復旧の checkpoint（フォーカスを失ったとき）から別の窓が戻す
-            window.GetType().GetMethod("OnLostFocus", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(window, null);
+            window.GetType().GetMethod("OnLostFocus", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(window, null); window.FlushRecovery();
             window.ImportSmartAsset("b:edges");
-            window.GetType().GetMethod("OnLostFocus", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(window, null);
+            window.GetType().GetMethod("OnLostFocus", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(window, null); window.FlushRecovery();
             var restored = NewWindow(); var flags = BindingFlags.NonPublic | BindingFlags.Instance;
             restored.GetType().GetMethod("OnDisable", flags).Invoke(restored, null);
             string own = restored.RecoveryRoot; if (Directory.Exists(own)) Directory.Delete(own, true);

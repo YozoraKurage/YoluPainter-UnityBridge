@@ -21,35 +21,13 @@ namespace Yozolab.YoluPainter.Editor
         internal int OpenedFormat=>openedFormat;
         /// <summary>新しく作った・取り込んだ文書: 今の形式で、作ったのはこのアプリ。</summary>
         void NewProjectRecord(){openedFormat=YlpFormat.Current;projectCreatedBy=YlpContent.Writer;}
-        bool ConfirmDiscard() => ProjectUnchanged() || Dialogs.Confirm("Keep current work?","Current work has unsaved changes. A native recovery checkpoint will be kept before opening another document.","Continue","Cancel") && SaveRecovery();
+        bool ConfirmDiscard() => ProjectUnchanged() || Dialogs.Confirm("Keep current work?","Current work has unsaved changes. A native recovery checkpoint will be kept before opening another document.","Continue","Cancel") && SaveRecoveryAndWait();
         /// <summary>復旧 checkpoint が全部のセットとセットの並びの今の中身と同じか。</summary>
         bool RecoveryIsCurrent()
         {
             if(currentSet==null)return true;
             SyncCurrentSet();
             return setsRevision==recoveredSetsRevision&&textureSets.All(s=>s.Document.Revision==s.RecoveredRevision)&&recoveredProjectState==RecoveryState();
-        }
-        bool SaveRecovery()
-        {
-            if(document==null||currentSet==null||stroke!=null||RecoveryIsCurrent())return true;
-            try
-            {
-                var files=new Dictionary<string,byte[]>(StringComparer.Ordinal);
-                files.Add(RecoveryCatalog.InfoName,RecoveryInfoBytes());
-                foreach(var set in textureSets)
-                {
-                    files.Add(YlpFormat.SetEntry(set.Id,YlpArchive.NativeName),DocumentBinary.Write(set.Document));
-                    if(set.Document.Selection!=null)files.Add(YlpFormat.SetEntry(set.Id,SelectionBinary.EntryName),SelectionBinary.Write(set.Document.Selection));
-                }
-                files.Add(YlpFormat.ProjectName,YlpFormat.WriteProject(ProjectInfo()));
-                ResourceIndex.AddTo(files,resources); // プロジェクトのリソース（形式 4。TexturePaintWindow.Resources.cs）
-                YlpFormat.Stamp(files,YlpContent.Writer,projectCreatedBy);
-                var snapshot=GenerationStore.Commit(recoveryRoot,files,recoveryToken,generationsToKeep:PainterSettings.RecoveryGenerationsToKeep,shareContents:true); recoveryToken=snapshot.Token;
-                LastRecoveryWrittenBytes=snapshot.WrittenContentBytes;LastRecoveryReusedFiles=snapshot.ReusedContentFiles;recoveredProjectState=RecoveryState();
-                foreach(var set in textureSets)set.RecoveredRevision=set.Document.Revision;
-                recoveredSetsRevision=setsRevision;lastRecovery=EditorApplication.timeSinceStartup;CheckRecoveryStorage();return true;
-            }
-            catch(Exception ex){message="Recovery checkpoint failed: "+ex.Message;return false;}
         }
         /// <summary>保存した選択範囲をセットの文書に戻す（履歴も版も増やさない）。読めなければ選択なしで開き、そのことを知らせる（文書は開ける）。</summary>
         void RestoreSavedSelection(TextureSet set,IReadOnlyDictionary<string,byte[]> files,List<string> notes)

@@ -323,7 +323,7 @@ namespace Yozolab.YoluPainter.Tests
             var sets = NewProject(TextureSetModels.Prefab(folder, "Saved", "Body", "Hair"));
             Flood(sets[0].Document, PaintChannel.Color, new Rgba32(9, 8, 7)); Flood(sets[1].Document, PaintChannel.Color, new Rgba32(1, 2, 3));
             window.SwitchTextureSet(sets[1].Id);
-            window.GetType().GetMethod("OnLostFocus", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(window, null);
+            window.GetType().GetMethod("OnLostFocus", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(window, null); window.FlushRecovery();
             var checkpoint = YlpFormat.Open(GenerationStore.Load(window.RecoveryRoot).Files);
             Assert.That(checkpoint.Project.Sets.Select(s => s.Id), Is.EqualTo(sets.Select(s => s.Id)));
             Assert.That(checkpoint.Project.CurrentSet, Is.EqualTo(sets[1].Id));

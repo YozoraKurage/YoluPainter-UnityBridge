@@ -26,7 +26,8 @@ namespace Yozolab.YoluPainter.Core.Shelf
         {
             if (id == Guid.Empty) throw new ArgumentException("A resource needs an ID.", nameof(id));
             ImageResource.CheckName(name);
-            bytes = fileBytes ?? throw new ArgumentNullException(nameof(fileBytes));
+            if (fileBytes == null) throw new ArgumentNullException(nameof(fileBytes));
+            bytes = (byte[])fileBytes.Clone(); // 保存用の写しで共有するため、呼び出し元の配列から切り離す。
             Material = material ?? throw new ArgumentNullException(nameof(material));
             Id = id; Name = name; Origin = origin ?? ResourceOrigin.None;
             Hash = Persistence.GenerationStore.Hash(bytes);

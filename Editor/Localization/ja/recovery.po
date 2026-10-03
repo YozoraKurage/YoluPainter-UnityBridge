@@ -63,3 +63,9 @@ msgstr "閉じたウィンドウの checkpoint はありません。"
 
 msgid "Recover checkpoint"
 msgstr "checkpoint を復旧"
+
+msgid "Recovery checkpoint failed: {0}"
+msgstr "復旧 checkpoint の保存に失敗しました: {0}"
+
+msgid "Recovery checkpoint saved. Automatic recovery is working again."
+msgstr "復旧 checkpoint を保存しました。自動復旧の保存が再びできるようになりました。"

@@ -57,6 +57,27 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// </summary>
     public static class ResourceIndex
     {
+        /// <summary>名前・出どころを固定し、不変の画素とスマートファイルを共有する保存用の写し。</summary>
+        public sealed class Snapshot
+        {
+            internal YlpResourceEntry[] Entries;
+            internal KeyValuePair<string, ImageContent>[] Images;
+            internal KeyValuePair<string, byte[]>[] Smart;
+        }
+        public static Snapshot Capture(ProjectResources resources) => new Snapshot
+        {
+            Entries = resources.Images.Select(r => new YlpResourceEntry(r.Id, r.Kind, r.Name, r.ContentHash, r.Width, r.Height, r.ColorSpace, r.Origin))
+                .Concat(resources.Smart.Select(r => new YlpResourceEntry(r.Id, KindOf(r.Kind), r.Name, r.Hash, r.Length, r.Origin))).ToArray(),
+            Images = resources.Images.Select(r => new KeyValuePair<string, ImageContent>(ContentEntry(r.ContentHash), r.Content)).ToArray(),
+            Smart = resources.Smart.Select(r => new KeyValuePair<string, byte[]>(SmartEntry(r.Hash), r.Bytes)).ToArray()
+        };
+        public static void AddTo(IDictionary<string, byte[]> files, Snapshot snapshot)
+        {
+            if (snapshot.Entries.Length == 0) return;
+            files[EntryName] = Write(snapshot.Entries);
+            foreach (var image in snapshot.Images) files[image.Key] = image.Value.EncodePng();
+            foreach (var smart in snapshot.Smart) files[smart.Key] = smart.Value;
+        }
         public const string EntryName = "resources.json";
         public const string Folder = "resources/";
         public const int MaxBytes = 1024 * 1024;

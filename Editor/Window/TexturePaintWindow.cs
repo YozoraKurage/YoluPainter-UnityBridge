@@ -143,18 +143,19 @@ namespace Yozolab.YoluPainter.Editor
             ResetSetsBaseline(false);
         }
         void OnLostFocus() { ClearPolygonFillHover(); pickHoverPointer = new Vector2(-100, -100); FinishStroke(false); CancelShapeDrag(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); ReleaseStencilInput(); preview?.CancelNavigation(); SaveRecovery(); }
-        void BeforeReload() { FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); EndLightingDrag(true); preview?.CancelNavigation(); preview?.CancelPreparation(); SaveRecovery(); }
-        void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); SaveRecovery(); } }
+        void BeforeReload() { FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); EndLightingDrag(true); preview?.CancelNavigation(); preview?.CancelPreparation(); SaveRecoveryBeforeLifecycleChange(); }
+        void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); SaveRecoveryBeforeLifecycleChange(); } }
         void OnDisable()
         {
             DisposePenInput();
-            FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); preview?.CancelNavigation(); SaveRecovery();
+            FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); preview?.CancelNavigation(); SaveRecoveryBeforeLifecycleChange(); recoveryWriter=null; lastRecoveryRequest=null;
             EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; EditorApplication.projectChanged-=OnUnityProjectChanged; UnhookResources(); DisposeAssetThumbnails(); L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
             DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeDecalOverlay(); DisposeStencilOverlay(); DisposeThumbnails(); DisposeColorPanel(); DisposeTextureSetTextures(); DisposeMaterialChannelTextures(); DisposeModelShowTextures(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
             if(selectionOverlay!=null){DestroyImmediate(selectionOverlay);selectionOverlay=null;overlayFor=null;}
         }
         void Tick()
         {
+            PollRecovery();
             if(document==null) return;
             if(EditorApplication.timeSinceStartup-lastRecoveryStorageCheck>60) CheckRecoveryStorage();
             TickModelPreparation();

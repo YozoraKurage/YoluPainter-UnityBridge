@@ -304,7 +304,7 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void FocusLossWritesARecoveryCheckpoint()
         {
             PaintDot(window, 777, 333);
-            Invoke(window, "OnLostFocus");
+            Invoke(window, "OnLostFocus"); window.FlushRecovery();
             var recovery = GenerationStore.Load(window.RecoveryRoot);
             Assert.That(SetFiles(recovery.Files)["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
         }
