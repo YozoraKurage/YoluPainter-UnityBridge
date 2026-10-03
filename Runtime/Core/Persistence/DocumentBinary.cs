@@ -37,14 +37,22 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// followed by the tolerance (int, 0–255), the number of colours (int, 0–<see cref="GeneratorSettings.MaxIdColors"/>) and the colours
     /// (int 0xRRGGBB each, in the generator's order, no repeats); generators of other types are written as before, so a document without
     /// one is laid out exactly as version 14 and only the version number differs. Type 6 in an older archive, a colour outside 0–0xFFFFFF,
-    /// a repeated colour and a count or tolerance out of range are refused. Older archives still load.</summary>
+    /// a repeated colour and a count or tolerance out of range are refused. Version 16 adds fill layers' images and projection: bit 3 of
+    /// the attribute byte says that after the layer's fill values come an int count (1..6, or 0 with a projection that is not the
+    /// default), per image an int channel (one with a fill value, no duplicates) and the 16-byte resource ID (not empty), then the
+    /// projection (int algorithm version, int mode, int wrap, doubles tiles u, v, offset u, v, rotation, blend width, placement centre
+    /// x, y, z, rotation x, y, z, size x, y, z); the bit on another kind of layer or in an older archive (12–15), an unknown mode, wrap or
+    /// algorithm version and values out of range are refused. A document without fill images is laid out as version 15, only the version
+    /// number differs. Older archives still load.</summary>
     public static class DocumentBinary
     {
         /// <summary>The version that added per-channel blend modes and opacities (attribute bit 2).</summary>
         internal const int ChannelBlendsVersion = 14;
         /// <summary>The version that added the ID colour generator (generator type 6 and its colours after the generator block).</summary>
         internal const int IdColorVersion = 15;
-        const int Version = IdColorVersion;
+        /// <summary>The version that added fill layers' images and projection (attribute bit 3 and the block after the fill values).</summary>
+        internal const int FillImageVersion = 16;
+        const int Version = FillImageVersion;
         /// <summary>The version <see cref="Write"/> produces.</summary>
         public const int CurrentVersion = Version;
         /// <summary>The version that added the shape gradient (generator type 5 and its volume after the generator block).</summary>
@@ -52,8 +60,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
         static bool IsReadable(int version) => version >= 1 && version <= Version;
         const long MaxArchiveBytes = 512L * 1024 * 1024;
         /// <summary>Version 12 layer attribute byte: bit 0 clipping, bit 1 an int of layer locks follows; version 14 bit 2 the per-channel
-        /// blend settings follow.</summary>
-        const int AttributeClipping = 1, AttributeLocks = 2, AttributeChannelBlends = 4;
+        /// blend settings follow; version 16 bit 3 the fill images and projection follow the fill values.</summary>
+        const int AttributeClipping = 1, AttributeLocks = 2, AttributeChannelBlends = 4, AttributeFillImages = 8;
         /// <summary>Parts of a per-channel blend entry.</summary>
         const int BlendPartMode = 1, BlendPartOpacity = 2;
         static readonly byte[] Magic = Encoding.ASCII.GetBytes("DOTPAINT");
@@ -76,8 +84,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 {
                     writer.Write(layer.Id.ToByteArray()); WriteString(writer, layer.Name);
                     writer.Write(layer.Visible); writer.Write(layer.Opacity); writer.Write((int)layer.BlendMode);
-                    // 版 12: 属性の印（ビット 0 クリッピング、ビット 1 ロックが続く）。ロックの無い層は版 11 と同じ 0 か 1
-                    writer.Write((byte)((layer.Clipping ? AttributeClipping : 0) | (layer.Locks != LayerLocks.None ? AttributeLocks : 0) | (layer.HasChannelBlends ? AttributeChannelBlends : 0)));
+                    // 版 12: 属性の印（ビット 0 クリッピング、ビット 1 ロックが続く）。ロックの無い層は版 11 と同じ 0 か 1。版 14: ビット 2 チャンネルごとの合成。版 16: ビット 3 塗りつぶしの画像と投影が続く
+                    bool fillImages = layer.Kind == LayerKind.Fill && (layer.FillImages.Count > 0 || !layer.Projection.Equals(FillProjection.Default));
+                    writer.Write((byte)((layer.Clipping ? AttributeClipping : 0) | (layer.Locks != LayerLocks.None ? AttributeLocks : 0) | (layer.HasChannelBlends ? AttributeChannelBlends : 0) | (fillImages ? AttributeFillImages : 0)));
                     if (layer.Locks != LayerLocks.None) writer.Write((int)layer.Locks);
                     if (layer.HasChannelBlends) WriteChannelBlends(writer, layer); // 版 14
                     writer.Write((int)layer.Kind);
@@ -90,6 +99,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         writer.Write((int)channel); writer.Write(layer.IsChannelEnabled(channel));
                         writer.Write(value.R); writer.Write(value.G); writer.Write(value.B); writer.Write(value.A);
                     }
+                    if (fillImages) WriteFillImages(writer, layer);
                     if (layer.Kind == LayerKind.Adjustment)
                     {
                         var a = layer.Adjustment;
@@ -178,13 +188,13 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         bool visible = reader.ReadBoolean(); double opacity = reader.ReadDouble(); int blend = reader.ReadInt32();
                         if (double.IsNaN(opacity) || double.IsInfinity(opacity) || opacity < 0 || opacity > 1 || !Enum.IsDefined(typeof(LayerBlendMode), blend))
                             throw new InvalidDataException("Invalid layer attributes.");
-                        bool clipping = false; var locks = LayerLocks.None; System.Collections.Generic.List<(PaintChannel, ChannelBlend)> channelBlends = null;
+                        bool clipping = false, fillImages = false; var locks = LayerLocks.None; System.Collections.Generic.List<(PaintChannel, ChannelBlend)> channelBlends = null;
                         if (version >= 12)
                         {
                             int attributes = reader.ReadByte();
-                            int known = AttributeClipping | AttributeLocks | (version >= ChannelBlendsVersion ? AttributeChannelBlends : 0);
+                            int known = AttributeClipping | AttributeLocks | (version >= ChannelBlendsVersion ? AttributeChannelBlends : 0) | (version >= FillImageVersion ? AttributeFillImages : 0);
                             if ((attributes & ~known) != 0) throw new InvalidDataException("Unknown layer attribute flags " + attributes + "; a newer reader is required (source retained unchanged).");
-                            clipping = (attributes & AttributeClipping) != 0;
+                            clipping = (attributes & AttributeClipping) != 0; fillImages = (attributes & AttributeFillImages) != 0;
                             if ((attributes & AttributeLocks) != 0)
                             {
                                 int value = reader.ReadInt32();
@@ -198,7 +208,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         if (!Enum.IsDefined(typeof(LayerKind), kind) || kind == (int)LayerKind.Group && version < 6) throw new InvalidDataException("Unknown layer kind; a newer reader is required.");
                         if (blend == (int)LayerBlendMode.PassThrough && kind != (int)LayerKind.Group) throw new InvalidDataException("Pass through applies to groups only.");
                         var parentId = version >= 6 ? new Guid(ReadExact(reader, 16)) : Guid.Empty;
-                        PaintLayer layer;
+                        PaintLayer layer; FillProjection projection = null;
                         if (version >= 3)
                         {
                             int fillCount = ReadCount(reader, 6, "fill values");
@@ -211,6 +221,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
                                 values.Add((PaintChannel)channelValue, new Rgba32(reader.ReadByte(), reader.ReadByte(), reader.ReadByte(), reader.ReadByte()));
                                 if (!channelEnabled) disabled.Add((PaintChannel)channelValue);
                             }
+                            if (fillImages && kind != (int)LayerKind.Fill) throw new InvalidDataException("Only fill layers have images and a projection.");
+                            var images = fillImages ? ReadFillImages(reader, values, out projection) : null;
                             if (kind == (int)LayerKind.Adjustment)
                             {
                                 if (version < 4) throw new InvalidDataException("Adjustment layers require archive version 4.");
@@ -241,6 +253,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                             else if (kind == (int)LayerKind.Group) layer = doc.AddGroup(layerName, layerId);
                             else layer = kind == (int)LayerKind.Fill ? doc.AddFillLayer(layerName, values, layerId) : doc.AddLayer(layerName, layerId);
                             foreach (var channel in disabled) doc.SetChannelEnabled(layer.Id, channel, false);
+                            if (images != null) doc.SetFillImagesForLoad(layer, images, projection);
                         }
                         else layer = doc.AddLayer(layerName, layerId);
                         doc.SetParentForLoad(layer, parentId);
@@ -310,6 +323,44 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 }
                 catch (EndOfStreamException ex) { throw new InvalidDataException("Native archive is truncated.", ex); }
             }
+        }
+        /// <summary>Version 16: a fill layer's images (channel and resource ID per image, by channel) and its projection.</summary>
+        static void WriteFillImages(BinaryWriter writer, PaintLayer layer)
+        {
+            var images = layer.FillImages.OrderBy(e => e.Key).ToArray();
+            writer.Write(images.Length);
+            foreach (var image in images) { writer.Write((int)image.Key); writer.Write(image.Value.ToByteArray()); }
+            var p = layer.Projection; var v = p.Placement;
+            writer.Write(FillProjection.AlgorithmVersion); writer.Write((int)p.Mode); writer.Write((int)p.Wrap);
+            foreach (double d in new[] { p.TileU, p.TileV, p.OffsetU, p.OffsetV, p.Rotation, p.BlendWidth, v.CenterX, v.CenterY, v.CenterZ, v.RotationX, v.RotationY, v.RotationZ, v.SizeX, v.SizeY, v.SizeZ }) writer.Write(d);
+        }
+        /// <summary>The version 16 fill images block. Unknown values are refused, never replaced by defaults.</summary>
+        static System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<PaintChannel, Guid>> ReadFillImages(BinaryReader reader,
+            System.Collections.Generic.Dictionary<PaintChannel, Rgba32> values, out FillProjection projection)
+        {
+            int count = ReadCount(reader, 6, "fill images");
+            var images = new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<PaintChannel, Guid>>();
+            for (int i = 0; i < count; i++)
+            {
+                int channel = reader.ReadInt32(); var id = new Guid(ReadExact(reader, 16));
+                if (!Enum.IsDefined(typeof(PaintChannel), channel) || images.Any(e => e.Key == (PaintChannel)channel)) throw new InvalidDataException("Invalid or duplicate fill image channel.");
+                if (!values.ContainsKey((PaintChannel)channel)) throw new InvalidDataException("A fill image's channel (" + (PaintChannel)channel + ") has no fill value.");
+                if (id == Guid.Empty) throw new InvalidDataException("A fill image has no resource ID.");
+                images.Add(new System.Collections.Generic.KeyValuePair<PaintChannel, Guid>((PaintChannel)channel, id));
+            }
+            int algorithm = reader.ReadInt32(), mode = reader.ReadInt32(), wrap = reader.ReadInt32();
+            if (algorithm != FillProjection.AlgorithmVersion) throw new InvalidDataException("Fill projection algorithm version " + algorithm + " is not supported by this reader; source retained unchanged.");
+            if (!Enum.IsDefined(typeof(FillProjectionMode), mode)) throw new InvalidDataException("Unknown fill projection " + mode + "; a newer reader is required (source retained unchanged).");
+            if (!Enum.IsDefined(typeof(FillWrap), wrap)) throw new InvalidDataException("Unknown fill wrap " + wrap + "; a newer reader is required (source retained unchanged).");
+            var d = new double[15]; for (int k = 0; k < d.Length; k++) d[k] = reader.ReadDouble();
+            try
+            {
+                projection = new FillProjection((FillProjectionMode)mode, (FillWrap)wrap, d[0], d[1], d[2], d[3], d[4], d[5],
+                    new ShapeVolume(GeneratorShape.Box, d[6], d[7], d[8], d[9], d[10], d[11], d[12], d[13], d[14], 0));
+            }
+            catch (ArgumentException ex) { throw new InvalidDataException("Invalid fill projection: " + ex.Message, ex); }
+            if (count == 0 && projection.Equals(FillProjection.Default)) throw new InvalidDataException("An empty fill images block (no images, default projection) is never written.");
+            return images;
         }
         static void WriteChannelBlends(BinaryWriter writer, PaintLayer layer)
         {

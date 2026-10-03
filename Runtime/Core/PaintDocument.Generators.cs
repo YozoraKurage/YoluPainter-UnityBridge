@@ -50,9 +50,10 @@ namespace Yozolab.YoluPainter.Core
         /// generator layers were then reported as changed).</summary>
         public bool RefreshGeneratorInputs() { return PollGeneratorInputs(); }
 
-        /// <summary>The revision of the resolved maps (changes whenever what generators read changes). Reading it brings the inputs
-        /// up to date first. Display caches keyed by <see cref="Revision"/> can add it to their key.</summary>
-        public long GeneratorInputsRevision { get { PollGeneratorInputs(); return generatorRevision; } }
+        /// <summary>The revision of what evaluations read from outside the document: the resolved maps (generators, fill projections on
+        /// the model) and the fill layers' resolved images. Changes whenever any of them changes; reading it brings them up to date first.
+        /// Display caches keyed by <see cref="Revision"/> can add it to their key.</summary>
+        public long GeneratorInputsRevision { get { PollGeneratorInputs(); return inputsRevision; } }
 
         /// <summary>True when a layer has a generator in its content or mask stack (on or off).</summary>
         public bool HasGenerators
@@ -71,10 +72,11 @@ namespace Yozolab.YoluPainter.Core
         /// since the provider was set). True when the resolved maps changed.</summary>
         internal bool PollGeneratorInputs()
         {
-            if (!HasGenerators) return false;
+            bool images = PollImageResources(); // 塗りつぶしの画像（プロジェクトのリソース）も同じ所で見る
+            if (!HasGenerators && !HasMapProjections) return images;
             long seen = InputsRevision();
-            if (generatorResolved && seen == generatorInputsSeen) return false;
-            return ResolveGeneratorInputs(seen);
+            if (generatorResolved && seen == generatorInputsSeen) return images;
+            return ResolveGeneratorInputs(seen) || images;
         }
         long InputsRevision()
         {
@@ -108,18 +110,18 @@ namespace Yozolab.YoluPainter.Core
             generatorMaps = maps; generatorReasons = reasons; generatorFrame = frame; generatorFrameReason = frameReason;
             generatorInputsSeen = seen; generatorResolved = true; generatorEverResolved = true;
             if (!changed) return false;
-            generatorRevision++;
+            generatorRevision++; inputsRevision++;
             MarkGeneratorLayersChanged();
             return true;
         }
 
-        /// <summary>Reports every layer with a generator as changed and forgets its cached filtered tiles.</summary>
+        /// <summary>Reports every layer with a generator (or a fill projected on the model) as changed and forgets its cached filtered tiles.</summary>
         void MarkGeneratorLayersChanged()
         {
             bool any = false;
             foreach (var layer in layers)
             {
-                if (!LayerHasGenerator(layer)) continue;
+                if (!LayerHasGenerator(layer) && !layer.ReadsMeshMapsForFill) continue;
                 any = true;
                 foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel))) FilterEvaluator.Forget(layer.Id, (int)c);
                 FilterEvaluator.Forget(layer.Id, FilterEngine.MaskKey);

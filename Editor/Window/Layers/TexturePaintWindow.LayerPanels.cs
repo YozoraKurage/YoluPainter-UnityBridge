@@ -34,6 +34,8 @@ namespace Yozolab.YoluPainter.Editor
             var active = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
             if (active == null) return;
             if (Section(rows, "layer", LayerKindName(active) + ": " + active.Name, LayerKindIcon(active))) { DrawLayerDetails(rows, active); rows.Space(SectionGap); }
+            // 投影の欄は、画像のある（か投影を変えた）塗りつぶしだけ（TexturePaintWindow.FillImages.cs）
+            if (active.Kind == LayerKind.Fill && (active.FillImages.Count > 0 || !active.Projection.Equals(FillProjection.Default)) && Section(rows, "projection", L.Tr("Projection"), "texture")) { DrawFillProjection(rows, active); rows.Space(SectionGap); }
             if (Section(rows, "mask", L.Tr("Layer mask"), "vignette")) { DrawMask(rows, active); rows.Space(SectionGap); }
             if (Section(rows, "filters", FiltersTitle(active), "auto_awesome")) { DrawFilters(rows, active); rows.Space(SectionGap); }
         }
@@ -135,13 +137,15 @@ namespace Yozolab.YoluPainter.Editor
         void DrawFill(UiRows rows, PaintLayer active)
         {
             PaintGui.GroupLabel(rows.Row(16), L.Tr("Fill Value") + " · " + L.Tr(channel.ToString()));
+            bool image = active.HasFillImage(channel); // 画像があれば、値は画像を使えないときの代わり
             if (active.FillValues.TryGetValue(channel, out var value))
             {
                 var row = rows.Row();
                 var main = new Rect(row.x, row.y, row.width - 28, row.height);
                 if (IsScalarChannel(channel))
                 {
-                    double v = PaintGui.KeepSlider(Spot("fill.value", main), L.Tr("Value"), value.R / 255.0, 0, 1, "0.###");
+                    double v = PaintGui.KeepSlider(Spot("fill.value", main), image ? L.TrIn("fill", "Fallback") : L.Tr("Value"), value.R / 255.0, 0, 1, "0.###",
+                        "", image ? L.Tr("Shown where the image cannot be used (no mesh maps, a missing image)") : null);
                     if (v != value.R / 255.0)
                     {
                         byte b = (byte)Mathf.RoundToInt((float)v * 255);
@@ -151,16 +155,17 @@ namespace Yozolab.YoluPainter.Editor
                 }
                 else
                 {
-                    PaintGui.Text(new Rect(main.x, main.y, PropertyLabelWidth, main.height), L.Tr("Color"), PaintTheme.Label, GUI.enabled ? PaintTheme.Text : PaintTheme.TextDisabled);
+                    PaintGui.Text(new Rect(main.x, main.y, PropertyLabelWidth, main.height), image ? L.TrIn("fill", "Fallback") : L.Tr("Color"), PaintTheme.Label, GUI.enabled ? PaintTheme.Text : PaintTheme.TextDisabled);
                     var doc = document; var id = active.Id; var ch = channel;
                     PaintGui.ColorSwatch(new Rect(main.x + PropertyLabelWidth, main.y + 1, main.width - PropertyLabelWidth, main.height - 2), new Color32(value.R, value.G, value.B, value.A),
                         c => SetFillColorFromPicker(doc, id, ch, c), true, L.Tr("Click to choose the fill color"), GUI.enabled);
                 }
-                if (PaintGui.IconButton(Spot("fill.remove", new Rect(row.xMax - 24, row.y, 24, row.height)), "delete", L.Tr("Remove this channel's value (the fill then leaves the channel as it is)"), false, GUI.enabled, 16))
+                if (PaintGui.IconButton(Spot("fill.remove", new Rect(row.xMax - 24, row.y, 24, row.height)), "delete", image ? L.Tr("Remove this channel's value and image (the fill then leaves the channel as it is)") : L.Tr("Remove this channel's value (the fill then leaves the channel as it is)"), false, GUI.enabled, 16))
                     TryAction(() => document.SetFillValue(active.Id, channel, null));
             }
             else if (PaintGui.Button(Spot("fill.add", rows.Row()), L.Tr("Add a Value for This Channel"), false, GUI.enabled, L.Tr("The fill starts with the brush color"), "add"))
                 TryAction(() => document.SetFillValue(active.Id, channel, GetBrush().Color));
+            DrawFillImage(rows, active); // チャンネルの画像（TexturePaintWindow.FillImages.cs）
             NoteRow(rows, L.Tr("A fill covers the whole canvas. Paint its mask to choose where it shows."));
         }
 

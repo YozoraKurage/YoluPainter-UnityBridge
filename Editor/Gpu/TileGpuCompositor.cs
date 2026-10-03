@@ -990,7 +990,7 @@ namespace Yozolab.YoluPainter.Editor
                     AppendFilterStamp(sb, layer, channel, bx, by);
                     break;
                 case LayerKind.Fill:
-                    var c = layer.GetPixel(channel, 0, 0);
+                    layer.FillValues.TryGetValue(channel, out var c); // 画像のチャンネルは下の出力の印（塗りつぶしの版を含む）で変わる
                     sb.Append("|f").Append(c.R).Append(',').Append(c.G).Append(',').Append(c.B).Append(',').Append(c.A);
                     AppendFilterStamp(sb, layer, channel, bx, by);
                     break;
@@ -1013,10 +1013,10 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
         static string R(double v) => v.ToString("R", CultureInfo.InvariantCulture);
-        /// <summary>フィルターのある層: 出力の印（スタックの版と、halo だけ広げた範囲の入力の書き換え番号）。</summary>
+        /// <summary>フィルターのある層と画像を投影する塗りつぶし: 出力の印（スタックの版と、halo だけ広げた範囲の入力の書き換え番号。塗りつぶしは塗りつぶしの版）。</summary>
         void AppendFilterStamp(StringBuilder sb, PaintLayer layer, PaintChannel channel, int bx, int by)
         {
-            if (layer.HasActiveFilters(channel)) sb.Append("|F").Append(layer.OutputStamp(channel, bx * blockTiles, by * blockTiles, (bx + 1) * blockTiles, (by + 1) * blockTiles));
+            if (layer.HasEvaluatedOutput(channel)) sb.Append("|F").Append(layer.OutputStamp(channel, bx * blockTiles, by * blockTiles, (bx + 1) * blockTiles, (by + 1) * blockTiles));
         }
         long BlockRevision(SparseTileSurface surface, int bx, int by)
         { return surface.MaxTileRevision(bx * blockTiles, by * blockTiles, (bx + 1) * blockTiles, (by + 1) * blockTiles); }
@@ -1188,9 +1188,9 @@ namespace Yozolab.YoluPainter.Editor
         bool TryGetSource(PaintLayer layer, PaintChannel channel, int bx, int by, bool keep, out Source source)
         {
             source = default;
-            if (layer.HasActiveFilters(channel))
+            if (layer.HasEvaluatedOutput(channel))
             {
-                // フィルターのある層は、Core が halo 込みで評価した出力のタイルを載せる（CPU の正本と同じバイト）
+                // フィルターのある層と画像を投影する塗りつぶしは、Core が（halo 込みで）評価した出力のタイルを載せる（CPU の正本と同じバイト）
                 int tx0 = bx * blockTiles, ty0 = by * blockTiles, tx1 = tx0 + blockTiles, ty1 = ty0 + blockTiles;
                 if (!layer.OutputMayCover(channel, tx0, ty0, tx1, ty1)) return false;
                 source.Texture = Upload(FilteredId(layer, channel), layer.OutputStamp(channel, tx0, ty0, tx1, ty1), (c, b) => layer.CopyOutputTile(channel, c, b), bx, by, keep, transientLayer, ref transientLayerNext);

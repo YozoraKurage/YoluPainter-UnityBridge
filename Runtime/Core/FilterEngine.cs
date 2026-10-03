@@ -41,11 +41,14 @@ namespace Yozolab.YoluPainter.Core
             public int Area { get { return W * H; } }
         }
 
-        /// <summary>What one stack reads: a raster channel, a fill value or a mask, and the active stages in order.</summary>
+        /// <summary>What one stack reads: a raster channel, a fill value (or a fill's projected image) or a mask, and the active stages in
+        /// order (none for a fill image without filters: its pixels are still evaluated and cached here).</summary>
         internal sealed class Source
         {
             public PaintLayer Layer; public PaintChannel Channel; public bool Mask;
             public SparseTileSurface Surface; public bool IsFill; public Rgba32 Fill;
+            /// <summary>A fill channel with an image: the bound projection (its pixels replace the fill value), or null.</summary>
+            public FillImageSampler Sampler;
             public FilterEffect[] Chain; public long FilterRevision;
             /// <summary>Generator stacks: the mesh maps by kind as the document resolved them, and that resolution's revision (0
             /// without a generator).</summary>
@@ -73,11 +76,17 @@ namespace Yozolab.YoluPainter.Core
 
         internal static Source ContentSource(PaintLayer layer, PaintChannel channel)
         {
-            var chain = layer.ActiveChain(channel); if (chain.Length == 0) return null;
+            var chain = layer.ActiveChain(channel);
+            bool projected = layer.Kind == LayerKind.Fill && layer.HasFillImage(channel);
+            if (chain.Length == 0 && !projected) return null;
             var s = new Source { Layer = layer, Channel = channel, Chain = chain, FilterRevision = layer.FilterRevision };
-            AttachMaps(s, layer.Document);
-            if (layer.Kind == LayerKind.Fill) { s.IsFill = true; Rgba32 fill; layer.FillValues.TryGetValue(channel, out fill); s.Fill = fill; }
+            if (layer.Kind == LayerKind.Fill)
+            {
+                s.IsFill = true; Rgba32 fill; layer.FillValues.TryGetValue(channel, out fill); s.Fill = fill;
+                if (projected) s.Sampler = layer.Document.FillSampler(layer, channel);
+            }
             else { SparseTileSurface surface; layer.TryGetChannel(channel, out surface); s.Surface = surface; }
+            AttachMaps(s, layer.Document);
             return s;
         }
         internal static Source MaskSource(RasterMask mask)
@@ -89,7 +98,9 @@ namespace Yozolab.YoluPainter.Core
         }
         static void AttachMaps(Source s, PaintDocument document)
         {
-            foreach (var e in s.Chain) if (e.Settings.IsGenerator) { s.Maps = document.GeneratorMapSnapshot(out s.MapsRevision, out s.Frame); return; }
+            bool reads = s.Sampler != null && s.Layer.ReadsMeshMapsForFill; // 型の上に投影する塗りつぶしの画像もマップを読む
+            foreach (var e in s.Chain) if (e.Settings.IsGenerator) reads = true;
+            if (reads) s.Maps = document.GeneratorMapSnapshot(out s.MapsRevision, out s.Frame);
         }
         internal static int Halo(FilterEffect[] chain, int count) { int h = 0; for (int i = 0; i < count; i++) h += chain[i].Settings.HaloPixels; return h; }
         internal static int Expansion(FilterEffect[] chain) { int h = 0; foreach (var e in chain) if (e.Settings.ExpandsCoverage) h += e.Settings.HaloPixels; return h; }
@@ -139,7 +150,7 @@ namespace Yozolab.YoluPainter.Core
                 int m = Tiles(Halo(s.Chain, s.Chain.Length));
                 return AnyTile(s.Surface, tx0 - m, ty0 - m, tx1 + m, ty1 + m);
             }
-            if (s.IsFill) return s.Fill != Rgba32.Transparent;
+            if (s.IsFill) return s.Sampler != null ? s.Sampler.MayCover : s.Fill != Rgba32.Transparent;
             if (s.Surface == null) return false;
             int e = Tiles(Expansion(s.Chain));
             return AnyTile(s.Surface, tx0 - e, ty0 - e, tx1 + e, ty1 + e);
@@ -154,7 +165,8 @@ namespace Yozolab.YoluPainter.Core
         internal FilterStamp Stamp(Source s, int tx0, int ty0, int tx1, int ty1)
         {
             long input;
-            if (s.IsFill) input = (long)((uint)s.Fill.R | (uint)s.Fill.G << 8 | (uint)s.Fill.B << 16 | (uint)s.Fill.A << 24);
+            // 塗りつぶしの画像は層の塗りつぶしの版（負にして、値の詰め合わせと重ならないように）。一定の値はその値
+            if (s.IsFill) input = s.Sampler != null ? -1 - s.Layer.FillRevision : (long)((uint)s.Fill.R | (uint)s.Fill.G << 8 | (uint)s.Fill.B << 16 | (uint)s.Fill.A << 24);
             else if (s.Surface == null) input = 0;
             else if (IsGlobal(s.Chain, s.Chain.Length)) input = s.Surface.Revision;
             else { int m = Tiles(Halo(s.Chain, s.Chain.Length)); input = s.Surface.MaxTileRevision(tx0 - m, ty0 - m, tx1 + m, ty1 + m); }
@@ -201,9 +213,10 @@ namespace Yozolab.YoluPainter.Core
             entry.Used = ++clock; return entry;
         }
         /// <summary>Evaluates the aligned block that holds coord, caches its tiles and returns its pixels (grey for masks). While
-        /// the cache has room, the other blocks of the same stack whose tiles are stale are evaluated with it, one block per
-        /// worker thread (as many at once as the working budget allows): after a parameter change every block of the layer is
-        /// stale, and a thread-pool round trip per pass of one block costs more than the pass itself.</summary>
+        /// the cache has room, stale blocks of the same stack nearest to it are evaluated with it, up to two per worker thread
+        /// (2 × <see cref="CoreParallelism.Degree"/>; as many at once as the working budget allows): after a parameter change every block
+        /// of the layer is stale, and a thread-pool round trip per pass of one block costs more than the pass itself. Not more: one
+        /// request would otherwise evaluate the whole layer, and the display's time-sliced compositing could not stop between blocks.</summary>
         byte[] EvaluateBlock(Source s, TileCoord coord, out Rect block)
         {
             int bt = BlockTiles, side = bt * TileSize;
@@ -213,13 +226,24 @@ namespace Yozolab.YoluPainter.Core
             var wanted = new List<Rect> { block };
             if (caching)
             {
-                long room = Math.Max(1, budget / ((long)side * side * 4));
-                for (int by = 0; by * side < document.Height && wanted.Count < room; by++)
-                    for (int bx = 0; bx * side < document.Width && wanted.Count < room; bx++)
+                // 一緒に評価するのは、作業者 1 人に 2 つまで（1 回の依頼が層の全部を評価して、表示の時間の予算で区切れなくならないように。
+                // 1 つずつでは遅いブロックを待つ回が増え、層の全部を評価し直す時間が延びた）、
+                // 頼まれたブロックに近い順（表示は見えている所から順に頼むので、次に頼まれるものから）
+                long room = Math.Min(Math.Max(1, budget / ((long)side * side * 4)), Math.Max(1, CoreParallelism.Degree * 2));
+                if (room > 1)
+                {
+                    int cx = coord.X / bt, cy = coord.Y / bt; var near = new List<(int distance, int bx, int by)>();
+                    for (int by = 0; by * side < document.Height; by++)
+                        for (int bx = 0; bx * side < document.Width; bx++)
+                            if (bx != cx || by != cy) near.Add((Math.Max(Math.Abs(bx - cx), Math.Abs(by - cy)), bx, by));
+                    near.Sort((a, b) => a.distance != b.distance ? a.distance.CompareTo(b.distance) : a.by != b.by ? a.by.CompareTo(b.by) : a.bx.CompareTo(b.bx));
+                    foreach (var (_, bx, by) in near)
                     {
+                        if (wanted.Count >= room) break;
                         var r = BlockRect(bx, by);
-                        if (r.X0 != block.X0 || r.Y0 != block.Y0) if (Stale(s, r)) wanted.Add(r);
+                        if (Stale(s, r)) wanted.Add(r);
                     }
+                }
             }
             var results = EvaluateRects(s, s.Chain.Length, wanted);
             EvaluatedBlocks += wanted.Count;
@@ -392,6 +416,13 @@ namespace Yozolab.YoluPainter.Core
             int n = r.Area * 4; Array.Clear(buf, 0, n);
             if (s.IsFill)
             {
+                if (s.Sampler != null)
+                {
+                    // 投影した画像: 画素ごとに入力（マップ・画像）だけから決まるので、行の分け方によらず同じバイト
+                    var sampler = s.Sampler; int x0 = r.X0, y0 = r.Y0, w = r.W;
+                    ParallelRange(r.H, (row0, row1) => sampler.FillRows(x0, y0, w, row0, row1, buf, w));
+                    return buf;
+                }
                 if (s.Fill != Rgba32.Transparent) for (int i = 0; i < n; i += 4) { buf[i] = s.Fill.R; buf[i + 1] = s.Fill.G; buf[i + 2] = s.Fill.B; buf[i + 3] = s.Fill.A; }
                 return buf;
             }

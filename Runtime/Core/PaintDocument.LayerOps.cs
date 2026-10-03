@@ -151,7 +151,7 @@ namespace Yozolab.YoluPainter.Core
         }
 
         /// <summary>A deep copy of a layer of this document under a new ID (not inserted; ParentId is the original's): attributes, channels
-        /// (tiles shared copy-on-write), fill values, adjustment, mask with its filters, content filters and the path, each effect and path
+        /// (tiles shared copy-on-write), fill values, images and projection, adjustment, mask with its filters, content filters and the path, each effect and path
         /// with a new ID.</summary>
         PaintLayer CloneLayer(PaintLayer source, Guid id, string name)
         {
@@ -159,6 +159,7 @@ namespace Yozolab.YoluPainter.Core
             { Visible = source.Visible, Opacity = source.Opacity, BlendMode = source.BlendMode, Clipping = source.Clipping, ParentId = source.ParentId, Adjustment = source.Adjustment, Locks = source.Locks };
             copy.CopyChannelBlendsFrom(source);
             foreach (var entry in source.FillValues) copy.SetFillValueInternal(entry.Key, entry.Value);
+            if (source.Kind == LayerKind.Fill && (source.FillImages.Count > 0 || !source.Projection.Equals(FillProjection.Default))) SetFillImagesForLoad(copy, source.FillImages, source.Projection);
             foreach (var entry in source.Channels)
             {
                 var surface = copy.GetChannel(entry.Key);

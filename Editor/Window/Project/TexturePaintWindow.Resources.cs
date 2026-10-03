@@ -55,9 +55,10 @@ namespace Yozolab.YoluPainter.Editor
             if (resourcesHooked) return;
             resourcesHooked = true;
             resources.Changed += OnResourcesChanged;
+            resources.AddUsageProbe(FillImageUsage); // 塗りつぶしの画像が使っているリソースは消さない（TexturePaintWindow.FillImages.cs）
             resources.BudgetBytes = PainterSettings.ResourceBudgetBytes;
         }
-        void UnhookResources() { if (resourcesHooked) resources.Changed -= OnResourcesChanged; resourcesHooked = false; }
+        void UnhookResources() { if (resourcesHooked) { resources.Changed -= OnResourcesChanged; resources.RemoveUsageProbe(FillImageUsage); } resourcesHooked = false; }
 
         void OnResourcesChanged(ResourceChange change)
         {
@@ -67,6 +68,8 @@ namespace Yozolab.YoluPainter.Editor
                 case ResourceChangeKind.Removed: resourceChecks.Remove(change.Id); keptResourceCopies.Remove(change.Id); setsRevision++; break;
                 default: setsRevision++; break;
             }
+            // 塗りつぶしの画像が読む中身・色空間が変われば、文書に問い合わせて表示（合成・3D・サムネイル）を作り直させる（TexturePaintWindow.FillImages.cs）
+            if (change.Kind == ResourceChangeKind.ContentReplaced || change.Kind == ResourceChangeKind.ColorSpaceChanged || change.Kind == ResourceChangeKind.Removed) PollGeneratorInputs();
             Repaint();
         }
 

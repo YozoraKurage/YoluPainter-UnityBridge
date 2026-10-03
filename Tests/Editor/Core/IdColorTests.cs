@@ -203,8 +203,8 @@ namespace Yozolab.YoluPainter.Tests
             var inputs = new TestGeneratorInputs().Put(IdMap()).Put(TestMeshMaps.Make(MeshMapKind.Curvature, W, H, (x, y, _) => .8));
             d.GeneratorInputs = inputs; read.GeneratorInputs = inputs;
             Assert.That(read.Composite(PaintChannel.Color), Is.EqualTo(d.Composite(PaintChannel.Color)));
-            // 古い版には種類 6 が無い
-            foreach (int older in new[] { 11, 13, DocumentBinary.CurrentVersion - 1 })
+            // 古い版には種類 6 が無い（版 15 で足した。版 16 は塗りつぶしの画像なので、今の版の 1 つ前ではなく 14 で確かめる）
+            foreach (int older in new[] { 11, 13, 14 })
             {
                 var old = (byte[])bytes.Clone(); BitConverter.GetBytes(older).CopyTo(old, 8);
                 Assert.That(() => DocumentBinary.Read(old), Throws.InstanceOf<InvalidDataException>().With.Message.Contains("Unknown generator type 6"), "version " + older);

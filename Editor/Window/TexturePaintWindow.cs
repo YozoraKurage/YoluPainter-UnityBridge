@@ -86,6 +86,7 @@ namespace Yozolab.YoluPainter.Editor
                     ResetSetsBaseline(false); recoveryToken=snapshot.Token; projectCreatedBy=recovered.Info.CreatedBy;
                     var recoveryNotes=new List<string>();
                     foreach(var set in sets)RestoreSavedSelection(set,recovered.SetFiles(set.Id),recoveryNotes);
+                    var missingImages=MissingFillImageNote(); if(missingImages!=null)recoveryNotes.Add(missingImages);
                     message="Recovered native source from the last durable checkpoint. Unsaved edits after that checkpoint may be missing."+(recoveryNotes.Count>0?" "+String.Join(" ",recoveryNotes):"");
                 }
             }

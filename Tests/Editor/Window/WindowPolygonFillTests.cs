@@ -164,6 +164,7 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void ThePointerHighlightFollowsTheRegionAndIsLookedUpOnlyWhenItChanges()
         {
             var g = PolygonFillCube(); var index = new SurfaceRegionIndex(g);
+            window.Preview.FrameRateLimit = 0; // 光らせる物の表示は 3D を描くときに合わせる。1/60 秒の上限で描くのが後回しになると、前の状態を読んでしまう
             var center = window.SurfaceRect.center;
             Assert.That(window.Preview.TryPick(window.SurfaceRect, center, out var hit), Is.True);
             Mouse(window, EventType.MouseMove, center); Repaint(window);

@@ -8,7 +8,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// (opaque values, as SoCo) and Invert / Levels / Hue/Saturation adjustment layers with any of the 26 PSD blend modes (pass-through or isolated for groups), clipping, a
     /// raster mask (enabled, disabled, density), visibility, opacity and the layer locks (lspf) map both ways. Anything without an exact PSD form here
     /// (translucent fill values, adjustment settings between PSD's steps, inverted masks, clipped groups, layers or masks with filters) is
-    /// refused instead of being flattened into pixels.</summary>
+    /// refused instead of being flattened into pixels. The one exception is a fill channel with a projected image: it is written as the
+    /// pixels it shows, and the export reports that the image reference and the projection are not carried (<see cref="PsdCodec.NotCarriedIntoExport"/>).</summary>
     public static class PsdBridge
     {
         /// <summary>Export a native channel. The merged image is the CPU composite of that channel. Each layer is written with its opacity
@@ -19,23 +20,38 @@ namespace Yozolab.YoluPainter.Core.Persistence
         /// it is on), which Photoshop does not reproduce when it recomposites the layers; the derived normal is not written as
         /// a layer (it is regenerated from Height, not painted pixels). With a DirectX file direction the green byte of the
         /// Normal layers' pixels is inverted too, so the layers and the merged image share one convention.</summary>
+        /// <remarks>Refused when something would be written in a form that loses information (a fill channel with a projected image);
+        /// use <see cref="Export(PaintDocument, PaintChannel, ICollection{PsdDiagnostic})"/>, which says what was not carried.</remarks>
         public static PsdDocument Export(PaintDocument source, PaintChannel channel)
         {
+            var notes = new List<PsdDiagnostic>();
+            var result = Export(source, channel, notes);
+            if (notes.Count > 0) throw new InvalidOperationException("PSD export would leave out: " + notes[0].Message + " Use the export that reports what is not carried. Native project can still be saved losslessly.");
+            return result;
+        }
+
+        /// <summary>Like <see cref="Export(PaintDocument, PaintChannel)"/>, and writes what has no PSD form but is still exported in a
+        /// lossy form into <paramref name="notes"/> as <see cref="PsdCodec.NotCarriedIntoExport"/>: a fill layer's channel that reads a
+        /// projected image is written as a raster layer of its evaluated pixels (the image reference and the projection are not in the
+        /// PSD; importing the PSD gives a paint layer).</summary>
+        public static PsdDocument Export(PaintDocument source, PaintChannel channel, ICollection<PsdDiagnostic> notes)
+        {
             if (source == null) throw new ArgumentNullException(nameof(source));
+            if (notes == null) throw new ArgumentNullException(nameof(notes));
             if (source.HasActiveStroke) throw new InvalidOperationException("Commit or cancel the active stroke before exporting PSD.");
             var result = new PsdDocument { Width = source.Width, Height = source.Height };
             var usedIds = new HashSet<int>(); long byteBudget = 0;
-            result.Layers = ExportLevel(source, channel, Guid.Empty, usedIds, ref byteBudget);
+            result.Layers = ExportLevel(source, channel, Guid.Empty, usedIds, ref byteBudget, notes);
             result.CompositeRgba = FlipRows(channel == PaintChannel.Normal ? NormalMaps.FileOutput(source) : source.Composite(channel), source.Width, source.Height);
             return result;
         }
 
         /// <summary>The children of a group (Guid.Empty: the top level) as DTO layers, top to bottom.</summary>
-        static List<PsdRasterLayer> ExportLevel(PaintDocument source, PaintChannel channel, Guid parent, HashSet<int> usedIds, ref long byteBudget)
+        static List<PsdRasterLayer> ExportLevel(PaintDocument source, PaintChannel channel, Guid parent, HashSet<int> usedIds, ref long byteBudget, ICollection<PsdDiagnostic> notes)
         {
             var children = source.ChildrenOf(parent);
             var list = new List<PsdRasterLayer>();
-            for (int i = children.Count - 1; i >= 0; i--) list.Add(ExportLayer(source, channel, children[i], usedIds, ref byteBudget));
+            for (int i = children.Count - 1; i >= 0; i--) list.Add(ExportLayer(source, channel, children[i], usedIds, ref byteBudget, notes));
             return list;
         }
 
@@ -53,7 +69,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             return false;
         }
 
-        static PsdRasterLayer ExportLayer(PaintDocument source, PaintChannel channel, PaintLayer layer, HashSet<int> usedIds, ref long byteBudget)
+        static PsdRasterLayer ExportLayer(PaintDocument source, PaintChannel channel, PaintLayer layer, HashSet<int> usedIds, ref long byteBudget, ICollection<PsdDiagnostic> notes)
         {
             if (layer.Kind == LayerKind.Adjustment)
             {
@@ -63,7 +79,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
             if (layer.IsGroup && layer.Clipping) throw new InvalidOperationException("Group '" + layer.Name + "' is clipped. Photoshop's handling of a clipped folder is not verified (psd-tools treats it as unsupported in Photoshop), so it is not exported; turn its clipping off or export from the native project. Native project can still be saved losslessly.");
             if (layer.Filters.Count > 0 || layer.Mask != null && layer.Mask.Filters.Count > 0)
                 throw new InvalidOperationException("Layer '" + layer.Name + "' has non-destructive filters" + (HasGenerator(layer) ? " or generators" : "") + ". PSD has no exact form for them here (Photoshop keeps smart filters inside smart objects, which this exporter does not write, and has no mesh-map generators), and writing only the filtered pixels would drop the filter stack silently. Bake the filters into the layer (or remove them) before exporting PSD. Native project can still be saved losslessly.");
-            if (layer.Kind == LayerKind.Fill && layer.FillValues.TryGetValue(channel, out var fillValue) && fillValue.A != 255)
+            bool projected = layer.Kind == LayerKind.Fill && layer.HasFillImage(channel);
+            if (layer.Kind == LayerKind.Fill && !projected && layer.FillValues.TryGetValue(channel, out var fillValue) && fillValue.A != 255)
                 throw new InvalidOperationException("Fill layer '" + layer.Name + "': a PSD solid colour fill is opaque, and this fill's " + channel + " value has alpha " + fillValue.A + ". Use the layer opacity instead. Native project can still be saved losslessly.");
             if (layer.Kind != LayerKind.Raster && layer.Kind != LayerKind.Group && layer.Kind != LayerKind.Adjustment && layer.Kind != LayerKind.Fill) throw new InvalidOperationException("PSD projection does not write " + layer.Kind + " layers yet. Native project can still be saved losslessly.");
             if (layer.Mask != null && layer.Mask.Inverted) throw new InvalidOperationException("PSD has no non-destructive mask inversion; turn Inverted off (or invert the mask pixels) before exporting. Native project can still be saved losslessly.");
@@ -84,6 +101,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     Visible = layer.Visible && layer.IsChannelEnabled(channel) && layer.Adjustment.AppliesTo(channel),
                     BlendMode = blendMode, Clipping = layer.Clipping, Mask = mask, Adjustment = layer.Adjustment, PixelsRgba = new byte[0], Locks = layer.Locks };
             }
+            if (projected) return ExportProjectedFill(source, channel, layer, mask, opacity, guid, usedIds, ref byteBudget, notes);
             if (layer.Kind == LayerKind.Fill)
             {
                 if (PsdCodec.BlendKey(blendMode) == null) throw new InvalidOperationException("Blend mode " + blendMode + " has no PSD equivalent for a fill layer. Native project can still be saved losslessly.");
@@ -99,7 +117,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 var group = new PsdRasterLayer { Id = UniqueId(guid, 0, usedIds), Name = layer.Name, Opacity = opacity, Visible = layer.Visible,
                     BlendMode = blendMode, Clipping = layer.Clipping, Mask = mask, PixelsRgba = new byte[0], Locks = layer.Locks };
                 group.DividerId = UniqueId(guid, 4, usedIds);
-                group.Children = ExportLevel(source, channel, layer.Id, usedIds, ref byteBudget);
+                group.Children = ExportLevel(source, channel, layer.Id, usedIds, ref byteBudget, notes);
                 return group;
             }
             if (PsdCodec.BlendKey(blendMode) == null) throw new InvalidOperationException("Blend mode " + blendMode + " has no PSD equivalent for a raster layer. Native project can still be saved losslessly.");
@@ -127,6 +145,28 @@ namespace Yozolab.YoluPainter.Core.Persistence
             return new PsdRasterLayer { Id=UniqueId(guid, 0, usedIds), Name=layer.Name, Left=left, Top=source.Height-top,
                 Width=width, Height=height, Opacity=opacity, Visible=layer.Visible && layer.IsChannelEnabled(channel),
                 BlendMode=blendMode, Clipping=layer.Clipping, Mask=mask, PixelsRgba=pixels, Locks=layer.Locks };
+        }
+
+        /// <summary>A fill channel with a projected image: a raster layer of the whole canvas holding the channel's evaluated pixels (the
+        /// projected image, or the fill value where it cannot be used), with the layer's attributes and mask, and a NotCarriedIntoExport
+        /// note naming the image reference and the projection the PSD does not keep.</summary>
+        static PsdRasterLayer ExportProjectedFill(PaintDocument source, PaintChannel channel, PaintLayer layer, PsdLayerMask mask, byte opacity, byte[] guid, HashSet<int> usedIds, ref long byteBudget, ICollection<PsdDiagnostic> notes)
+        {
+            if (PsdCodec.BlendKey(layer.BlendMode) == null) throw new InvalidOperationException("Blend mode " + layer.BlendMode + " has no PSD equivalent for a raster layer. Native project can still be saved losslessly.");
+            int width = source.Width, height = source.Height;
+            byteBudget = checked(byteBudget + (long)width * height * 4);
+            if (byteBudget > 128L * 1024 * 1024) throw new InvalidOperationException("PSD projection exceeds the prototype's 128 MiB decoded-layer budget. Save the native project instead.");
+            var rgba = layer.EvaluateOutputRegion(channel, 0, 0, width, height); // フィルターは上で断っているので、層そのものの画素
+            var pixels = new byte[rgba.Length]; int row = width * 4;
+            bool flipGreen = channel == PaintChannel.Normal && source.NormalSettings.FileDirection == NormalYDirection.DirectX;
+            for (int y = 0; y < height; y++) Buffer.BlockCopy(rgba, y * row, pixels, (height - 1 - y) * row, row);
+            if (flipGreen) for (int i = 1; i < pixels.Length; i += 4) pixels[i] = (byte)(255 - pixels[i]);
+            var status = source.GetFillImageStatus(layer.Id, channel);
+            string image = status.Image != null ? "\"" + status.Image.Name + "\"" : status.ResourceId.ToString();
+            notes.Add(new PsdDiagnostic(PsdCodec.NotCarriedIntoExport, "Fill layer '" + layer.Name + "' (" + channel + "): the image " + image + " and its " + layer.Projection.Mode
+                + " projection are written as the layer's pixels; the PSD keeps neither the image reference nor the projection" + (status.Active ? "." : " (the image is not projected now: " + status.Reason + " The pixels are the fill value.)"), -1, 0));
+            return new PsdRasterLayer { Id = UniqueId(guid, 0, usedIds), Name = layer.Name, Left = 0, Top = 0, Width = width, Height = height, Opacity = opacity,
+                Visible = layer.Visible && layer.IsChannelEnabled(channel), BlendMode = layer.BlendMode, Clipping = layer.Clipping, Mask = mask, PixelsRgba = pixels, Locks = layer.Locks };
         }
 
         /// <summary>Native mask (hide amount in alpha, bottom-left origin) → PSD mask (255 shows, top-down). The rectangle is the

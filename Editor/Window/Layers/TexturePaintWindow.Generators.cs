@@ -89,6 +89,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (d == null) continue;
                 if (!generatorInputs.TryGetValue(set, out var inputs)) generatorInputs[set] = inputs = new SetGeneratorInputs(this, set);
                 if (!ReferenceEquals(d.GeneratorInputs, inputs)) d.GeneratorInputs = inputs;
+                if (!ReferenceEquals(d.ImageResources, resources)) d.ImageResources = resources; // 塗りつぶしの画像はプロジェクトのリソースから（TexturePaintWindow.FillImages.cs）
             }
             if (generatorInputs.Count > textureSets.Count) foreach (var gone in generatorInputs.Keys.Where(s => !textureSets.Contains(s)).ToList()) generatorInputs.Remove(gone);
             if (!generatorTickHooked) { EditorApplication.update -= GeneratorTick; EditorApplication.update += GeneratorTick; generatorTickHooked = true; }
@@ -120,7 +121,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (ReferenceEquals(inputs.SeenDocument, d) && inputs.SeenRevision == revision) continue;
                 bool first = !ReferenceEquals(inputs.SeenDocument, d);
                 inputs.SeenDocument = d; inputs.SeenRevision = revision;
-                if (first && !d.HasGenerators) continue; // 初めて見た文書で、Generator も無い
+                if (first && !d.HasGenerators && !d.HasFillImages) continue; // 初めて見た文書で、Generator も塗りつぶしの画像も無い
                 changed = true;
                 set.DisplayKey = null; set.LightingKey = null; set.ThumbnailRevision = long.MinValue;
                 foreach (var c in set.MaterialChannels.Values) c.Revision = long.MinValue;
@@ -357,9 +358,9 @@ namespace Yozolab.YoluPainter.Editor
         {
             ConnectGeneratorInputs();
             string list = InactiveGeneratorList(documents, textureSets.Count > 1);
-            if (list == null) return true;
+            if (list == null) return ConfirmInactiveFillImages(documents); // 塗りつぶしの画像も（TexturePaintWindow.FillImages.cs）
             if (Dialogs.Confirm(L.Tr("Generators without mesh maps"), L.Tr("These generators have no usable mesh maps, so the exported images would not have their effect (the layers pass through unchanged):\n{0}\n\nBake the mesh maps first, or export anyway?", list), L.Tr("Export Anyway"), L.Tr("Cancel")))
-                return true;
+                return ConfirmInactiveFillImages(documents);
             message = L.Tr("Nothing was exported: some generators have no usable mesh maps. Bake them (Properties ▸ Filters ▸ the generator) first.");
             return false;
         }
@@ -367,7 +368,7 @@ namespace Yozolab.YoluPainter.Editor
         string InactiveGeneratorSaveNote()
         {
             int count = textureSets.Sum(s => (s == currentSet ? document : s.Document).InactiveGenerators().Count);
-            return count == 0 ? "" : " " + L.Tr("{0} generator(s) have no usable mesh maps; they are kept in the file, and the preview images inside it are without their effect.", count);
+            return (count == 0 ? "" : " " + L.Tr("{0} generator(s) have no usable mesh maps; they are kept in the file, and the preview images inside it are without their effect.", count)) + InactiveFillImageSaveNote();
         }
     }
 }

@@ -73,6 +73,7 @@ namespace Yozolab.YoluPainter.Core
             {
                 sourceBudgetBytes = budget, activeStrokeBudgetBytes = activeStrokeBudgetBytes, minimumUndoSteps = minimumUndoSteps,
                 filterWorkingBudget = filterWorkingBudget, filterCacheBudget = filterCacheBudget, filterBlockPixels = filterBlockPixels,
+                fillImageCacheBudget = fillImageCacheBudget, imageResources = imageResources,
             };
             copy.normalSettings = ScaledNormalSettings(normalSettings, scale, notes);
             string size = width + "×" + height;
@@ -132,7 +133,7 @@ namespace Yozolab.YoluPainter.Core
             return new ResampledDocument(copy, notes, surfacePaths);
         }
 
-        /// <summary>The layer itself in the copy (kind, id, name, group, attributes, fill values, adjustment) without pixels.</summary>
+        /// <summary>The layer itself in the copy (kind, id, name, group, attributes, fill values, images and projection, adjustment) without pixels.</summary>
         static PaintLayer CopyLayerShell(PaintDocument copy, PaintLayer layer)
         {
             PaintLayer target;
@@ -141,6 +142,8 @@ namespace Yozolab.YoluPainter.Core
                 case LayerKind.Fill:
                     var values = new Dictionary<PaintChannel, Rgba32>(); foreach (var entry in layer.FillValues) values.Add(entry.Key, entry.Value);
                     target = copy.AddFillLayer(layer.Name, values, layer.Id);
+                    // 画像と投影は UV・モデルの空間で決まるので、大きさによらずそのまま写す
+                    if (layer.FillImages.Count > 0 || !layer.Projection.Equals(FillProjection.Default)) copy.SetFillImagesForLoad(target, layer.FillImages, layer.Projection);
                     break;
                 case LayerKind.Adjustment: target = copy.AddAdjustmentLayer(layer.Name, layer.Adjustment, layer.EnabledChannels, layer.Id); break;
                 case LayerKind.Group: target = copy.AddGroup(layer.Name, layer.Id); break;

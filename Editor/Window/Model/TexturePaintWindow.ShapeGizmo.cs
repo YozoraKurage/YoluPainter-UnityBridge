@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using Yozolab.YoluPainter.Core;
@@ -9,7 +10,7 @@ namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>
     /// 3D ビューの形のグラデーションのギズモ（<see cref="ShapeGizmo"/>）: プロパティの欄で「3D ビューで編集」にした Generator（選んだ層の
-    /// 画素かマスクのスタックにあるもの）の形の線とハンドルを 3D ビューに重ね、形の値をモデルの面に薄く重ねる
+    /// 画素かマスクのスタックにあるもの）か、塗りつぶしの層の投影の置き場（ボックス。TexturePaintWindow.FillImages.cs）の形の線とハンドルを 3D ビューに重ね、形の値をモデルの面に薄く重ねる
     /// （<see cref="IsolatedModelPreview.ShownShapeGradient"/>）。ハンドルを押した所から離すまでの変更は、スライダーと同じく
     /// <see cref="ApplyFilterSettings"/> で入れて 1 つの Undo にまとめ、描き直しも同じ流れ（文書の版が変わり、次の Repaint で合成する）。
     /// Esc・フォーカスの喪失・リロード・Play への移行ではドラッグの前に戻し、履歴にも残さない（<see cref="PaintDocument.CancelCoalescing"/>）。
@@ -17,15 +18,23 @@ namespace Yozolab.YoluPainter.Editor
     /// </summary>
     public sealed partial class TexturePaintWindow
     {
-        [SerializeField] string shapeEditFilter = "";
+        [SerializeField] string shapeEditFilter = "", projectionEditLayer = "";
         [SerializeField] ShapeGizmoMode shapeGizmoMode = ShapeGizmoMode.Move;
-        ShapeHandle shapeDrag; ShapeVolume shapeDragStart; Vector2 shapeDragFrom; Guid shapeDragFilter, shapeDragLayer; int shapeDragControl;
+        ShapeHandle shapeDrag; ShapeVolume shapeDragStart; Vector2 shapeDragFrom; Guid shapeDragFilter, shapeDragLayer; int shapeDragControl; bool shapeDragProjection;
 
-        /// <summary>3D ビューで編集している形のグラデーションの Generator（無ければ Guid.Empty）。窓の状態で、保存しない。</summary>
+        /// <summary>3D ビューで編集している形のグラデーションの Generator（無ければ Guid.Empty）。窓の状態で、保存しない。投影の置き場の編集とは
+        /// どちらか一方（ギズモは 1 つ）。</summary>
         internal Guid ShapeEditFilter
         {
             get => Guid.TryParse(shapeEditFilter, out var id) ? id : Guid.Empty;
-            set { if (value != ShapeEditFilter) CancelShapeDrag(); shapeEditFilter = value == Guid.Empty ? "" : value.ToString(); Repaint(); }
+            set { if (value != ShapeEditFilter) CancelShapeDrag(); shapeEditFilter = value == Guid.Empty ? "" : value.ToString(); if (value != Guid.Empty) projectionEditLayer = ""; Repaint(); }
+        }
+        /// <summary>3D ビューで投影の置き場（ボックス）を編集している塗りつぶしの層（無ければ Guid.Empty。TexturePaintWindow.FillImages.cs）。
+        /// 窓の状態で、保存しない。形のグラデーションの編集とはどちらか一方。</summary>
+        internal Guid ProjectionEditLayer
+        {
+            get => Guid.TryParse(projectionEditLayer, out var id) ? id : Guid.Empty;
+            set { if (value != ProjectionEditLayer) CancelShapeDrag(); projectionEditLayer = value == Guid.Empty ? "" : value.ToString(); if (value != Guid.Empty) shapeEditFilter = ""; Repaint(); }
         }
         internal ShapeGizmoMode ShapeGizmoMode { get => shapeGizmoMode; set { if (shapeDrag == ShapeHandle.None) shapeGizmoMode = value; Repaint(); } }
         /// <summary>ギズモのハンドルをドラッグしている間 true。</summary>
@@ -41,7 +50,24 @@ namespace Yozolab.YoluPainter.Editor
             catch (KeyNotFoundException) { return null; }
             return effect != null && effect.Settings.IsGenerator && effect.Settings.Generator.Type == GeneratorType.ShapeGradient ? effect : null;
         }
-        bool ShapeGizmoShown => surfaceRect.width > 0 && preview != null && preview.HasModel && EditedShapeGradient() != null;
+        /// <summary>編集している投影の層（選んだ層で、型の上に投影する塗りつぶし）。無ければ null。</summary>
+        PaintLayer EditedProjection()
+        {
+            var id = ProjectionEditLayer;
+            if (id == Guid.Empty || document == null || id != selectedLayer) return null;
+            var layer = document.Layers.FirstOrDefault(l => l.Id == id);
+            return layer != null && layer.Kind == LayerKind.Fill && layer.Projection.ReadsMeshMaps ? layer : null;
+        }
+        /// <summary>ギズモが動かす形（モデルのルートの空間）: 形のグラデーションの形か、投影の置き場（球の投影は球として見せる）。無ければ false。</summary>
+        bool TryGizmoVolume(out ShapeVolume volume)
+        {
+            var effect = EditedShapeGradient();
+            if (effect != null) { volume = effect.Settings.Generator.Volume; return true; }
+            var layer = EditedProjection();
+            if (layer != null) { var p = layer.Projection; volume = p.Mode == FillProjectionMode.Spherical ? p.Placement.WithShape(GeneratorShape.Sphere) : p.Placement; return true; }
+            volume = default; return false;
+        }
+        bool ShapeGizmoShown => surfaceRect.width > 0 && preview != null && preview.HasModel && TryGizmoVolume(out _);
 
         /// <summary>3D を描く直前に: 編集している形の値をモデルの面に重ねるか、プレビューに伝える。</summary>
         void SyncShapeOverlay()
@@ -55,7 +81,7 @@ namespace Yozolab.YoluPainter.Editor
         void DrawShapeGizmo(Vector2 pointer)
         {
             if (Event.current.type != EventType.Repaint || !ShapeGizmoShown) return;
-            var v = EditedShapeGradient().Settings.Generator.Volume; var view = preview.GizmoView(surfaceRect);
+            TryGizmoVolume(out var v); var view = preview.GizmoView(surfaceRect);
             Vector3 rootPosition = preview.ModelRootPosition; var rootRotation = preview.ModelRootRotation;
             var hover = shapeDrag != ShapeHandle.None ? shapeDrag : stroke == null && surfaceRect.Contains(pointer) ? ShapeGizmo.Hit(v, rootPosition, rootRotation, view, shapeGizmoMode, pointer) : ShapeHandle.None;
             var offset = (Vector3)surfaceRect.position;
@@ -102,17 +128,18 @@ namespace Yozolab.YoluPainter.Editor
                 return e.type == EventType.MouseDown; // ドラッグ中のほかのボタンは使わない
             }
             if (e.type != EventType.MouseDown || e.button != 0 || e.alt || stroke != null || !surfaceRect.Contains(e.mousePosition) || !ShapeGizmoShown) return false;
-            var effect = EditedShapeGradient(); var v = effect.Settings.Generator.Volume;
+            var effect = EditedShapeGradient(); TryGizmoVolume(out var v);
             var handle = ShapeGizmo.Hit(v, preview.ModelRootPosition, preview.ModelRootRotation, preview.GizmoView(surfaceRect), shapeGizmoMode, e.mousePosition);
             if (handle == ShapeHandle.None) return false;
             document.EndCoalescing(); // 前の欄のドラッグにまとめない
-            shapeDrag = handle; shapeDragStart = v; shapeDragFrom = e.mousePosition; shapeDragFilter = effect.Id; shapeDragLayer = selectedLayer;
+            shapeDrag = handle; shapeDragStart = v; shapeDragFrom = e.mousePosition; shapeDragFilter = effect?.Id ?? Guid.Empty; shapeDragLayer = selectedLayer; shapeDragProjection = effect == null;
             shapeDragControl = GUIUtility.GetControlID(FocusType.Passive); GUIUtility.hotControl = shapeDragControl;
             e.Use(); Repaint(); return true;
         }
 
         void ApplyShapeDrag(Vector2 mouse, bool symmetric, bool snap)
         {
+            if (shapeDragProjection) { ApplyProjectionDrag(mouse, symmetric, snap); return; }
             FilterEffect effect = null;
             if (selectedLayer == shapeDragLayer) try { effect = document.FindFilter(shapeDragLayer, shapeDragFilter, out _); } catch (KeyNotFoundException) { }
             if (effect == null || !effect.Settings.IsGenerator) { EndShapeDrag(); return; } // 層や Generator が無くなった
@@ -122,6 +149,19 @@ namespace Yozolab.YoluPainter.Editor
             string why = next.Refusal();
             if (why != null) { message = why; return; }
             ApplyFilterSettings(effect.Id, effect.Settings.WithGenerator(g.WithVolume(next)), coalesce: true);
+        }
+        /// <summary>投影の置き場のドラッグ: 押した所の形から計算し（ずれない）、層の投影に 1 回の Undo にまとめて入れる。球の投影は球として
+        /// 動かし、置き場（ボックス）に戻す。</summary>
+        void ApplyProjectionDrag(Vector2 mouse, bool symmetric, bool snap)
+        {
+            var layer = selectedLayer == shapeDragLayer ? document.Layers.FirstOrDefault(l => l.Id == shapeDragLayer && l.Kind == LayerKind.Fill) : null;
+            if (layer == null) { EndShapeDrag(); return; } // 層が無くなった
+            var next = ShapeGizmo.Drag(shapeDrag, shapeDragStart, preview.ModelRootPosition, preview.ModelRootRotation, preview.GizmoView(surfaceRect), shapeDragFrom, mouse, symmetric, snap);
+            var placement = layer.Projection.WithPlacement(next);
+            if (placement.Equals(layer.Projection)) return;
+            string why = placement.Placement.Refusal();
+            if (why != null) { message = why; return; }
+            TryAction(() => document.SetFillProjection(layer.Id, placement, coalesce: true));
         }
         void EndShapeDrag()
         {
@@ -147,12 +187,12 @@ namespace Yozolab.YoluPainter.Editor
         internal Vector2? ShapeHandleGui(ShapeHandle handle)
         {
             if (!ShapeGizmoShown) return null;
-            var v = EditedShapeGradient().Settings.Generator.Volume;
+            TryGizmoVolume(out var v);
             foreach (var (h, at) in ShapeGizmo.HandlePoints(v, preview.ModelRootPosition, preview.ModelRootRotation, preview.GizmoView(surfaceRect), shapeGizmoMode))
                 if (h == handle) return at;
             return null;
         }
         /// <summary>試験用: GUI の点の下のハンドル。</summary>
-        internal ShapeHandle ShapeHandleAt(Vector2 gui) => ShapeGizmoShown ? ShapeGizmo.Hit(EditedShapeGradient().Settings.Generator.Volume, preview.ModelRootPosition, preview.ModelRootRotation, preview.GizmoView(surfaceRect), shapeGizmoMode, gui) : ShapeHandle.None;
+        internal ShapeHandle ShapeHandleAt(Vector2 gui) => ShapeGizmoShown && TryGizmoVolume(out var v) ? ShapeGizmo.Hit(v, preview.ModelRootPosition, preview.ModelRootRotation, preview.GizmoView(surfaceRect), shapeGizmoMode, gui) : ShapeHandle.None;
     }
 }

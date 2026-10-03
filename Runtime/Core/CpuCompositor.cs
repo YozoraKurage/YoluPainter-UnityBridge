@@ -426,7 +426,8 @@ namespace Yozolab.YoluPainter.Core
                 if (layer.Kind != LayerKind.Adjustment && !layer.IsGroup)
                 {
                     Pixels = new byte[slots][];
-                    if (layer.HasActiveFilters(channel)) { ownPixels = new byte[slots][]; for (int k = 0; k < slots; k++) ownPixels[k] = new byte[tileBytes]; }
+                    // フィルターのある層と、画像を投影する塗りつぶしは、評価した出力（CopyOutputTile）を読む
+                    if (layer.HasEvaluatedOutput(channel)) { ownPixels = new byte[slots][]; for (int k = 0; k < slots; k++) ownPixels[k] = new byte[tileBytes]; }
                     else if (layer.Kind == LayerKind.Fill)
                     {
                         fill = true;
@@ -862,7 +863,7 @@ namespace Yozolab.YoluPainter.Core
             foreach (var e in plan)
             {
                 var l = e.Base;
-                b += (l.Kind != LayerKind.Adjustment && !l.IsGroup && l.HasActiveFilters(channel) ? 1 : 0) + (l.Mask != null && !l.Mask.IsNeutral && l.Mask.HasActiveFilters ? 1 : 0)
+                b += (l.Kind != LayerKind.Adjustment && !l.IsGroup && l.HasEvaluatedOutput(channel) ? 1 : 0) + (l.Mask != null && !l.Mask.IsNeutral && l.Mask.HasActiveFilters ? 1 : 0)
                     + CountOwnBuffers(e.Children, channel) + CountOwnBuffers(e.ClipEntries, channel);
             }
             return b;

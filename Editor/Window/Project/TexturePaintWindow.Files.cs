@@ -202,6 +202,7 @@ namespace Yozolab.YoluPainter.Editor
                     set.SavedRevision=set.Document.Revision;
                 }
                 var resourceNote=AdoptResources(loadedResources); if(resourceNote!=null)notes.Add(resourceNote);
+                var missingImages=MissingFillImageNote(); if(missingImages!=null)notes.Add(missingImages); // 無い画像を読む層は値のまま（参照は残す）
                 ResetSetsBaseline(true);
                 var sourceNote=AskAboutChangedResources(); if(sourceNote!=null)notes.Add(sourceNote); // 出どころが変わっていれば尋ねる（更新すると未保存になる）
                 notes.AddRange(FormatNotes(opened));
@@ -239,14 +240,16 @@ namespace Yozolab.YoluPainter.Editor
         internal void ExportPsd()
         {
             byte[] bytes;
-            try{bytes=PsdCodec.Write(PsdBridge.Export(document,channel));}
+            var psdNotes=new List<PsdDiagnostic>(); // 画像の塗りつぶしは画素の層として書き、投影が残らないことを知らせる
+            try{bytes=PsdCodec.Write(PsdBridge.Export(document,channel,psdNotes));}
             catch(Exception ex){message="PSD export unavailable: "+ex.Message;Dialogs.Inform("PSD export unavailable",ex.Message+"\n\nNothing was written. The .ylp keeps everything losslessly.");return;}
             string source=projectPath??importedPsdPath;
             string stem=(source!=null?Path.GetFileNameWithoutExtension(source):"Texture")+SetFileSuffix(currentSet);
             string path=Dialogs.SaveFile("Export selected channel PSD",source!=null?Path.GetDirectoryName(source):Application.dataPath,channel==PaintChannel.Color?stem:stem+"_"+channel,"psd");if(String.IsNullOrEmpty(path))return;
             // 取り込み元の PSD を上書きするときは確かめる（原本のバイト列は .ylp に残るが、外の PSD そのものは置き換わる）
             if(importedPsdPath!=null&&String.Equals(Path.GetFullPath(path),importedPsdPath,PainterSettings.PathComparison)&&!Dialogs.Confirm("Overwrite the imported PSD?",Path.GetFileName(path)+" is the PSD this document was imported from. Replace it with the exported PSD?"+(importedOriginal!=null?" Its original bytes stay inside the .ylp once you save.":""),"Replace","Cancel"))return;
-            TryAction(()=>{File.WriteAllBytes(path,bytes);message="Exported "+channel+" PSD. No material was changed."+NormalExportNote(channel==PaintChannel.Normal,psd:true);});
+            TryAction(()=>{File.WriteAllBytes(path,bytes);message="Exported "+channel+" PSD. No material was changed."+NormalExportNote(channel==PaintChannel.Normal,psd:true)+(psdNotes.Count>0?" "+String.Join(" ",psdNotes.Select(n=>n.Message)):"");
+                if(psdNotes.Count>0)Dialogs.Inform(L.Tr("PSD exported with notes"),String.Join("\n",psdNotes.Select(n=>"• "+n.Message))+"\n\n"+L.Tr("The .ylp keeps the images and projections."));});
         }
         /// <summary>Export Images のファイルの名前: テクスチャセットが 1 つなら &lt;名前&gt;_&lt;チャンネル&gt;.png、複数なら &lt;名前&gt;_&lt;セット名&gt;_&lt;チャンネル&gt;.png。</summary>
         internal string ExportImageName(string stem,TextureSet set,PaintChannel c)=>stem+SetFileSuffix(set)+"_"+c+".png";

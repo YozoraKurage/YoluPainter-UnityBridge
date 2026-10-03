@@ -154,12 +154,14 @@ namespace Yozolab.YoluPainter.Core
             if (Kind == LayerKind.Fill)
             {
                 if (x < 0 || y < 0 || x >= document.Width || y >= document.Height) throw new ArgumentOutOfRangeException("pixel");
+                if (fillImages.ContainsKey(channel)) return document.FillSampler(this, channel).Pixel(x, y); // 投影した画像（フィルターの前）
                 return fillValues.TryGetValue(channel, out var value) ? value : Rgba32.Transparent;
             }
             return channels.TryGetValue(channel, out var surface) ? surface.GetPixel(x, y) : Rgba32.Transparent;
         }
         /// <summary>Copies the layer's own pixels for one tile into a caller buffer (TileSize²×4, padding zero).
-        /// Returns false (and writes zeros) where the layer has nothing. Fill tiles are generated, never stored.</summary>
+        /// Returns false (and writes zeros) where the layer has nothing. Fill tiles are generated, never stored (a fill channel with an
+        /// image is its projected image, evaluated each time; the compositors read the cached <see cref="CopyOutputTile"/>).</summary>
         public bool CopyTile(PaintChannel channel, TileCoord coord, byte[] destination)
         {
             if (Kind != LayerKind.Fill)
@@ -174,8 +176,16 @@ namespace Yozolab.YoluPainter.Core
             if (destination.Length != length) throw new ArgumentException("Incorrect tile byte length.", nameof(destination));
             if (coord.X < 0 || coord.Y < 0 || (long)coord.X * tile >= document.Width || (long)coord.Y * tile >= document.Height) throw new ArgumentOutOfRangeException(nameof(coord));
             Array.Clear(destination, 0, length);
-            if (!fillValues.TryGetValue(channel, out var fill) || fill == Rgba32.Transparent) return false;
             int w = Math.Min(tile, document.Width - coord.X * tile), h = Math.Min(tile, document.Height - coord.Y * tile);
+            if (fillImages.ContainsKey(channel))
+            {
+                // 投影した画像（フィルターの前の、層そのものの画素）。評価してキャッシュには入れない
+                var sampler = document.FillSampler(this, channel);
+                if (!sampler.MayCover) return false;
+                sampler.FillRows(coord.X * tile, coord.Y * tile, w, 0, h, destination, tile);
+                return true;
+            }
+            if (!fillValues.TryGetValue(channel, out var fill) || fill == Rgba32.Transparent) return false;
             for (int y = 0; y < h; y++) for (int x = 0; x < w; x++)
             { int i = (y * tile + x) * 4; destination[i] = fill.R; destination[i + 1] = fill.G; destination[i + 2] = fill.B; destination[i + 3] = fill.A; }
             return true;
@@ -300,19 +310,22 @@ namespace Yozolab.YoluPainter.Core
             Insert(layer, above);
             return layer;
         }
-        /// <summary>Sets (or with null removes) a fill layer's value for one channel. Setting a value enables the channel.</summary>
+        /// <summary>Sets (or with null removes) a fill layer's value for one channel. Setting a value enables the channel. On a channel with an
+        /// image (<see cref="SetFillImage"/>) the value is what shows where the image cannot be used; removing the value removes the image too
+        /// (in the same undo step).</summary>
         public void SetFillValue(Guid id, PaintChannel channel, Rgba32? value, bool coalesce = false)
         {
             EnsureNoStroke(); PaintLayer.ValidateChannel(channel); var layer = GetLayer(id);
             if (layer.Kind != LayerKind.Fill) throw new InvalidOperationException("Only fill layers have fill values.");
             Rgba32? old = layer.FillValues.TryGetValue(channel, out var current) ? current : (Rgba32?)null;
+            Guid? image = layer.FillImages.TryGetValue(channel, out var imageId) ? imageId : (Guid?)null;
             bool wasEnabled = layer.IsChannelEnabled(channel);
             if (Nullable.Equals(old, value) && (value == null || wasEnabled)) return;
             RefuseLockedPixels(layer, erase: false); // 塗りつぶしの値は層の中身
-            if ((old?.A ?? 0) != (value?.A ?? 0)) RefuseLockedTransparency(layer);
+            if ((old?.A ?? 0) != (value?.A ?? 0) || image.HasValue && value == null) RefuseLockedTransparency(layer);
             Execute(LayerScoped(layer, channel,
-                () => { layer.SetFillValueInternal(channel, value); if (value.HasValue) layer.Enable(channel, true); },
-                () => { layer.SetFillValueInternal(channel, old); layer.Enable(channel, wasEnabled); }, 64), coalesce ? (object)("fill", id, channel) : null);
+                () => { layer.SetFillValueInternal(channel, value); if (value.HasValue) layer.Enable(channel, true); else layer.SetFillImageInternal(channel, null); FillChanged(layer); },
+                () => { layer.SetFillValueInternal(channel, old); layer.SetFillImageInternal(channel, image); layer.Enable(channel, wasEnabled); FillChanged(layer); }, 64), coalesce ? (object)("fill", id, channel) : null);
         }
         /// <summary>Adds an adjustment layer on top that changes the composite below it in the given channels (all channels
         /// the adjustment applies to when null). Hue/saturation can only target Color and Emission.</summary>
