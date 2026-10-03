@@ -52,6 +52,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>中身の版: 渡すテクスチャ・描き方・マテリアル表示の中身・モデルを変える口で増やす。</summary>
         long contentVersion;
         RenderKey lastKey; bool hasPicture, deferred, renderedWhileCompiling; double lastRenderTime = double.NegativeInfinity;
+        /// <summary>前に描いた絵（PreviewRenderUtility の描き先か、トーンマッピングを当てた 8 bit の描き先）。</summary>
+        Texture lastPicture;
         /// <summary>コンパイル中に描き直す間隔（秒）。</summary>
         internal const double CompileRedrawInterval = .25;
 
@@ -62,6 +64,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
             var s = Scene ?? defaultScene;
             int scene = unchecked(((s.lightYaw.GetHashCode() * 31 + s.lightPitch.GetHashCode()) * 31 + s.intensity.GetHashCode()) * 31
                 + (s.lightColor.GetHashCode() * 31 + s.ambient.GetHashCode()) * 17 + s.background.GetHashCode());
+            // 環境・影・トーンマッピング（IsolatedModelPreview.Display.cs）と、環境のテクスチャの中身（取り込み直しで updateCount が進む）
+            var environmentTexture = s.environment == PreviewEnvironmentSource.Texture ? EnvironmentTexture : null;
+            scene = unchecked(scene * 31 + ((((int)s.environment * 31 + (s.environmentTexture ?? "").GetHashCode()) * 31 + s.environmentRotation.GetHashCode()) * 31
+                + s.environmentIntensity.GetHashCode()) * 31 + (s.environmentBackground ? 1 : 0) + s.environmentBlur.GetHashCode() * 7);
+            scene = unchecked(scene * 31 + (s.skyZenith.GetHashCode() * 31 + s.skyHorizon.GetHashCode()) * 31 + s.skyGround.GetHashCode());
+            scene = unchecked(scene * 31 + ((s.shadows ? 1 : 0) * 31 + s.shadowSoftness.GetHashCode()) * 31 + (int)s.toneMapping * 7 + s.exposure.GetHashCode());
+            if (environmentTexture != null) scene = unchecked(scene * 31 + environmentTexture.GetInstanceID() * 7 + (int)environmentTexture.updateCount);
             bool compiling = CompilingShaders;
             long compileTick = compiling ? 1 + (long)Math.Floor(Clock() / CompileRedrawInterval) : 0;
             bool region = regionWanted && HasModel && ReferenceEquals(regionGeometry, geometry) && regionTriangles != null && regionTriangles.Count > 0;
@@ -80,14 +89,14 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (!HasModel || rect.width < 2 || rect.height < 2) return null;
             EnsurePreview();
             var key = ComputeRenderKey(rect, pixelsPerPoint);
-            var picture = preview.camera.targetTexture;
-            bool old = hasPicture && picture != null && picture.IsCreated();
+            var picture = lastPicture;
+            bool old = hasPicture && picture != null && (!(picture is RenderTexture rt) || rt.IsCreated());
             if (old && key.Equals(lastKey)) { deferred = false; return picture; }
             double now = Clock();
             bool sameSize = key.PixelWidth == lastKey.PixelWidth && key.PixelHeight == lastKey.PixelHeight; // 大きさが変わったら待たない（引き伸ばした絵を見せない）
             if (old && sameSize && FrameRateLimit > 0 && now - lastRenderTime < 1.0 / FrameRateLimit) { deferred = true; return picture; }
             var texture = DrawPreview(rect);
-            lastKey = key; hasPicture = texture != null; deferred = false; lastRenderTime = now; renderedWhileCompiling = key.CompileTick != 0;
+            lastKey = key; lastPicture = texture; hasPicture = texture != null; deferred = false; lastRenderTime = now; renderedWhileCompiling = key.CompileTick != 0;
             RenderCount++;
             return texture;
         }
@@ -106,6 +115,6 @@ namespace Yozolab.YoluPainter.Editor.Preview
         }
 
         /// <summary>前の絵を使わせない（同じ描き先に別の大きさで描いた後など）。</summary>
-        void ForgetRenderedPicture() { hasPicture = false; deferred = false; }
+        void ForgetRenderedPicture() { hasPicture = false; deferred = false; lastPicture = null; }
     }
 }

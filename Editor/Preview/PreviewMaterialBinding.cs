@@ -54,6 +54,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         Standard,
         /// <summary>それ以外のシェーダー: メインのテクスチャに Color だけ。</summary>
         MainTexture,
+        /// <summary>それ以外のシェーダーで、プロパティの名前と属性から流し込み先を推し量ったもの（確かめていない。欄で手で変えられる）。</summary>
+        Guessed,
     }
 
     /// <summary>
@@ -76,6 +78,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public string Unusable { get; internal set; }
         /// <summary>lilToon のときの検査の結果。</summary>
         public LilToonReport LilToon { get; internal set; }
+        /// <summary>欄で手で決めた流し込み先を含むか（<see cref="PreviewMaterialBindings.WithRoutes"/>）。</summary>
+        public bool HandSet { get; internal set; }
         /// <summary>対応を決めたときの元のマテリアルの状態（変わったら決め直す）。</summary>
         internal int SourceDirtyCount, ShaderId;
         public bool CanShow => Unusable == null && Source != null;
@@ -180,16 +184,172 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 return LilToonBinding(b, lil);
             }
             if (IsVerifiedStandard(shader, out string standardProblem)) return StandardBinding(b, source);
-            var mainOnly = MainTextureBinding(b, shader);
             var remarks = new List<string>();
-            if (lil.IsLilToon) remarks.Add(L.Tr("lilToon {0} is not verified for this material, so only the main texture is used: {1}", lil.Version, string.Join(" ", lil.Reasons)));
-            else if (standardProblem != null) remarks.Add(standardProblem);
+            if (lil.IsLilToon)
+            {
+                // 確かめていない lilToon には推し量りも当てない（似ているだけで当てない）。メインのテクスチャに Color だけ
+                var mainOnly = MainTextureBinding(b, shader);
+                remarks.Add(L.Tr("lilToon {0} is not verified for this material, so only the main texture is used: {1}", lil.Version, string.Join(" ", lil.Reasons)));
+                var unmapped = new List<(PaintChannel, string)>();
+                foreach (var c in (PaintChannel[])Enum.GetValues(typeof(PaintChannel)))
+                    if (c != PaintChannel.Color || mainOnly.Channels.Count == 0)
+                        unmapped.Add((c, c == PaintChannel.Color ? L.Tr("this shader has no main texture ([MainTexture] or _MainTex).") : L.Tr("not shown, because the mapping of this shader is not verified (only Color goes into the main texture).")));
+                mainOnly.Unmapped = unmapped; mainOnly.Remarks = remarks;
+                return mainOnly;
+            }
+            if (standardProblem != null) remarks.Add(standardProblem);
+            var guessed = GuessedBinding(b, shader);
+            if (guessed.Kind == PreviewMaterialKind.Guessed) remarks.Add(L.Tr("The mapping of {0} is guessed from its property names (not verified); change it under Channels in the Material panel if it looks wrong.", shader.name));
+            guessed.Remarks = remarks;
+            return guessed;
+        }
+
+        // ───────── それ以外: 名前と属性から推し量る（書き出しのテンプレートの Unity Standard / URP Lit・HDRP Lit の名前を含む） ─────────
+
+        static readonly string[] NormalNames = { "_BumpMap", "_NormalMap", "_NormalTex", "_Normal" };
+        static readonly string[] EmissionNames = { "_EmissionMap", "_EmissiveColorMap", "_EmissionTex", "_EmissiveMap", "_Emissive_Tex", "_EmissionColorTex" };
+        static readonly string[] MetallicNames = { "_MetallicMap", "_MetallicTex", "_MetalMap", "_MetallicTexture" };
+        static readonly string[] RoughnessNames = { "_RoughnessMap", "_RoughnessTex", "_RoughnessTexture" };
+        static readonly string[] SmoothnessNames = { "_SmoothnessMap", "_SmoothnessTex", "_GlossMap", "_GlossinessMap", "_SmoothnessTexture" };
+        static readonly string[] HeightNames = { "_ParallaxMap", "_HeightMap", "_Heightmap", "_HeightTex" };
+        static readonly string[] MainNames = { "_BaseMap", "_BaseColorMap", "_AlbedoMap", "_Albedo" };
+        /// <summary>テクスチャを入れたときにシェーダーのインスペクターが付けるキーワード（シェーダーにあれば複製で有効にする）。</summary>
+        static readonly Dictionary<string, string> TextureKeywords = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            { "_BumpMap", "_NORMALMAP" }, { "_NormalMap", "_NORMALMAP" }, { "_EmissionMap", "_EMISSION" }, { "_EmissiveColorMap", "_EMISSIVE_COLOR_MAP" },
+            { "_MetallicGlossMap", "_METALLICGLOSSMAP" }, { "_ParallaxMap", "_PARALLAXMAP" }, { "_HeightMap", "_HEIGHTMAP" },
+        };
+
+        /// <summary>シェーダーの 2D テクスチャのプロパティ（並びの順）。</summary>
+        internal static List<string> TextureProperties(Shader shader)
+        {
+            var list = new List<string>();
+            if (shader == null) return list;
+            int count = shader.GetPropertyCount();
+            for (int i = 0; i < count; i++)
+                if (shader.GetPropertyType(i) == ShaderPropertyType.Texture && shader.GetPropertyTextureDimension(i) == TextureDimension.Tex2D && !list.Contains(shader.GetPropertyName(i)))
+                    list.Add(shader.GetPropertyName(i));
+            return list;
+        }
+
+        static string FirstOf(List<string> textures, string[] names) => names.FirstOrDefault(textures.Contains);
+
+        /// <summary>名前と属性から推し量った流し込み先（Color: [MainTexture]・_MainTex・_BaseMap など、Normal: [Normal] の印か名前、Emission・
+        /// Height は名前、Metallic と Roughness は _MetallicGlossMap（Standard と同じ R と A）か別々のマップ）。</summary>
+        static PreviewMaterialBinding GuessedBinding(PreviewMaterialBinding b, Shader shader)
+        {
+            var textures = TextureProperties(shader);
+            var channels = new List<PreviewChannelBinding>();
+            void Add(PaintChannel c, string property, PreviewPacking packing, string reading)
+                => channels.Add(new PreviewChannelBinding { Channel = c, Property = property, Packing = packing, Keywords = KeywordsFor(shader, property), Reading = reading + " " + L.Tr("(guessed from its name)") });
+            string main = MainTextureProperty(shader) ?? FirstOf(textures, MainNames);
+            if (main != null) channels.Add(new PreviewChannelBinding { Channel = PaintChannel.Color, Property = main, Packing = PreviewPacking.Color, Reading = main + " (sRGB)" });
+            string normal = FirstOf(textures, NormalNames);
+            if (normal == null)
+                foreach (var t in textures) { int i = shader.FindPropertyIndex(t); if ((shader.GetPropertyFlags(i) & ShaderPropertyFlags.Normal) != 0) { normal = t; break; } }
+            if (normal != null) Add(PaintChannel.Normal, normal, PreviewPacking.Normal, normal + " (normal map)");
+            string emission = FirstOf(textures, EmissionNames) ?? textures.FirstOrDefault(t => t.IndexOf("emissi", StringComparison.OrdinalIgnoreCase) >= 0 && t != main);
+            if (emission != null) Add(PaintChannel.Emission, emission, PreviewPacking.Color, emission + " (sRGB)");
+            if (textures.Contains("_MetallicGlossMap"))
+            {
+                Add(PaintChannel.Metallic, "_MetallicGlossMap", PreviewPacking.MetallicSmoothness, "_MetallicGlossMap.r = Metallic");
+                Add(PaintChannel.Roughness, "_MetallicGlossMap", PreviewPacking.MetallicSmoothness, "_MetallicGlossMap.a = 1 − Roughness");
+            }
+            else
+            {
+                string metallic = FirstOf(textures, MetallicNames);
+                if (metallic != null) Add(PaintChannel.Metallic, metallic, PreviewPacking.Value, metallic + ".r = Metallic");
+                string rough = FirstOf(textures, RoughnessNames), smooth = rough == null ? FirstOf(textures, SmoothnessNames) : null;
+                if (rough != null) Add(PaintChannel.Roughness, rough, PreviewPacking.Value, rough + ".r = Roughness");
+                else if (smooth != null) Add(PaintChannel.Roughness, smooth, PreviewPacking.InvertedValue, smooth + ".r = 1 − Roughness");
+            }
+            string height = FirstOf(textures, HeightNames);
+            if (height != null) Add(PaintChannel.Height, height, PreviewPacking.Value, height + " = Height");
+            b.Kind = channels.Count > (main != null ? 1 : 0) ? PreviewMaterialKind.Guessed : PreviewMaterialKind.MainTexture;
+            b.Summary = b.Kind == PreviewMaterialKind.Guessed ? L.Tr("Guessed from the property names") : main != null ? L.Tr("Main texture only ({0})", main) : L.Tr("As the material is (no main texture)");
+            b.Channels = channels.OrderBy(c => c.Channel).ToList();
             var unmapped = new List<(PaintChannel, string)>();
             foreach (var c in (PaintChannel[])Enum.GetValues(typeof(PaintChannel)))
-                if (c != PaintChannel.Color || mainOnly.Channels.Count == 0)
-                    unmapped.Add((c, c == PaintChannel.Color ? L.Tr("this shader has no main texture ([MainTexture] or _MainTex).") : L.Tr("not shown, because the mapping of this shader is not verified (only Color goes into the main texture).")));
-            mainOnly.Unmapped = unmapped; mainOnly.Remarks = remarks;
-            return mainOnly;
+                if (!channels.Any(x => x.Channel == c))
+                    unmapped.Add((c, c == PaintChannel.Color ? L.Tr("this shader has no main texture ([MainTexture] or _MainTex).") : L.Tr("not shown: no property of this shader looks like it takes this channel (the mapping is not verified; set it under Channels in the Material panel).")));
+            b.Unmapped = unmapped;
+            return b;
+        }
+
+        static IReadOnlyList<string> KeywordsFor(Shader shader, string property)
+            => TextureKeywords.TryGetValue(property, out var k) && shader.keywordSpace.keywordNames.Contains(k) ? new[] { k } : Array.Empty<string>();
+
+        // ───────── 手で決めた流し込み先 ─────────
+
+        /// <summary>チャンネルに選べる詰め方（Color と Emission は色、Normal は法線、値のチャンネルは値・1 − 値・Standard の R と A）。</summary>
+        public static IReadOnlyList<PreviewPacking> PackingsFor(PaintChannel channel)
+        {
+            switch (channel)
+            {
+                case PaintChannel.Color: case PaintChannel.Emission: return new[] { PreviewPacking.Color };
+                case PaintChannel.Normal: return new[] { PreviewPacking.Normal };
+                case PaintChannel.Metallic: return new[] { PreviewPacking.Value, PreviewPacking.MetallicSmoothness };
+                case PaintChannel.Roughness: return new[] { PreviewPacking.InvertedValue, PreviewPacking.Value, PreviewPacking.MetallicSmoothness };
+                default: return new[] { PreviewPacking.Value, PreviewPacking.InvertedValue };
+            }
+        }
+
+        /// <summary>手で決めた流し込み先が使えない理由（使えれば null。プロパティが空なら「見せない」で使える）。</summary>
+        public static string RouteProblem(Shader shader, PreviewChannelRoute route)
+        {
+            if (route == null) return "No route.";
+            if (string.IsNullOrEmpty(route.property)) return null;
+            if (shader == null) return L.Tr("The material has no shader.");
+            int i = shader.FindPropertyIndex(route.property);
+            if (i < 0) return L.Tr("the shader {0} has no property {1}.", shader.name, route.property);
+            if (shader.GetPropertyType(i) != ShaderPropertyType.Texture || shader.GetPropertyTextureDimension(i) != TextureDimension.Tex2D) return L.Tr("{0} is not a 2D texture.", route.property);
+            if (!PackingsFor(route.channel).Contains(route.packing)) return L.Tr("{0} cannot be packed as {1}.", L.Tr(route.channel.ToString()), route.packing);
+            return null;
+        }
+
+        /// <summary>
+        /// 自動の対応に、手で決めた流し込み先を重ねる（チャンネルごとに置き換え。プロパティが空のものは見せない）。使えない流し込み先（無い
+        /// プロパティ・型・詰め方、ほかのチャンネルが別の詰め方で使うプロパティ）は使わず、理由を <see cref="PreviewMaterialBinding.Remarks"/> に足す。
+        /// 見せられない対応（中立に戻すもの）はそのまま返す。
+        /// </summary>
+        public static PreviewMaterialBinding WithRoutes(PreviewMaterialBinding auto, IReadOnlyList<PreviewChannelRoute> routes)
+        {
+            if (auto == null || !auto.CanShow || routes == null || routes.Count == 0) return auto;
+            var shader = auto.Source.shader;
+            var channels = auto.Channels.ToList(); var unmapped = auto.Unmapped.ToList(); var remarks = auto.Remarks.ToList();
+            bool changed = false;
+            foreach (var r in routes)
+            {
+                if (r == null) continue;
+                string channel = L.Tr(r.channel.ToString());
+                string why = RouteProblem(shader, r);
+                if (why != null) { remarks.Add(L.Tr("{0}: the route set by hand is not used: {1}", channel, why)); continue; }
+                var clash = string.IsNullOrEmpty(r.property) ? null : channels.FirstOrDefault(c => c.Channel != r.channel && c.Property == r.property && !(c.Packing == PreviewPacking.MetallicSmoothness && r.packing == PreviewPacking.MetallicSmoothness));
+                if (clash != null) { remarks.Add(L.Tr("{0}: the route set by hand is not used: {1} already takes {2} packed another way.", channel, L.Tr(clash.Channel.ToString()), r.property)); continue; }
+                channels.RemoveAll(c => c.Channel == r.channel); unmapped.RemoveAll(u => u.Channel == r.channel); changed = true;
+                if (string.IsNullOrEmpty(r.property)) { unmapped.Add((r.channel, L.Tr("turned off under Channels in the Material panel."))); continue; }
+                channels.Add(new PreviewChannelBinding { Channel = r.channel, Property = r.property, Packing = r.packing, Keywords = KeywordsFor(shader, r.property), Reading = r.property + " (" + PackingLabel(r.packing) + ", " + L.Tr("set by hand") + ")" });
+            }
+            var b = new PreviewMaterialBinding
+            {
+                Source = auto.Source, Kind = auto.Kind, ShaderName = auto.ShaderName, Summary = changed ? auto.Summary + " · " + L.Tr("routes set by hand") : auto.Summary,
+                Channels = channels.OrderBy(c => c.Channel).ToList(), Unmapped = unmapped, Remarks = remarks, LilToon = auto.LilToon, HandSet = changed,
+                SourceDirtyCount = auto.SourceDirtyCount, ShaderId = auto.ShaderId,
+            };
+            return b;
+        }
+
+        /// <summary>詰め方の名前（欄に出す）。</summary>
+        public static string PackingLabel(PreviewPacking packing)
+        {
+            switch (packing)
+            {
+                case PreviewPacking.Color: return L.TrIn("packing", "Color");
+                case PreviewPacking.Value: return L.TrIn("packing", "Value");
+                case PreviewPacking.InvertedValue: return L.TrIn("packing", "1 − value");
+                case PreviewPacking.Normal: return L.TrIn("packing", "Normal map");
+                default: return L.TrIn("packing", "Metallic (R) + smoothness (A)");
+            }
         }
 
         /// <summary>シェーダーが使えないときの理由（使えれば null）。</summary>

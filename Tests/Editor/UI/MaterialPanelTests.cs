@@ -89,14 +89,16 @@ namespace Yozolab.YoluPainter.Tests
             string recovery = w.RecoveryRoot;
             try
             {
-                foreach (bool model in new[] { false, true })
+                foreach (string state in new[] { "empty", "model", "display" })
                 {
-                    if (model) w.Preview.LoadDemoMesh();
+                    if (state == "model") w.Preview.LoadDemoMesh();
+                    // 右の列（環境・影・トーンマッピング。Model/TexturePaintWindow.Display3D.cs）を全部使った状態
+                    if (state == "display") { w.SetEnvironment(PreviewEnvironmentSource.Sky); w.PreviewScene.shadows = true; w.SetToneMapping(PreviewToneMapping.Aces); w.PreviewScene.exposure = .5f; }
                     foreach (var language in new[] { PainterLanguage.English, PainterLanguage.Japanese })
                     {
                         L.OverrideLanguage(language);
                         int before = PaintGui.ShortenedTexts;
-                        string path = Path.Combine(Folder, "scene-" + (model ? "model" : "empty") + "-" + language + ".png");
+                        string path = Path.Combine(Folder, "scene-" + state + "-" + language + ".png");
                         OffscreenGui.RenderToPng((int)TexturePaintWindow.ScenePanelWidth, (int)TexturePaintWindow.ScenePanelHeight,
                             () => w.DrawScenePanel(new Rect(0, 0, TexturePaintWindow.ScenePanelWidth, TexturePaintWindow.ScenePanelHeight)), path, PaintTheme.PanelBg);
                         Assert.That(PaintGui.ShortenedTexts - before, Is.Zero, language + ": a UI text did not fit");
@@ -108,6 +110,7 @@ namespace Yozolab.YoluPainter.Tests
                 Assert.That(w.Preview.Scene, Is.SameAs(w.PreviewScene));
                 w.ResetPreviewScene();
                 Assert.That(w.PreviewScene.lightYaw, Is.EqualTo(PreviewSceneSettings.Default().lightYaw));
+                Assert.That((w.PreviewScene.environment, w.PreviewScene.shadows, w.PreviewScene.toneMapping), Is.EqualTo((PreviewEnvironmentSource.None, false, PreviewToneMapping.None)), "Reset Scene resets the environment, the shadows and the tone mapping too");
             }
             finally
             {
@@ -133,6 +136,14 @@ namespace Yozolab.YoluPainter.Tests
                     w.Shading = PreviewShading.Material; w.RefreshPreviewTextures();
                 });
             yield return ("filtered-out", () => w.MaterialFilter = "no property is called this");
+            // 見せるマテリアルをシェーダーから作り、チャンネルの流し込み先を開いて 1 つを手で指定（Model/TexturePaintWindow.PreviewMaterial.cs）
+            yield return ("chosen-shader", () =>
+            {
+                w.MaterialFilter = ""; w.SetModel(Model(new Material(Shader.Find("Unlit/Texture")))); w.Document.AddLayer("Height"); Paint(w.Document, PaintChannel.Height);
+                Assert.That(w.UsePreviewShader(Shader.Find("Standard")), Is.True, w.StatusMessage);
+                Assert.That(w.SetChannelRoute(PaintChannel.Height, "_DetailMask", PreviewPacking.Value), Is.True, w.StatusMessage);
+                w.MaterialRoutesOpen = true; w.Shading = PreviewShading.Material; w.RefreshPreviewTextures();
+            });
         }
 
         GameObject Model(Material material)

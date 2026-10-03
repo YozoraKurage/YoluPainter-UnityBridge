@@ -44,6 +44,7 @@ namespace Yozolab.YoluPainter.Editor
             if((canvasRect.width>0||canvasRotating)&&HandleCanvasRotateInput(e))return; // R ＋ ドラッグ・Shift ＋ 中ボタンのドラッグで表示を回す
             if(HandleShapeGizmo(e))return; // 3D ビューの形のグラデーションのハンドル（Model/TexturePaintWindow.ShapeGizmo.cs）
             if(HandleResourceDrop(e))return; // アセットのパネル・Project ウィンドウから落とした画像をレイヤーとして置く
+            if(stroke==null && HandleLightingDrag(e))return; // Ctrl+右ドラッグで環境と光を回す（Model/TexturePaintWindow.Display3D.cs）
             if(preview.HasModel && stroke==null && preview.HandleNavigation(surfaceRect,e)){Repaint();return;}
             if(canvasRect.Contains(e.mousePosition))
             {

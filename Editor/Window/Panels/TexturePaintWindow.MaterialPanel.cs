@@ -31,8 +31,9 @@ namespace Yozolab.YoluPainter.Editor
             return r;
         }
 
-        /// <summary>今のセットのスロットの元のマテリアル（モデルが無い・割り当てが無ければ null）。</summary>
-        internal Material PanelMaterial => preview != null && preview.HasModel ? preview.SourceMaterial(materialSlot) : null;
+        /// <summary>今のセットのマテリアル表示が見せるマテリアル（選んだもの、選んでいなければ元のマテリアル。モデルが無い・割り当てが無ければ null。
+        /// Model/TexturePaintWindow.PreviewMaterial.cs）。</summary>
+        internal Material PanelMaterial { get { SyncMaterialChoices(); return ViewMaterialOf(currentSet); } }
 
         /// <summary>シェーダーのプロパティ（シェーダーと lilToon の検査が同じあいだは作り直さない）。</summary>
         internal List<MaterialPropertyInfo> MaterialProperties(Material source)
@@ -63,22 +64,25 @@ namespace Yozolab.YoluPainter.Editor
             bool was = GUI.enabled; GUI.enabled = was && stroke == null;
             try
             {
+                // 1 行目: 見せるマテリアル（元のマテリアル・プロジェクトのマテリアル・シェーダーから選ぶ。Model/TexturePaintWindow.PreviewMaterial.cs）。
+                // 元のマテリアルが無いスロットでも選べる
+                if (preview != null && preview.HasModel) DrawPreviewMaterialRow(rows, source);
                 if (source == null)
                 {
-                    PaintGui.Notice(rows, preview != null && preview.HasModel ? L.Tr("This material slot has no source material (the demo cube or an unassigned slot). Load a model to see and adjust its material.") : L.Tr("Load a model to see and adjust its material."), "info", PaintTheme.TextDim);
+                    PaintGui.Notice(rows, preview != null && preview.HasModel ? L.Tr("This material slot has no source material (the demo cube or an unassigned slot). Choose a material or a shader above to see the painted maps with it.") : L.Tr("Load a model to see and adjust its material."), "info", PaintTheme.TextDim);
                     return;
                 }
                 var binding = preview.MaterialBinding(materialSlot);
-                var row = rows.Row();
-                PaintGui.ValueBox(new Rect(row.x, row.y, row.width - 28, row.height), L.Tr("Material"), source.name, MaterialLabelWidth, PaintTheme.Text, AssetDatabase.GetAssetPath(source), true);
-                if (PaintGui.IconButton(MaterialSpot("material.ping", new Rect(row.xMax - 24, row.y, 24, row.height)), "target", L.Tr("Show the material in the Project window"), false, true, 16)) EditorGUIUtility.PingObject(source);
                 PaintGui.ValueBox(rows.Row(), L.Tr("Shader"), source.shader != null ? source.shader.name : "-", MaterialLabelWidth, null, null, true);
                 bool usable = binding != null && binding.CanShow;
-                PaintGui.ValueBox(rows.Row(), L.Tr("3D view"), binding?.Summary ?? "-", MaterialLabelWidth, usable ? PaintTheme.TextDim : PaintTheme.Warning, binding?.Unusable, true);
+                var viewRow = rows.Row();
+                PaintGui.ValueBox(new Rect(viewRow.x, viewRow.y, viewRow.width - 28, viewRow.height), L.Tr("3D view"), binding?.Summary ?? "-", MaterialLabelWidth, usable ? PaintTheme.TextDim : PaintTheme.Warning, binding?.Unusable, true);
+                DrawChannelRoutesToggle(new Rect(viewRow.xMax - 24, viewRow.y, 24, viewRow.height), binding); // 流し込み先の一覧を開く
                 bool on = PaintGui.ToggleButton(MaterialSpot("material.shading", rows.Row(24)), L.Tr("Show This Material in 3D"), previewShading == PreviewShading.Material,
                     L.Tr("Material shading: the 3D view draws a preview copy of this material with the painted maps. Off: neutral shading."), "auto_awesome", GUI.enabled);
                 if (on != (previewShading == PreviewShading.Material)) Shading = on ? PreviewShading.Material : PreviewShading.Neutral;
                 DrawMaterialNotes(rows, source, binding);
+                DrawChannelRoutes(rows, source, binding);
                 materialFilter = PaintGui.SearchField(MaterialSpot("material.filter", rows.Row()), materialFilter, L.Tr("Filter properties"), L.Tr("Show the properties whose name or description contains this")) ?? "";
                 // 下の 2 行（変えた数・ボタン）を残して、残りをプロパティの一覧にする
                 const float footer = 4 + 18 + 4 + 26 + 8;
@@ -261,6 +265,11 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (stroke != null) { message = L.Tr("Finish the stroke first."); return; }
             var source = PanelMaterial;
+            if (IsMadeMaterial(source)) // シェーダーから作ったプレビューだけのマテリアル（Model/TexturePaintWindow.PreviewMaterial.cs）
+            {
+                string why = L.Tr("{0} was made from a shader for the preview only, so there is no material asset to apply to.", source.name);
+                message = L.Tr("Not applied: {0}", why); Dialogs.Inform(L.Tr("Cannot apply to the material"), why); return;
+            }
             var plan = PreviewMaterialApply.Plan(source, materialEdits);
             if (!plan.CanApply) { message = L.Tr("Not applied: {0}", string.Join(" ", plan.Refusals)); Dialogs.Inform(L.Tr("Cannot apply to the material"), plan.Describe()); return; }
             if (!Dialogs.Confirm(L.Tr("Apply to the material?"), plan.Describe(), L.Tr("Apply"), L.Tr("Cancel"))) { message = L.Tr("Not applied; the material is unchanged."); return; }
@@ -282,6 +291,7 @@ namespace Yozolab.YoluPainter.Editor
                 reconciledSnapshot = preview.SnapshotRevision;
                 var present = new HashSet<Material>();
                 for (int i = 0; i < preview.MaterialSlotCount; i++) { var m = preview.SourceMaterial(i); if (m != null) present.Add(m); }
+                foreach (var set in TextureSets) { var chosen = ViewMaterialOf(set); if (chosen != null) present.Add(chosen); } // 選んだマテリアル（PreviewMaterial.cs）
                 var gone = materialEdits.Materials.Where(m => !present.Contains(m)).ToList();
                 int dropped = 0; foreach (var m in gone) dropped += materialEdits.RevertAll(m);
                 if (dropped > 0) { message = L.Tr("Discarded {0} preview-only material change(s) of materials that are not in this model (they were never applied).", dropped); Repaint(); }

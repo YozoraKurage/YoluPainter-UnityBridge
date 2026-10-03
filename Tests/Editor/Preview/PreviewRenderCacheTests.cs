@@ -95,6 +95,51 @@ namespace Yozolab.YoluPainter.Tests
             }
         }
 
+        /// <summary>3D の表示の入力（環境・影・トーンマッピング・照明なしの見せ方・スロットごとに選んだマテリアルと流し込み先・環境のテクスチャ）も
+        /// 1 回ずつ描かせ、同じ値を入れ直しても描かない。トーンマッピングを当てた絵も貼り直せる。</summary>
+        [Test] public void TheDisplayInputsDrawItOnceMoreAndRepeatsDoNot()
+        {
+            GpuTests.RequireWorkingShader(PreviewEnvironment.ShaderName); GpuTests.RequireWorkingShader("Hidden/YoluPainter/PreviewToneMap");
+            using (var p = Demo())
+            {
+                var scene = PreviewSceneSettings.Default(); p.Scene = scene;
+                var material = new Material(Shader.Find("Unlit/Texture")); made.Add(material);
+                var routes = new List<PreviewChannelRoute>();
+                var latLong = Solid(new Color32(90, 120, 200, 255));
+                var unlit = new Dictionary<int, Texture> { { 0, Solid(new Color32(1, 2, 3, 255)) } };
+                var changes = new List<(string, Action, Action)>
+                {
+                    ("the environment", () => scene.environment = PreviewEnvironmentSource.Sky, null),
+                    ("its rotation", () => scene.environmentRotation = 40, null),
+                    ("its brightness", () => scene.environmentIntensity = 2, null),
+                    ("its background switch", () => scene.environmentBackground = !scene.environmentBackground, null),
+                    ("the background blur", () => scene.environmentBlur = .8f, null),
+                    ("the sky colour", () => scene.skyZenith = Color.red, null),
+                    ("the shadows", () => scene.shadows = true, null),
+                    ("their softness", () => scene.shadowSoftness = .9f, null),
+                    ("the tone mapping", () => scene.toneMapping = PreviewToneMapping.Aces, null),
+                    ("the exposure", () => scene.exposure = 1, null),
+                    ("the environment texture", () => { scene.environment = PreviewEnvironmentSource.Texture; p.EnvironmentTexture = latLong; }, () => p.EnvironmentTexture = latLong),
+                    ("the unlit view", () => p.SetUnlitTextures(unlit), null),
+                    ("back to the shading", () => p.SetUnlitTextures(null), null),
+                    ("a chosen material", () => p.SetMaterialChoice(0, material, routes), () => p.SetMaterialChoice(0, material, routes)),
+                    ("a route added to the same list", () => { routes.Add(new PreviewChannelRoute(PaintChannel.Color, "", PreviewPacking.Color)); p.SetMaterialChoice(0, material, routes); }, () => p.SetMaterialChoice(0, material, routes)),
+                    ("the own material again", () => p.SetMaterialChoice(0, null, null), () => p.SetMaterialChoice(0, null, null)),
+                };
+                p.RenderCached(View, 1);
+                foreach (var (name, change, repeat) in changes)
+                {
+                    int before = p.RenderCount; now += 1;
+                    change(); p.RenderCached(View, 1);
+                    Assert.That(p.RenderCount, Is.EqualTo(before + 1), name + " draws the 3D view again");
+                    now += 1; repeat?.Invoke(); var again = p.RenderCached(View, 1);
+                    Assert.That(p.RenderCount, Is.EqualTo(before + 1), name + ": the same value again draws nothing");
+                    Assert.That(again, Is.Not.Null);
+                }
+                Assert.That(p.ToneMapped, Is.True, "the reused picture above was the tone-mapped one");
+            }
+        }
+
         [Test] public void TheFrameRateLimitHoldsChangesBackAndDrawsThemLater()
         {
             using (var p = Demo(10))

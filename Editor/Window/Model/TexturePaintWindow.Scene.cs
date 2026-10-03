@@ -44,12 +44,17 @@ namespace Yozolab.YoluPainter.Editor
 
         void OpenScenePopup(Rect at) { if (!LayoutOverride.HasValue) PopupWindow.Show(at, new PreviewScenePopup(this)); }
 
-        internal const float ScenePanelWidth = 280, ScenePanelHeight = 392;
+        /// <summary>小さな窓の大きさ（左の列がカメラと照明、右の列が環境・影・トーンマッピング。Model/TexturePaintWindow.Display3D.cs）。</summary>
+        internal const float ScenePanelWidth = 2 * SceneColumnWidth, ScenePanelHeight = 436, SceneColumnWidth = 280;
 
         /// <summary>擬似的なシーンの欄（小さな窓の中身。オフスクリーンの描画の試験もこれを描く）。</summary>
         internal void DrawScenePanel(Rect r)
         {
             PaintGui.Fill(r, PaintTheme.PanelBg);
+            float column = Mathf.Min(SceneColumnWidth, r.width / 2);
+            DrawDisplayColumn(new Rect(r.x + column, r.y, r.width - column, r.height));
+            PaintGui.VLine(r.x + column, r.y + 8, r.yMax - 8, PaintTheme.Border);
+            r = new Rect(r.x, r.y, column, r.height);
             var s = PreviewScene; var rows = new UiRows(r, 8);
             bool was = GUI.enabled; GUI.enabled = was && stroke == null;
             try
@@ -82,7 +87,7 @@ namespace Yozolab.YoluPainter.Editor
                 SceneColor(rows, L.Tr("Ambient"), s.ambient, v => s.ambient = v, L.Tr("The light on the shaded side"));
                 SceneColor(rows, L.Tr("Background"), s.background, v => s.background = v);
                 rows.Space(2);
-                if (PaintGui.FitButton(rows.Row(24), L.Tr("Reset Scene"), false, GUI.enabled, L.Tr("The light, the ambient and the background back to the default (the camera stays)"))) ResetPreviewScene();
+                if (PaintGui.FitButton(rows.Row(24), L.Tr("Reset Scene"), false, GUI.enabled, L.Tr("The light, the ambient, the background, the environment, the shadows and the tone mapping back to the default (the camera stays)"))) ResetPreviewScene();
                 PaintGui.Text(rows.Row(18), L.Tr("Only the preview; the scene's lights are not changed."), PaintTheme.LabelSmall);
             }
             finally { GUI.enabled = was; }

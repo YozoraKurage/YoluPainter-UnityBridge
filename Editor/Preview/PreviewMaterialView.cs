@@ -28,18 +28,22 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public const string PackShaderName = "Hidden/YoluPainter/PreviewChannelPack";
         sealed class Slot
         {
-            public PreviewMaterialBinding Binding;
+            public PreviewMaterialBinding Auto, Binding; public string RoutesKey;
             public Material Display;
-            public int SyncedDirty = -1, SyncedEdits = -1; public Shader SyncedShader;
+            public int SyncedDirty = -1, SyncedEdits = -1; public Shader SyncedShader; public Material SyncedSource; public PreviewMaterialBinding SyncedBinding;
             public readonly Dictionary<string, RenderTexture> Packed = new Dictionary<string, RenderTexture>();
             public string Reason;
         }
         readonly Func<int, Material> sourceOf;
+        readonly Func<int, IReadOnlyList<PreviewChannelRoute>> routesOf;
         readonly List<Slot> slots = new List<Slot>();
         Material pack;
         bool packChecked; string packProblem;
 
-        public PreviewMaterialView(Func<int, Material> sourceOf) { this.sourceOf = sourceOf ?? throw new ArgumentNullException(nameof(sourceOf)); }
+        /// <param name="sourceOf">スロットの見せるマテリアル（元のマテリアルか、選んだマテリアル・シェーダーから作ったもの）。</param>
+        /// <param name="routesOf">スロットの手で決めた流し込み先（null なら自動だけ）。</param>
+        public PreviewMaterialView(Func<int, Material> sourceOf, Func<int, IReadOnlyList<PreviewChannelRoute>> routesOf = null)
+        { this.sourceOf = sourceOf ?? throw new ArgumentNullException(nameof(sourceOf)); this.routesOf = routesOf; }
 
         /// <summary>マテリアルの欄で変えた値（複製に重ねる）。null なら重ねない。</summary>
         public PreviewMaterialEdits Edits { get; set; }
@@ -57,8 +61,12 @@ namespace Yozolab.YoluPainter.Editor.Preview
         {
             if (slot < 0 || slot >= slots.Count) return null;
             var s = slots[slot]; var source = sourceOf(slot);
-            if (s.Binding == null || s.Binding.Source != source || source != null && (s.Binding.SourceDirtyCount != UnityEditor.EditorUtility.GetDirtyCount(source) || s.Binding.ShaderId != (source.shader != null ? source.shader.GetInstanceID() : 0)))
-                s.Binding = PreviewMaterialBindings.Resolve(source);
+            bool resolved = false;
+            if (s.Auto == null || s.Auto.Source != source || source != null && (s.Auto.SourceDirtyCount != UnityEditor.EditorUtility.GetDirtyCount(source) || s.Auto.ShaderId != (source.shader != null ? source.shader.GetInstanceID() : 0)))
+            { s.Auto = PreviewMaterialBindings.Resolve(source); resolved = true; }
+            var routes = routesOf?.Invoke(slot);
+            string key = routes == null ? "" : string.Join("|", routes.Where(r => r != null).Select(r => r.Key));
+            if (resolved || s.Binding == null || key != s.RoutesKey) { s.Binding = PreviewMaterialBindings.WithRoutes(s.Auto, routes); s.RoutesKey = key; }
             return s.Binding;
         }
 
@@ -80,7 +88,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (needsPacking && PackProblem() != null) { s.Reason = PackProblem(); ReleaseDisplay(s); return; }
             try
             {
-                Sync(s, b.Source);
+                Sync(s, b.Source, b);
                 foreach (var group in b.Channels.GroupBy(c => c.Property))
                 {
                     // まず元のテクスチャとキーワードに戻し（使わなくなったチャンネルが残らないように）、塗った中身があれば入れる
@@ -103,20 +111,23 @@ namespace Yozolab.YoluPainter.Editor.Preview
         static void SetKeyword(Material m, string keyword, bool on) { if (on) m.EnableKeyword(keyword); else m.DisableKeyword(keyword); }
 
         /// <summary>複製を元のマテリアルに合わせる（作る・シェーダーの差し替え・元の値の変更・欄の変更のとき）。</summary>
-        void Sync(Slot s, Material source)
+        void Sync(Slot s, Material source, PreviewMaterialBinding binding)
         {
             int dirty = UnityEditor.EditorUtility.GetDirtyCount(source), edits = Edits?.Version ?? 0;
+            if (s.Display != null && s.SyncedSource != source) ReleaseDisplay(s); // 見せるマテリアルを選び直した
             if (s.Display == null)
             {
                 s.Display = new Material(source) { hideFlags = HideFlags.HideAndDontSave, name = source.name + " (material preview only)" };
-                s.SyncedDirty = dirty; s.SyncedEdits = -1; s.SyncedShader = source.shader;
+                s.SyncedDirty = dirty; s.SyncedEdits = -1; s.SyncedShader = source.shader; s.SyncedSource = source;
             }
             if (s.SyncedShader != source.shader) { s.Display.shader = source.shader; s.SyncedDirty = -1; s.SyncedShader = source.shader; }
-            if (s.SyncedDirty != dirty || s.SyncedEdits != edits)
+            // 対応が変わった（手で決めた流し込み先など）ら、外れたプロパティが前の中身のまま残らないよう元の値から入れ直す
+            if (s.SyncedDirty != dirty || s.SyncedEdits != edits || !ReferenceEquals(s.SyncedBinding, binding))
             {
                 s.Display.CopyPropertiesFromMaterial(source);
+                s.Display.shaderKeywords = source.shaderKeywords;
                 Edits?.ApplyTo(source, s.Display);
-                s.SyncedDirty = dirty; s.SyncedEdits = edits;
+                s.SyncedDirty = dirty; s.SyncedEdits = edits; s.SyncedBinding = binding;
             }
         }
 
@@ -151,7 +162,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                     pack.SetTexture("_SecondTex", hasRough ? rough : Texture2D.blackTexture);
                     pack.SetTexture("_OrigTex", original != null ? original : Texture2D.whiteTexture);
                     pack.SetVector("_Flags", new Vector4(hasMetal ? 1 : 0, hasRough ? 1 : 0, original != null ? 1 : 0, 0));
-                    pack.SetVector("_Consts", new Vector4(b.Source.GetFloat("_Metallic"), b.Source.GetFloat("_Glossiness"), 0, 0));
+                    pack.SetVector("_Consts", new Vector4(b.Source.HasProperty("_Metallic") ? b.Source.GetFloat("_Metallic") : 0, b.Source.HasProperty("_Glossiness") ? b.Source.GetFloat("_Glossiness") : .5f, 0, 0));
                     try { Blit(hasMetal ? metal : Texture2D.blackTexture, target, 1, hasRough ? rough : null); }
                     finally { pack.SetTexture("_SecondTex", null); pack.SetTexture("_OrigTex", null); }
                     return target;
@@ -211,11 +222,11 @@ namespace Yozolab.YoluPainter.Editor.Preview
         void ReleaseDisplay(Slot s)
         {
             if (s.Display != null) Object.DestroyImmediate(s.Display);
-            s.Display = null; s.SyncedDirty = -1; s.SyncedEdits = -1; s.SyncedShader = null;
+            s.Display = null; s.SyncedDirty = -1; s.SyncedEdits = -1; s.SyncedShader = null; s.SyncedSource = null; s.SyncedBinding = null;
             foreach (var rt in s.Packed.Values) DestroyTarget(rt);
             s.Packed.Clear();
         }
-        void Release(Slot s) { ReleaseDisplay(s); s.Binding = null; s.Reason = null; }
+        void Release(Slot s) { ReleaseDisplay(s); s.Auto = null; s.Binding = null; s.RoutesKey = null; s.Reason = null; }
         static void DestroyTarget(RenderTexture rt)
         {
             if (rt == null) return;

@@ -33,7 +33,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>持ち主の窓を閉じたら別のウィンドウも閉じる（配置には別のウィンドウのまま覚え、次に開いたときにまた出す）。</summary>
         void OnDestroy()
         {
-            WarnUnappliedMaterialEdits();
+            WarnUnappliedMaterialEdits(); DisposeMadeMaterials(); // シェーダーから作ったプレビューのマテリアル（Model/TexturePaintWindow.PreviewMaterial.cs）
             if (PainterPanelWindow.Quitting) return;
             foreach (var w in PanelWindows.ToList()) w.CloseWithOwner();
         }

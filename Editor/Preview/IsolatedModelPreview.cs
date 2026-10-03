@@ -106,7 +106,31 @@ namespace Yozolab.YoluPainter.Editor.Preview
         // ───────────── 描き方（中立 / マテリアル） ─────────────
 
         PreviewMaterialView MaterialView => materialView ?? (materialView = CreateMaterialView());
-        PreviewMaterialView CreateMaterialView() { var view = new PreviewMaterialView(SourceMaterial); view.Reset(materials.Count); return view; }
+        PreviewMaterialView CreateMaterialView() { var view = new PreviewMaterialView(ViewMaterial, RoutesOf); view.Reset(materials.Count); return view; }
+
+        // スロットごとに選んだ、マテリアル表示で見せるマテリアル（null なら元のマテリアル）と手で決めた流し込み先
+        readonly Dictionary<int, (Material material, IReadOnlyList<PreviewChannelRoute> routes)> materialChoices = new Dictionary<int, (Material, IReadOnlyList<PreviewChannelRoute>)>();
+        readonly Dictionary<int, string> materialChoiceKeys = new Dictionary<int, string>(); // 前に入れた流し込み先（窓は同じ一覧を中で書き換える）
+        /// <summary>
+        /// マテリアル表示でそのスロットを見せるマテリアルを選ぶ（null なら元のマテリアル）。routes は手で決めた流し込み先（null か空なら自動）。
+        /// 見せるのはそのマテリアルの複製で、選んだマテリアル・元のマテリアルには触れない。モデルを読み替えると選びは消える（呼ぶ側が入れ直す）。
+        /// </summary>
+        public void SetMaterialChoice(int slot, Material material, IReadOnlyList<PreviewChannelRoute> routes)
+        {
+            ThrowIfDisposed();
+            if (slot < 0 || slot >= materials.Count) return;
+            // 窓は描くたびに入れ直すので、変わったときだけ描き直させる（流し込み先は中身で比べる）
+            materialChoices.TryGetValue(slot, out var before);
+            string routesKey = routes == null ? "" : string.Join("|", routes.Where(r => r != null).Select(r => r.Key));
+            materialChoiceKeys.TryGetValue(slot, out string beforeKey);
+            if (before.material != material || (beforeKey ?? "") != routesKey) contentVersion++;
+            materialChoiceKeys[slot] = routesKey;
+            if (material == null && (routes == null || routes.Count == 0)) materialChoices.Remove(slot);
+            else materialChoices[slot] = (material, routes);
+        }
+        /// <summary>マテリアル表示がそのスロットで見せるマテリアル（選んだもの。選んでいなければ元のマテリアル）。</summary>
+        public Material ViewMaterial(int slot) => materialChoices.TryGetValue(slot, out var c) && c.material != null ? c.material : SourceMaterial(slot);
+        IReadOnlyList<PreviewChannelRoute> RoutesOf(int slot) => materialChoices.TryGetValue(slot, out var c) ? c.routes : null;
 
         /// <summary>
         /// 3D ビューの描き方。Material では、各スロットを元のマテリアルの複製（元のシェーダー・キーワード・値）で描き、塗った中身は
@@ -203,7 +227,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 {
                     int slot = slots[sub];
                     var display = shading == PreviewShading.Material ? MaterialView.Display(slot) : null;
-                    shared[sub] = display != null ? display : materials[slot];
+                    shared[sub] = ShowsUnlit ? UnlitMaterial(slot) : display != null ? display : materials[slot]; // 照明なしの見せ方（Display.cs）
                 }
                 renderer.sharedMaterials = shared;
             }
@@ -659,25 +683,25 @@ namespace Yozolab.YoluPainter.Editor.Preview
         Texture DrawPreview(Rect rect)
         {
             foreach (var material in materials) material.SetFloat("_PreviewLit", LitPreview ? 1 : 0);
-            ApplyScene(); UpdateSymmetryPlaneObject(); UpdateRegionHighlightObject();
-            Texture texture = null;
+            ApplyScene(); UpdateSymmetryPlaneObject(); UpdateRegionHighlightObject(); PrepareDisplay();
+            Texture texture = null, toneMappedTexture = null;
             // PreviewRenderUtility.Render in Unity 2022.3 temporarily changes this editor flag
             // without its own finally. Preserve it here even if a render callback throws.
             bool previousPipelineFlag = Unsupported.useScriptableRenderPipeline;
             preview.BeginPreview(rect, GUIStyle.none);
             try
             {
-                DrawShapeOverlay();
+                DrawShapeOverlay(); DrawDisplayExtras(rect.height * EditorGUIUtility.pixelsPerPoint);
                 // G1 neutral shader uses the built-in preview rendering path explicitly.
                 // No global shader keywords, source materials or project pipeline settings are changed.
-                preview.Render(false, false);
+                RenderCamera(); toneMappedTexture = FinishDisplay(); // preview.Render と同じ手順に環境を足したもの・トーンマッピング（Display.cs）
             }
             finally
             {
                 try { texture = preview.EndPreview(); }
                 finally { Unsupported.useScriptableRenderPipeline = previousPipelineFlag; }
             }
-            return texture;
+            return toneMappedTexture != null ? toneMappedTexture : texture; // トーンマッピングを当てたら 8 bit の描き先（Display.cs）
         }
         /// <summary>モデルの空間の点が 3D ビューのどこに見えるか（GUI 座標）。カメラの後ろなら false。</summary>
         public bool TryWorldToGui(Rect viewRect, Vector3 world, out Vector2 gui)
@@ -900,13 +924,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
         {
             ThrowIfDisposed();
             if (!HasModel) return null;
-            EnsurePreview(); var rect = new Rect(0, 0, width, height); UpdateCamera(rect); ApplyScene(); UpdateSymmetryPlaneObject(); UpdateRegionHighlightObject();
+            EnsurePreview(); var rect = new Rect(0, 0, width, height); UpdateCamera(rect); ApplyScene(); UpdateSymmetryPlaneObject(); UpdateRegionHighlightObject(); PrepareDisplay();
             ForgetRenderedPicture(); // 3D ビューと同じ描き先に描くので、次の 3D ビューの描画は描き直す
             bool previousPipelineFlag = Unsupported.useScriptableRenderPipeline, previousAsync = ShaderUtil.allowAsyncCompilation;
             // 試験の画像は、元のシェーダーのコンパイルを待った絵にする（非同期のあいだは仮のシアンで描かれる）
             ShaderUtil.allowAsyncCompilation = false;
             preview.BeginStaticPreview(rect);
-            try { DrawShapeOverlay(); preview.Render(false, false); return preview.EndStaticPreview(); }
+            try { DrawShapeOverlay(); DrawDisplayExtras(height); RenderCamera(); FinishDisplay(true); return preview.EndStaticPreview(); }
             finally { Unsupported.useScriptableRenderPipeline = previousPipelineFlag; ShaderUtil.allowAsyncCompilation = previousAsync; }
         }
         public bool HandleNavigation(Rect rect, Event current)
@@ -954,7 +978,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             foreach (var e in entries) e.Skin?.Dispose();
             entries.Clear();
             skeleton?.Dispose(); skeleton = null; humanAvatar = null; humanRoot = null;
-            slotRenderers.Clear(); materialView?.Reset(0);
+            slotRenderers.Clear(); materialView?.Reset(0); DisposeUnlit(); materialChoices.Clear(); materialChoiceKeys.Clear();
             DestroyTail(objects, 0); DestroyTail(meshes, 0); DestroyTail(materials, 0);
             sourceTextures.Clear(); sourceColors.Clear(); sourceMaterials.Clear(); slotNames.Clear();
         }
@@ -966,7 +990,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public void Dispose()
         {
             if (disposed) return;
-            ClearModel(); DisposeSymmetryPlane(); DisposeShapeOverlay(); DisposeRegionHighlight();
+            ClearModel(); DisposeSymmetryPlane(); DisposeShapeOverlay(); DisposeRegionHighlight(); DisposeDisplay();
             materialView?.Dispose(); materialView = null;
             if (preview != null) { preview.Cleanup(); preview = null; }
             disposed = true;

@@ -24,7 +24,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             Texture current = null;
             // マテリアル表示が Normal を使うなら、照明を切っていても出力を作る（_BumpMap などに入れる）
-            bool wanted = previewNormals || MaterialMaps(materialSlot, PaintChannel.Normal);
+            bool wanted = previewNormals || MaterialMaps(materialSlot, PaintChannel.Normal) || ModelShowWantsNormal; // Normal だけを見せるときも
             if (!wanted || !YlpContent.UsedChannels(document).Contains(PaintChannel.Normal)) DisposeLighting();
             else if (ShowsNormalOutput && normalOutput?.Texture != null) current = normalOutput.Texture; // 表示用の出力をそのまま使う
             else

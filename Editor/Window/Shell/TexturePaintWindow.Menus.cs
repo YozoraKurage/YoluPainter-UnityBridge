@@ -169,6 +169,7 @@ namespace Yozolab.YoluPainter.Editor
             Item(m, "Light with Normal Output", () => PreviewNormals = !previewNormals, true, previewNormals);
             m.AddSeparator("");
             ShadingMenuItems(m);
+            ModelShowMenuItems(m); // 見せるもの（Model/TexturePaintWindow.ModelShow.cs）
             m.AddSeparator("");
             SceneMenuItems(m);
         }
@@ -204,7 +205,8 @@ namespace Yozolab.YoluPainter.Editor
 
         void HelpMenu(GenericMenu m)
         {
-            Item(m, "Keyboard Shortcuts", () => Dialogs.Inform(L.Tr("Keyboard Shortcuts"), L.Tr(ShortcutHelp) + "\n" + L.Tr("2D view: - / ^ (or =) rotate 15° · R + drag rotates (with Shift in 15° steps) · Shift + middle drag rotates · Shift+R resets the rotation · H flips horizontally · Ctrl+0 also resets the rotation") + "\n" + L.Tr("Shift+W ID colour select (click a part on the 2D canvas or the 3D view; needs a baked ID map)")));
+            Item(m, "Keyboard Shortcuts", () => Dialogs.Inform(L.Tr("Keyboard Shortcuts"), L.Tr(ShortcutHelp) + "\n" + L.Tr("2D view: - / ^ (or =) rotate 15° · R + drag rotates (with Shift in 15° steps) · Shift + middle drag rotates · Shift+R resets the rotation · H flips horizontally · Ctrl+0 also resets the rotation") + "\n" + L.Tr("Shift+W ID colour select (click a part on the 2D canvas or the 3D view; needs a baked ID map)")
+                + "\n" + L.Tr("3D view: C shows one channel at a time (unlit) · Shift+B one baked mesh map at a time · Shift+C the material · Ctrl + right drag turns the environment and the light")));
             Item(m, "Implementation Limits", () => Dialogs.Inform(L.Tr("Implementation Limits"), L.Tr(LimitsHelp)));
             Item(m, "Plugins…", ShowPluginList);
         }

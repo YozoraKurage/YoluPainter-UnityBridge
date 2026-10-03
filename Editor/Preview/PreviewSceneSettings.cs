@@ -9,6 +9,14 @@ namespace Yozolab.YoluPainter.Editor.Preview
     /// <summary>照明のプリセット。View・Left・Right・Rim・Above は今のカメラの向きから決める（決めた後は世界の向きで残る）。</summary>
     public enum PreviewLightPreset { Default, View, Left, Right, Rim, Above }
 
+    /// <summary>3D ビューの環境: None は前の版と同じ一様な環境光、Sky は内蔵の手続きの空（天頂・地平線・地面の色の勾配。画像は使わない）、
+    /// Texture は Unity のプロジェクトのテクスチャ（Cubemap か緯度経度の Texture2D。HDR でもよい）。</summary>
+    public enum PreviewEnvironmentSource { None, Sky, Texture }
+
+    /// <summary>3D ビューの絵だけに当てるトーンマッピング（テクスチャの値・書き出し・2D には当てない）。None は 0〜1 で切るだけ（前の版と同じ）。
+    /// Neutral と ACES は Unity の後処理（URP・Post Processing）と同じ名前の曲線。</summary>
+    public enum PreviewToneMapping { None, Neutral, Aces }
+
     /// <summary>
     /// 3D ビューの擬似的なシーン: 主な光の向き（世界の空間で、光の来る向き = 方位 yaw と高さ pitch）・強さ・色、環境光の色、背景の色。
     /// 中立の表示（PreviewSurface.shader）とマテリアルの表示（PreviewRenderUtility の光と環境光）の両方に効く。プレビューの中だけで、
@@ -29,6 +37,35 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>環境光（灰色 0.5 が既定。中立の表示では 0.7 倍が影の側の明るさ = 0.35、マテリアルの表示では 0.4 倍が環境光）。</summary>
         public Color ambient = new Color(.5f, .5f, .5f, 1);
         public Color background = DefaultBackground;
+
+        // ── 環境（HDRI）。既定は None（前の版と同じ絵） ──
+        public PreviewEnvironmentSource environment = PreviewEnvironmentSource.None;
+        /// <summary>環境のテクスチャのアセットの GUID（Texture のときだけ使う。消えていたら内蔵の空で描いて知らせる）。</summary>
+        public string environmentTexture = "";
+        /// <summary>環境の向き（上の軸のまわりの度。世界の空間）。</summary>
+        public float environmentRotation;
+        /// <summary>環境の明るさ（拡散と映り込みと背景に掛ける。1 が既定）。</summary>
+        public float environmentIntensity = 1;
+        /// <summary>背景に環境を映すか（false なら背景の色）。</summary>
+        public bool environmentBackground = true;
+        /// <summary>背景に映す環境のぼかし（0〜1。0 は元の解像度）。</summary>
+        public float environmentBlur = .3f;
+        /// <summary>内蔵の空の色（天頂・地平線・地面）。</summary>
+        public Color skyZenith = DefaultSkyZenith, skyHorizon = DefaultSkyHorizon, skyGround = DefaultSkyGround;
+        public static readonly Color DefaultSkyZenith = new Color(.42f, .55f, .75f, 1), DefaultSkyHorizon = new Color(.86f, .87f, .88f, 1), DefaultSkyGround = new Color(.24f, .23f, .22f, 1);
+
+        // ── 影（主な光からモデル自身への影）。既定はオフ ──
+        public bool shadows;
+        /// <summary>影の柔らかさ（0〜1。0 は影のマップの 1 画素ぶん、1 はモデルの大きさの約 4%）。</summary>
+        public float shadowSoftness = .25f;
+
+        // ── トーンマッピングと露出（3D ビューの絵だけ）。既定は None・0（前の版と同じ絵） ──
+        public PreviewToneMapping toneMapping = PreviewToneMapping.None;
+        /// <summary>露出（EV。+1 で 2 倍の明るさ）。</summary>
+        public float exposure;
+
+        /// <summary>トーンマッピングか露出を当てるか（当てないときは前の版と同じ 8 bit の描き先で描く）。</summary>
+        public bool UsesToneMapping => toneMapping != PreviewToneMapping.None || Mathf.Abs(exposure) > 1e-4f;
 
         public static PreviewSceneSettings Default() => new PreviewSceneSettings();
         public PreviewSceneSettings Clone() => (PreviewSceneSettings)MemberwiseClone();
@@ -72,6 +109,16 @@ namespace Yozolab.YoluPainter.Editor.Preview
             }
         }
 
+        static float Finite(float value, float fallback) => float.IsNaN(value) || float.IsInfinity(value) ? fallback : value;
+
+        /// <summary>照明を上の軸のまわりに回す（環境と主な光を一緒に。3D ビューの Ctrl+右ドラッグ）。</summary>
+        public void RotateLighting(float degrees)
+        {
+            if (float.IsNaN(degrees) || float.IsInfinity(degrees)) return;
+            environmentRotation = Mathf.Repeat(environmentRotation + degrees + 180, 360) - 180;
+            lightYaw = Mathf.Repeat(lightYaw + degrees + 180, 360) - 180;
+        }
+
         /// <summary>値を正しい範囲に収める（壊れた・古いシリアライズ）。</summary>
         public PreviewSceneSettings Normalized()
         {
@@ -79,6 +126,14 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (float.IsNaN(lightPitch) || float.IsInfinity(lightPitch)) lightPitch = Default().lightPitch;
             lightYaw = Mathf.Repeat(lightYaw + 180, 360) - 180; lightPitch = Mathf.Clamp(lightPitch, -89, 89);
             intensity = float.IsNaN(intensity) || float.IsInfinity(intensity) ? 1 : Mathf.Clamp(intensity, 0, 4);
+            if (!Enum.IsDefined(typeof(PreviewEnvironmentSource), environment)) environment = PreviewEnvironmentSource.None;
+            if (environmentTexture == null) environmentTexture = "";
+            environmentRotation = Finite(environmentRotation, 0); environmentRotation = Mathf.Repeat(environmentRotation + 180, 360) - 180;
+            environmentIntensity = Mathf.Clamp(Finite(environmentIntensity, 1), 0, 8);
+            environmentBlur = Mathf.Clamp01(Finite(environmentBlur, .3f));
+            shadowSoftness = Mathf.Clamp01(Finite(shadowSoftness, .25f));
+            if (!Enum.IsDefined(typeof(PreviewToneMapping), toneMapping)) toneMapping = PreviewToneMapping.None;
+            exposure = Mathf.Clamp(Finite(exposure, 0), -6, 6);
             return this;
         }
     }
