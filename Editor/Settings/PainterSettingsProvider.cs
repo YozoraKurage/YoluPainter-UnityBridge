@@ -74,6 +74,7 @@ namespace Yozolab.YoluPainter.Editor
                 using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(personal.brushFolder))) if (GUILayout.Button("Default", GUILayout.Width(60))) notice = ChangePersonalBrushFolder("", Dialogs, out error) ?? notice;
                 EditorGUILayout.EndHorizontal();
                 FolderInfo(BrushLibrary.Personal);
+                LibraryFolderField();
 
                 EditorGUI.BeginChangeCheck();
                 personal.showBundledBrushes = EditorGUILayout.Toggle(new GUIContent("Show bundled brushes", "The Krita 4 default tips shipped with the package. Hiding them does not break brushes that already use them."), personal.showBundledBrushes);
@@ -89,8 +90,36 @@ namespace Yozolab.YoluPainter.Editor
                 personal.sourceBudgetMiB = BudgetField(new GUIContent("Layer pixels", "Total pixel data of all layers. Edits that would exceed it are refused without changing anything. A full 4096² layer takes 64 MiB."), personal.sourceBudgetMiB, PainterSettings.Budget.Source);
                 personal.gpuCacheMiB = BudgetField(new GUIContent("GPU cache", "Layer blocks and partial composites kept on the GPU (automatic: 1/8 of the reported " + PainterSettings.GraphicsMemoryMiB + " MiB of video memory) so sliders and edits on large documents redraw quickly. With CPU display compositing the partial composites are kept in main memory under the same limit. Released after two minutes without drawing. 0 keeps nothing: the same result, only slower."), personal.gpuCacheMiB, PainterSettings.Budget.GpuCache);
                 personal.strokeBudgetMiB = BudgetField(new GUIContent("One operation", "Undo data one stroke, fill, gradient or transform may keep. A bigger one is refused or cancelled safely without changing anything."), personal.strokeBudgetMiB, PainterSettings.Budget.Stroke);
+                personal.resourceBudgetMiB = BudgetField(new GUIContent("Resources", "Pixels of the images a project holds as resources (the copies embedded in the .ylp, each distinct image once). Importing beyond it is refused. An 8192² image takes 256 MiB."), personal.resourceBudgetMiB, PainterSettings.Budget.Resources);
                 if (EditorGUI.EndChangeCheck()) SavePersonal();
             }
+        }
+
+        /// <summary>自分の置き場（アセットのパネルの「自分の置き場」）の欄。置き場を変えても中身は写さない（前の置き場はそのまま）。</summary>
+        void LibraryFolderField()
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUI.BeginChangeCheck();
+            string library = EditorGUILayout.DelayedTextField(new GUIContent("Library folder", "Your own images for the Assets panel (My Library). Empty = UserSettings/YoluPainter/Library. Point several projects at the same folder outside them to share it."), personal.libraryFolder);
+            if (EditorGUI.EndChangeCheck()) ChangeLibraryFolder(library.Trim());
+            if (GUILayout.Button("Choose…", GUILayout.Width(70)))
+            {
+                string picked = Dialogs.OpenFolder("Library folder", PainterSettings.LibraryFolder);
+                if (!string.IsNullOrEmpty(picked)) ChangeLibraryFolder(ToProjectRelativeIfInside(picked));
+            }
+            using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(personal.libraryFolder))) if (GUILayout.Button("Default", GUILayout.Width(60))) ChangeLibraryFolder("");
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(" ", PainterSettings.LibraryFolder, EditorStyles.miniLabel);
+            using (new EditorGUI.DisabledScope(!Directory.Exists(PainterSettings.LibraryFolder))) if (GUILayout.Button("Show", EditorStyles.miniButton, GUILayout.Width(50))) EditorUtility.RevealInFinder(PainterSettings.LibraryFolder);
+            EditorGUILayout.EndHorizontal();
+        }
+        void ChangeLibraryFolder(string setting)
+        {
+            string problem = PainterSettings.CheckLibraryFolder(setting);
+            if (problem != null) { error = problem; return; }
+            personal.libraryFolder = setting; SavePersonal();
+            if (error == null) notice = "Library folder is now " + PainterSettings.LibraryFolder + ".";
         }
 
         /// <summary>予算の欄: 「Auto」のときは自動の値を灰色で見せ、外すと今の自動の値から数値を入れられる。</summary>

@@ -41,6 +41,7 @@ namespace Yozolab.YoluPainter.Editor
                     if(set.Document.Selection!=null)files.Add(YlpFormat.SetEntry(set.Id,SelectionBinary.EntryName),SelectionBinary.Write(set.Document.Selection));
                 }
                 files.Add(YlpFormat.ProjectName,YlpFormat.WriteProject(ProjectInfo()));
+                ResourceIndex.AddTo(files,resources); // プロジェクトのリソース（形式 4。TexturePaintWindow.Resources.cs）
                 YlpFormat.Stamp(files,YlpContent.Writer,projectCreatedBy);
                 var snapshot=GenerationStore.Commit(recoveryRoot,files,recoveryToken); recoveryToken=snapshot.Token;
                 foreach(var set in textureSets)set.RecoveredRevision=set.Document.Revision;
@@ -114,6 +115,7 @@ namespace Yozolab.YoluPainter.Editor
                 files.Add(YlpContent.BrushName,System.Text.Encoding.UTF8.GetBytes(JsonUtility.ToJson(brush,true)));
                 var thumbnail=ProjectThumbnail(); if(thumbnail!=null)files.Add(YlpContent.ThumbnailName,thumbnail);
                 AddMeshMapFiles(files);
+                ResourceIndex.AddTo(files,resources); // プロジェクトのリソース（形式 4）
                 YlpFormat.Stamp(files,YlpContent.Writer,projectCreatedBy);
                 var saved=YlpStore.Save(target,files,sameFile?projectToken:null,!sameFile,keep);
                 projectPath=saved.Path;projectToken=saved.Token;externalConflict=false;MeshMapsWereSaved();openedFormat=YlpFormat.Current;
@@ -168,6 +170,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 var snapshot=YlpStore.Load(path);var opened=YlpFormat.Open(snapshot.Files);var files=opened.Files;
                 var sets=ReadTextureSets(opened); // 全部の正本を読めてから入れ替える
+                var loadedResources=ResourceIndex.Load(files,opened.Resources); // リソースも全部読めてから（壊れていれば何も変えずに断る）
                 FinishStroke(false);CancelToolDrag();
                 ReplaceProject(sets,sets.First(s=>s.Id==opened.Project.CurrentSet));BindDocument();
                 projectPath=snapshot.Path;projectToken=snapshot.Token;externalConflict=false;
@@ -193,7 +196,9 @@ namespace Yozolab.YoluPainter.Editor
                     RestoreSavedSelection(set,setFiles,notes);
                     set.SavedRevision=set.Document.Revision;
                 }
+                var resourceNote=AdoptResources(loadedResources); if(resourceNote!=null)notes.Add(resourceNote);
                 ResetSetsBaseline(true);
+                var sourceNote=AskAboutChangedResources(); if(sourceNote!=null)notes.Add(sourceNote); // 出どころが変わっていれば尋ねる（更新すると未保存になる）
                 notes.AddRange(FormatNotes(opened));
                 message="Opened "+Path.GetFileName(path)+" (verified)"+(sets.Count>1?" with "+sets.Count+" texture sets":"")+(notes.Count>0?". "+String.Join(" ",notes):"");
             });

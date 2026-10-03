@@ -56,6 +56,7 @@ namespace Yozolab.YoluPainter.Editor
             Item(m, "Save As…", () => SaveProject(true), keys: "Ctrl+Shift+S");
             m.AddSeparator("");
             Item(m, "Import PSD…", ImportPsd);
+            Item(m, "Import Image Resource…", ImportImageResourceDialog);
             m.AddItem(new GUIContent(L.Tr("Export") + "/" + L.Tr("Channel as PNG…")), false, () => TryAction(ExportPng));
             m.AddItem(new GUIContent(L.Tr("Export") + "/" + L.Tr("All Channels as Images…")), false, () => TryAction(ExportImages));
             m.AddItem(new GUIContent(L.Tr("Export") + "/" + L.Tr("Channel as PSD…")), false, () => TryAction(ExportPsd));

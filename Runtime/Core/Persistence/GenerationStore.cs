@@ -17,8 +17,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// Immutable generation directories, verified content hashes, current pointer changed last.
     /// Flush(true) flushes files. Directory fsync/power-loss durability varies by OS and is not claimed.
     /// The lock serializes this tool; external noncooperating writers are detected by hashes, not locked.
-    /// File names are flat, or flat inside one texture-set folder <c>sets/&lt;lower-case GUID&gt;/</c> (.ylp format 3); a generation
-    /// holds a native document at the root or in at least one texture set.
+    /// File names are flat, or flat inside one texture-set folder <c>sets/&lt;lower-case GUID&gt;/</c> (.ylp format 3) or the resource
+    /// folder <c>resources/</c> (format 4); a generation holds a native document at the root or in at least one texture set.
     /// </summary>
     public static class GenerationStore
     {
@@ -151,7 +151,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
         static bool HasNative(IEnumerable<string> names) => names.Any(n => n == NativeName || YlpFormat.TrySplitSetEntry(n, out _, out var leaf) && leaf == NativeName);
         static void ValidateName(string value)
         {
-            string leaf = value != null && YlpFormat.TrySplitSetEntry(value, out _, out var inSet) ? inSet : value;
+            string leaf = value != null && YlpFormat.TrySplitSetEntry(value, out _, out var inSet) ? inSet
+                : value != null && value.StartsWith(YlpArchive.ResourceFolder, StringComparison.Ordinal) ? value.Substring(YlpArchive.ResourceFolder.Length) : value;
             if (String.IsNullOrEmpty(leaf) || leaf.Length > 80 || leaf == "manifest.sha256" || leaf.Any(c => !(Char.IsLetterOrDigit(c) || c == '.' || c == '-' || c == '_')) || leaf.Contains("..")) throw new InvalidDataException("Unsafe generation filename.");
         }
         static void ValidateGeneration(string value)

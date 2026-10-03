@@ -90,6 +90,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
         public IReadOnlyList<string> UnknownEntries { get; internal set; }
         /// <summary>移すときの知らせ。</summary>
         public IReadOnlyList<string> Notes { get; internal set; }
+        /// <summary>プロジェクトのリソースの並び（resources.json。形式 4 から。無ければ空）。画素はまだ読んでいない
+        /// （<see cref="ResourceIndex.Load"/> が読んで確かめる）。</summary>
+        public IReadOnlyList<YlpResourceEntry> Resources { get; internal set; }
 
         /// <summary>テクスチャセットのエントリ（sets/&lt;ID&gt;/ を取った名前 → 中身）。</summary>
         public Dictionary<string, byte[]> SetFiles(Guid set)
@@ -109,6 +112,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// <item>形式 2: ylp.json を足した（エントリの並びは形式 1 と同じ）。</item>
     /// <item>形式 3: テクスチャセット。根に project.json（セットの並びと今のセット）、正本と合成とメッシュマップはセットごとに
     /// sets/&lt;ID&gt;/ の下。view.json の materialSlot は使わない（スロットは project.json に）。</item>
+    /// <item>形式 4: プロジェクトのリソース（全部のセットで共通の画像）。根に resources.json（並び）、画素は中身ごとに 1 つの
+    /// resources/&lt;中身の SHA-256&gt;.png（<see cref="ResourceIndex"/>）。どちらも正本。manifest は YOLUPAINTER-YLP-3。</item>
     /// </list>
     /// 開くときは <see cref="Open"/> が形式を読み、古い形式なら <see cref="Steps"/> を順に通して今の形式の並びにする（メモリの上だけで、
     /// ファイルは書き換えない）。今より新しい形式は、どのエントリにも触れずに断る。保存は <see cref="Stamp"/> でいつも今の形式で書く。
@@ -117,7 +122,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
     public static class YlpFormat
     {
         /// <summary>今の形式。</summary>
-        public const int Current = 3;
+        public const int Current = 4;
         /// <summary>形式と書いたアプリの記録（形式 2 から）。</summary>
         public const string InfoName = "ylp.json";
         /// <summary>テクスチャセットの並び（形式 3 から）。</summary>
@@ -136,6 +141,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
         {
             (files, notes) => { }, // 1 → 2: 並びは同じ（ylp.json を足しただけ）
             ToTextureSets,         // 2 → 3: 1 つのテクスチャセットにする
+            (files, notes) => { }, // 3 → 4: 並びは同じ（形式 3 のファイルにはリソースが無い。resources.json の無いファイルはリソース無し）
         };
 
         /// <summary>エントリの種類。</summary>
@@ -169,7 +175,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
         public static EntryKind? KindOf(string name)
         {
             if (name == InfoName) return EntryKind.Info;
-            if (name == ProjectName) return EntryKind.Source;
+            if (name == ProjectName || name == ResourceIndex.EntryName || ResourceIndex.TryParseContentEntry(name, out _)) return EntryKind.Source;
             if (name == ViewName || name == BrushName) return EntryKind.State;
             if (name == ThumbnailName) return EntryKind.Derived;
             return TrySplitSetEntry(name, out _, out var leaf) ? SetEntryKind(leaf) : null;
@@ -255,9 +261,15 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 if (!upgraded.ContainsKey(SetEntry(set.Id, YlpArchive.NativeName)))
                     throw new InvalidDataException("Texture set \"" + set.Name + "\" has no native document (" + SetEntry(set.Id, YlpArchive.NativeName) + ").");
             var listed = new HashSet<Guid>(project.Sets.Select(s => s.Id));
-            var unknown = upgraded.Keys.Where(k => KindOf(k) == null || TrySplitSetEntry(k, out var set, out _) && !listed.Contains(set))
+            // リソース（形式 4）: 並びにある中身の PNG が無ければ断る。並びに無い PNG は知らないエントリとして知らせる
+            var resources = upgraded.TryGetValue(ResourceIndex.EntryName, out var resourceBytes) ? ResourceIndex.Read(resourceBytes) : (IReadOnlyList<YlpResourceEntry>)new YlpResourceEntry[0];
+            foreach (var resource in resources)
+                if (!upgraded.ContainsKey(ResourceIndex.ContentEntry(resource.Content)))
+                    throw new InvalidDataException("Resource \"" + resource.Name + "\" has no pixels (" + ResourceIndex.ContentEntry(resource.Content) + ").");
+            var contents = new HashSet<string>(resources.Select(r => r.Content), StringComparer.Ordinal);
+            var unknown = upgraded.Keys.Where(k => KindOf(k) == null || TrySplitSetEntry(k, out var set, out _) && !listed.Contains(set) || ResourceIndex.TryParseContentEntry(k, out var hash) && !contents.Contains(hash))
                 .OrderBy(k => k, StringComparer.Ordinal).ToList();
-            return new YlpOpened { Files = upgraded, Info = info, Project = project, UnknownEntries = unknown, Notes = notes };
+            return new YlpOpened { Files = upgraded, Info = info, Project = project, UnknownEntries = unknown, Notes = notes, Resources = resources };
         }
 
         /// <summary>保存するエントリに ylp.json（今の形式・保存したアプリ・最初に作ったアプリ）を足す。既にあれば置き換える。</summary>
@@ -369,11 +381,11 @@ namespace Yozolab.YoluPainter.Core.Persistence
 
         // ───────── 共通 ─────────
 
-        /// <summary>UTF-8 の JSON のオブジェクトを読む（<see cref="MaxInfoBytes"/> まで）。</summary>
-        static Dictionary<string, object> ParseObject(byte[] bytes, string entry)
+        /// <summary>UTF-8 の JSON のオブジェクトを読む（<paramref name="maxBytes"/>、既定は <see cref="MaxInfoBytes"/> まで）。</summary>
+        internal static Dictionary<string, object> ParseObject(byte[] bytes, string entry, int maxBytes = MaxInfoBytes)
         {
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));
-            if (bytes.Length > MaxInfoBytes) throw new InvalidDataException(entry + " is larger than " + (MaxInfoBytes >> 10) + " KiB.");
+            if (bytes.Length > maxBytes) throw new InvalidDataException(entry + " is larger than " + (maxBytes >> 10) + " KiB.");
             string text;
             try { text = new UTF8Encoding(false, true).GetString(bytes); }
             catch (DecoderFallbackException) { throw new InvalidDataException(entry + " is not valid UTF-8."); }
@@ -381,7 +393,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             return root;
         }
 
-        static string Quote(string value)
+        internal static string Quote(string value)
         {
             var s = new StringBuilder("\"");
             foreach (char c in value)

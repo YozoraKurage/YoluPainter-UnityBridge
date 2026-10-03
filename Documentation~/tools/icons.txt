@@ -88,3 +88,6 @@ lock fluent lock_closed
 lock_filled fluent lock_closed filled
 lock_transparency fluent transparency_square
 arrow_move fluent arrow_move
+# ── アセットのパネル（Editor/Window/Panels/TexturePaintWindow.AssetsPanel.cs） ──
+library fluent library
+shapes fluent shapes

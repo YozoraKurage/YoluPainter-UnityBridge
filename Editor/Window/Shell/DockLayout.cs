@@ -43,9 +43,9 @@ namespace Yozolab.YoluPainter.Editor
     {
         /// <summary>知っているパネル（既定の配置の上からの順。マテリアルは畳んでプロパティの上に置く: 列の一番下を畳んだ見出しにすると、
         /// 列の下の端へ落としたパネルがその見出しのタブになってしまう）。</summary>
-        public static readonly string[] KnownPanels = { "color", "textureSet", "layers", "material", "properties" };
+        public static readonly string[] KnownPanels = { "color", "textureSet", "layers", "material", "assets", "properties" };
         /// <summary>初めて置くときに畳んでおくパネル（既定の配置でも、前の配置の記録に無くて右の列の最後に足すときも）。</summary>
-        static readonly string[] FoldedAtFirst = { "material" };
+        static readonly string[] FoldedAtFirst = { "material", "assets" };
         public const float MinWidth = 220, MaxWidth = 560;
         /// <summary>保存の形式。0 は最初の形式（列ごとのパネルの ID の並びと、パネルごとの畳み・高さの比。<see cref="DockLayoutV0"/>）。</summary>
         public const int CurrentVersion = 1;

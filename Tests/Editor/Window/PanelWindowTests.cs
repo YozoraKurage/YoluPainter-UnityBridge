@@ -94,11 +94,11 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(panel.ShownPanels, Is.EqualTo(new[] { "layers" }));
             Assert.That(panel.titleContent.text, Is.EqualTo("Layers"));
             Repaint(panel); // 持ち主のレイヤーのパネルを、このウィンドウで描ける
-            Assert.That(Layout.PanelsIn(DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "material", "properties" }));
+            Assert.That(Layout.PanelsIn(DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "material", "assets", "properties" }));
             panel.Close();
             Assert.That(PainterPanelWindow.All, Is.Empty);
             Assert.That(Layout.IsFloating("layers"), Is.False, "closing the window puts the panel back, it is never lost");
-            Assert.That(Layout.PanelsIn(DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "layers", "material", "properties" }), "back where it was");
+            Assert.That(Layout.PanelsIn(DockPlace.Right), Is.EqualTo(new[] { "color", "textureSet", "layers", "material", "assets", "properties" }), "back where it was");
         }
 
         [Test] public void EscapeCancelsAHeaderDragAndAShortDropOnTheCanvasFloats()

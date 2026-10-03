@@ -63,6 +63,12 @@ namespace Yozolab.YoluPainter.Editor
             /// 少しずつ合成する（窓を止めない。ストロークの所は時間に関わらずその回に出す）。0 は分けない（変わった所を 1 回で全部合成する。
             /// 以前の動き）。この項目の無い以前のファイルは既定。保存・書き出しの合成には関わらない。</summary>
             public int displayFrameBudgetMs = DefaultDisplayFrameBudgetMs;
+            /// <summary>自分の置き場（アセットのパネルの「自分の置き場」。ほかのプロジェクトと同じフォルダを指せば共有できる）。空なら
+            /// UserSettings/YoluPainter/Library。相対パスはプロジェクトのフォルダから。この項目の無い以前のファイルは既定。</summary>
+            public string libraryFolder = "";
+            /// <summary>プロジェクトのリソース（.ylp に埋め込む画像の写し）の画素の合計の上限（MiB）。-1 は自動。この項目の無い以前の
+            /// ファイルは自動。</summary>
+            public int resourceBudgetMiB = Automatic;
         }
 
         public static readonly int[] Resolutions = { 256, 512, 1024, 2048, 4096 };
@@ -75,7 +81,8 @@ namespace Yozolab.YoluPainter.Editor
         public const int MaxUndoMiB = 16384, MinSourceMiB = 16, MaxSourceMiB = 32768, MinStrokeMiB = 8, MaxStrokeMiB = 8192, MaxMinUndoSteps = 100;
         /// <summary>予算の値で「自動」を表す。</summary>
         public const int Automatic = -1;
-        internal enum Budget { Undo, Source, Stroke, GpuCache }
+        internal enum Budget { Undo, Source, Stroke, GpuCache, Resources }
+        public const int MinResourceMiB = 16, MaxResourceMiB = 32768;
         public const int MaxGpuCacheMiB = 16384;
         /// <summary>CPU のスレッドの上限に入れられる最大の数（論理プロセッサの数より多くてもよい。多すぎると遅くなるだけ）。</summary>
         public const int MaxCpuThreads = 1024;
@@ -101,6 +108,8 @@ namespace Yozolab.YoluPainter.Editor
                 case Budget.Stroke: return Mathf.Clamp(ram / 32, 64, 1024);
                 // 申告された VRAM の 1/8。上限まで取らない（仕様 15）。8 GB で 1024、4 GB で 512
                 case Budget.GpuCache: return Mathf.Clamp(GraphicsMemoryMiB / 8, 128, 1024);
+                // プロジェクトのリソース（画像の写し）。16 GB で 1024（8192² の画像 4 枚）
+                case Budget.Resources: return Mathf.Clamp(ram / 16, 256, 4096);
                 default: throw new ArgumentOutOfRangeException(nameof(budget));
             }
         }
@@ -124,6 +133,7 @@ namespace Yozolab.YoluPainter.Editor
         public static string SharedPath => Path.Combine(ProjectRoot, "ProjectSettings", "Packages", PackageName, "Settings.json");
         public static string PersonalPath => Path.Combine(ProjectRoot, "UserSettings", "YoluPainter", "Settings.json");
         public static string DefaultBrushFolder => Path.Combine(ProjectRoot, "UserSettings", "YoluPainter", "Brushes");
+        public static string DefaultLibraryFolder => Path.Combine(ProjectRoot, "UserSettings", "YoluPainter", "Library");
 
         /// <summary>今の共有設定の写し。変えるときは写しを直して <see cref="Save(Shared, Personal)"/> に渡す。</summary>
         public static Shared SharedSettings { get { Load(); return JsonUtility.FromJson<Shared>(JsonUtility.ToJson(shared)); } }
@@ -143,6 +153,12 @@ namespace Yozolab.YoluPainter.Editor
         {
             get { Load(); return string.IsNullOrWhiteSpace(shared.projectBrushFolder) ? null : Path.GetFullPath(Path.Combine(ProjectRoot, shared.projectBrushFolder)); }
         }
+        /// <summary>自分の置き場の絶対パス。</summary>
+        public static string LibraryFolder
+        {
+            get { Load(); return string.IsNullOrWhiteSpace(personal.libraryFolder) ? DefaultLibraryFolder : Path.GetFullPath(Path.Combine(ProjectRoot, personal.libraryFolder)); }
+        }
+        public static long ResourceBudgetBytes { get { Load(); return Bytes(personal.resourceBudgetMiB, Budget.Resources); } }
         public static bool ShowBundledBrushes { get { Load(); return personal.showBundledBrushes; } }
         public static int DefaultResolution { get { Load(); return shared.defaultResolution; } }
         public static int ExportPadding { get { Load(); return shared.exportPadding; } }
@@ -225,6 +241,8 @@ namespace Yozolab.YoluPainter.Editor
             if (folderProblem != null) { problems.Add(folderProblem); if (fix) s.projectBrushFolder = ""; }
             string personalFolderProblem = CheckPersonalBrushFolder(p.brushFolder);
             if (personalFolderProblem != null) { problems.Add(personalFolderProblem); if (fix) p.brushFolder = ""; }
+            string libraryProblem = CheckLibraryFolder(p.libraryFolder);
+            if (libraryProblem != null) { problems.Add(libraryProblem); if (fix) p.libraryFolder = ""; }
             void Range(ref int value, int min, int max, int fallback, string what)
             {
                 if (value >= min && value <= max) return;
@@ -238,6 +256,7 @@ namespace Yozolab.YoluPainter.Editor
             Budget(ref p.strokeBudgetMiB, MinStrokeMiB, MaxStrokeMiB, "One operation budget (MiB)");
             Range(ref p.minUndoSteps, 0, MaxMinUndoSteps, defaultsPersonal.minUndoSteps, "Minimum undo steps");
             Budget(ref p.gpuCacheMiB, 0, MaxGpuCacheMiB, "GPU cache (MiB)");
+            Budget(ref p.resourceBudgetMiB, MinResourceMiB, MaxResourceMiB, "Resource budget (MiB)");
             Range(ref p.backupsToKeep, -1, MaxBackups, defaultsPersonal.backupsToKeep, "Backups to keep");
             if (!Enum.IsDefined(typeof(ShortcutGuardMode), p.shortcutGuard))
             {
@@ -254,6 +273,7 @@ namespace Yozolab.YoluPainter.Editor
             if (p.brushImportFolder == null && fix) p.brushImportFolder = "";
             if (s.projectBrushFolder == null && fix) s.projectBrushFolder = "";
             if (p.brushFolder == null && fix) p.brushFolder = "";
+            if (p.libraryFolder == null && fix) p.libraryFolder = "";
             return problems;
         }
 
@@ -268,21 +288,24 @@ namespace Yozolab.YoluPainter.Editor
             if (!full.StartsWith(root, PathComparison)) return "The shared brush folder must be inside the project folder.";
             return InsideImportedFolder(full.Substring(root.Length));
         }
-        internal static string CheckPersonalBrushFolder(string folder)
+        internal static string CheckPersonalBrushFolder(string folder) => CheckPersonalFolder(folder, "brush folder");
+        /// <summary>自分の置き場の検査（個人のブラシ置き場と同じ決まり: プロジェクトの外でもよく、Unity が取り込む Assets / Packages の下は断る）。</summary>
+        internal static string CheckLibraryFolder(string folder) => CheckPersonalFolder(folder, "library folder");
+        static string CheckPersonalFolder(string folder, string what)
         {
             if (string.IsNullOrWhiteSpace(folder)) return null;
-            string full; try { full = Path.GetFullPath(Path.Combine(ProjectRoot, folder)); } catch (Exception ex) { return "The brush folder path is invalid (" + ex.Message + ")."; }
+            string full; try { full = Path.GetFullPath(Path.Combine(ProjectRoot, folder)); } catch (Exception ex) { return "The " + what + " path is invalid (" + ex.Message + ")."; }
             string root = Path.GetFullPath(ProjectRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            if (string.Equals(full.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, root, PathComparison)) return "The brush folder cannot be the project folder itself.";
-            return full.StartsWith(root, PathComparison) ? InsideImportedFolder(full.Substring(root.Length)) : null;
+            if (string.Equals(full.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, root, PathComparison)) return "The " + what + " cannot be the project folder itself.";
+            return full.StartsWith(root, PathComparison) ? InsideImportedFolder(full.Substring(root.Length), what) : null;
         }
-        static string InsideImportedFolder(string relative)
+        static string InsideImportedFolder(string relative, string what = "brush folder")
         {
             var parts = relative.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length == 0) return "The brush folder cannot be the project folder itself.";
+            if (parts.Length == 0) return "The " + what + " cannot be the project folder itself.";
             if (parts[0] != "Assets" && parts[0] != "Packages") return null;
             for (int i = 1; i < parts.Length; i++) if (parts[i].EndsWith("~", StringComparison.Ordinal) || parts[i].StartsWith(".", StringComparison.Ordinal)) return null;
-            return "A brush folder under " + parts[0] + "/ would be imported by Unity as assets; use a folder outside it, or one whose name ends with '~'.";
+            return "A " + what + " under " + parts[0] + "/ would be imported by Unity as assets; use a folder outside it, or one whose name ends with '~'.";
         }
 
         /// <summary>設定を検査して保存する。範囲外があれば何も書かずに例外。null を渡した方は書かない。</summary>

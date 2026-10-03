@@ -123,6 +123,7 @@ namespace Yozolab.YoluPainter.Editor
             meshBakeOutcome = null; meshBakeSkipped.Clear(); meshMapView = MeshMapView.None;
             foreach (var set in textureSets) if (!next.Contains(set)) set.DisposeTextures();
             textureSets.Clear(); textureSets.AddRange(next);
+            ImageResources.Clear(); // プロジェクトのリソースも入れ替わる（開く・戻すときは呼ぶ側が読んだものを入れる。TexturePaintWindow.Resources.cs）
             currentSet = null; LoadSet(current);
             materialEditsNoticePending = true; // マテリアルの欄の未反映の変更（プロジェクトには入らない）が残っていれば、開いた後に知らせる
         }

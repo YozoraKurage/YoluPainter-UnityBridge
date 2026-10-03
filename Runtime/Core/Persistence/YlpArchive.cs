@@ -14,9 +14,11 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// すべて確かめ、manifest に無いエントリーや足りないエントリーがあれば読まない。
     /// <list type="bullet">
     /// <item>YOLUPAINTER-YLP-1: エントリーの名前は根と composite/ の下だけ、正本（document.utpaint）は根（.ylp の形式 1・2）。読むだけ。</item>
-    /// <item>YOLUPAINTER-YLP-2: テクスチャセットの置き場 sets/&lt;ID&gt;/ の下にも同じ名前を置ける（.ylp の形式 3 から）。正本は根か
-    /// どれかのセットの下にあればよい（どのセットに要るかは中身の形式 <see cref="YlpFormat"/> が決める）。書くのはこれ。名前の決まりが
-    /// 広がったので番号を上げた（YLP-1 の読み手は名前で断る代わりに「新しい YoluPainter で書かれた」と断る）。</item>
+    /// <item>YOLUPAINTER-YLP-2: テクスチャセットの置き場 sets/&lt;ID&gt;/ の下にも同じ名前を置ける（.ylp の形式 3）。正本は根か
+    /// どれかのセットの下にあればよい（どのセットに要るかは中身の形式 <see cref="YlpFormat"/> が決める）。名前の決まりが
+    /// 広がったので番号を上げた（YLP-1 の読み手は名前で断る代わりに「新しい YoluPainter で書かれた」と断る）。読むだけ。</item>
+    /// <item>YOLUPAINTER-YLP-3: 加えて、根の resources/ の下に 1 段の名前を置ける（プロジェクトのリソースの画素。.ylp の形式 4 から）。
+    /// 書くのはこれ。YLP-2 までの読み手は「新しい YoluPainter で書かれた」と断る。</item>
     /// </list>
     /// </summary>
     public static class YlpArchive
@@ -24,10 +26,14 @@ namespace Yozolab.YoluPainter.Core.Persistence
         public const string Extension = ".ylp";
         public const string MimeType = "application/x-yolupainter";
         public const string ManifestName = "manifest.sha256";
-        /// <summary>書く manifest の 1 行目（テクスチャセットの置き場を認める版）。</summary>
-        public const string ManifestHeader = "YOLUPAINTER-YLP-2";
-        /// <summary>前の版の manifest の 1 行目（読むだけ。テクスチャセットの置き場は認めない）。</summary>
+        /// <summary>書く manifest の 1 行目（テクスチャセットの置き場とリソースの置き場を認める版）。</summary>
+        public const string ManifestHeader = "YOLUPAINTER-YLP-3";
+        /// <summary>前の版の manifest の 1 行目（読むだけ。テクスチャセットの置き場は認め、リソースの置き場は認めない）。</summary>
+        public const string ManifestHeaderV2 = "YOLUPAINTER-YLP-2";
+        /// <summary>最初の版の manifest の 1 行目（読むだけ。テクスチャセットの置き場もリソースの置き場も認めない）。</summary>
         public const string ManifestHeaderV1 = "YOLUPAINTER-YLP-1";
+        /// <summary>リソースの置き場（YLP-3 から）。</summary>
+        public const string ResourceFolder = "resources/";
         public const string NativeName = "document.utpaint";
         public const string CompositeFolder = "composite/";
         public const long MaxEntryBytes = 512L * 1024 * 1024, MaxTotalBytes = 768L * 1024 * 1024;
@@ -50,11 +56,11 @@ namespace Yozolab.YoluPainter.Core.Persistence
         /// <summary>中身（名前 → バイト列）から .ylp のバイト列を作る。PNG は圧縮済みなので無圧縮で入れる。</summary>
         public static byte[] Write(IDictionary<string, byte[]> files)
         {
-            if (files == null || !HasNative(files.Keys, true)) throw new ArgumentException("A complete native document is required.");
+            if (files == null || !HasNative(files.Keys, 3)) throw new ArgumentException("A complete native document is required.");
             long total = 0;
             foreach (var entry in files)
             {
-                ValidateName(entry.Key, true);
+                ValidateName(entry.Key, 3);
                 if (entry.Key == ManifestName || entry.Key == "mimetype") throw new ArgumentException("Reserved entry name: " + entry.Key);
                 if (entry.Value == null) throw new ArgumentException("Null content: " + entry.Key);
                 if (entry.Value.LongLength > MaxEntryBytes) throw new InvalidOperationException(entry.Key + " exceeds the " + (MaxEntryBytes >> 20) + " MiB entry budget.");
@@ -142,10 +148,10 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     var manifestEntry = entries.Skip(1).FirstOrDefault(e => e.FullName == ManifestName);
                     if (manifestEntry == null) throw new InvalidDataException("The file has no manifest.");
                     byte[] manifestBytes = Extract(manifestEntry, 1024 * 1024);
-                    bool sets = ManifestAllowsSets(manifestBytes);
+                    int level = ManifestLevel(manifestBytes);
                     foreach (var entry in entries.Skip(1))
                     {
-                        ValidateName(entry.FullName, sets);
+                        ValidateName(entry.FullName, level);
                         if (entry.FullName == "mimetype" || byName.ContainsKey(entry.FullName)) throw new InvalidDataException("Duplicate entry: " + entry.FullName);
                         byName.Add(entry.FullName, entry);
                     }
@@ -179,16 +185,18 @@ namespace Yozolab.YoluPainter.Core.Persistence
             return text.Split('\n');
         }
 
-        /// <summary>manifest の版がテクスチャセットの置き場を認めるか（YLP-2）。知らない版はここで断る。</summary>
-        static bool ManifestAllowsSets(byte[] bytes)
+        /// <summary>manifest の版の番号（1: 根と composite/ だけ、2: テクスチャセットの置き場も、3: リソースの置き場も）。知らない版は
+        /// ここで断る（新しい版は「新しい YoluPainter で書かれた」）。</summary>
+        static int ManifestLevel(byte[] bytes)
         {
             var lines = ManifestLines(bytes);
             const string prefix = "YOLUPAINTER-YLP-";
-            if (lines[0] == ManifestHeader) return true;
-            if (lines[0] == ManifestHeaderV1) return false;
+            if (lines[0] == ManifestHeader) return 3;
+            if (lines[0] == ManifestHeaderV2) return 2;
+            if (lines[0] == ManifestHeaderV1) return 1;
             {
                 string number = lines[0].StartsWith(prefix, StringComparison.Ordinal) ? lines[0].Substring(prefix.Length) : "";
-                if (number.Length > 0 && number.Length < 9 && number.All(c => c >= '0' && c <= '9') && number[0] != '0' && int.Parse(number, CultureInfo.InvariantCulture) > 2)
+                if (number.Length > 0 && number.Length < 9 && number.All(c => c >= '0' && c <= '9') && number[0] != '0' && int.Parse(number, CultureInfo.InvariantCulture) > 3)
                     throw new InvalidDataException("The file was written by a newer YoluPainter (" + lines[0] + ").");
                 throw new InvalidDataException("Unsupported manifest.");
             }
@@ -196,7 +204,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
 
         static Dictionary<string, Listed> ParseManifest(byte[] bytes)
         {
-            bool sets = ManifestAllowsSets(bytes);
+            int level = ManifestLevel(bytes);
             var lines = ManifestLines(bytes);
             var result = new Dictionary<string, Listed>(StringComparer.Ordinal); long total = 0;
             for (int i = 1; i < lines.Length; i++)
@@ -206,12 +214,12 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 if (parts.Length != 3 || parts[0].Length != 64 || parts[0].Any(c => !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f'))
                     || !long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out long length) || length > MaxEntryBytes)
                     throw new InvalidDataException("Malformed manifest entry.");
-                ValidateName(parts[2], sets);
+                ValidateName(parts[2], level);
                 if (parts[2] == ManifestName || parts[2] == "mimetype" || result.ContainsKey(parts[2])) throw new InvalidDataException("Duplicate or reserved manifest entry: " + parts[2]);
                 total = checked(total + length); if (total > MaxTotalBytes) throw new InvalidDataException("The file exceeds the " + (MaxTotalBytes >> 20) + " MiB read budget.");
                 result.Add(parts[2], new Listed { Hash = parts[0], Length = length });
             }
-            if (!HasNative(result.Keys, sets)) throw new InvalidDataException("The file has no native document.");
+            if (!HasNative(result.Keys, level)) throw new InvalidDataException("The file has no native document.");
             return result;
         }
 
@@ -266,17 +274,19 @@ namespace Yozolab.YoluPainter.Core.Persistence
         }
         static uint U32(byte[] d, int o) { return (uint)(d[o] | d[o + 1] << 8 | d[o + 2] << 16 | d[o + 3] << 24); }
 
-        /// <summary>正本が根か（sets が許すなら）どれかのテクスチャセットの下にあるか。</summary>
-        static bool HasNative(IEnumerable<string> names, bool sets)
-            => names.Any(n => n == NativeName || sets && YlpFormat.TrySplitSetEntry(n, out _, out var leaf) && leaf == NativeName);
+        /// <summary>正本が根か（版 2 から）どれかのテクスチャセットの下にあるか。</summary>
+        static bool HasNative(IEnumerable<string> names, int level)
+            => names.Any(n => n == NativeName || level >= 2 && YlpFormat.TrySplitSetEntry(n, out _, out var leaf) && leaf == NativeName);
 
-        /// <summary>エントリー名: 英数字と . - _、フォルダは composite/ だけ。sets なら、その前に sets/&lt;小文字のハイフン付きの ID&gt;/ を
-        /// 1 つ置ける（ID の書き方の違う同じセットを作らない）。全体で 96 文字まで。</summary>
-        static void ValidateName(string name, bool sets)
+        /// <summary>エントリー名: 英数字と . - _、フォルダは composite/ だけ。版 2 からは、その前に sets/&lt;小文字のハイフン付きの ID&gt;/ を
+        /// 1 つ置ける（ID の書き方の違う同じセットを作らない）。版 3 からは、根の resources/ の下に 1 段の名前を置ける（その下に composite/ は
+        /// 置けない）。全体で 96 文字まで。</summary>
+        static void ValidateName(string name, int level)
         {
-            string rest = name;
-            if (sets && name != null && YlpFormat.TrySplitSetEntry(name, out _, out var inSet)) rest = inSet;
-            string leaf = rest != null && rest.StartsWith(CompositeFolder, StringComparison.Ordinal) ? rest.Substring(CompositeFolder.Length) : rest;
+            string rest = name, leaf;
+            if (level >= 2 && name != null && YlpFormat.TrySplitSetEntry(name, out _, out var inSet)) rest = inSet;
+            if (level >= 3 && name != null && name.StartsWith(ResourceFolder, StringComparison.Ordinal)) leaf = name.Substring(ResourceFolder.Length);
+            else leaf = rest != null && rest.StartsWith(CompositeFolder, StringComparison.Ordinal) ? rest.Substring(CompositeFolder.Length) : rest;
             if (string.IsNullOrEmpty(leaf) || name.Length > 96 || leaf.Contains("..") || leaf.StartsWith(".", StringComparison.Ordinal) || leaf.Any(c => !(char.IsLetterOrDigit(c) && c < 128 || c == '.' || c == '-' || c == '_')))
                 throw new InvalidDataException("Unsafe entry name: " + name);
         }

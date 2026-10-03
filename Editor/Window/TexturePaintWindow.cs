@@ -81,8 +81,8 @@ namespace Yozolab.YoluPainter.Editor
                 if (File.Exists(Path.Combine(recoveryRoot,"current")))
                 {
                     var snapshot=GenerationStore.Load(recoveryRoot); var recovered=YlpFormat.Open(snapshot.Files);
-                    var sets=ReadTextureSets(recovered);
-                    ReplaceProject(sets,sets.First(s=>s.Id==recovered.Project.CurrentSet));
+                    var sets=ReadTextureSets(recovered); var recoveredResources=ResourceIndex.Load(recovered.Files,recovered.Resources);
+                    ReplaceProject(sets,sets.First(s=>s.Id==recovered.Project.CurrentSet)); AdoptResources(recoveredResources);
                     ResetSetsBaseline(false); recoveryToken=snapshot.Token; projectCreatedBy=recovered.Info.CreatedBy;
                     var recoveryNotes=new List<string>();
                     foreach(var set in sets)RestoreSavedSelection(set,recovered.SetFiles(set.Id),recoveryNotes);
@@ -94,7 +94,7 @@ namespace Yozolab.YoluPainter.Editor
             if (document==null) CreateDocument(resolution);
             BindDocument();
             if (model!=null) TryAction(()=>preview.Load(model));
-            EditorApplication.update+=Tick; PainterSettings.Changed+=SettingsChanged;
+            EditorApplication.update+=Tick; PainterSettings.Changed+=SettingsChanged; EditorApplication.projectChanged+=OnUnityProjectChanged; HookResources();
             AssemblyReloadEvents.beforeAssemblyReload+=BeforeReload;
             EditorApplication.playModeStateChanged+=PlayModeChanged;
         }
@@ -117,7 +117,7 @@ namespace Yozolab.YoluPainter.Editor
             if(otherSource>0) return "This project already holds "+((document.AllocatedBytes+otherSource)>>20)+" MiB of layer pixels ("+(otherSource>>20)+" MiB in the other texture sets), above the "+(budget>>20)+" MiB budget in Project Settings > YoluPainter; nothing more can be added to this texture set until the budget is raised.";
             return "This document already holds "+(document.AllocatedBytes>>20)+" MiB of layer pixels, above the "+(source>>20)+" MiB budget in Project Settings > YoluPainter; nothing more can be added until the budget is raised.";
         }
-        void SettingsChanged(){var note=ApplyBudgets();if(note!=null)message=note;ApplyCompositorSettings();Repaint();}
+        void SettingsChanged(){var note=ApplyBudgets();var resourceNote=ApplyResourceBudget();if(note!=null||resourceNote!=null)message=note??resourceNote;libraryListing=null;ApplyCompositorSettings();Repaint();}
         internal static void OpenSettings()=>SettingsService.OpenProjectSettings(PainterSettingsProvider.Path);
         /// <summary>今のテクスチャセットの文書を新しく結び付けたとき（新しいプロジェクト・開く・取り込み）: 予算を入れ、表示を作り直し、
         /// メッシュマップ（前の文書のもの）を捨てる。</summary>
@@ -152,13 +152,14 @@ namespace Yozolab.YoluPainter.Editor
         void OnDisable()
         {
             FinishStroke(false); CancelShapeDrag(); preview?.CancelNavigation(); SaveRecovery();
-            EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
+            EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; EditorApplication.projectChanged-=OnUnityProjectChanged; UnhookResources(); DisposeAssetThumbnails(); L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
             DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeThumbnails(); DisposeColorPanel(); DisposeTextureSetTextures(); DisposeMaterialChannelTextures(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
             if(selectionOverlay!=null){DestroyImmediate(selectionOverlay);selectionOverlay=null;overlayFor=null;}
         }
         void Tick()
         {
             if(document==null) return;
+            TickAssetsPanel(); // アセットのパネルが出たら、リソースの出どころを確かめる（TexturePaintWindow.AssetsPanel.cs）
             if(stroke==null && EditorApplication.timeSinceStartup-lastRecovery>PainterSettings.RecoveryIntervalSeconds && !RecoveryIsCurrent()) SaveRecovery();
             if(!String.IsNullOrEmpty(projectPath) && EditorApplication.timeSinceStartup-lastExternalCheck>3) CheckExternalChange();
             // テクスチャセットのサムネイル（間隔を置いて作り直すので、描き直しを 1 度だけ頼む。パネルが見えていなければそれきり）
