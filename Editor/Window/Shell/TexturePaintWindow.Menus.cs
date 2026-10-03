@@ -70,6 +70,8 @@ namespace Yozolab.YoluPainter.Editor
             Item(m, "Undo", () => document.Undo(), document.CanUndo, keys: "Ctrl+Z");
             Item(m, "Redo", () => document.Redo(), document.CanRedo, keys: "Ctrl+Shift+Z / Ctrl+Y");
             m.AddSeparator("");
+            ClipboardMenuItems(m);
+            m.AddSeparator("");
             Item(m, "Free Transform", () => Tool = PaintTool.Move, keys: "V");
             Item(m, "Flip Horizontal", () => TransformSelected(0, 0, 0, -1, 1, L.Tr("Flipped horizontally.")));
             Item(m, "Flip Vertical", () => TransformSelected(0, 0, 0, 1, -1, L.Tr("Flipped vertically.")));
@@ -87,6 +89,8 @@ namespace Yozolab.YoluPainter.Editor
             foreach (var (label, make) in AdjustmentMenu) { var mk = make; var lb = label; m.AddItem(new GUIContent(L.Tr("New Adjustment Layer") + "/" + L.Tr(lb)), false, () => TryAction(() => selectedLayer = document.AddAdjustmentLayer(L.Tr(lb), mk(), above: AboveSelected()).Id)); }
             Item(m, "Group Layers", () => selectedLayer = document.GroupLayers(new[] { selectedLayer }, L.Tr("Group") + " " + (document.Layers.Count(l => l.IsGroup) + 1)).Id, active != null, keys: "Ctrl+G");
             Item(m, "Ungroup", UngroupSelected, active != null && active.IsGroup);
+            m.AddSeparator("");
+            LayerOpMenuItems(m);
             m.AddSeparator("");
             if (active?.Mask == null) Item(m, "Add Layer Mask", () => { document.AddLayerMask(selectedLayer); editMask = true; }, active != null);
             else
@@ -193,7 +197,7 @@ namespace Yozolab.YoluPainter.Editor
             Item(m, "Plugins…", ShowPluginList);
         }
 
-        const string ShortcutHelp = "Tools: B brush · E eraser · G fill · Shift+G gradient · M rectangle select · Shift+M ellipse select · L lasso · W magic wand · V move · P path · I eyedropper\n[ / ] brush size · X swap colors · D default colors\nCtrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo · Ctrl+S save · Ctrl+Shift+S save as · Ctrl+O open · Ctrl+N new\nCtrl+A select all · Ctrl+D deselect · Ctrl+Shift+I inverse\nF1 2D · F2 3D · F3 2D + 3D · Ctrl+0 fit · Ctrl++ / Ctrl+- zoom · wheel zoom · middle drag pan\n3D: Alt or right drag orbits, middle drag pans, wheel zooms\nEsc cancels a stroke or a drag\nBy default, Unity's own shortcuts do nothing while this window has focus (Project Settings ▸ YoluPainter ▸ Unity shortcuts while painting)";
+        const string ShortcutHelp = "Tools: B brush · E eraser · G fill · Shift+G gradient · M rectangle select · Shift+M ellipse select · L lasso · W magic wand · V move · P path · I eyedropper\n[ / ] brush size · X swap colors · D default colors\nCtrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo · Ctrl+S save · Ctrl+Shift+S save as · Ctrl+O open · Ctrl+N new\nCtrl+A select all · Ctrl+D deselect · Ctrl+Shift+I inverse\nCtrl+J duplicate layer · Ctrl+E merge down (a group: merge group) · Ctrl+Shift+E merge visible · Ctrl+C copy · Ctrl+Shift+C copy merged · Ctrl+X cut · Ctrl+V paste as a new layer\nF1 2D · F2 3D · F3 2D + 3D · Ctrl+0 fit · Ctrl++ / Ctrl+- zoom · wheel zoom · middle drag pan\n3D: Alt or right drag orbits, middle drag pans, wheel zooms\nEsc cancels a stroke or a drag\nBy default, Unity's own shortcuts do nothing while this window has focus (Project Settings ▸ YoluPainter ▸ Unity shortcuts while painting)";
         const string LimitsHelp = "Prototype: the CPU paints the source; tiles are composited on the GPU or the CPU (Project Settings ▸ YoluPainter). Readable static and skinned meshes (posed on a copy). One channel is painted at a time. .ylp saves; PSD with 8-bit RGB layers, groups, masks, fills and three adjustment types. Generators read baked mesh maps and are computed on the CPU; anchors are not implemented yet, and the 3D preview does not reproduce lilToon exactly. See Documentation~/STATUS.md in the package.";
     }
 }

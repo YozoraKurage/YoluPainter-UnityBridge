@@ -30,6 +30,8 @@ namespace Yozolab.YoluPainter.Editor
             else if(stroke==null && !toolDragging && tool==PaintTool.Move && GUIUtility.keyboardControl==0 && !(e.control||e.command) && ArrowDelta(e.keyCode)!=Vector2Int.zero)
             {var d=ScreenArrowToCanvas(ArrowDelta(e.keyCode))*(e.shift?10:1);TryAction(()=>MoveBy(d.x,d.y));e.Use();Repaint();}
             else if(stroke==null && tool==PaintTool.Path && GUIUtility.keyboardControl==0 && (e.keyCode==KeyCode.Delete||e.keyCode==KeyCode.Backspace)){TryAction(RemoveLastPathPoint);e.Use();Repaint();}
+            // レイヤーの複製・結合・クリップボード（文字の欄で入力中は Unity の文字のコピー・貼り付けに任せる。ストロークの最中は断って知らせる）
+            else if(GUIUtility.keyboardControl==0 && LayerCommandOf(e)!=LayerCommand.None){RunLayerCommand(LayerCommandOf(e));e.Use();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.A){document.SetSelection(SelectionMask.All(document));e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.D){document.ClearSelection();e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.shift && e.keyCode==KeyCode.I){if(document.Selection!=null)document.SetSelection(document.Selection.Invert());e.Use();Repaint();}
