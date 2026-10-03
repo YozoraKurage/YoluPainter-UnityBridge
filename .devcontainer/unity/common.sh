@@ -60,6 +60,10 @@ if [[ "${YOLUPAINTER_GPU:-1}" != 0 && -e /dev/dxg && -d /usr/lib/wsl/lib ]]; the
   # 同梱パッチが解釈する、3 系統それぞれの未使用バッファーキャッシュ上限（MiB）。
   # 既定は上流と同じ 512。実測して選ぶ（64 は GLX で比較、Unity は未確認）。
   export D3D12_BUFFER_CACHE_MB="${D3D12_BUFFER_CACHE_MB:-${YOLUPAINTER_GPU_CACHE_MB:-512}}"
+  # 台をまたいで GPU の重い仕事（メッシュマップのベイクの Dispatch）を 1 つずつにする（2026-10-03: 4 つの Unity が同時に GPU のベイクを
+  # すると、GPU のドライバの層でまとめて落ちた。Editor/Gpu/GpuHeavyWorkGate.cs が読む。空にすれば止める）
+  export YOLUPAINTER_GPU_HEAVY_LOCK="${YOLUPAINTER_GPU_HEAVY_LOCK-$HOME/.cache/yolupainter-tests/gpu-heavy.lock}"
+  [[ -z "$YOLUPAINTER_GPU_HEAVY_LOCK" ]] || mkdir -p "$(dirname "$YOLUPAINTER_GPU_HEAVY_LOCK")"
   # 複数の GPU があるときは MESA_D3D12_DEFAULT_ADAPTER_NAME（部分一致）で選べる。
 fi
 

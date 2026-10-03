@@ -163,6 +163,7 @@ namespace Yozolab.YoluPainter.Editor
             for (int start = 0; start < count;)
             {
                 int n = Math.Min(Math.Min(chunk, limit), count - start);
+                using var gate = GpuHeavyWorkGate.Enter(); // 開発環境のテストの台だけ: 台をまたいで GPU の重い仕事を 1 つずつ（待つ時間は測らない）
                 clock.Restart();
                 for (int i = 0; i < n; i++)
                 {
