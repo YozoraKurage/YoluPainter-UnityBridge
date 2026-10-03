@@ -8,8 +8,8 @@ YoluPainter は、指揮役（メインの Claude）と、作業者のエージ�
 
 | もの | 置き場 | コンテナの再起動 | 作り直し |
 |---|---|---|---|
-| 統合の木（0.0.0）と各エージェントの worktree（コミット・未コミットの変更・進捗メモ） | `/workspace`（ホストのディスク）、`/workspace/.worktrees/<名前>` | 残る | 残る |
-| GitHub に push したもの（0.0.0、agent-board） | GitHub | 残る | 残る |
+| 統合の木（作業ブランチ。次に出す版の名前で、0.1.0 の後は 0.2.0）と各エージェントの worktree（コミット・未コミットの変更・進捗メモ） | `/workspace`（ホストのディスク）、`/workspace/.worktrees/<名前>` | 残る | 残る |
+| GitHub に push したもの（作業ブランチ、agent-board） | GitHub | 残る | 残る |
 | エージェントの頭の中（どこまでやったか・次に何をするか・迷っていること） | 会話の中だけ | **消える** | **消える** |
 | 会話の記録（指揮役とサブエージェントの transcript）とメモリ | `~/.claude`（名前付きボリューム） | 残る | 残る |
 | テストの台 0（`~/unity-testproject`） | 名前付きボリューム | 残る（Unity は起動し直し） | 残る |
@@ -70,7 +70,7 @@ Codex（OpenAI の Codex CLI）も Claude の担当と同じ決まりで動く�
   （作り直した後は台 1 以上を作り直すので数分。`~/unity-runners/start-all.log`）。人の画面のトークンは作り直した後は発行し直す。
 2. 指揮役（`claude --continue` か新しい会話）は、メモリ（指揮役の決まり）とこの文書を読み、`status.sh` で全体を見る。
 3. 作業中だった worktree ごとに、新しいエージェントを立てる。依頼は「`/workspace/.worktrees/<名前>` の `.agent/task.md`（元の依頼文）と
-   `.agent/progress.md`、ブランチのコミット（`git log 0.0.0..`）を読んで、『次にすること』から続ける」。
+   `.agent/progress.md`、ブランチのコミット（`git log <作業ブランチ>..`）を読んで、『次にすること』から続ける」。
 4. テストの台が揃うまでは、`run-tests.sh` は動いている台に振り分けるか、空くのを待つ。
 
 ## 異常終了したとき（電源断・コンテナの強制終了・エージェントの途中終了）
@@ -80,8 +80,8 @@ Codex（OpenAI の Codex CLI）も Claude の担当と同じ決まりで動く�
 - **テストの台の Unity が落ちた・固まった**: `runners.sh status` で down なら `runners.sh start <番号>`。固まった（鼓動が止まったまま）なら
   `runners.sh restart <番号>`。依頼していた側は終了コード 5 か「デーモンが死んでいた」で終わるので、回し直す。台 0 は `test-daemon.sh restart --batch-gl`。
 - **掲示板が落ちた**: `agent-boardctl start`。実行中だったテストの依頼は「中断」で閉じて、待っていた人に知らせる（自動ではやり直さない）。
-- **統合の途中で落ちた**: 統合はコミットの直前まで `scratchpad` の写しで行い、0.0.0 には最後の 1 回のコミットでしか書かない（commit-snapshot）。
-  落ちても 0.0.0 は前のコミットのまま。`git status` で統合の木に半端な変更が無いかを見る。
+- **統合の途中で落ちた**: 統合はコミットの直前まで `scratchpad` の写しで行い、作業ブランチには最後の 1 回のコミットでしか書かない（commit-snapshot）。
+  落ちても作業ブランチは前のコミットのまま。`git status` で統合の木に半端な変更が無いかを見る。
 - **異常終了で worktree の中のファイルが壊れた**: ブランチの最後のコミットに戻せる（`wip:` をこまめに残す理由）。戻すのはそのエージェントか
   指揮役が中身を見てから（黙って消さない）。
 
@@ -89,6 +89,7 @@ Codex（OpenAI の Codex CLI）も Claude の担当と同じ決まりで動く�
 
 - 新しい担当は、今の HEAD から作った専用の worktree（`git worktree add /workspace/.worktrees/<名前> -b agent/<名前> HEAD`）で動かす。
   Agent ツールの isolation: worktree は main の最初のコミットから作られたので使わない。
-- 0.0.0 に入れるのは指揮役だけ。入れる前にその木で `run-tests.sh --both` を回す。共有の文書（STATUS・VALIDATION・README）は、HEAD に担当の
+- 作業ブランチ（`/workspace` の今のブランチ。`git branch --show-current`）に入れるのは指揮役だけ。リリースは、作業ブランチからその版の名前の
+  ブランチを切って main へ PR（ラベルで版を上げる）し、リリースの後は次の版の名前の作業ブランチを main から作る（2026-10-03: 0.0.0 → 0.1.0 を出して 0.2.0）。入れる前にその木で `run-tests.sh --both` を回す。共有の文書（STATUS・VALIDATION・README）は、HEAD に担当の
   行だけを足した版で入れる（ファイルを丸ごと取らない。2026-10-03 に別の担当の書きかけの節が混ざった）。
 - エージェントの依頼文には、この文書の「エージェントの決まり（書き残し）」を入れる。

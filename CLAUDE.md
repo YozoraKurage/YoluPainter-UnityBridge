@@ -91,7 +91,8 @@ git の履歴に入れてはならない**。コミットされるファイル�
 - `main` へ PR をマージすると `.github/workflows/release.yml` が PR ラベル
   （major / minor / patch）で `package.json` の version を上げ、VPM 用の
   .zip / .unitypackage を Release として公開する。
-- 作業ブランチ名はリリース予定のバージョン（例: `0.0.0`）。
+- 作業ブランチ名はリリース予定のバージョン（例: `0.2.0`）。リリースはその版の名前のブランチを切って main へ PR し、出したら次の版の
+  作業ブランチを main から作る（手順は `Documentation~/ORCHESTRATION.md`）。
 
 ## テストの走らせ方
 
