@@ -169,6 +169,8 @@ namespace Yozolab.YoluPainter.Editor
             Item(m, "2D Canvas", () => View = ViewMode.Canvas, true, viewMode == ViewMode.Canvas, "F1");
             Item(m, "3D View", () => View = ViewMode.Model, true, viewMode == ViewMode.Model, "F2");
             Item(m, "2D + 3D", () => View = ViewMode.Split, true, viewMode == ViewMode.Split, "F3");
+            Item(m, "Swap 2D and 3D", () => ViewsSwapped = !viewsSwapped, true, viewsSwapped);
+            Item(m, "UV Wireframe", () => ShowUvWireframe = !showUvWireframe, preview.HasModel, showUvWireframe);
             m.AddSeparator("");
             Item(m, "Zoom In", () => ZoomCanvasView(canvasZoom * 1.25f), keys: "Ctrl++");
             Item(m, "Zoom Out", () => ZoomCanvasView(canvasZoom / 1.25f), keys: "Ctrl+-");

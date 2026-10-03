@@ -27,6 +27,7 @@ namespace Yozolab.YoluPainter.Editor
                 if(document.Selection!=null){EnsureSelectionOverlay(); GUI.DrawTexture(image,selectionOverlay,ScaleMode.StretchToFill,true);}
             }
             finally{if(turned)GL.PopMatrix();}
+            DrawUvWireframe(view); // 今のテクスチャセットの UV（Canvas/TexturePaintWindow.UvWireframe.cs）
             if(toolDragging&&Event.current.type==EventType.Repaint) DrawToolPreview(view);
             else if(tool==PaintTool.Move&&!toolDragging&&Event.current.type==EventType.Repaint) DrawTransformHandles(view);
             if(Event.current.type==EventType.Repaint) DrawCanvasPathMarkers(view);

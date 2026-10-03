@@ -38,6 +38,7 @@ square fluent image
 color_square fluent square
 stylus fluent inking_tool
 swap_horiz fluent arrow_swap
+uv_wireframe phosphor polygon
 texture fluent data_area
 3d_rotation fluent hexagon
 tune fluent options

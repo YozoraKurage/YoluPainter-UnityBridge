@@ -18,12 +18,21 @@ namespace Yozolab.YoluPainter.Editor
         sealed class ToolSlot { public PaintTool Tool; public bool Erase; public string Id, Name, Key; }
 
         [SerializeField] ViewMode viewMode = ViewMode.Split;
-        Rect menuRect, optionsRect, toolStripRect, viewAreaRect, dockRect, statusRect;
+        /// <summary>並べる表示で、3D ビューを左に（Substance Painter の既定の並び）。</summary>
+        [SerializeField] bool viewsSwapped;
+        /// <summary>並べる表示で 2D キャンバスが取る幅の割合（境目のドラッグで変える。入れ替えても各ビューの幅は保つ）。</summary>
+        [SerializeField] float splitRatio = .5f;
+        Rect menuRect, optionsRect, toolStripRect, viewAreaRect, dockRect, statusRect, splitAreaRect, splitHandleRect;
+        const float SplitGap = 6, MinSplitRatio = .15f, MaxSplitRatio = .85f;
 
         Guid renamingLayer; double lastLayerClick; Guid lastLayerClicked;
         /// <summary>テストとオフスクリーンの描画用: position の代わりに使う大きさ。</summary>
         internal Rect? LayoutOverride;
         internal ViewMode View { get => viewMode; set { viewMode = value; Repaint(); } }
+        internal bool ViewsSwapped { get => viewsSwapped; set { viewsSwapped = value; Repaint(); } }
+        internal float SplitRatio { get => ClampSplitRatio(splitRatio); set { splitRatio = ClampSplitRatio(value); Repaint(); } }
+        internal Rect SplitHandleRect => splitHandleRect;
+        static float ClampSplitRatio(float r) => float.IsNaN(r) || float.IsInfinity(r) ? .5f : Mathf.Clamp(r, MinSplitRatio, MaxSplitRatio);
 
         static readonly ToolSlot[] ToolSlots =
         {
@@ -63,9 +72,45 @@ namespace Yozolab.YoluPainter.Editor
                 case ViewMode.Canvas: canvasRect = inner; surfaceRect = new Rect(inner.xMax, inner.y, 0, inner.height); break;
                 case ViewMode.Model: surfaceRect = inner; canvasRect = new Rect(inner.x, inner.y, 0, inner.height); break;
                 default:
-                    float half = (inner.width - 2) * .5f;
-                    canvasRect = new Rect(inner.x, inner.y, half, inner.height);
-                    surfaceRect = new Rect(canvasRect.xMax + 2, inner.y, inner.width - half - 2, inner.height);
+                    // 境目（SplitGap の幅）はどちらのビューにも入らないので、そこでのクリックはストロークにならない
+                    float share = ClampSplitRatio(splitRatio), room = Mathf.Max(0, inner.width - SplitGap);
+                    float firstWidth = Mathf.Round(room * (viewsSwapped ? 1 - share : share));
+                    var left = new Rect(inner.x, inner.y, firstWidth, inner.height);
+                    var right = new Rect(left.xMax + SplitGap, inner.y, room - firstWidth, inner.height);
+                    if (viewsSwapped) { surfaceRect = left; canvasRect = right; } else { canvasRect = left; surfaceRect = right; }
+                    splitAreaRect = inner; splitHandleRect = new Rect(left.xMax, inner.y, SplitGap, inner.height);
+                    break;
+            }
+            if (viewMode != ViewMode.Split) splitHandleRect = default;
+        }
+
+        /// <summary>並べる表示の境目: 左ドラッグで幅の割合を変え、ダブルクリックで半分に戻す。ストロークやドラッグの最中は動かさない。
+        /// 外枠の中で、キャンバスと 3D ビューの入力より先に呼ぶ（境目はどちらのビューにも入らない）。</summary>
+        void HandleSplitHandle()
+        {
+            if (viewMode != ViewMode.Split || splitHandleRect.width <= 0) return;
+            var e = Event.current;
+            int id = GUIUtility.GetControlID("YoluPainter.ViewSplit".GetHashCode(), FocusType.Passive, splitHandleRect);
+            if (LayoutOverride == null) EditorGUIUtility.AddCursorRect(splitHandleRect, MouseCursor.ResizeHorizontal, id); // オフスクリーンの描画は窓の OnGUI の外
+            switch (e.GetTypeForControl(id))
+            {
+                case EventType.MouseDown:
+                    if (e.button != 0 || !splitHandleRect.Contains(e.mousePosition) || stroke != null || toolDragging) break;
+                    if (e.clickCount == 2) SplitRatio = .5f; else GUIUtility.hotControl = id;
+                    e.Use(); break;
+                case EventType.MouseDrag:
+                    if (GUIUtility.hotControl != id) break;
+                    float room = Mathf.Max(1, splitAreaRect.width - SplitGap);
+                    float leftShare = (e.mousePosition.x - splitAreaRect.x - SplitGap * .5f) / room;
+                    SplitRatio = viewsSwapped ? 1 - leftShare : leftShare;
+                    e.Use(); break;
+                case EventType.MouseUp:
+                    if (GUIUtility.hotControl == id) { GUIUtility.hotControl = 0; e.Use(); }
+                    break;
+                case EventType.Repaint:
+                    PaintGui.Fill(splitHandleRect, GUIUtility.hotControl == id || splitHandleRect.Contains(e.mousePosition) ? PaintTheme.Separator : PaintTheme.WindowBg);
+                    var c = splitHandleRect.center;
+                    for (int i = -1; i <= 1; i++) PaintGui.Fill(new Rect(c.x - 1, c.y + i * 6 - 1, 2, 2), PaintTheme.TextDim);
                     break;
             }
         }
@@ -84,6 +129,7 @@ namespace Yozolab.YoluPainter.Editor
                 DrawDocks();
             }
             DrawViewHeader();
+            HandleSplitHandle();
             DrawStatusBar();
         }
 
@@ -241,6 +287,11 @@ namespace Yozolab.YoluPainter.Editor
                 if (PaintGui.IconButton(new Rect(x, bar.y + 2, 26, 22), icon, L.Tr(tip), viewMode == mode, true, 17)) View = mode;
                 x += 28;
             }
+            if (viewMode == ViewMode.Split)
+            {
+                if (PaintGui.IconButton(new Rect(x + 4, bar.y + 2, 26, 22), "swap_horiz", L.Tr("Swap 2D and 3D (left and right)"), viewsSwapped, true, 17)) ViewsSwapped = !viewsSwapped;
+                x += 32;
+            }
             string channelName = L.Tr(channel.ToString());
             string what = EditingMask ? L.Tr("Layer mask") : channelName;
             if (textureSets.Count > 1) what = currentSet.Name + " · " + what;
@@ -248,6 +299,8 @@ namespace Yozolab.YoluPainter.Editor
             {
                 // 2D の見出し: 何を描いているか・拡大率、回っていれば角度、反転していればその印（押すと戻す）
                 float left = Mathf.Max(x + 8, canvasRect.x + 8), right = canvasRect.xMax - 4;
+                // 右端に UV のワイヤーフレームの表示の切り替え（Canvas/TexturePaintWindow.UvWireframe.cs）
+                right -= 28; DrawUvWireframeToggle(new Rect(right, bar.y + 2, 26, 22)); right -= 4;
                 float marks = (canvasAngle != 0 ? 20 + PaintGui.TextWidth(AngleLabel(canvasAngle), PaintTheme.LabelDim) + 10 : 0) + (canvasFlip ? 28 : 0);
                 float width = Mathf.Clamp(right - left - marks, 0, 300);
                 string label = PaintGui.Fit("2D · " + what + "  " + Mathf.RoundToInt(canvasZoom * 100) + "%", width, PaintTheme.LabelDim, false);
