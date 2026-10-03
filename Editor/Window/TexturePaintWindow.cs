@@ -153,7 +153,7 @@ namespace Yozolab.YoluPainter.Editor
             DisposePenInput();
             FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); CancelGradientDrafts(); preview?.CancelNavigation(); SaveRecoveryBeforeLifecycleChange(); recoveryWriter=null; lastRecoveryRequest=null;
             EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; EditorApplication.projectChanged-=OnUnityProjectChanged; UnhookResources(); DisposeAssetThumbnails(); L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
-            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeDecalOverlay(); DisposeStencilOverlay(); DisposeThumbnails(); DisposeColorPanel(); DisposeTextureSetTextures(); DisposeMaterialChannelTextures(); DisposeModelShowTextures(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
+            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeDecalOverlay(); DisposeStencilOverlay(); DisposeThumbnails(); DisposeColorPanel(); DisposeTextureSetTextures(); DisposeMaterialChannelTextures(); DisposeModelShowTextures(); DisposeCanvasShowTextures(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
             if(selectionOverlay!=null){DestroyImmediate(selectionOverlay);selectionOverlay=null;overlayFor=null;}
         }
         void Tick()
@@ -237,6 +237,7 @@ namespace Yozolab.YoluPainter.Editor
             TryAction(UpdatePreviewLighting);
             TryAction(ShowMaterialChannels);
             TryAction(ShowModelShowTextures); // 1 つのチャンネル・メッシュマップだけの見せ方（Model/TexturePaintWindow.ModelShow.cs）
+            TryAction(UpdateCanvasShowTexture); // 2Dは描き込み先と3Dから独立した表示
             lastComposite=EditorApplication.timeSinceStartup; CompositeCount++;
             renderedRevision=document.Revision; repaintPixels=false;
         }

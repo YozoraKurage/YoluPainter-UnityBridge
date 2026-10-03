@@ -28,7 +28,7 @@ namespace Yozolab.YoluPainter.Editor
         Guid renamingLayer; double lastLayerClick; Guid lastLayerClicked;
         /// <summary>テストとオフスクリーンの描画用: position の代わりに使う大きさ。</summary>
         internal Rect? LayoutOverride;
-        internal ViewMode View { get => viewMode; set { viewMode = value; Repaint(); } }
+        internal ViewMode View { get => viewMode; set { viewMode = value; repaintPixels = true; Repaint(); } }
         internal bool ViewsSwapped { get => viewsSwapped; set { viewsSwapped = value; Repaint(); } }
         internal float SplitRatio { get => ClampSplitRatio(splitRatio); set { splitRatio = ClampSplitRatio(value); Repaint(); } }
         internal Rect SplitHandleRect => splitHandleRect;
@@ -315,6 +315,7 @@ namespace Yozolab.YoluPainter.Editor
         internal Rect surfaceHeaderLabelForTests; internal float viewModeButtonsEndForTests;
         void DrawViewHeader()
         {
+            modelShowButtonForTests = canvasShowButtonForTests = surfaceHeaderLabelForTests = default;
             var bar = new Rect(viewAreaRect.x, viewAreaRect.y, viewAreaRect.width, 26);
             PaintGui.Fill(bar, PaintTheme.PanelHeader);
             PaintGui.HLine(bar.x, bar.xMax, bar.yMax - 1, PaintTheme.Border);
@@ -329,6 +330,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (PaintGui.IconButton(new Rect(x + 4, bar.y + 2, 26, 22), "swap_horiz", L.Tr("Swap 2D and 3D (left and right)"), viewsSwapped, true, 17)) ViewsSwapped = !viewsSwapped;
                 x += 32;
             }
+            viewModeButtonsEndForTests = x;
             string channelName = L.Tr(channel.ToString());
             string what = EditingMask ? L.Tr("Layer mask") : channelName;
             if (textureSets.Count > 1) what = currentSet.Name + " · " + what;
@@ -339,18 +341,19 @@ namespace Yozolab.YoluPainter.Editor
                 // 右端に UV のワイヤーフレームの表示の切り替え（Canvas/TexturePaintWindow.UvWireframe.cs）
                 right -= 28; DrawUvWireframeToggle(new Rect(right, bar.y + 2, 26, 22)); right -= 4;
                 float marks = (canvasAngle != 0 ? 20 + PaintGui.TextWidth(AngleLabel(canvasAngle), PaintTheme.LabelDim) + 10 : 0) + (canvasFlip ? 28 : 0);
-                float width = Mathf.Clamp(right - left - marks, 0, 300);
+                if (marks > 0) DrawCanvasViewMarks(Mathf.Max(left, right - marks), bar.y, right);
+                var show = DrawViewShowDropdown(bar, canvasRect, left, right - marks, true);
+                float width = Mathf.Clamp(show.x - left - 8, 0, 300);
                 string label = PaintGui.Fit("2D · " + what + "  " + Mathf.RoundToInt(canvasZoom * 100) + "%", width, PaintTheme.LabelDim, false);
                 PaintGui.Text(new Rect(left, bar.y, width, bar.height), label, PaintTheme.LabelDim, EditingMask ? PaintTheme.Warning : PaintTheme.TextDim);
-                if (marks > 0) DrawCanvasViewMarks(left + Mathf.Min(width, PaintGui.TextWidth(label, PaintTheme.LabelDim)) + 8, bar.y, right);
             }
             if (surfaceRect.width > 0)
             {
-                // 3D だけの表示では 3D ビューの左端が表示の切り替えのボタンの下なので、2D の見出しと同じくボタンの後から書く
-                float right = DrawShadingSwitch(bar), left = DrawModelShowDropdown(bar, Mathf.Max(x + 8, surfaceRect.x + 8), right);
+                float right = DrawShadingSwitch(bar), left = Mathf.Max(x + 8, surfaceRect.x + 8);
+                var show = DrawViewShowDropdown(bar, surfaceRect, left, right, false);
                 string label = "3D · " + (preview.HasSnapshot ? (model != null ? model.name : L.Tr("Demo cube")) : L.Tr("No model"));
-                float width = Mathf.Max(0, Mathf.Min(300, right - left - 4));
-                surfaceHeaderLabelForTests = new Rect(left, bar.y, width, bar.height); viewModeButtonsEndForTests = x;
+                float width = Mathf.Max(0, Mathf.Min(300, show.x - left - 8));
+                surfaceHeaderLabelForTests = new Rect(left, bar.y, width, bar.height);
                 PaintGui.Text(new Rect(left, bar.y, width, bar.height), PaintGui.Fit(label, width, PaintTheme.LabelDim, false), PaintTheme.LabelDim);
             }
             if (surfaceRect.width > 0 && !preview.HasSnapshot)

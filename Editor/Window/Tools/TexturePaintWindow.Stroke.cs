@@ -25,6 +25,9 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>3D ビューのストロークで 1 回の入力（1 区間）に置けるダブの数の上限。超えたらストロークを取り消す。</summary>
         internal const int SurfaceDabsPerEvent = 128;
 
+        // 表示の準備の案内が出入りしても、増えた部品が筆の制御番号を取り、ドラッグを飲み込まないための手がかり。
+        const int StrokeDragHint = 0x59505354;
+
         /// <summary>ブラシのストローク（2D キャンバスと 3D ビュー）: 押して始め、ドラッグで足し、離して確定する。</summary>
         void HandleBrushInput(Event e)
         {
@@ -51,7 +54,7 @@ namespace Yozolab.YoluPainter.Editor
                     strokeCanvasSymmetry=surfaceStroke ? null : CanvasSymmetryNow();
                     BeginBrushEffectStroke();
                     previousPointer=e.mousePosition; previousPressure=Pressure(e); surfaceHasBefore=surfaceHasHeld=false;
-                    PaintAt(e.mousePosition,previousPressure); GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive);
+                    PaintAt(e.mousePosition,previousPressure); GUIUtility.hotControl=GUIUtility.GetControlID(StrokeDragHint,FocusType.Passive);
                 });
                 e.Use();Repaint();
             }

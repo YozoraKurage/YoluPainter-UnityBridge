@@ -33,3 +33,21 @@ msgstr "先にモデルを読み込んでください。"
 
 msgid "not baked for this texture set"
 msgstr "このテクスチャセットでは未ベイク"
+
+msgid "Finish the stroke first; the 2D view keeps showing {0}."
+msgstr "先にストロークを終えてください。2D ビューは {0} を表示したままです。"
+
+msgid "2D view: the current composite."
+msgstr "2D ビュー: 今の合成。"
+
+msgid "2D view: {0} only, unlit (the values as they are)."
+msgstr "2D ビュー: {0} だけを照明なしで表示（そのままの値）。"
+
+msgid "2D view: the selected layer mask (white shows the layer)."
+msgstr "2D ビュー: 選んだ層のマスク（白が見える所）。"
+
+msgid "2D view: the baked {0} only."
+msgstr "2D ビュー: ベイク済みの {0} だけ。"
+
+msgid "What the 2D view shows: the current composite, one channel, the layer mask or a baked mesh map. Independent of 3D and the painted channel (C · Shift+B · Shift+C)."
+msgstr "2D ビューの表示: 今の合成・チャンネル・層のマスク・ベイク済みメッシュマップ。3D の表示や描き込み先とは別に選べます（C・Shift+B・Shift+C）。"

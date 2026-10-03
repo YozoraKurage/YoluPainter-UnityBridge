@@ -12,8 +12,8 @@ namespace Yozolab.YoluPainter.Editor
     /// 3D ビューで見せるもの（Substance Painter の C・B・M に当たる）: マテリアル（描き方どおり。中立かマテリアル表示）/ 1 つのチャンネルだけ
     /// （Color・Roughness・Metallic・Height・Normal の出力・Emission・選んだ層のマスクを、照明・環境・影・トーンマッピングなしでそのまま）/
     /// 焼いたメッシュマップだけ。キーは C（チャンネルを順に。最後の次はマテリアル）、Shift+B（メッシュマップを順に）、Shift+C（マテリアルへ）。
-    /// B は筆のまま（Shift+B だけを使う）、M は矩形選択のまま。文字の欄の入力中は使わず、ストロークの最中は断って知らせる。3D ビューの左上の
-    /// ドロップダウンと 3D メニューからも選べる。描き込み・ピック・ブラシのカーソルは見せ方によらない。見せ方は窓の状態（.ylp には入らない）。
+    /// B は筆のまま（Shift+B だけを使う）、M は矩形選択のまま。文字の欄の入力中は使わず、ストロークの最中は断って知らせる。各ビュー上部中央の
+    /// ドロップダウンから独立して選べる。キーはポインタのビューへ。描き込み・ピック・ブラシのカーソルは見せ方によらない。見せ方は窓の状態（.ylp には入らない）。
     /// </summary>
     public sealed partial class TexturePaintWindow
     {
@@ -33,6 +33,7 @@ namespace Yozolab.YoluPainter.Editor
         internal bool ShowMaterialIn3D()
         {
             if (ModelShowRefusal() is string refused) { message = refused; return false; }
+            showKeysInCanvas = false;
             if (modelShow == ModelShowKind.Material) return true;
             modelShow = ModelShowKind.Material;
             ModelShowChanged(L.Tr("3D view: the material ({0} shading).", previewShading == Yozolab.YoluPainter.Editor.Preview.PreviewShading.Material ? L.Tr("material") : L.Tr("neutral")));
@@ -43,6 +44,7 @@ namespace Yozolab.YoluPainter.Editor
         internal bool ShowChannelIn3D(PaintChannel c)
         {
             if (ModelShowRefusal() is string refused) { message = refused; return false; }
+            showKeysInCanvas = false;
             modelShow = ModelShowKind.Channel; modelShowChannel = c;
             bool used = YlpContent.UsedChannels(document).Contains(c);
             ModelShowChanged(L.Tr("3D view: {0} only, unlit (the values as they are).", L.Tr(c.ToString())) + (used ? "" : " " + L.Tr("This texture set does not use {0}, so it shows dark grey.", L.Tr(c.ToString()))));
@@ -54,6 +56,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (ModelShowRefusal() is string refused) { message = refused; return false; }
             if (SelectedMaskLayer == null) { message = L.Tr("The selected layer has no mask to show."); return false; }
+            showKeysInCanvas = false;
             modelShow = ModelShowKind.Mask;
             ModelShowChanged(L.Tr("3D view: the mask of {0} only (white shows the layer).", SelectedMaskLayer.Name));
             return true;
@@ -64,6 +67,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (ModelShowRefusal() is string refused) { message = refused; return false; }
             if (!meshMaps.TryGet(kind, out var map)) { message = L.Tr("{0} is not baked for this texture set (3D ▸ Bake Mesh Maps…).", MeshMapLabel(kind)); return false; }
+            showKeysInCanvas = false;
             modelShow = ModelShowKind.MeshMap; modelShowMap = kind;
             var check = map.Provenance.Check(CurrentMeshMapExpectation());
             ModelShowChanged(L.Tr("3D view: the baked {0} only.", MeshMapLabel(kind)) + (check.State == MeshMapState.Stale ? " " + L.Tr("It is stale for the loaded model.") : ""));
@@ -96,13 +100,14 @@ namespace Yozolab.YoluPainter.Editor
         void ModelShowChanged(string note) { message = note; repaintPixels = true; lightingRevision = -1; Repaint(); }
 
         /// <summary>見出しとメニューに出す、今見せているものの名前。</summary>
-        internal string ModelShowName()
+        internal string ModelShowName() => ViewShowName(modelShow, modelShowChannel, modelShowMap);
+        string ViewShowName(ModelShowKind kind, PaintChannel shownChannel, MeshMapKind shownMap)
         {
-            switch (modelShow)
+            switch (kind)
             {
-                case ModelShowKind.Channel: return L.Tr(modelShowChannel.ToString());
+                case ModelShowKind.Channel: return L.Tr(shownChannel.ToString());
                 case ModelShowKind.Mask: return L.Tr("Layer mask");
-                case ModelShowKind.MeshMap: return L.Tr("{0} (mesh map)", MeshMapGridLabel(modelShowMap));
+                case ModelShowKind.MeshMap: return L.Tr("{0} (mesh map)", MeshMapGridLabel(shownMap));
                 default: return L.Tr("Material");
             }
         }
@@ -115,7 +120,16 @@ namespace Yozolab.YoluPainter.Editor
             if (e.type != EventType.KeyDown || GUIUtility.keyboardControl != 0 || e.control || e.command || e.alt) return false;
             bool c = e.keyCode == KeyCode.C, b = e.keyCode == KeyCode.B && e.shift;
             if (!c && !b) return false;
-            if (ModelShowRefusal() is string refused) message = refused;
+            bool canvas = canvasRect.Contains(e.mousePosition) || canvasShowButtonForTests.Contains(e.mousePosition) ? true :
+                surfaceRect.Contains(e.mousePosition) || modelShowButtonForTests.Contains(e.mousePosition) ? false :
+                viewMode == ViewMode.Canvas || viewMode == ViewMode.Split && showKeysInCanvas;
+            if ((canvas ? CanvasShowRefusal() : ModelShowRefusal()) is string refused) message = refused;
+            else if (canvas)
+            {
+                if (b) CycleMeshMapIn2D();
+                else if (e.shift) ShowMaterialIn2D();
+                else CycleChannelIn2D();
+            }
             else if (b) CycleMeshMapIn3D();
             else if (e.shift) ShowMaterialIn3D();
             else CycleChannelIn3D();
@@ -164,12 +178,14 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>3D のマスクの長辺の上限（マスクの出力は画素ごとに読むので、大きい文書は縮めて読む）。</summary>
         internal const int MaskPreviewMaxSize = 1024;
 
-        Texture2D MaskTexture3D()
+        Texture2D MaskTexture3D() => MaskDisplayTexture(ref maskTexture3D, ref maskTexture3DKey, true);
+        Texture2D MaskDisplayTexture(ref Texture2D texture, ref (Guid layer, long stamp) key, bool freezeStroke)
         {
             var layer = SelectedMaskLayer; if (layer == null) return null;
             var mask = layer.Mask;
             long stamp = unchecked(mask.Surface.Revision * 31 + mask.FilterRevision * 7 + (mask.Inverted ? 1 : 0) + (mask.Enabled ? 2 : 0) + (long)(mask.Density * 1000) * 131);
-            if (maskTexture3D != null && maskTexture3DKey.layer == layer.Id && (maskTexture3DKey.stamp == stamp || stroke != null)) return maskTexture3D;
+            if (texture != null && key.layer == layer.Id && (key.stamp == stamp || freezeStroke && stroke != null)) return texture;
+            if (!freezeStroke && !AdmitPreviewDisplayWork()) return key.layer == layer.Id ? texture : null;
             float scale = Mathf.Max(1, Mathf.Max(document.Width, document.Height) / (float)MaskPreviewMaxSize);
             int w = Mathf.Max(1, Mathf.RoundToInt(document.Width / scale)), h = Mathf.Max(1, Mathf.RoundToInt(document.Height / scale));
             var rgba = new byte[w * h * 4];
@@ -180,9 +196,9 @@ namespace Yozolab.YoluPainter.Editor
                     byte v = (byte)Mathf.Clamp(Mathf.RoundToInt((float)mask.FactorAt(sx, sy) * 255), 0, 255); int o = (y * w + x) * 4;
                     rgba[o] = rgba[o + 1] = rgba[o + 2] = v; rgba[o + 3] = 255;
                 }
-            maskTexture3D = Upload(maskTexture3D, rgba, w, h, "YoluPainter 3D view mask");
-            maskTexture3DKey = (layer.Id, stamp);
-            return maskTexture3D;
+            texture = Upload(texture, rgba, w, h, "YoluPainter view mask");
+            key = (layer.Id, stamp);
+            return texture;
         }
 
         Texture2D MeshMapTexture3D(TextureSet set)
@@ -204,24 +220,23 @@ namespace Yozolab.YoluPainter.Editor
 
         // ───────── 見出しとメニュー ─────────
 
-        /// <summary>3D ビューの左上に、今見せているものを常に出す。右の操作と狭い表示では重ならない幅。</summary>
-        float DrawModelShowDropdown(Rect bar, float left, float right)
+        /// <summary>各ビュー上部の中央に今の表示名を出す。左右の操作があるときは空いている範囲へ収める。</summary>
+        Rect DrawViewShowDropdown(Rect bar, Rect view, float left, float right, bool canvas)
         {
-            string label = ModelShowName();
+            string label = canvas ? CanvasShowName() : ModelShowName();
             float w = Mathf.Min(Mathf.Clamp(PaintGui.TextWidth(label, PaintTheme.Label) + 28, 86, 220), Mathf.Max(0, right - left - 4));
-            var r = new Rect(left, bar.y + 2, w, 22);
-            modelShowButtonForTests = r;
-            if (w > 0 && PaintGui.Button(r, PaintGui.Fit(label, Mathf.Max(0, w - 24), PaintTheme.Label, false) + " ▾", modelShow != ModelShowKind.Material, true,
-                L.Tr("What the 3D view shows: the material, or one channel or one baked mesh map unlit, as it is (C: channels · Shift+B: mesh maps · Shift+C: the material)")))
-                ShowModelShowMenu(r);
-            return r.xMax + 8;
+            var r = new Rect(Mathf.Clamp(view.center.x - w * .5f, left, Mathf.Max(left, right - w)), bar.y + 2, w, 22);
+            if (canvas) canvasShowButtonForTests = r; else modelShowButtonForTests = r;
+            string tip = canvas ? L.Tr("What the 2D view shows: the current composite, one channel, the layer mask or a baked mesh map. Independent of 3D and the painted channel (C · Shift+B · Shift+C).") :
+                L.Tr("What the 3D view shows: the material, or one channel or one baked mesh map unlit, as it is (C: channels · Shift+B: mesh maps · Shift+C: the material)");
+            if (w > 0 && PaintGui.Button(r, PaintGui.Fit(label, Mathf.Max(0, w - 24), PaintTheme.Label, false) + " ▾", (canvas ? canvasShow : modelShow) != ModelShowKind.Material, true, tip))
+            {
+                showKeysInCanvas = canvas;
+                ViewShowMenu(canvas).DropDown(r);
+            }
+            return r;
         }
-        internal Rect modelShowButtonForTests;
-
-        void ShowModelShowMenu(Rect at)
-        {
-            ModelShowMenu().DropDown(at);
-        }
+        internal Rect modelShowButtonForTests, canvasShowButtonForTests;
 
         /// <summary>3D メニューの「見せるもの」。</summary>
         void ModelShowMenuItems(GenericMenu m) => ModelShowItems(m, L.Tr("3D View Shows") + "/");
@@ -232,10 +247,11 @@ namespace Yozolab.YoluPainter.Editor
                 AddItem(m, prefix + item.path, item.choose, item.reason == null, item.on, item.keys);
         }
 
-        internal PaintMenu ModelShowMenu()
+        internal PaintMenu ModelShowMenu() => ViewShowMenu(false);
+        PaintMenu ViewShowMenu(bool canvas)
         {
             var m = new PaintMenu(); string group = null;
-            foreach (var item in ModelShowChoices())
+            foreach (var item in ViewShowChoices(canvas))
             {
                 string text = item.path; int slash = text.IndexOf('/');
                 if (slash >= 0)
@@ -252,28 +268,32 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>共通ドロップダウンに渡せる、表示名・選択・無効の理由。GUI の部品には依存しない。</summary>
-        internal List<(string path, Action choose, string reason, bool on, string keys)> ModelShowChoices()
+        internal List<(string path, Action choose, string reason, bool on, string keys)> ModelShowChoices() => ViewShowChoices(false);
+        List<(string path, Action choose, string reason, bool on, string keys)> ViewShowChoices(bool canvas)
         {
             var items = new List<(string, Action, string, bool, string)>();
-            string locked = ModelShowRefusal() ?? (!preview.HasModel ? L.Tr("Load a model first.") : null);
+            string locked = canvas ? CanvasShowRefusal() : ModelShowRefusal() ?? (!preview.HasModel ? L.Tr("Load a model first.") : null);
+            var shown = canvas ? canvasShow : modelShow;
+            var shownChannel = canvas ? canvasShowChannel : modelShowChannel;
+            var shownMap = canvas ? canvasShowMap : modelShowMap;
             void Add(string path, Action action, string reason, bool on, string keys = null)
             {
                 string why = locked ?? reason;
                 items.Add((why == null ? path : path + " · " + why, action, why, on, keys));
             }
-            Add(L.Tr("Material"), () => ShowMaterialIn3D(), null, modelShow == ModelShowKind.Material, "Shift+C");
+            Add(L.Tr("Material"), () => { if (canvas) ShowMaterialIn2D(); else ShowMaterialIn3D(); }, null, shown == ModelShowKind.Material, "Shift+C");
             var used = YlpContent.UsedChannels(document);
             foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel)))
             {
                 var ch = c;
-                Add(L.Tr("Channel") + "/" + L.Tr(c.ToString()) + (used.Contains(c) ? "" : " " + L.Tr("(not used)")), () => ShowChannelIn3D(ch), null, modelShow == ModelShowKind.Channel && modelShowChannel == c, c == used.FirstOrDefault() ? "C" : null);
+                Add(L.Tr("Channel") + "/" + L.Tr(c.ToString()) + (used.Contains(c) ? "" : " " + L.Tr("(not used)")), () => { if (canvas) ShowChannelIn2D(ch); else ShowChannelIn3D(ch); }, null, shown == ModelShowKind.Channel && shownChannel == c, c == used.FirstOrDefault() ? "C" : null);
             }
-            Add(L.Tr("Channel") + "/" + L.Tr("Layer mask"), () => ShowMaskIn3D(), SelectedMaskLayer == null ? L.Tr("The selected layer has no mask to show.") : null, modelShow == ModelShowKind.Mask);
+            Add(L.Tr("Channel") + "/" + L.Tr("Layer mask"), () => { if (canvas) ShowMaskIn2D(); else ShowMaskIn3D(); }, SelectedMaskLayer == null ? L.Tr("The selected layer has no mask to show.") : null, shown == ModelShowKind.Mask);
             var maps = meshMaps.Maps.Select(x => x.Kind).ToList();
             foreach (MeshMapKind kind in Enum.GetValues(typeof(MeshMapKind)))
             {
                 var k = kind;
-                Add(L.Tr("Mesh Map") + "/" + MeshMapLabel(kind), () => ShowMeshMapIn3D(k), maps.Contains(kind) ? null : L.Tr("not baked for this texture set"), modelShow == ModelShowKind.MeshMap && modelShowMap == kind, maps.Count > 0 && kind == maps[0] ? "Shift+B" : null);
+                Add(L.Tr("Mesh Map") + "/" + MeshMapLabel(kind), () => { if (canvas) ShowMeshMapIn2D(k); else ShowMeshMapIn3D(k); }, maps.Contains(kind) ? null : L.Tr("not baked for this texture set"), shown == ModelShowKind.MeshMap && shownMap == kind, maps.Count > 0 && kind == maps[0] ? "Shift+B" : null);
             }
             return items;
         }
