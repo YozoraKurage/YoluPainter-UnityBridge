@@ -50,6 +50,8 @@ namespace Yozolab.YoluPainter.Core
             /// <summary>Generator stacks: the mesh maps by kind as the document resolved them, and that resolution's revision (0
             /// without a generator).</summary>
             public IReadOnlyList<MeshMaps.BakedMeshMap> Maps; public long MapsRevision;
+            /// <summary>Generator stacks: where the model root is in the maps' space (shape gradients), from the same resolution.</summary>
+            public GeneratorModelFrame Frame;
             public bool Normal { get { return !Mask && Channel == PaintChannel.Normal; } }
             public int Key { get { return Mask ? MaskKey : (int)Channel; } }
         }
@@ -87,7 +89,7 @@ namespace Yozolab.YoluPainter.Core
         }
         static void AttachMaps(Source s, PaintDocument document)
         {
-            foreach (var e in s.Chain) if (e.Settings.IsGenerator) { s.Maps = document.GeneratorMapSnapshot(out s.MapsRevision); return; }
+            foreach (var e in s.Chain) if (e.Settings.IsGenerator) { s.Maps = document.GeneratorMapSnapshot(out s.MapsRevision, out s.Frame); return; }
         }
         internal static int Halo(FilterEffect[] chain, int count) { int h = 0; for (int i = 0; i < count; i++) h += chain[i].Settings.HaloPixels; return h; }
         internal static int Expansion(FilterEffect[] chain) { int h = 0; foreach (var e in chain) if (e.Settings.ExpandsCoverage) h += e.Settings.HaloPixels; return h; }
@@ -518,7 +520,7 @@ namespace Yozolab.YoluPainter.Core
         /// keep their RGB. Pixels where a map has no data, and the whole stage when its maps are not usable, keep the input.</summary>
         void Generate(Source s, byte[] buf, Rect r, GeneratorSettings g, double strength)
         {
-            var bound = BoundGenerator.Bind(g, s.Maps, document.Width, document.Height, out _);
+            var bound = BoundGenerator.Bind(g, s.Maps, s.Frame, document.Width, document.Height, out _);
             if (bound == null) return; // 入力のまま（理由は PaintDocument.GetGeneratorStatus が知らせる）
             bool mask = s.Mask; var blend = g.Blend; var unit = MathUtil.ByteUnit;
             ParallelRange(r.H, (y0, y1) =>

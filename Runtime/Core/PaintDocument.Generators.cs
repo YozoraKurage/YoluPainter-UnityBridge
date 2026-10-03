@@ -28,6 +28,9 @@ namespace Yozolab.YoluPainter.Core
         long generatorInputsSeen, generatorRevision = 1;
         BakedMeshMap[] generatorMaps = new BakedMeshMap[MapKinds];
         string[] generatorReasons = new string[MapKinds];
+        /// <summary>Where the model root is in the maps' space (<see cref="IGeneratorModelFrame"/>; identity when the inputs do not say),
+        /// or null when the inputs failed to say (shape gradients then pass their input through).</summary>
+        GeneratorModelFrame generatorFrame = GeneratorModelFrame.Identity; string generatorFrameReason;
 
         /// <summary>Where generators read the texture set's mesh maps (null: nothing connected, every generator passes its input
         /// through). Setting another provider reads the maps again and reports the generator layers as changed if they differ.
@@ -96,9 +99,14 @@ namespace Yozolab.YoluPainter.Core
                 }
                 catch (Exception ex) { reasons[k] = "Reading the " + kind + " map failed: " + ex.Message; }
             }
-            bool changed = !generatorEverResolved;
+            GeneratorModelFrame frame = GeneratorModelFrame.Identity; string frameReason = null;
+            if (generatorInputs is IGeneratorModelFrame framed)
+                try { frame = framed.ModelFrame; if (frame == null) frameReason = "Where the model root is is not known (load the model)."; }
+                catch (Exception ex) { frame = null; frameReason = "Reading where the model root is failed: " + ex.Message; }
+            bool changed = !generatorEverResolved || !Equals(frame, generatorFrame);
             for (int k = 0; k < MapKinds && !changed; k++) changed = !ReferenceEquals(maps[k], generatorMaps[k]);
-            generatorMaps = maps; generatorReasons = reasons; generatorInputsSeen = seen; generatorResolved = true; generatorEverResolved = true;
+            generatorMaps = maps; generatorReasons = reasons; generatorFrame = frame; generatorFrameReason = frameReason;
+            generatorInputsSeen = seen; generatorResolved = true; generatorEverResolved = true;
             if (!changed) return false;
             generatorRevision++;
             MarkGeneratorLayersChanged();
@@ -120,12 +128,12 @@ namespace Yozolab.YoluPainter.Core
             if (any) MarkClippedLayersChanged();
         }
 
-        /// <summary>The resolved maps by kind (an immutable snapshot) and its revision, resolving them first if nothing was resolved
-        /// since the provider was set. Evaluations read this; they do not poll the inputs per tile.</summary>
-        internal IReadOnlyList<BakedMeshMap> GeneratorMapSnapshot(out long revision)
+        /// <summary>The resolved maps by kind (an immutable snapshot), the model root's frame and their revision, resolving them first
+        /// if nothing was resolved since the provider was set. Evaluations read this; they do not poll the inputs per tile.</summary>
+        internal IReadOnlyList<BakedMeshMap> GeneratorMapSnapshot(out long revision, out GeneratorModelFrame frame)
         {
             if (!generatorResolved) ResolveGeneratorInputs(InputsRevision());
-            revision = generatorRevision;
+            revision = generatorRevision; frame = generatorFrame;
             return generatorMaps;
         }
 
@@ -151,7 +159,7 @@ namespace Yozolab.YoluPainter.Core
                 uses.Add(new GeneratorMapUse(kind, map, reason, pin, available));
             }
             string extra = null;
-            if (all && BoundGenerator.Bind(settings, generatorMaps, Width, Height, out var why) == null) extra = why;
+            if (all && BoundGenerator.Bind(settings, generatorMaps, generatorFrame, Width, Height, out var why) == null) extra = generatorFrameReason != null && settings.Type == GeneratorType.ShapeGradient ? generatorFrameReason : why;
             return new GeneratorStatus(uses.AsReadOnly(), extra);
         }
         /// <summary>The status of a generator stage of a layer (content or mask stack).</summary>

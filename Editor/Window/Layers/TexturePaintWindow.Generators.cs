@@ -23,11 +23,11 @@ namespace Yozolab.YoluPainter.Editor
     public sealed partial class TexturePaintWindow
     {
         /// <summary>テクスチャセットの焼いたマップを、そのセットの文書の Generator に渡す口。</summary>
-        internal sealed class SetGeneratorInputs : IGeneratorInputs
+        internal sealed class SetGeneratorInputs : IGeneratorInputs, IGeneratorModelFrame
         {
             readonly TexturePaintWindow window; readonly TextureSet set;
             long revision, mapsRevision = long.MinValue; int slot = int.MinValue;
-            object input, highPoly; string settings; PaintDocument doc;
+            object input, highPoly; string settings; PaintDocument doc; Vector3 rootPosition; Quaternion rootRotation; bool hasRoot;
             /// <summary>窓が最後に見た文書と、その文書の <see cref="PaintDocument.GeneratorInputsRevision"/>（合成器が先に問い合わせて
             /// 変化を受け取っていても、窓の写しを作り直し損ねないように、窓は文書の版で比べる）。</summary>
             internal PaintDocument SeenDocument; internal long SeenRevision;
@@ -44,9 +44,13 @@ namespace Yozolab.YoluPainter.Editor
                     bool current = set == window.currentSet;
                     int nowSlot = current ? window.materialSlot : set.MaterialSlot;
                     var nowDoc = current && window.document != null ? window.document : set.Document;
-                    if (set.MeshMaps.Revision != mapsRevision || !ReferenceEquals(nowInput, input) || !ReferenceEquals(nowHigh, highPoly) || nowSettings != settings || nowSlot != slot || !ReferenceEquals(nowDoc, doc))
+                    bool nowHasRoot = window.preview != null && window.preview.HasModel;
+                    var nowRootPosition = nowHasRoot ? window.preview.ModelRootPosition : Vector3.zero; var nowRootRotation = nowHasRoot ? window.preview.ModelRootRotation : Quaternion.identity;
+                    if (set.MeshMaps.Revision != mapsRevision || !ReferenceEquals(nowInput, input) || !ReferenceEquals(nowHigh, highPoly) || nowSettings != settings || nowSlot != slot || !ReferenceEquals(nowDoc, doc)
+                        || nowHasRoot != hasRoot || nowRootPosition != rootPosition || nowRootRotation != rootRotation)
                     {
                         mapsRevision = set.MeshMaps.Revision; input = nowInput; highPoly = nowHigh; settings = nowSettings; slot = nowSlot; doc = nowDoc;
+                        hasRoot = nowHasRoot; rootPosition = nowRootPosition; rootRotation = nowRootRotation;
                         revision++;
                     }
                     return revision;
@@ -56,6 +60,17 @@ namespace Yozolab.YoluPainter.Editor
             {
                 if (window == null) { map = null; reason = "The YoluPainter window that held the mesh maps was closed."; return false; }
                 return set.MeshMaps.TryGetUsable(kind, window.MeshMapExpectationFor(set), out map, out reason);
+            }
+            /// <summary>読み込んだモデルのルートの位置と向き（プレビューの空間 = 焼いたマップの空間）。モデルが無ければ null（そのときマップも
+            /// 照合できないので使われない）。形のグラデーションが形をルートの空間に置くのに使う。</summary>
+            public GeneratorModelFrame ModelFrame
+            {
+                get
+                {
+                    if (window == null || window.preview == null || !window.preview.HasModel) return null;
+                    var p = window.preview.ModelRootPosition; var q = window.preview.ModelRootRotation;
+                    return new GeneratorModelFrame(p.x, p.y, p.z, q.x, q.y, q.z, q.w);
+                }
             }
         }
 
@@ -118,14 +133,15 @@ namespace Yozolab.YoluPainter.Editor
 
         // ───────── 足す ─────────
 
-        static readonly GeneratorType[] GeneratorMenu = { GeneratorType.EdgeWear, GeneratorType.Dirt, GeneratorType.PositionGradient, GeneratorType.Thickness, GeneratorType.Direction };
+        static readonly GeneratorType[] GeneratorMenu = { GeneratorType.EdgeWear, GeneratorType.Dirt, GeneratorType.PositionGradient, GeneratorType.ShapeGradient, GeneratorType.Thickness, GeneratorType.Direction };
 
         /// <summary>選んだ層のスタックに Generator を足す（画素なら今のチャンネルだけ）。足せたら知らせに、読むマップが無ければその理由も添える。</summary>
         internal FilterEffect AddGenerator(FilterTarget target, GeneratorType type)
         {
-            var added = AddFilter(target, FilterSettings.FromGenerator(GeneratorSettings.Default(type)));
+            var added = AddFilter(target, FilterSettings.FromGenerator(NewGeneratorSettings(type)));
             if (added == null) return null;
             ConnectGeneratorInputs();
+            if (type == GeneratorType.ShapeGradient) ShapeEditFilter = added.Id; // 足したらすぐ 3D ビューで形を動かせるように
             var status = document.GetGeneratorStatus(added.Settings.Generator);
             if (!status.Active) message += " " + L.Tr("It has no effect until its mesh maps are baked: {0}", status.Reason);
             return added;
@@ -164,6 +180,7 @@ namespace Yozolab.YoluPainter.Editor
                 case GeneratorType.EdgeWear: return L.Tr("Edge wear");
                 case GeneratorType.Dirt: return L.Tr("Dirt");
                 case GeneratorType.PositionGradient: return L.Tr("Position gradient");
+                case GeneratorType.ShapeGradient: return L.Tr("Shape gradient");
                 case GeneratorType.Thickness: return L.TrIn("generator", "Thickness");
                 default: return L.TrIn("generator", "Direction");
             }
@@ -263,6 +280,9 @@ namespace Yozolab.YoluPainter.Editor
                         ChoiceDropdown(Spot("generator.axis", Indent(rows.Row(), indent)), L.Tr("Axis"), next.Axis, new[] { 0, 1, 2 }, AxisName,
                             a => { if (a != g.Axis) ApplyFilterSettings(e.Id, e.Settings.WithGenerator(g.WithAxis(a))); },
                             L.Tr("0 at the bounding box's minimum, 1 at its maximum along this world axis"));
+                        break;
+                    case GeneratorType.ShapeGradient:
+                        next = ShapeGradientRows(rows, e, next, indent); // 形・置き場・シーンから写す（TexturePaintWindow.ShapeGradient.cs）
                         break;
                     case GeneratorType.Direction:
                     {

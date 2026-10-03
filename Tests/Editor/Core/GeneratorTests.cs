@@ -418,7 +418,7 @@ namespace Yozolab.YoluPainter.Tests
             d.AddFilter(fill.Id, FilterTarget.Mask, FilterSettings.FromGenerator(GeneratorSettings.Default(GeneratorType.PositionGradient).WithAxis(2)));
             d.AddFilter(fill.Id, FilterTarget.Mask, FilterSettings.FromGenerator(GeneratorSettings.Default(GeneratorType.Thickness).WithBlend(GeneratorBlend.Screen)));
             var bytes = DocumentBinary.Write(d);
-            Assert.That(BitConverter.ToInt32(bytes, 8), Is.EqualTo(DocumentBinary.CurrentVersion)); Assert.That(DocumentBinary.CurrentVersion, Is.GreaterThanOrEqualTo(11), "Generator stages came with version 11 (version 12 added layer locks)");
+            Assert.That(BitConverter.ToInt32(bytes, 8), Is.EqualTo(DocumentBinary.CurrentVersion)); Assert.That(DocumentBinary.CurrentVersion, Is.GreaterThanOrEqualTo(11), "Generator stages came with version 11 (12 added layer locks, 13 the shape gradient)");
             var read = DocumentBinary.Read(bytes); var rl = read.GetLayer(fill.Id);
             Assert.That(rl.Filters.Select(f => (f.Id, f.Settings, f.Enabled, f.Strength, string.Join(",", f.Channels))), Is.EqualTo(fill.Filters.Select(f => (f.Id, f.Settings, f.Enabled, f.Strength, string.Join(",", f.Channels)))));
             Assert.That(rl.Mask.Filters.Select(f => (f.Id, f.Settings, f.Enabled)), Is.EqualTo(fill.Mask.Filters.Select(f => (f.Id, f.Settings, f.Enabled))));

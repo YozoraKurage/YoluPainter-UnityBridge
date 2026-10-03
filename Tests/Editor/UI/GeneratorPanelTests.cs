@@ -51,7 +51,7 @@ namespace Yozolab.YoluPainter.Tests
                         if (state == "pinned-other-bake")
                             d.SetFilterSettings(fill.Id, gen.Id, gen.Settings.WithGenerator(gen.Settings.Generator.WithPin(MeshMapKind.Curvature, new string('a', 64))));
                         var status = d.GetGeneratorStatus(fill.Id, gen.Id);
-                        Assert.That(status.Active, Is.EqualTo(state == "maps" && (type == GeneratorType.EdgeWear || type == GeneratorType.PositionGradient || type == GeneratorType.Direction)), type + " " + state + ": " + status.Reason);
+                        Assert.That(status.Active, Is.EqualTo(state == "maps" && (type == GeneratorType.EdgeWear || type == GeneratorType.PositionGradient || type == GeneratorType.Direction || type == GeneratorType.ShapeGradient)), type + " " + state + ": " + status.Reason);
                         foreach (var language in new[] { PainterLanguage.English, PainterLanguage.Japanese })
                         {
                             L.OverrideLanguage(language);

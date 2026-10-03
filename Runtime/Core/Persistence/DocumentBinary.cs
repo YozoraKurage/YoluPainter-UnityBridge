@@ -26,12 +26,17 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// derived and live next to it in the .ylp). Version 12 turns the clipping byte (version 5) into a byte of attribute flags: bit 0
     /// clipping, bit 1 "the layer's locks follow" (then an int of <see cref="LayerLocks"/>, never 0); any other bit, or an unknown lock
     /// bit, refuses the archive. A document without locks is laid out exactly as version 11 (the byte is 0 or 1), only the version
-    /// number differs. Older archives still load.</summary>
+    /// number differs. Version 13 adds the shape gradient (generator type 5): its generator block is followed by the shape (int) and
+    /// the volume (centre x, y, z, rotation x, y, z, size x, y, z, falloff as doubles); generators of other types are written as in
+    /// version 11. Type 5 in an older archive and an unknown shape are refused. Older archives still load.</summary>
     public static class DocumentBinary
     {
-        const int Version = 12;
+        const int Version = 13;
         /// <summary>The version <see cref="Write"/> produces.</summary>
         public const int CurrentVersion = Version;
+        /// <summary>The version that added the shape gradient (generator type 5 and its volume after the generator block).</summary>
+        internal const int ShapeGradientVersion = 13;
+        static bool IsReadable(int version) => version >= 1 && version <= Version;
         const long MaxArchiveBytes = 512L * 1024 * 1024;
         /// <summary>Version 12 layer attribute byte: bit 0 clipping, bit 1 an int of layer locks follows.</summary>
         const int AttributeClipping = 1, AttributeLocks = 2;
@@ -117,7 +122,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             for (int i = 0; i < Magic.Length; i++) if (bytes[i] != Magic[i]) throw new InvalidDataException("Not a dot paint archive.");
             int version = BitConverter.ToInt32(bytes, Magic.Length);
             if (!BitConverter.IsLittleEndian) version = (int)((uint)version >> 24 | ((uint)version >> 8 & 0xff00) | ((uint)version << 8 & 0xff0000) | (uint)version << 24);
-            if (version < 1 || version > Version) throw new InvalidDataException("Unsupported archive version; source retained unchanged.");
+            if (!IsReadable(version)) throw new InvalidDataException("Unsupported archive version; source retained unchanged.");
             var id = new Guid(bytes.Skip(Magic.Length + 4).Take(16).ToArray());
             if (id == Guid.Empty) throw new InvalidDataException("The native document has no ID.");
             return id;
@@ -133,7 +138,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 {
                     for (int i = 0; i < Magic.Length; i++) if (reader.ReadByte() != Magic[i]) throw new InvalidDataException("Not a dot paint archive.");
                     int version = reader.ReadInt32();
-                    if (version < 1 || version > Version) throw new InvalidDataException("Unsupported archive version; source retained unchanged.");
+                    if (!IsReadable(version)) throw new InvalidDataException("Unsupported archive version; source retained unchanged.");
                     var id = new Guid(ReadExact(reader, 16));
                     int width = reader.ReadInt32(), height = reader.ReadInt32(), tileSize = reader.ReadInt32();
                     if (width < 1 || height < 1 || width > PaintDocument.MaxNativeSide || height > PaintDocument.MaxNativeSide || tileSize < 8 || tileSize > 512 || (tileSize & (tileSize - 1)) != 0)
@@ -304,13 +309,21 @@ namespace Yozolab.YoluPainter.Core.Persistence
             var pins = g.Pins.Keys.OrderBy(k => k).ToArray();
             writer.Write(pins.Length);
             foreach (var kind in pins) { writer.Write((int)kind); WriteString(writer, g.Pins[kind]); }
+            if (g.Type == GeneratorType.ShapeGradient)
+            {
+                var v = g.Volume;
+                writer.Write((int)v.Shape);
+                foreach (double d in new[] { v.CenterX, v.CenterY, v.CenterZ, v.RotationX, v.RotationY, v.RotationZ, v.SizeX, v.SizeY, v.SizeZ, v.Falloff }) writer.Write(d);
+            }
         }
         const int MaxGeneratorPins = 8;
-        /// <summary>The generator block (version 11). Unknown values are refused, never replaced by defaults.</summary>
-        static GeneratorSettings ReadGenerator(BinaryReader reader)
+        /// <summary>The generator block (version 11; the shape gradient's volume from version 13). Unknown values are refused, never
+        /// replaced by defaults.</summary>
+        static GeneratorSettings ReadGenerator(BinaryReader reader, int version)
         {
             int type = reader.ReadInt32(), algorithm = reader.ReadInt32();
-            if (!Enum.IsDefined(typeof(GeneratorType), type)) throw new InvalidDataException("Unknown generator type " + type + "; a newer reader is required (source retained unchanged).");
+            if (!Enum.IsDefined(typeof(GeneratorType), type) || type == (int)GeneratorType.ShapeGradient && version < ShapeGradientVersion)
+                throw new InvalidDataException("Unknown generator type " + type + "; a newer reader is required (source retained unchanged).");
             if (algorithm != GeneratorSettings.AlgorithmVersionOf((GeneratorType)type)) throw new InvalidDataException("Generator algorithm version " + algorithm + " of " + (GeneratorType)type + " is not supported by this reader; source retained unchanged.");
             double low = reader.ReadDouble(), high = reader.ReadDouble(), softness = reader.ReadDouble(); bool invert = reader.ReadBoolean();
             double noiseAmount = reader.ReadDouble(), noiseScale = reader.ReadDouble(); int noiseSeed = reader.ReadInt32(), noiseSpace = reader.ReadInt32();
@@ -326,10 +339,18 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 if (!Enum.IsDefined(typeof(MeshMaps.MeshMapKind), kind)) throw new InvalidDataException("Unknown mesh map kind " + kind + " in a generator pin; a newer reader is required (source retained unchanged).");
                 pins.Add(new System.Collections.Generic.KeyValuePair<MeshMaps.MeshMapKind, string>((MeshMaps.MeshMapKind)kind, key));
             }
+            var volume = ShapeVolume.Default;
+            if (type == (int)GeneratorType.ShapeGradient)
+            {
+                int shape = reader.ReadInt32();
+                if (!Enum.IsDefined(typeof(GeneratorShape), shape)) throw new InvalidDataException("Unknown generator shape " + shape + "; a newer reader is required (source retained unchanged).");
+                var v = new double[10]; for (int k = 0; k < v.Length; k++) v[k] = reader.ReadDouble();
+                volume = new ShapeVolume((GeneratorShape)shape, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9]);
+            }
             try
             {
                 return GeneratorSettings.FromValues((GeneratorType)type, low, high, softness, invert, noiseAmount, noiseScale, noiseSeed, (GeneratorNoiseSpace)noiseSpace,
-                    (GeneratorBlend)blend, balance, axis, dx, dy, dz, bent, pins);
+                    (GeneratorBlend)blend, balance, axis, dx, dy, dz, bent, pins, volume);
             }
             catch (ArgumentException ex) { throw new InvalidDataException("Invalid generator parameters: " + ex.Message, ex); }
         }
@@ -352,7 +373,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 }
                 int radius = reader.ReadInt32(); double amount = reader.ReadDouble(); int threshold = reader.ReadInt32(), seed = reader.ReadInt32(); bool mono = reader.ReadBoolean();
                 var p = new double[5]; for (int k = 0; k < 5; k++) p[k] = reader.ReadDouble();
-                GeneratorSettings generator = type == (int)FilterType.Generator ? ReadGenerator(reader) : null;
+                GeneratorSettings generator = type == (int)FilterType.Generator ? ReadGenerator(reader, version) : null;
                 try
                 {
                     FilterSettings settings;

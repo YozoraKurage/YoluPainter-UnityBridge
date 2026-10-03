@@ -631,6 +631,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             preview.BeginPreview(rect, GUIStyle.none);
             try
             {
+                DrawShapeOverlay();
                 // G1 neutral shader uses the built-in preview rendering path explicitly.
                 // No global shader keywords, source materials or project pipeline settings are changed.
                 preview.Render(false, false);
@@ -652,6 +653,24 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (v.z <= 0) return false;
             gui = new Vector2(viewRect.x + v.x * viewRect.width, viewRect.y + (1 - v.y) * viewRect.height);
             return true;
+        }
+        /// <summary>The camera ray through a GUI point of the 3D view (also outside the model). False without a camera or view.</summary>
+        public bool TryGuiRay(Rect viewRect, Vector2 guiPosition, out Ray ray)
+        {
+            ray = default;
+            if (preview == null || viewRect.width <= 0 || viewRect.height <= 0) return false;
+            UpdateCamera(viewRect);
+            ray = preview.camera.ViewportPointToRay(new Vector3((guiPosition.x - viewRect.x) / viewRect.width, 1 - (guiPosition.y - viewRect.y) / viewRect.height, 0));
+            return true;
+        }
+        /// <summary>The 3D view as the shape gizmo sees it (projection with the preview's camera in that rectangle).</summary>
+        public IGizmoView GizmoView(Rect viewRect) => new PreviewGizmoView(this, viewRect);
+        sealed class PreviewGizmoView : IGizmoView
+        {
+            readonly IsolatedModelPreview owner; readonly Rect rect;
+            public PreviewGizmoView(IsolatedModelPreview owner, Rect rect) { this.owner = owner; this.rect = rect; }
+            public bool ToGui(Vector3 world, out Vector2 gui) => owner.TryWorldToGui(rect, world, out gui);
+            public bool Ray(Vector2 gui, out Ray ray) => owner.TryGuiRay(rect, gui, out ray);
         }
         public bool TryPick(Rect viewRect, Vector2 guiPosition, out SurfaceHit hit)
         {
@@ -745,6 +764,43 @@ namespace Yozolab.YoluPainter.Editor.Preview
             planeObject = null; planeMesh = null; planeMaterial = null; planeBuilt = false;
         }
 
+        // ───────────── 形のグラデーションの重ね表示 ─────────────
+
+        /// <summary>
+        /// 3D ビューに薄く重ねる形のグラデーションの値（null で重ねない）: そのスロットの面に、形の値（レベル・反転まで。崩しと合成は
+        /// 入れない）を色の不透明度として重ねる。値はシェーダーが面の点の位置から画素ごとに計算する（Core の式と同じ形・同じ順。float）ので、
+        /// メッシュマップを焼く前でも形の範囲が見える。プレビューの中だけの描画で、当たり判定・ブラシ・ベイク・合成には入らない。
+        /// シェーダーが無い・壊れている環境では重ねない（ギズモの線は窓が描く）。
+        /// </summary>
+        public ShapeGradientOverlay? ShownShapeGradient { get; set; }
+        Material shapeOverlayMaterial; bool shapeOverlayUnavailable;
+        /// <summary>試験用: 直前の描画で重ねたか。</summary>
+        internal bool ShapeOverlayDrawn { get; private set; }
+
+        void DrawShapeOverlay()
+        {
+            ShapeOverlayDrawn = false;
+            if (!ShownShapeGradient.HasValue || !HasModel || preview == null) return;
+            var o = ShownShapeGradient.Value;
+            if (shapeOverlayMaterial == null && !shapeOverlayUnavailable)
+            {
+                var shader = Shader.Find("Hidden/YoluPainter/ShapeGradientOverlay");
+                if (!Yozolab.YoluPainter.Editor.ShaderHealth.IsUsable(shader)) shapeOverlayUnavailable = true;
+                else shapeOverlayMaterial = new Material(shader) { name = "Shape gradient overlay (preview only)", hideFlags = HideFlags.HideAndDontSave };
+            }
+            if (shapeOverlayMaterial == null) return;
+            o.Apply(shapeOverlayMaterial);
+            foreach (var (renderer, slots) in slotRenderers)
+            {
+                if (renderer == null) continue;
+                var filter = renderer.GetComponent<MeshFilter>(); var mesh = filter != null ? filter.sharedMesh : null;
+                if (mesh == null) continue;
+                for (int sub = 0; sub < slots.Length && sub < mesh.subMeshCount; sub++)
+                    if (slots[sub] == o.Slot) { preview.DrawMesh(mesh, renderer.transform.localToWorldMatrix, shapeOverlayMaterial, sub); ShapeOverlayDrawn = true; }
+            }
+        }
+        void DisposeShapeOverlay() { if (shapeOverlayMaterial != null) Object.DestroyImmediate(shapeOverlayMaterial); shapeOverlayMaterial = null; }
+
         /// <summary>Perspective estimate for screen-space resampling; geometry still determines the actual footprint.</summary>
         public float WorldRadiusToGuiPoints(Vector3 worldPosition, float radiusWorld)
         {
@@ -813,7 +869,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             // 試験の画像は、元のシェーダーのコンパイルを待った絵にする（非同期のあいだは仮のシアンで描かれる）
             ShaderUtil.allowAsyncCompilation = false;
             preview.BeginStaticPreview(rect);
-            try { preview.Render(false, false); return preview.EndStaticPreview(); }
+            try { DrawShapeOverlay(); preview.Render(false, false); return preview.EndStaticPreview(); }
             finally { Unsupported.useScriptableRenderPipeline = previousPipelineFlag; ShaderUtil.allowAsyncCompilation = previousAsync; }
         }
         public bool HandleNavigation(Rect rect, Event current)
@@ -872,7 +928,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public void Dispose()
         {
             if (disposed) return;
-            ClearModel(); DisposeSymmetryPlane();
+            ClearModel(); DisposeSymmetryPlane(); DisposeShapeOverlay();
             materialView?.Dispose(); materialView = null;
             if (preview != null) { preview.Cleanup(); preview = null; }
             disposed = true;

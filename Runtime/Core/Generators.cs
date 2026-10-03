@@ -9,7 +9,7 @@ namespace Yozolab.YoluPainter.Core
 {
     /// <summary>Built-in generators: values made from the texture set's baked mesh maps and parameters. Values are stored in the
     /// native format; append only.</summary>
-    public enum GeneratorType { EdgeWear = 0, Dirt = 1, PositionGradient = 2, Thickness = 3, Direction = 4 }
+    public enum GeneratorType { EdgeWear = 0, Dirt = 1, PositionGradient = 2, Thickness = 3, Direction = 4, ShapeGradient = 5 }
 
     /// <summary>How a generator's value g is combined with its stage input s. On a mask s is the visibility (1 = the layer shows,
     /// 1 − the stored hide amount), on layer pixels the channel value. Values are stored in the native format; append only.</summary>
@@ -34,6 +34,9 @@ namespace Yozolab.YoluPainter.Core
     /// <item>Thickness (Thickness): b = t (0 = thin, 1 = at or beyond the bake's maximum distance).</item>
     /// <item>Direction (WorldNormal, or BentNormal when <see cref="UseBentNormal"/>): b = (n · d + 1) / 2 with n the renormalized
     /// world normal and d the normalized <see cref="DirectionX"/>, Y, Z: 1 facing d, 0.5 at right angles, 0 facing away.</item>
+    /// <item>ShapeGradient (Position): the texel's point on the model, read back from the Position map with the bake's bounding box
+    /// (p = min + v (max − min)) and moved into the model root's space with the document's <see cref="GeneratorModelFrame"/>, gets
+    /// the base value of <see cref="Volume"/> (a box, sphere or plane; see <see cref="ShapeVolume"/>).</item>
     /// </list></item>
     /// <item>Levels: t = clamp((b − Low) / (High − Low)), then t + Softness (t² (3 − 2t) − t) (0 = linear ramp, 1 = smoothstep),
     /// then 1 − t when <see cref="Invert"/>.</item>
@@ -88,10 +91,12 @@ namespace Yozolab.YoluPainter.Core
         /// A kind without a pin uses whatever map of that kind is current for the texture set (a rebake under other conditions is
         /// used as soon as it exists). A pinned kind refuses any other bake, so the node says exactly which result it reads.</summary>
         public IReadOnlyDictionary<MeshMapKind, string> Pins { get; private set; }
+        /// <summary>ShapeGradient: the shape and where it is in the model root's space. Other types keep <see cref="ShapeVolume.Default"/>.</summary>
+        public ShapeVolume Volume { get; private set; }
 
         GeneratorSettings(GeneratorType type)
         {
-            Type = type; High = 1; NoiseScale = .05; Balance = DefaultBalance; Axis = DefaultAxis; DirectionY = 1; Pins = NoPins;
+            Type = type; High = 1; NoiseScale = .05; Balance = DefaultBalance; Axis = DefaultAxis; DirectionY = 1; Pins = NoPins; Volume = ShapeVolume.Default;
         }
 
         /// <summary>The settings a newly added generator of the type starts with.</summary>
@@ -103,7 +108,7 @@ namespace Yozolab.YoluPainter.Core
                 case GeneratorType.EdgeWear: g.Low = .04; g.High = .3; g.Softness = .5; g.NoiseAmount = .6; break;
                 case GeneratorType.Dirt: g.Low = .15; g.High = .6; g.Softness = .5; g.NoiseAmount = .4; break;
                 case GeneratorType.Direction: g.Low = .6; g.High = .95; g.Softness = .5; g.NoiseAmount = .3; break;
-                default: break; // PositionGradient, Thickness: the map as it is
+                default: break; // PositionGradient, Thickness, ShapeGradient: the map (the shape's value) as it is
             }
             return Checked(g);
         }
@@ -112,11 +117,16 @@ namespace Yozolab.YoluPainter.Core
         public static GeneratorSettings FromValues(GeneratorType type, double low, double high, double softness, bool invert, double noiseAmount, double noiseScale, int noiseSeed,
             GeneratorNoiseSpace noiseSpace, GeneratorBlend blend, double balance, int axis, double directionX, double directionY, double directionZ, bool useBentNormal,
             IEnumerable<KeyValuePair<MeshMapKind, string>> pins)
+            => FromValues(type, low, high, softness, invert, noiseAmount, noiseScale, noiseSeed, noiseSpace, blend, balance, axis, directionX, directionY, directionZ, useBentNormal, pins, ShapeVolume.Default);
+        /// <summary>Settings from stored values with the shape gradient's volume (<see cref="ShapeVolume.Default"/> for other types).</summary>
+        public static GeneratorSettings FromValues(GeneratorType type, double low, double high, double softness, bool invert, double noiseAmount, double noiseScale, int noiseSeed,
+            GeneratorNoiseSpace noiseSpace, GeneratorBlend blend, double balance, int axis, double directionX, double directionY, double directionZ, bool useBentNormal,
+            IEnumerable<KeyValuePair<MeshMapKind, string>> pins, ShapeVolume volume)
         {
             var g = new GeneratorSettings(type)
             {
                 Low = low, High = high, Softness = softness, Invert = invert, NoiseAmount = noiseAmount, NoiseScale = noiseScale, NoiseSeed = noiseSeed, NoiseSpace = noiseSpace,
-                Blend = blend, Balance = balance, Axis = axis, DirectionX = directionX, DirectionY = directionY, DirectionZ = directionZ, UseBentNormal = useBentNormal,
+                Blend = blend, Balance = balance, Axis = axis, DirectionX = directionX, DirectionY = directionY, DirectionZ = directionZ, UseBentNormal = useBentNormal, Volume = volume,
             };
             g.Pins = PinTable(pins);
             return Checked(g);
@@ -131,6 +141,8 @@ namespace Yozolab.YoluPainter.Core
         public GeneratorSettings WithAxis(int value) { var g = Copy(); g.Axis = value; return Checked(g); }
         public GeneratorSettings WithDirection(double x, double y, double z) { var g = Copy(); g.DirectionX = x; g.DirectionY = y; g.DirectionZ = z; return Checked(g); }
         public GeneratorSettings WithBentNormal(bool value) { var g = Copy(); g.UseBentNormal = value; return Checked(g); }
+        /// <summary>ShapeGradient: another shape or placement.</summary>
+        public GeneratorSettings WithVolume(ShapeVolume value) { var g = Copy(); g.Volume = value; return Checked(g); }
         /// <summary>Pins the kind to one bake (its condition key), or follows the current map again when key is null.</summary>
         public GeneratorSettings WithPin(MeshMapKind kind, string key)
         {
@@ -147,6 +159,7 @@ namespace Yozolab.YoluPainter.Core
             {
                 Low = Low, High = High, Softness = Softness, Invert = Invert, NoiseAmount = NoiseAmount, NoiseScale = NoiseScale, NoiseSeed = NoiseSeed, NoiseSpace = NoiseSpace,
                 Blend = Blend, Balance = Balance, Axis = Axis, DirectionX = DirectionX, DirectionY = DirectionY, DirectionZ = DirectionZ, UseBentNormal = UseBentNormal, Pins = Pins,
+                Volume = Volume,
             };
         }
         static IReadOnlyDictionary<MeshMapKind, string> PinTable(IEnumerable<KeyValuePair<MeshMapKind, string>> pins)
@@ -184,6 +197,8 @@ namespace Yozolab.YoluPainter.Core
                 if (DirectionX * DirectionX + DirectionY * DirectionY + DirectionZ * DirectionZ < 1e-12) throw new ArgumentOutOfRangeException("direction", "The direction must not be zero.");
             }
             else if (DirectionX != 0 || DirectionY != 1 || DirectionZ != 0 || UseBentNormal) throw new ArgumentException("The direction belongs to the direction generator.", "direction");
+            if (Type == GeneratorType.ShapeGradient) { string why = Volume.Refusal(); if (why != null) throw new ArgumentOutOfRangeException("volume", why); }
+            else if (!Volume.Equals(ShapeVolume.Default)) throw new ArgumentException("The shape belongs to the shape gradient.", "volume");
             var candidates = CandidateMaps(Type);
             foreach (var pin in Pins)
             {
@@ -211,6 +226,7 @@ namespace Yozolab.YoluPainter.Core
                 case GeneratorType.Dirt: return new[] { MeshMapKind.AmbientOcclusion, MeshMapKind.Curvature, MeshMapKind.Position };
                 case GeneratorType.PositionGradient: return new[] { MeshMapKind.Position };
                 case GeneratorType.Thickness: return new[] { MeshMapKind.Thickness, MeshMapKind.Position };
+                case GeneratorType.ShapeGradient: return new[] { MeshMapKind.Position };
                 default: return new[] { MeshMapKind.WorldNormal, MeshMapKind.BentNormal, MeshMapKind.Position };
             }
         }
@@ -230,6 +246,7 @@ namespace Yozolab.YoluPainter.Core
                         break;
                     case GeneratorType.PositionGradient: kinds.Add(MeshMapKind.Position); break;
                     case GeneratorType.Thickness: kinds.Add(MeshMapKind.Thickness); break;
+                    case GeneratorType.ShapeGradient: kinds.Add(MeshMapKind.Position); break;
                     default: kinds.Add(UseBentNormal ? MeshMapKind.BentNormal : MeshMapKind.WorldNormal); break;
                 }
                 if (NoiseAmount > 0 && NoiseSpace == GeneratorNoiseSpace.Model && !kinds.Contains(MeshMapKind.Position)) kinds.Add(MeshMapKind.Position);
@@ -248,6 +265,7 @@ namespace Yozolab.YoluPainter.Core
                     case GeneratorType.Dirt: return "Dirt";
                     case GeneratorType.PositionGradient: return "Position gradient";
                     case GeneratorType.Thickness: return "Thickness";
+                    case GeneratorType.ShapeGradient: return "Shape gradient";
                     default: return "Direction";
                 }
             }
@@ -257,14 +275,15 @@ namespace Yozolab.YoluPainter.Core
         {
             if (other == null || Type != other.Type || Low != other.Low || High != other.High || Softness != other.Softness || Invert != other.Invert || NoiseAmount != other.NoiseAmount
                 || NoiseScale != other.NoiseScale || NoiseSeed != other.NoiseSeed || NoiseSpace != other.NoiseSpace || Blend != other.Blend || Balance != other.Balance || Axis != other.Axis
-                || DirectionX != other.DirectionX || DirectionY != other.DirectionY || DirectionZ != other.DirectionZ || UseBentNormal != other.UseBentNormal || Pins.Count != other.Pins.Count) return false;
+                || DirectionX != other.DirectionX || DirectionY != other.DirectionY || DirectionZ != other.DirectionZ || UseBentNormal != other.UseBentNormal || Pins.Count != other.Pins.Count
+                || !Volume.Equals(other.Volume)) return false;
             foreach (var p in Pins) if (!other.Pins.TryGetValue(p.Key, out var key) || key != p.Value) return false;
             return true;
         }
         public override bool Equals(object obj) { return Equals(obj as GeneratorSettings); }
         public override int GetHashCode()
         {
-            unchecked { return ((int)Type * 397) ^ Low.GetHashCode() ^ (High.GetHashCode() * 7) ^ (NoiseAmount.GetHashCode() * 31) ^ (NoiseSeed * 17) ^ ((int)Blend << 8) ^ Pins.Count; }
+            unchecked { return ((int)Type * 397) ^ Low.GetHashCode() ^ (High.GetHashCode() * 7) ^ (NoiseAmount.GetHashCode() * 31) ^ (NoiseSeed * 17) ^ ((int)Blend << 8) ^ Pins.Count ^ (Volume.GetHashCode() * 3); }
         }
         public override string ToString()
         {
@@ -328,8 +347,10 @@ namespace Yozolab.YoluPainter.Core
         readonly ushort[] primary, secondary, position; readonly byte[] primaryCoverage, secondaryCoverage, positionCoverage;
         readonly int axis; readonly double dx, dy, dz, balance, low, range, softness, amount, sx, sy, sz, invW, invH;
         readonly bool noise, uvNoise, invert; readonly uint[] octaveSeeds;
+        // ShapeGradient: the Position map's 16-bit values → the shape's space (l = shapeMatrix · v + shapeOffset), and the shape
+        readonly double[] shapeMatrix, shapeOffset; readonly ShapeEvaluator shape;
 
-        BoundGenerator(GeneratorSettings g, int width, int height, BakedMeshMap primary, BakedMeshMap secondary, BakedMeshMap position)
+        BoundGenerator(GeneratorSettings g, int width, int height, BakedMeshMap primary, BakedMeshMap secondary, BakedMeshMap position, GeneratorModelFrame frame)
         {
             this.g = g; this.width = width; this.height = height;
             if (primary != null) { this.primary = primary.Data; primaryCoverage = primary.Coverage; }
@@ -346,7 +367,25 @@ namespace Yozolab.YoluPainter.Core
                 double diag = Math.Sqrt(ex * ex + ey * ey + ez * ez);
                 sx = ex / diag / g.NoiseScale / 65535; sy = ey / diag / g.NoiseScale / 65535; sz = ez / diag / g.NoiseScale / 65535;
             }
-            else if (g.Type == GeneratorType.PositionGradient) { this.position = position.Data; positionCoverage = position.Coverage; }
+            else if (g.Type == GeneratorType.PositionGradient || g.Type == GeneratorType.ShapeGradient) { this.position = position.Data; positionCoverage = position.Coverage; }
+            if (g.Type == GeneratorType.ShapeGradient)
+            {
+                // p = min + v · extent / 65535（スナップショットの空間）→ ルートの空間 R0ᵀ (p − t0) → 形の空間 Rsᵀ (… − c)。まとめて 1 つのアフィン写像に
+                var p = position.Provenance; var v = g.Volume; var r0 = frame.RotationMatrix(); var rs = v.RotationMatrix();
+                var a = new double[9]; // A = Rsᵀ R0ᵀ
+                for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) a[i * 3 + j] = rs[i] * r0[j * 3] + rs[3 + i] * r0[j * 3 + 1] + rs[6 + i] * r0[j * 3 + 2];
+                shapeMatrix = new double[9]; shapeOffset = new double[3];
+                double[] min = { p.BoundsMin(0), p.BoundsMin(1), p.BoundsMin(2) }, t0 = { frame.PositionX, frame.PositionY, frame.PositionZ }, c = { v.CenterX, v.CenterY, v.CenterZ };
+                var rootCenter = new double[3]; // R0ᵀ t0 + c
+                for (int k = 0; k < 3; k++) rootCenter[k] = r0[k] * t0[0] + r0[3 + k] * t0[1] + r0[6 + k] * t0[2] + c[k];
+                for (int i = 0; i < 3; i++)
+                {
+                    double offset = 0;
+                    for (int j = 0; j < 3; j++) { shapeMatrix[i * 3 + j] = a[i * 3 + j] * ((p.BoundsMax(j) - p.BoundsMin(j)) / 65535); offset += a[i * 3 + j] * min[j]; }
+                    shapeOffset[i] = offset - (rs[i] * rootCenter[0] + rs[3 + i] * rootCenter[1] + rs[6 + i] * rootCenter[2]);
+                }
+                shape = new ShapeEvaluator(v);
+            }
             octaveSeeds = new uint[GeneratorSettings.NoiseOctaves];
             uint seed = FilterEngine.Hash((uint)g.NoiseSeed ^ 0x9e3779b9U);
             for (int o = 0; o < octaveSeeds.Length; o++) octaveSeeds[o] = FilterEngine.Hash(seed + (uint)o * 0x85ebca6bU);
@@ -354,7 +393,7 @@ namespace Yozolab.YoluPainter.Core
 
         /// <summary>Binds the settings to resolved maps (indexed by <see cref="MeshMapKind"/>), or null with the reason when a map it
         /// uses is not there, has another size, is another bake than its pin, or the model has no extent for a model-space breakup.</summary>
-        internal static BoundGenerator Bind(GeneratorSettings g, IReadOnlyList<BakedMeshMap> maps, int width, int height, out string reason)
+        internal static BoundGenerator Bind(GeneratorSettings g, IReadOnlyList<BakedMeshMap> maps, GeneratorModelFrame frame, int width, int height, out string reason)
         {
             reason = null;
             foreach (var kind in g.UsedMaps)
@@ -375,6 +414,10 @@ namespace Yozolab.YoluPainter.Core
                     break;
                 case GeneratorType.PositionGradient: position = Get(MeshMapKind.Position); break;
                 case GeneratorType.Thickness: primary = Get(MeshMapKind.Thickness); break;
+                case GeneratorType.ShapeGradient:
+                    position = Get(MeshMapKind.Position);
+                    if (frame == null) { reason = "Where the model root is is not known, so the shape cannot be placed on the model (load the model)."; return null; }
+                    break;
                 default: primary = Get(g.UseBentNormal ? MeshMapKind.BentNormal : MeshMapKind.WorldNormal); break;
             }
             if (g.NoiseAmount > 0 && g.NoiseSpace == GeneratorNoiseSpace.Model)
@@ -383,7 +426,7 @@ namespace Yozolab.YoluPainter.Core
                 for (int a = 0; a < 3; a++) { double e = p.BoundsMax(a) - p.BoundsMin(a); diag += e * e; }
                 if (!(diag > 0)) { reason = "The Position map's bounding box has no size, so the breakup cannot be placed on the model; use UV space."; return null; }
             }
-            return new BoundGenerator(g, width, height, primary, secondary, position);
+            return new BoundGenerator(g, width, height, primary, secondary, position, frame);
         }
 
         /// <summary>The generator's value g (0..1) at the pixel, or false where a map it reads has no data (Empty texel).</summary>
@@ -410,6 +453,13 @@ namespace Yozolab.YoluPainter.Core
                     if (primaryCoverage[i] == 0) return false;
                     b = primary[i] / 65535.0;
                     break;
+                case GeneratorType.ShapeGradient:
+                {
+                    if (positionCoverage[i] == 0) return false;
+                    double vx = position[i * 3], vy = position[i * 3 + 1], vz = position[i * 3 + 2]; var m = shapeMatrix; var k = shapeOffset;
+                    b = shape.Value(m[0] * vx + m[1] * vy + m[2] * vz + k[0], m[3] * vx + m[4] * vy + m[5] * vz + k[1], m[6] * vx + m[7] * vy + m[8] * vz + k[2]);
+                    break;
+                }
                 default:
                 {
                     if (primaryCoverage[i] == 0) return false;

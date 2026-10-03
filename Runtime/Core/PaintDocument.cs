@@ -772,6 +772,17 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>Ends the current run of coalesced edits (the UI calls this when a slider drag ends), so the next edit
         /// becomes its own undo step.</summary>
         public void EndCoalescing() { coalesceKey = null; lastCoalesced = null; }
+        /// <summary>Reverts the current run of coalesced edits and drops its history entry, as if the run had not happened (a drag
+        /// the user cancels with Escape or by leaving the window). Redo is left as it is (the run's first edit already cleared it).
+        /// False, changing nothing, when no run is open.</summary>
+        public bool CancelCoalescing()
+        {
+            EnsureNoStroke(); RefuseInBatch("Cancelling an edit");
+            if (lastCoalesced == null || undo.Count == 0 || !ReferenceEquals(undo[undo.Count - 1], lastCoalesced)) { EndCoalescing(); return false; }
+            var command = undo[undo.Count - 1]; command.Revert(); undo.RemoveAt(undo.Count - 1); historyBytes -= command.ByteCost; Revision++;
+            EndCoalescing();
+            return true;
+        }
 
         private bool batching;
         /// <summary>True while <see cref="Batch"/> runs its edits.</summary>

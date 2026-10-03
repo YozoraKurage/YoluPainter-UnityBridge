@@ -41,6 +41,7 @@ namespace Yozolab.YoluPainter.Editor
         void HandleCanvasInput(Event e)
         {
             if((canvasRect.width>0||canvasRotating)&&HandleCanvasRotateInput(e))return; // R ＋ ドラッグ・Shift ＋ 中ボタンのドラッグで表示を回す
+            if(HandleShapeGizmo(e))return; // 3D ビューの形のグラデーションのハンドル（Model/TexturePaintWindow.ShapeGizmo.cs）
             if(preview.HasModel && stroke==null && preview.HandleNavigation(surfaceRect,e)){Repaint();return;}
             if(canvasRect.Contains(e.mousePosition))
             {

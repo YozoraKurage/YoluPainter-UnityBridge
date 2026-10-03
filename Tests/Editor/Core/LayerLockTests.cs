@@ -327,12 +327,15 @@ namespace Yozolab.YoluPainter.Tests
             d.SetLayerClipping(fill.Id, true);
             d.SetLayerLocks(a.Id, LayerLocks.Transparency | LayerLocks.Position); d.SetLayerLocks(g.Id, LayerLocks.All); d.SetLayerLocks(fill.Id, LayerLocks.Pixels);
             var bytes = DocumentBinary.Write(d);
-            Assert.That(BitConverter.ToInt32(bytes, 8), Is.EqualTo(12)); Assert.That(DocumentBinary.CurrentVersion, Is.EqualTo(12));
+            Assert.That(BitConverter.ToInt32(bytes, 8), Is.EqualTo(DocumentBinary.CurrentVersion)); Assert.That(DocumentBinary.CurrentVersion, Is.GreaterThanOrEqualTo(12), "locks came with version 12");
             var read = DocumentBinary.Read(bytes);
             Assert.That(read.Layers.Select(l => (l.Name, l.Locks, l.Clipping)), Is.EqualTo(d.Layers.Select(l => (l.Name, l.Locks, l.Clipping))));
             Assert.That(read.CanUndo, Is.False, "the locks are loaded, not edited");
             Assert.That(DocumentBinary.Write(read), Is.EqualTo(bytes), "byte for byte");
             Assert.That(read.EffectiveLocks(b.Id) & LayerLocks.Pixels, Is.EqualTo(LayerLocks.Pixels), "the group's lock reaches its contents after loading");
+            // 版 13 の形のグラデーションを持たない文書は版 12 と同じ並び: 版 12 として読めてロックが戻る
+            var v12 = (byte[])bytes.Clone(); BitConverter.GetBytes(12).CopyTo(v12, 8);
+            Assert.That(DocumentBinary.Read(v12).Layers.Select(l => (l.Name, l.Locks, l.Clipping)), Is.EqualTo(d.Layers.Select(l => (l.Name, l.Locks, l.Clipping))), "read as version 12");
             Assert.That(bytes[AttributeByte(a)], Is.EqualTo(2)); Assert.That(BitConverter.ToInt32(bytes, AttributeByte(a) + 1), Is.EqualTo((int)(LayerLocks.Transparency | LayerLocks.Position)));
 
             // ロックを外すと版 11 と同じ並び（版の数だけが違う）: 版 11 として読める
