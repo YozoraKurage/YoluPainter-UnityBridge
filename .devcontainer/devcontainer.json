@@ -73,5 +73,7 @@
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",
   // chmod は Windows ホストから clone した場合に実行ビットが落ちているのを直すため。
-  "postCreateCommand": "chmod +x /workspace/.devcontainer/unity/*.sh /workspace/.devcontainer/unity/*.js && bash /workspace/.devcontainer/unity/setup.sh"
+  "postCreateCommand": "chmod +x /workspace/.devcontainer/unity/*.sh /workspace/.devcontainer/unity/*.js && bash /workspace/.devcontainer/unity/setup.sh",
+  // エージェントの掲示板（別リポジトリ agent-board）を起動ごとに立ち上げる。無ければ GitHub から取る。失敗しても起動は止めない
+  "postStartCommand": "bash /workspace/.devcontainer/agent-board-start.sh"
 }

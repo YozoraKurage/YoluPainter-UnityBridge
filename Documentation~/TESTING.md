@@ -68,6 +68,18 @@
   写さない（開いている Unity の Library を写すと、データベースが壊れた写しになり得る）。台 0 の Assets（`ZZ_UserAssets` を含む）も写さない。
 - 資源の目安: 3 台を常駐させても、この PC（メモリ 58 GB・32 スレッド）では余裕がある。GPU は WSL2 の d3d12 を共有する。
 
+### エージェントの掲示板（agent-board）
+
+複数のエージェントの仕事・状態・メッセージ・ユーザーへの質問・テストの依頼を置く掲示板は、別のリポジトリ
+（https://github.com/YozoraKurage/agent-board 、コンテナの中では `~/agent-board`）にある。devcontainer の起動ごとに
+`.devcontainer/agent-board-start.sh`（postStartCommand）が立ち上げ、無ければ GitHub から取る。
+
+- 画面: `http://localhost:8787/`（VS Code が 8787 番を転送する）。人のトークンは `~/agent-board/bin/agent-board token issue user --kind human`
+  で発行する（表示は 1 回だけ。コンテナを作り直すと掲示板のデータと一緒に消えるので、発行し直す）。
+- Claude Code には MCP（`board`、ユーザーの設定）として登録してある。トークンは `~/.local/share/agent-board/claude.token` を `~/.zshrc` の
+  `AGENT_BOARD_TOKEN` が読む（設定ファイルには平文で残さない）。登録した後に起動した Claude Code から使える。
+- エージェント向けの決まりの案は `~/agent-board/docs/agent-rules.md`。使い方は `~/agent-board/README.md`。
+
 ### 複数の作業者（エージェント）が同時にデーモンを使うとき
 
 デーモンへの依頼の受け口は 1 組しか無いので、`run-tests.sh` と `unity-do.sh` は `TestDaemon/client.lock` を flock で取り、依頼を 1 本ずつ通す（後から来た依頼は待つ）。モードの切り替えは `test-daemon.sh` を直接使わず、`switch-daemon.sh` を使う:
