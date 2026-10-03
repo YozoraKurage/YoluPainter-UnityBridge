@@ -63,6 +63,46 @@ namespace Yozolab.YoluPainter.Editor
             return name;
         }
 
+        /// <summary>The smart material and smart mask files (.ylsmart) at the top of the folder, by name (an absent folder is empty).</summary>
+        public static List<Item> ListSmart(string folder)
+        {
+            var items = new List<Item>();
+            if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) return items;
+            foreach (var path in Directory.GetFiles(folder))
+            {
+                string name = System.IO.Path.GetFileName(path);
+                if (name.StartsWith(".", StringComparison.Ordinal) || !name.EndsWith(SmartMaterialFile.Extension, StringComparison.OrdinalIgnoreCase)) continue;
+                var info = new FileInfo(path);
+                items.Add(new Item { FileName = name, Path = path, Length = info.Length, Modified = info.LastWriteTimeUtc });
+            }
+            return items.OrderBy(i => i.FileName, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        /// <summary>Puts a smart material's file into the folder as &lt;name&gt;.ylsmart and returns the file name; a file with exactly
+        /// these bytes is reused (<paramref name="existed"/>). Written to a temporary file first and moved into place.</summary>
+        public static string AddSmart(string folder, string name, byte[] bytes, out bool existed)
+        {
+            if (bytes == null) throw new ArgumentNullException(nameof(bytes));
+            Directory.CreateDirectory(folder);
+            string hash = null;
+            foreach (var item in ListSmart(folder).Where(i => i.Length == bytes.LongLength))
+            {
+                hash = hash ?? GenerationStore.Hash(bytes);
+                if (GenerationStore.Hash(File.ReadAllBytes(item.Path)) == hash) { existed = true; return item.FileName; }
+            }
+            existed = false;
+            string stem = SafeStem(name), file = stem + SmartMaterialFile.Extension;
+            for (int n = 2; File.Exists(System.IO.Path.Combine(folder, file)); n++) file = stem + " " + n + SmartMaterialFile.Extension;
+            string target = System.IO.Path.Combine(folder, file), temp = target + "." + Guid.NewGuid().ToString("N") + ".tmp~";
+            try
+            {
+                using (var s = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { s.Write(bytes, 0, bytes.Length); s.Flush(true); }
+                File.Move(temp, target);
+            }
+            finally { if (File.Exists(temp)) File.Delete(temp); }
+            return file;
+        }
+
         /// <summary>A file name from a resource name: characters that file systems refuse become '_', at most 100 characters.</summary>
         internal static string SafeStem(string name)
         {

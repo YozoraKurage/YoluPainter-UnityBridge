@@ -39,6 +39,33 @@ namespace Yozolab.YoluPainter.Core.Persistence
         public const long MaxEntryBytes = 512L * 1024 * 1024, MaxTotalBytes = 768L * 1024 * 1024;
         public const int MaxEntries = 1000;
 
+        /// <summary>同じ zip の層（mimetype・SHA-256 の manifest・名前と大きさの決まり・展開の上限）を使う別の種類のファイル（.ylp と、
+        /// スマートマテリアルの .ylsmart）の違い: MIME タイプ、manifest の 1 行目の版の並び（添字 + 1 が版。最後が書く版）、名前の決まり、
+        /// 無ければ読まないエントリ。</summary>
+        internal sealed class Profile
+        {
+            /// <summary>先頭の mimetype エントリの中身。</summary>
+            internal string MimeType;
+            /// <summary>知らせの中の呼び名（"YoluPainter file" など）。</summary>
+            internal string What;
+            /// <summary>manifest の 1 行目の版（古い順。最後のものを書く）と、新しい版を見分ける頭の文字列。</summary>
+            internal string[] Headers; internal string HeaderPrefix;
+            /// <summary>エントリの名前の決まり（manifest の版ごと）。合わなければ InvalidDataException。</summary>
+            internal Action<string, int> ValidateName;
+            /// <summary>必要なエントリが揃っているか（manifest の版ごと）と、揃っていないときの知らせ。</summary>
+            internal Func<IEnumerable<string>, int, bool> Complete; internal string Incomplete;
+            /// <summary>zip のエントリの日時（null なら書いた時刻）。決めておくと、同じ中身はいつも同じバイト列になる。</summary>
+            internal DateTime? Timestamp;
+            internal int Newest => Headers.Length;
+        }
+
+        /// <summary>.ylp の決まり。</summary>
+        static readonly Profile Ylp = new Profile
+        {
+            MimeType = MimeType, What = "YoluPainter file", Headers = new[] { ManifestHeaderV1, ManifestHeaderV2, ManifestHeader }, HeaderPrefix = "YOLUPAINTER-YLP-",
+            ValidateName = ValidateName, Complete = HasNative, Incomplete = "The file has no native document.",
+        };
+
         static uint[] crcTable;
         internal static uint Crc32(byte[] data)
         {
@@ -54,13 +81,16 @@ namespace Yozolab.YoluPainter.Core.Persistence
         }
 
         /// <summary>中身（名前 → バイト列）から .ylp のバイト列を作る。PNG は圧縮済みなので無圧縮で入れる。</summary>
-        public static byte[] Write(IDictionary<string, byte[]> files)
+        public static byte[] Write(IDictionary<string, byte[]> files) => Write(files, Ylp, "A complete native document is required.");
+
+        /// <summary>決まり <paramref name="profile"/> のファイルを書く（manifest は最後の版）。</summary>
+        internal static byte[] Write(IDictionary<string, byte[]> files, Profile profile, string incomplete)
         {
-            if (files == null || !HasNative(files.Keys, 3)) throw new ArgumentException("A complete native document is required.");
+            if (files == null || !profile.Complete(files.Keys, profile.Newest)) throw new ArgumentException(incomplete);
             long total = 0;
             foreach (var entry in files)
             {
-                ValidateName(entry.Key, 3);
+                profile.ValidateName(entry.Key, profile.Newest);
                 if (entry.Key == ManifestName || entry.Key == "mimetype") throw new ArgumentException("Reserved entry name: " + entry.Key);
                 if (entry.Value == null) throw new ArgumentException("Null content: " + entry.Key);
                 if (entry.Value.LongLength > MaxEntryBytes) throw new InvalidOperationException(entry.Key + " exceeds the " + (MaxEntryBytes >> 20) + " MiB entry budget.");
@@ -69,10 +99,10 @@ namespace Yozolab.YoluPainter.Core.Persistence
             if (total > MaxTotalBytes) throw new InvalidOperationException("Save exceeds the " + (MaxTotalBytes >> 20) + " MiB file budget.");
             if (files.Count > MaxEntries) throw new InvalidOperationException("Too many entries.");
             var ordered = files.OrderBy(x => x.Key, StringComparer.Ordinal).ToList();
-            var manifest = new StringBuilder(ManifestHeader).Append('\n');
+            var manifest = new StringBuilder(profile.Headers[profile.Newest - 1]).Append('\n');
             foreach (var entry in ordered) manifest.Append(GenerationStore.Hash(entry.Value)).Append(' ').Append(entry.Value.LongLength).Append(' ').Append(entry.Key).Append('\n');
-            var zip = new ZipWriter(DateTime.Now);
-            zip.Add("mimetype", Encoding.ASCII.GetBytes(MimeType), false);
+            var zip = new ZipWriter(profile.Timestamp ?? DateTime.Now);
+            zip.Add("mimetype", Encoding.ASCII.GetBytes(profile.MimeType), false);
             zip.Add(ManifestName, Encoding.UTF8.GetBytes(manifest.ToString()), true);
             foreach (var entry in ordered) zip.Add(entry.Key, entry.Value, !entry.Key.EndsWith(".png", StringComparison.Ordinal));
             return zip.Finish();
@@ -130,32 +160,35 @@ namespace Yozolab.YoluPainter.Core.Persistence
 
         /// <summary>.ylp を読んで中身を返す。<paramref name="load"/> を渡すと、それが true を返すエントリーだけを展開して確かめ
         /// （インポーターが合成済みの画像だけを読むため）、他は manifest に載っていることだけを確かめる。</summary>
-        public static Dictionary<string, byte[]> Read(byte[] data, Func<string, bool> load = null)
+        public static Dictionary<string, byte[]> Read(byte[] data, Func<string, bool> load = null) => Read(data, Ylp, load);
+
+        /// <summary>決まり <paramref name="profile"/> のファイルを読む（<see cref="Read(byte[], Func{string, bool})"/> と同じ確かめ）。</summary>
+        internal static Dictionary<string, byte[]> Read(byte[] data, Profile profile, Func<string, bool> load = null)
         {
             if (data == null) throw new ArgumentNullException(nameof(data));
-            CheckMagic(data);
+            CheckMagic(data, profile);
             try
             {
                 using (var zip = ZipLayer(() => new ZipArchive(new MemoryStream(data, false), ZipArchiveMode.Read, false, new UTF8Encoding(false)), "The file is not a readable zip archive"))
                 {
                     var entries = ZipLayer(() => zip.Entries, "The file is not a readable zip archive");
                     if (entries.Count > MaxEntries + 2) throw new InvalidDataException("Too many entries.");
-                    if (entries.Count < 3 || entries[0].FullName != "mimetype") throw new InvalidDataException("Not a YoluPainter file (the first entry is not 'mimetype').");
+                    if (entries.Count < 3 || entries[0].FullName != "mimetype") throw new InvalidDataException("Not a " + profile.What + " (the first entry is not 'mimetype').");
                     string mime = Encoding.ASCII.GetString(Extract(entries[0], 256));
-                    if (mime != MimeType) throw new InvalidDataException("Not a YoluPainter file (mimetype '" + mime + "').");
+                    if (mime != profile.MimeType) throw new InvalidDataException("Not a " + profile.What + " (mimetype '" + mime + "').");
                     var byName = new Dictionary<string, ZipArchiveEntry>(StringComparer.Ordinal);
                     // 名前の決まりは manifest の版で決まる（manifest の 1 行目を先に読む）
                     var manifestEntry = entries.Skip(1).FirstOrDefault(e => e.FullName == ManifestName);
                     if (manifestEntry == null) throw new InvalidDataException("The file has no manifest.");
                     byte[] manifestBytes = Extract(manifestEntry, 1024 * 1024);
-                    int level = ManifestLevel(manifestBytes);
+                    int level = ManifestLevel(manifestBytes, profile);
                     foreach (var entry in entries.Skip(1))
                     {
-                        ValidateName(entry.FullName, level);
+                        profile.ValidateName(entry.FullName, level);
                         if (entry.FullName == "mimetype" || byName.ContainsKey(entry.FullName)) throw new InvalidDataException("Duplicate entry: " + entry.FullName);
                         byName.Add(entry.FullName, entry);
                     }
-                    var manifest = ParseManifest(manifestBytes);
+                    var manifest = ParseManifest(manifestBytes, profile);
                     foreach (var name in byName.Keys) if (name != ManifestName && !manifest.ContainsKey(name)) throw new InvalidDataException("Entry not listed in the manifest: " + name);
                     var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
                     foreach (var item in manifest)
@@ -185,26 +218,23 @@ namespace Yozolab.YoluPainter.Core.Persistence
             return text.Split('\n');
         }
 
-        /// <summary>manifest の版の番号（1: 根と composite/ だけ、2: テクスチャセットの置き場も、3: リソースの置き場も）。知らない版は
+        /// <summary>manifest の版の番号（.ylp では 1: 根と composite/ だけ、2: テクスチャセットの置き場も、3: リソースの置き場も）。知らない版は
         /// ここで断る（新しい版は「新しい YoluPainter で書かれた」）。</summary>
-        static int ManifestLevel(byte[] bytes)
+        static int ManifestLevel(byte[] bytes, Profile profile)
         {
             var lines = ManifestLines(bytes);
-            const string prefix = "YOLUPAINTER-YLP-";
-            if (lines[0] == ManifestHeader) return 3;
-            if (lines[0] == ManifestHeaderV2) return 2;
-            if (lines[0] == ManifestHeaderV1) return 1;
-            {
-                string number = lines[0].StartsWith(prefix, StringComparison.Ordinal) ? lines[0].Substring(prefix.Length) : "";
-                if (number.Length > 0 && number.Length < 9 && number.All(c => c >= '0' && c <= '9') && number[0] != '0' && int.Parse(number, CultureInfo.InvariantCulture) > 3)
-                    throw new InvalidDataException("The file was written by a newer YoluPainter (" + lines[0] + ").");
-                throw new InvalidDataException("Unsupported manifest.");
-            }
+            int known = Array.IndexOf(profile.Headers, lines[0]);
+            if (known >= 0) return known + 1;
+            string prefix = profile.HeaderPrefix;
+            string number = lines[0].StartsWith(prefix, StringComparison.Ordinal) ? lines[0].Substring(prefix.Length) : "";
+            if (number.Length > 0 && number.Length < 9 && number.All(c => c >= '0' && c <= '9') && number[0] != '0' && int.Parse(number, CultureInfo.InvariantCulture) > profile.Newest)
+                throw new InvalidDataException("The file was written by a newer YoluPainter (" + lines[0] + ").");
+            throw new InvalidDataException("Unsupported manifest.");
         }
 
-        static Dictionary<string, Listed> ParseManifest(byte[] bytes)
+        static Dictionary<string, Listed> ParseManifest(byte[] bytes, Profile profile)
         {
-            int level = ManifestLevel(bytes);
+            int level = ManifestLevel(bytes, profile);
             var lines = ManifestLines(bytes);
             var result = new Dictionary<string, Listed>(StringComparer.Ordinal); long total = 0;
             for (int i = 1; i < lines.Length; i++)
@@ -214,12 +244,12 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 if (parts.Length != 3 || parts[0].Length != 64 || parts[0].Any(c => !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f'))
                     || !long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out long length) || length > MaxEntryBytes)
                     throw new InvalidDataException("Malformed manifest entry.");
-                ValidateName(parts[2], level);
+                profile.ValidateName(parts[2], level);
                 if (parts[2] == ManifestName || parts[2] == "mimetype" || result.ContainsKey(parts[2])) throw new InvalidDataException("Duplicate or reserved manifest entry: " + parts[2]);
                 total = checked(total + length); if (total > MaxTotalBytes) throw new InvalidDataException("The file exceeds the " + (MaxTotalBytes >> 20) + " MiB read budget.");
                 result.Add(parts[2], new Listed { Hash = parts[0], Length = length });
             }
-            if (!HasNative(result.Keys, level)) throw new InvalidDataException("The file has no native document.");
+            if (!profile.Complete(result.Keys, level)) throw new InvalidDataException(profile.Incomplete);
             return result;
         }
 
@@ -259,9 +289,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
 
         /// <summary>先頭が OpenRaster / ODF と同じ識別の形か: オフセット 0 に最初のローカルヘッダー（無圧縮・追加フィールドなし）、
         /// 30 に "mimetype"、38 に MIME タイプ。</summary>
-        static void CheckMagic(byte[] data)
+        static void CheckMagic(byte[] data, Profile profile)
         {
-            byte[] mime = Encoding.ASCII.GetBytes(MimeType);
+            byte[] mime = Encoding.ASCII.GetBytes(profile.MimeType);
             bool ok = data.Length >= 38 + mime.Length
                 && data[0] == 0x50 && data[1] == 0x4b && data[2] == 3 && data[3] == 4
                 && data[8] == 0 && data[9] == 0               // method 0（無圧縮）
@@ -270,7 +300,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 && data[28] == 0 && data[29] == 0             // 追加フィールドなし
                 && Encoding.ASCII.GetString(data, 30, 8) == "mimetype";
             for (int i = 0; ok && i < mime.Length; i++) ok = data[38 + i] == mime[i];
-            if (!ok) throw new InvalidDataException("Not a YoluPainter file (it does not start with the uncompressed 'mimetype' entry).");
+            if (!ok) throw new InvalidDataException("Not a " + profile.What + " (it does not start with the uncompressed 'mimetype' entry).");
         }
         static uint U32(byte[] d, int o) { return (uint)(d[o] | d[o + 1] << 8 | d[o + 2] << 16 | d[o + 3] << 24); }
 

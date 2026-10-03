@@ -341,7 +341,7 @@ namespace Yozolab.YoluPainter.Tests
             dialogs.File = Temp(".ylp"); window.SaveProject(true);
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
             var saved = YlpFormat.Open(YlpStore.Load(dialogs.File).Files);
-            Assert.That(saved.Info.Format, Is.EqualTo(4)); Assert.That(saved.Resources.Count, Is.EqualTo(3));
+            Assert.That(saved.Info.Format, Is.EqualTo(YlpFormat.Current)); Assert.That(saved.Resources.Count, Is.EqualTo(3));
             Assert.That(saved.Files.Keys.Count(k => k.StartsWith(ResourceIndex.Folder, StringComparison.Ordinal)), Is.EqualTo(3));
 
             var other = NewWindow(); other.OpenProjectAt(dialogs.File);

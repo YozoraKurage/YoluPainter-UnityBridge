@@ -93,7 +93,7 @@ namespace Yozolab.YoluPainter.Tests
             dialogs.File = Temp(".ylp"); window.SaveProject(true);
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
             var saved = YlpFormat.Open(YlpStore.Load(dialogs.File).Files);
-            Assert.That(saved.Info.Format, Is.EqualTo(4), ".ylp format 4 (the images are the project's resources)");
+            Assert.That(saved.Info.Format, Is.EqualTo(YlpFormat.Current), "the current .ylp format (the images are the project's resources; they add no format of their own)");
             var other = NewWindow(); other.OpenProjectAt(dialogs.File);
             Assert.That(other.StatusMessage, Does.StartWith("Opened"));
             var opened = other.Document.GetLayer(fill.Id);

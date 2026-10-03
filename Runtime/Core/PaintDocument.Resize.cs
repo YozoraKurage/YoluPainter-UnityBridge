@@ -58,7 +58,11 @@ namespace Yozolab.YoluPainter.Core
         /// throws and leaves nothing behind (this document is untouched either way). Filters that would exceed
         /// <see cref="MaxFilterStackHalo"/> or the filter working budget at the new size are refused the same way.</para>
         /// </summary>
-        public ResampledDocument Resampled(int width, int height, CanvasResampling resampling, long? sourceBudgetBytes = null)
+        public ResampledDocument Resampled(int width, int height, CanvasResampling resampling, long? sourceBudgetBytes = null) => Resampled(width, height, resampling, sourceBudgetBytes, TileSize);
+
+        /// <summary><see cref="Resampled(int, int, CanvasResampling, long?)"/> into a document of another tile size (a smart material placed
+        /// into a texture set that uses another one; at the same size with Nearest the pixels are copied as they are).</summary>
+        internal ResampledDocument Resampled(int width, int height, CanvasResampling resampling, long? sourceBudgetBytes, int tileSize)
         {
             EnsureNoStroke();
             if (width < 1 || height < 1 || width > MaxNativeSide || height > MaxNativeSide)
@@ -69,7 +73,7 @@ namespace Yozolab.YoluPainter.Core
             double sx = width / (double)Width, sy = height / (double)Height, scale = Math.Sqrt(sx * sy);
             var xs = new ResampleAxis(Width, width, resampling); var ys = new ResampleAxis(Height, height, resampling);
             var notes = new List<string>(); var surfacePaths = new List<Guid>();
-            var copy = new PaintDocument(width, height, TileSize, undoBudgetBytes, Id)
+            var copy = new PaintDocument(width, height, tileSize, undoBudgetBytes, Id)
             {
                 sourceBudgetBytes = budget, activeStrokeBudgetBytes = activeStrokeBudgetBytes, minimumUndoSteps = minimumUndoSteps,
                 filterWorkingBudget = filterWorkingBudget, filterCacheBudget = filterCacheBudget, filterBlockPixels = filterBlockPixels,
@@ -124,7 +128,7 @@ namespace Yozolab.YoluPainter.Core
             foreach (var layer in layers) copy.SetLocksForLoad(copy.GetLayer(layer.Id), layer.Locks);
             if (selection != null)
             {
-                var resized = selection.ResampledTo(width, height, xs, ys, resampling);
+                var resized = selection.ResampledTo(width, height, xs, ys, resampling, tileSize);
                 copy.selection = resized.IsEmpty ? null : resized;
                 if (copy.selection == null) notes.Add("The selection was too small to keep at " + size + "; nothing is selected.");
             }
@@ -213,9 +217,9 @@ namespace Yozolab.YoluPainter.Core
     public sealed partial class SelectionMask
     {
         /// <summary>The selection at another canvas size (amounts resampled like a mask).</summary>
-        internal SelectionMask ResampledTo(int width, int height, ResampleAxis xs, ResampleAxis ys, CanvasResampling resampling)
+        internal SelectionMask ResampledTo(int width, int height, ResampleAxis xs, ResampleAxis ys, CanvasResampling resampling, int tileSize)
         {
-            var mask = new SelectionMask(width, height, TileSize);
+            var mask = new SelectionMask(width, height, tileSize);
             CanvasResampler.Resample(surface, mask.surface, xs, ys, resampling, false, null);
             return mask;
         }

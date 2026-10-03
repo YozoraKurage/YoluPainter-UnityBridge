@@ -4,21 +4,23 @@ using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
+using Yozolab.YoluPainter.Core.Persistence;
 using Yozolab.YoluPainter.Core.Shelf;
 
 namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>
     /// アセットのパネル（Substance Painter の Assets / シェルフに当たる）: 出どころの切り替え（このプロジェクト・Unity のプロジェクト・自分の置き場・
-    /// 内蔵）、名前の検索、種類の絞り込み（今は画像だけ。ブラシ・マテリアル・スマートマテリアルが同じ一覧に入る形）、サムネイルの格子、選んだものの
-    /// 説明と操作（置く・取り込む・自分の置き場へ・出どころから更新・消す）。ダブルクリックでも置く・取り込む。格子からキャンバス（2D・3D）へ
-    /// ドラッグすると置き、Unity の Project ウィンドウからテクスチャをパネルやキャンバスへ落とすと取り込む（キャンバスなら置く）。
+    /// 内蔵）、名前の検索、種類の絞り込み（画像・スマートマテリアル・スマートマスク。ブラシ・マテリアルも同じ一覧に入る形）、サムネイルの格子、選んだ
+    /// ものの説明と操作（置く・取り込む・自分の置き場へ・出どころから更新・消す）。ダブルクリックでも置く・取り込む（スマートマテリアルはいつも置く）。
+    /// 格子からキャンバス（2D・3D）へドラッグすると置き、Unity の Project ウィンドウからテクスチャをパネルやキャンバスへ落とすと取り込む（キャンバスなら
+    /// 置く）。スマートマテリアルは層の一覧の落とした所へ、スマートマスクは落とした行の層のマスクへも置ける（TexturePaintWindow.LayersPanel.cs）。
     /// 出どころの確かめは、パネルが出たとき・Unity のプロジェクトが変わったとき（パネルが出ていれば）に行う。ドックの別のウィンドウでも同じ描画。
     /// </summary>
     public sealed partial class TexturePaintWindow
     {
         internal enum AssetSource { Project, Unity, Library, BuiltIn }
-        internal enum AssetKind { All, Images }
+        internal enum AssetKind { All, Images, SmartMaterials, SmartMasks }
         static readonly AssetSource[] AssetSources = { AssetSource.Project, AssetSource.Unity, AssetSource.Library, AssetSource.BuiltIn };
 
         [SerializeField] AssetSource assetSource = AssetSource.Project;
@@ -67,13 +69,17 @@ namespace Yozolab.YoluPainter.Editor
                 default: return "Images that come with YoluPainter";
             }
         }
-        static string AssetKindName(AssetKind k) => k == AssetKind.Images ? "Images" : "All Kinds";
+        static string AssetKindName(AssetKind k) => k == AssetKind.Images ? "Images" : k == AssetKind.SmartMaterials ? "Smart Materials" : k == AssetKind.SmartMasks ? "Smart Masks" : "All Kinds";
 
         /// <summary>格子に並べる 1 つ。</summary>
         sealed class AssetItem
         {
             public string Key, Name, Detail, Badge, BadgeTip; public Color BadgeColor;
             public Func<Texture> Thumbnail;
+            /// <summary>画像・スマートマテリアル・スマートマスク。</summary>
+            public ResourceKind Kind;
+            /// <summary>読めないファイル（自分の置き場の壊れた .ylsmart）。並べて理由を見せるが、置けない。</summary>
+            public bool Broken;
         }
 
         // ───────── 描く ─────────
@@ -103,7 +109,8 @@ namespace Yozolab.YoluPainter.Editor
             // 検索と種類
             row = rows.Row(22, 6);
             string kindText = L.Tr(AssetKindName(assetKind));
-            float kindWidth = Mathf.Min(row.width * .45f, PaintGui.TextWidth(kindText, PaintTheme.Label) + 34);
+            // 種類の名前（スマートマテリアル）が入るだけ広げる。検索の欄は案内の文字が入る 124 を残す
+            float kindWidth = Mathf.Min(Mathf.Max(row.width * .45f, row.width - 128), PaintGui.TextWidth(kindText, PaintTheme.Label) + 34);
             assetSearch = PaintGui.SearchField(AssetSpot("search", new Rect(row.x, row.y, row.width - kindWidth - 4, row.height)), assetSearch, L.Tr("Search by name"));
             PaintGui.FitDropdown(AssetSpot("kind", new Rect(row.xMax - kindWidth, row.y, kindWidth, row.height)), null, kindText, OpenAssetKindMenu, L.Tr("Show only one kind of asset"));
             // 出どころが変わったリソースの知らせ
@@ -180,6 +187,7 @@ namespace Yozolab.YoluPainter.Editor
                     if (texture != null) GUI.DrawTexture(thumb, texture, ScaleMode.ScaleToFit, true);
                     PaintGui.Outline(thumb, PaintTheme.Border, 1, 0);
                     if (item.Badge != null) { var badge = new Rect(thumb.xMax - 16, thumb.y + 2, 14, 14); PaintGui.Rounded(badge, PaintTheme.PanelBg, 7); PaintGui.Icon(badge, item.Badge, item.BadgeColor, 11); }
+                    if (item.Kind != ResourceKind.Image) { var mark = new Rect(thumb.x + 2, thumb.yMax - 16, 14, 14); PaintGui.Rounded(mark, PaintTheme.PanelBg, 3); PaintGui.Icon(mark, item.Kind == ResourceKind.SmartMask ? "vignette" : "layers", PaintTheme.Accent, 11); }
                 }
                 var label = new Rect(cell.x + 3, thumb.yMax + 2, cell.width - 6, AssetCellHeight - AssetThumb - 8);
                 PaintGui.Text(label, PaintGui.Fit(item.Name, label.width, PaintTheme.LabelSmall, false), new GUIStyle(PaintTheme.LabelSmall) { alignment = TextAnchor.UpperCenter }, selected ? Color.white : PaintTheme.Text);
@@ -202,6 +210,19 @@ namespace Yozolab.YoluPainter.Editor
         string AssetEmptyText()
         {
             bool searching = !string.IsNullOrWhiteSpace(assetSearch);
+            if (assetKind == AssetKind.SmartMaterials || assetKind == AssetKind.SmartMasks)
+            {
+                bool masks = assetKind == AssetKind.SmartMasks;
+                if (searching && assetSource != AssetSource.Unity) return masks ? L.Tr("No smart mask here matches the search.") : L.Tr("No smart material here matches the search.");
+                switch (assetSource)
+                {
+                    case AssetSource.Project: return masks ? L.Tr("This project has no smart masks yet. Save a layer's mask with Layer ▸ Save Mask as Smart Mask, or import one from your library or the built-ins.")
+                        : L.Tr("This project has no smart materials yet. Save layers with Layer ▸ Save as Smart Material, or import one from your library or the built-ins.");
+                    case AssetSource.Unity: return L.Tr("Smart materials and smart masks are not Unity assets. Look in This Project, My Library or Built-in.");
+                    case AssetSource.Library: return masks ? L.Tr("Your library has no smart masks yet ({0}). Saving one puts it there.", PainterSettings.LibraryFolder) : L.Tr("Your library has no smart materials yet ({0}). Saving one puts it there.", PainterSettings.LibraryFolder);
+                    default: return masks ? L.Tr("No smart mask here matches the search.") : L.Tr("No smart material here matches the search.");
+                }
+            }
             switch (assetSource)
             {
                 case AssetSource.Project: return searching ? L.Tr("No resource in this project matches the search.") : L.Tr("This project has no resources yet. Import images from the Unity project, your library or the built-ins, or drop textures from the Project window here.");
@@ -225,6 +246,8 @@ namespace Yozolab.YoluPainter.Editor
             var buttons = new Rect(r.x, info.yMax + 4, r.width, 26);
             bool any = item != null && stroke == null;
             TryParseAssetKey(item?.Key, out var source, out string id);
+            bool smartKinds = assetKind == AssetKind.SmartMaterials || assetKind == AssetKind.SmartMasks;
+            if (item != null ? item.Kind != ResourceKind.Image : smartKinds) { DrawSmartFooter(buttons, item, assetSource, id); return; }
             if (assetSource == AssetSource.Project)
             {
                 var icons = new[] { ("library", L.Tr("Put into My Library (a PNG file in your library folder)"), "toLibrary"), ("sync", L.Tr("Update from the source (when it changed)"), "update"), ("delete", L.Tr("Remove from this project"), "remove") };
@@ -263,15 +286,20 @@ namespace Yozolab.YoluPainter.Editor
 
         List<AssetItem> AssetItems()
         {
-            if (assetKind != AssetKind.All && assetKind != AssetKind.Images) return new List<AssetItem>();
-            IEnumerable<AssetItem> all;
-            switch (assetSource)
+            IEnumerable<AssetItem> all = new AssetItem[0];
+            if (assetKind == AssetKind.All || assetKind == AssetKind.Images)
             {
-                case AssetSource.Project: all = ProjectAssetItems(); break;
-                case AssetSource.Unity: all = UnityAssetItems(); break;
-                case AssetSource.Library: all = LibraryAssetItems(); break;
-                default: all = BuiltInAssetItems(); break;
+                switch (assetSource)
+                {
+                    case AssetSource.Project: all = ProjectAssetItems(); break;
+                    case AssetSource.Unity: all = UnityAssetItems(); break;
+                    case AssetSource.Library: all = LibraryAssetItems(); break;
+                    default: all = BuiltInAssetItems(); break;
+                }
             }
+            // 画像の後にスマートマテリアル、スマートマスク
+            if (assetKind == AssetKind.All || assetKind == AssetKind.SmartMaterials) all = all.Concat(SmartAssetItems(SmartKind.Material));
+            if (assetKind == AssetKind.All || assetKind == AssetKind.SmartMasks) all = all.Concat(SmartAssetItems(SmartKind.Mask));
             string search = (assetSearch ?? "").Trim();
             return all.Where(i => search.Length == 0 || i.Name.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
         }
@@ -351,11 +379,113 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
 
+        /// <summary>スマートマテリアル（またはスマートマスク）の項目: このプロジェクトのもの・自分の置き場の .ylsmart（読めないものも理由を付けて）・内蔵。
+        /// Unity のアセットには無い。</summary>
+        IEnumerable<AssetItem> SmartAssetItems(SmartKind kind)
+        {
+            var resourceKind = ResourceIndex.KindOf(kind);
+            switch (assetSource)
+            {
+                case AssetSource.Project:
+                    foreach (var s in ImageResources.Smart.Where(s => s.Kind == kind))
+                    {
+                        var held = s;
+                        var item = new AssetItem { Key = AssetKey(AssetSource.Project, held.Id.ToString("D")), Name = held.Name, Kind = resourceKind, Detail = SmartDetail(kind, held.Material.LayerCount, held.Material.Width, held.Material.Height, held.Material.Channels) + " · " + SmartSourceLabel(held) };
+                        item.Thumbnail = () => CachedThumbnail(item.Key + ":" + held.Hash, () => SmartThumbnail(SmartMaterialFile.ReadInfo(held.FileBytes()).Thumbnail, () => held.Material));
+                        yield return item;
+                    }
+                    break;
+                case AssetSource.Library:
+                {
+                    var imported = new HashSet<string>(ImageResources.Smart.Where(r => r.Origin.Kind == ResourceOriginKind.Library).Select(r => r.Origin.Path), StringComparer.OrdinalIgnoreCase);
+                    foreach (var f in SmartLibraryItems())
+                    {
+                        // 読めないファイルはスマートマテリアルの方に 1 度だけ並べる
+                        if (f.Info != null ? f.Info.Kind != kind : kind != SmartKind.Material) continue;
+                        var file = f;
+                        var item = new AssetItem { Key = AssetKey(AssetSource.Library, file.FileName), Name = file.Info?.Name ?? Path.GetFileNameWithoutExtension(file.FileName), Kind = resourceKind, Broken = file.Info == null };
+                        if (file.Info == null)
+                        {
+                            item.Detail = file.FileName; item.Badge = "warning"; item.BadgeColor = PaintTheme.Warning; item.BadgeTip = L.Tr("This file cannot be used: {0}", file.Problem);
+                        }
+                        else
+                        {
+                            item.Detail = SmartDetail(kind, file.Info.LayerCount, file.Info.Width, file.Info.Height, file.Info.Channels) + " · " + file.FileName;
+                            item.Thumbnail = () => CachedThumbnail(item.Key + ":" + file.Length + ":" + file.Modified.Ticks, () => SmartThumbnail(file.Info.Thumbnail, () => SmartAsset(item.Key, out _)));
+                            if (imported.Contains(file.FileName)) { item.Badge = "check"; item.BadgeColor = PaintTheme.Accent; item.BadgeTip = L.Tr("Already in this project."); }
+                        }
+                        yield return item;
+                    }
+                    break;
+                }
+                case AssetSource.BuiltIn:
+                {
+                    var imported = new HashSet<string>(ImageResources.Smart.Where(r => r.Origin.Kind == ResourceOriginKind.BuiltIn).Select(r => r.Origin.BuiltInKey));
+                    foreach (var e in BuiltInSmartMaterials.All.Where(e => e.Kind == kind))
+                    {
+                        var entry = e;
+                        var item = new AssetItem { Key = AssetKey(AssetSource.BuiltIn, entry.Key), Name = L.Tr(entry.Name), Detail = L.Tr(entry.Description), Kind = resourceKind };
+                        item.Thumbnail = () => CachedThumbnail(item.Key + ":" + entry.Version, () => SmartThumbnail(null, () => SmartAsset(item.Key, out _)));
+                        if (imported.Contains(entry.Key)) { item.Badge = "check"; item.BadgeColor = PaintTheme.Accent; item.BadgeTip = L.Tr("Already in this project."); }
+                        yield return item;
+                    }
+                    break;
+                }
+            }
+        }
+
+        static string SmartDetail(SmartKind kind, int layers, int width, int height, IReadOnlyList<Core.PaintChannel> channels)
+            => (kind == SmartKind.Mask ? L.Tr("Smart mask") : L.Tr("{0} layers", layers)) + " · " + width + " × " + height
+               + (channels.Count > 0 ? " · " + string.Join(", ", channels.Select(c => L.Tr(c.ToString()))) : "");
+
+        /// <summary>このプロジェクトのスマートマテリアルの出どころ。</summary>
+        string SmartSourceLabel(SmartResource held)
+        {
+            switch (held.Origin.Kind)
+            {
+                case ResourceOriginKind.Library: return L.Tr("My Library: {0}", held.Origin.Path);
+                case ResourceOriginKind.BuiltIn: return L.Tr("Built-in: {0}", BuiltInSmartMaterials.TryGet(held.Origin.BuiltInKey, out var e) ? L.Tr(e.Name) : held.Origin.BuiltInKey);
+                default: return L.Tr("Saved in this project");
+            }
+        }
+
+        /// <summary>スマートマテリアル・スマートマスクを選んだときのフッター: 置く（マスクは選んだ層のマスクへ）と、出どころごとのアイコン。</summary>
+        void DrawSmartFooter(Rect buttons, AssetItem item, AssetSource source, string id)
+        {
+            bool any = item != null && stroke == null && !item.Broken, mask = item != null ? item.Kind == ResourceKind.SmartMask : assetKind == AssetKind.SmartMasks;
+            var icons = source == AssetSource.Project
+                ? new[] { ("library", L.Tr("Put into My Library (a .ylsmart file in your library folder)"), "toLibrary"), ("delete", L.Tr("Remove from this project"), "remove") }
+                : source == AssetSource.Library
+                    ? new[] { ("import", L.Tr("Import into this project (it is then saved with the .ylp)"), "import"), ("folder_open", L.Tr("Open your library folder"), "reveal") }
+                    : new[] { ("import", L.Tr("Import into this project (it is then saved with the .ylp)"), "import") };
+            float iconsWidth = icons.Length * 28;
+            var main = AssetSpot("place", new Rect(buttons.x, buttons.y, buttons.width - iconsWidth - 2, buttons.height));
+            string text = mask ? L.Tr("Apply to Mask") : L.TrIn("assets", "Place");
+            string tip = mask ? L.Tr("Put it on the selected layer's mask, replacing the mask it has (one undo step)") : L.Tr("New layers above the selected layer, fitted to this texture set (one undo step)");
+            if (PaintGui.FitButton(main, text, true, any, tip) && item != null) TryAction(() => PlaceSmartAsset(item.Key));
+            float x = main.xMax + 2;
+            foreach (var (icon, iconTip, spot) in icons)
+            {
+                bool enabled = spot == "reveal" || any;
+                if (item == null && spot != "reveal") { PaintGui.IconButton(AssetSpot(spot, new Rect(x + 2, buttons.y, 26, buttons.height)), icon, iconTip, false, false, 16); x += 28; continue; }
+                if (PaintGui.IconButton(AssetSpot(spot, new Rect(x + 2, buttons.y, 26, buttons.height)), icon, iconTip, false, enabled, 16))
+                {
+                    if (spot == "toLibrary") TryAction(() => AddSmartToLibrary(Guid.Parse(id)));
+                    else if (spot == "remove") TryAction(() => RemoveSmartResource(Guid.Parse(id)));
+                    else if (spot == "import") TryAction(() => { var held = ImportSmartAsset(item.Key); });
+                    else { Directory.CreateDirectory(PainterSettings.LibraryFolder); EditorUtility.RevealInFinder(PainterSettings.LibraryFolder); }
+                }
+                x += 28;
+            }
+        }
+
         // ───────── 操作 ─────────
 
-        /// <summary>ダブルクリックと主のボタン: このプロジェクトのリソースは置き、ほかは取り込む（今の一覧のまま。取り込んだものには印が付く）。</summary>
+        /// <summary>ダブルクリックと主のボタン: このプロジェクトのリソースは置き、ほかは取り込む（今の一覧のまま。取り込んだものには印が付く）。
+        /// スマートマテリアル・スマートマスクはどの出どころでも置く（取り込まない。置いた層は写し）。</summary>
         internal void PrimaryAssetAction(string key)
         {
+            if (TrySmartKind(key, out _)) { PlaceSmartAsset(key); return; }
             if (!TryParseAssetKey(key, out var source, out string id)) return;
             if (source == AssetSource.Project) { PlaceResourceAsLayer(Guid.Parse(id)); return; }
             ImportAsset(source, id);
@@ -377,7 +507,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void RefreshAssetPanel()
         {
-            unityListingStale = true; libraryListing = null; DisposeAssetThumbnails();
+            unityListingStale = true; libraryListing = null; smartListing = null; librarySmart.Clear(); DisposeAssetThumbnails();
             if (assetSource == AssetSource.Project)
             {
                 var changed = CheckResourceSources();
@@ -444,6 +574,7 @@ namespace Yozolab.YoluPainter.Editor
                 DragAndDrop.AcceptDrag();
                 TryAction(() =>
                 {
+                    if (key != null && TrySmartKind(key, out _)) { PlaceSmartAsset(key); return; } // スマートマテリアルは選んだ層の上、スマートマスクは選んだ層のマスクへ
                     if (key != null && TryParseAssetKey(key, out var source, out string id))
                     {
                         var image = ImportAsset(source, id);
@@ -474,7 +605,7 @@ namespace Yozolab.YoluPainter.Editor
                 texture = new Texture2D(w, h, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp };
                 texture.LoadRawTextureData(rgba); texture.Apply(false, false);
             }
-            catch (Exception ex) when (ex is IOException || ex is InvalidDataException || ex is ResourceRefusedException || ex is UnauthorizedAccessException) { texture = null; }
+            catch (Exception ex) when (ex is IOException || ex is InvalidDataException || ex is ResourceRefusedException || ex is UnauthorizedAccessException || ex is SmartRefusedException) { texture = null; }
             assetThumbnails[key] = texture;
             return texture;
         }

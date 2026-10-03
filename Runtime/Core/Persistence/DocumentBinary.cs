@@ -59,6 +59,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
         internal const int ShapeGradientVersion = 13;
         static bool IsReadable(int version) => version >= 1 && version <= Version;
         const long MaxArchiveBytes = 512L * 1024 * 1024;
+        /// <summary>The most layers a native document holds (the reader refuses more).</summary>
+        public const int MaxLayers = 2048;
         /// <summary>Version 12 layer attribute byte: bit 0 clipping, bit 1 an int of layer locks follows; version 14 bit 2 the per-channel
         /// blend settings follow; version 16 bit 3 the fill images and projection follow the fill values.</summary>
         const int AttributeClipping = 1, AttributeLocks = 2, AttributeChannelBlends = 4, AttributeFillImages = 8;
@@ -179,7 +181,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         try { doc.SetNormalSettings(new NormalSettings(derive, strength, (HeightEdgeMode)edges, (NormalYDirection)direction)); }
                         catch (ArgumentException ex) { throw new InvalidDataException("Invalid Normal output settings.", ex); }
                     }
-                    int layers = ReadCount(reader, 2048, "layers");
+                    int layers = ReadCount(reader, MaxLayers, "layers");
                     var lockedLayers = new System.Collections.Generic.List<(PaintLayer layer, LayerLocks locks)>();
                     for (int l = 0; l < layers; l++)
                     {

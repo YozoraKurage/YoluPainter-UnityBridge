@@ -114,6 +114,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// sets/&lt;ID&gt;/ の下。view.json の materialSlot は使わない（スロットは project.json に）。</item>
     /// <item>形式 4: プロジェクトのリソース（全部のセットで共通の画像）。根に resources.json（並び）、画素は中身ごとに 1 つの
     /// resources/&lt;中身の SHA-256&gt;.png（<see cref="ResourceIndex"/>）。どちらも正本。manifest は YOLUPAINTER-YLP-3。</item>
+    /// <item>形式 5: リソースの種類にスマートマテリアルとスマートマスク（resources.json の kind が smartMaterial / smartMask、ファイルはそのまま
+    /// resources/&lt;ファイルの SHA-256&gt;.ylsmart。<see cref="SmartMaterialFile"/>）。どちらも正本。名前の決まりは同じなので manifest は YLP-3 のまま。</item>
     /// </list>
     /// 開くときは <see cref="Open"/> が形式を読み、古い形式なら <see cref="Steps"/> を順に通して今の形式の並びにする（メモリの上だけで、
     /// ファイルは書き換えない）。今より新しい形式は、どのエントリにも触れずに断る。保存は <see cref="Stamp"/> でいつも今の形式で書く。
@@ -122,7 +124,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
     public static class YlpFormat
     {
         /// <summary>今の形式。</summary>
-        public const int Current = 4;
+        public const int Current = 5;
         /// <summary>形式と書いたアプリの記録（形式 2 から）。</summary>
         public const string InfoName = "ylp.json";
         /// <summary>テクスチャセットの並び（形式 3 から）。</summary>
@@ -142,6 +144,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             (files, notes) => { }, // 1 → 2: 並びは同じ（ylp.json を足しただけ）
             ToTextureSets,         // 2 → 3: 1 つのテクスチャセットにする
             (files, notes) => { }, // 3 → 4: 並びは同じ（形式 3 のファイルにはリソースが無い。resources.json の無いファイルはリソース無し）
+            (files, notes) => { }, // 4 → 5: 並びは同じ（形式 4 のリソースは画像だけ。スマートマテリアルの種類が増えただけ）
         };
 
         /// <summary>エントリの種類。</summary>
@@ -175,7 +178,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
         public static EntryKind? KindOf(string name)
         {
             if (name == InfoName) return EntryKind.Info;
-            if (name == ProjectName || name == ResourceIndex.EntryName || ResourceIndex.TryParseContentEntry(name, out _)) return EntryKind.Source;
+            if (name == ProjectName || name == ResourceIndex.EntryName || ResourceIndex.TryParseContentEntry(name, out _) || ResourceIndex.TryParseSmartEntry(name, out _)) return EntryKind.Source;
             if (name == ViewName || name == BrushName) return EntryKind.State;
             if (name == ThumbnailName) return EntryKind.Derived;
             return TrySplitSetEntry(name, out _, out var leaf) ? SetEntryKind(leaf) : null;
@@ -264,10 +267,18 @@ namespace Yozolab.YoluPainter.Core.Persistence
             // リソース（形式 4）: 並びにある中身の PNG が無ければ断る。並びに無い PNG は知らないエントリとして知らせる
             var resources = upgraded.TryGetValue(ResourceIndex.EntryName, out var resourceBytes) ? ResourceIndex.Read(resourceBytes) : (IReadOnlyList<YlpResourceEntry>)new YlpResourceEntry[0];
             foreach (var resource in resources)
-                if (!upgraded.ContainsKey(ResourceIndex.ContentEntry(resource.Content)))
+            {
+                if (resource.IsSmart)
+                {
+                    if (!upgraded.ContainsKey(ResourceIndex.SmartEntry(resource.Content))) throw new InvalidDataException("Smart material \"" + resource.Name + "\" has no file (" + ResourceIndex.SmartEntry(resource.Content) + ").");
+                }
+                else if (!upgraded.ContainsKey(ResourceIndex.ContentEntry(resource.Content)))
                     throw new InvalidDataException("Resource \"" + resource.Name + "\" has no pixels (" + ResourceIndex.ContentEntry(resource.Content) + ").");
-            var contents = new HashSet<string>(resources.Select(r => r.Content), StringComparer.Ordinal);
-            var unknown = upgraded.Keys.Where(k => KindOf(k) == null || TrySplitSetEntry(k, out var set, out _) && !listed.Contains(set) || ResourceIndex.TryParseContentEntry(k, out var hash) && !contents.Contains(hash))
+            }
+            var contents = new HashSet<string>(resources.Where(r => !r.IsSmart).Select(r => r.Content), StringComparer.Ordinal);
+            var smartFiles = new HashSet<string>(resources.Where(r => r.IsSmart).Select(r => r.Content), StringComparer.Ordinal);
+            var unknown = upgraded.Keys.Where(k => KindOf(k) == null || TrySplitSetEntry(k, out var set, out _) && !listed.Contains(set) || ResourceIndex.TryParseContentEntry(k, out var hash) && !contents.Contains(hash)
+                    || ResourceIndex.TryParseSmartEntry(k, out var smartHash) && !smartFiles.Contains(smartHash))
                 .OrderBy(k => k, StringComparer.Ordinal).ToList();
             return new YlpOpened { Files = upgraded, Info = info, Project = project, UnknownEntries = unknown, Notes = notes, Resources = resources };
         }

@@ -56,6 +56,9 @@ namespace Yozolab.YoluPainter.Core.Shelf
     /// raises <see cref="Changed"/> and bumps <see cref="Revision"/>; refused changes throw <see cref="ResourceRefusedException"/>
     /// and change nothing. Resource changes are not in a document's undo history (they belong to the project, like its texture
     /// sets); removing asks every usage probe first. Single-threaded like the document.
+    /// <para>Besides images (<see cref="Images"/>) a project holds smart materials and smart masks (<see cref="Smart"/>, .ylp format 5):
+    /// equal files are held once, they count against the same budget and the same <see cref="MaxResources"/>, and nothing refers to
+    /// them (placing one copies its layers).</para>
     /// </summary>
     public sealed class ProjectResources : IImageResources
     {
@@ -64,6 +67,7 @@ namespace Yozolab.YoluPainter.Core.Shelf
         public const long DefaultBudgetBytes = 1L << 30;
 
         readonly List<ImageResource> images = new List<ImageResource>();
+        readonly List<SmartResource> smart = new List<SmartResource>();
         readonly Dictionary<string, (ImageContent content, int users)> contents = new Dictionary<string, (ImageContent, int)>(StringComparer.Ordinal);
         readonly List<Func<Guid, string>> usageProbes = new List<Func<Guid, string>>();
         long budget = DefaultBudgetBytes;
@@ -71,8 +75,11 @@ namespace Yozolab.YoluPainter.Core.Shelf
         public event Action<ResourceChange> Changed;
         public long Revision { get; private set; }
         public IReadOnlyList<ImageResource> Images => images.AsReadOnly();
-        public int Count => images.Count;
-        /// <summary>Pixel bytes held (each distinct content once).</summary>
+        /// <summary>The smart materials and smart masks, in the order the panel shows them.</summary>
+        public IReadOnlyList<SmartResource> Smart => smart.AsReadOnly();
+        /// <summary>Every resource: images and smart ones.</summary>
+        public int Count => images.Count + smart.Count;
+        /// <summary>Bytes held: image pixels (each distinct content once) and smart resources (<see cref="SmartResource.ByteSize"/>).</summary>
         public long UsedBytes { get; private set; }
         /// <summary>The most pixel bytes the resources may hold. Lowering it below <see cref="UsedBytes"/> keeps what is there and
         /// refuses only further growth.</summary>
@@ -91,7 +98,7 @@ namespace Yozolab.YoluPainter.Core.Shelf
             refusal = default;
             if (content == null) throw new ArgumentNullException(nameof(content));
             if (contents.ContainsKey(content.Hash)) return null;
-            if (images.Count >= MaxResources) { refusal = ResourceRefusal.TooMany; return "A project holds at most " + MaxResources + " resources."; }
+            if (Count >= MaxResources) { refusal = ResourceRefusal.TooMany; return "A project holds at most " + MaxResources + " resources."; }
             if (UsedBytes + content.ByteSize > budget) { refusal = ResourceRefusal.OverBudget; return OverBudget(content.ByteSize); }
             return null;
         }
@@ -110,9 +117,9 @@ namespace Yozolab.YoluPainter.Core.Shelf
             added = false;
             var existing = FindByHash(content.Hash);
             if (existing != null) return existing;
-            if (images.Count >= MaxResources) throw new ResourceRefusedException(ResourceRefusal.TooMany, "A project holds at most " + MaxResources + " resources.");
+            if (Count >= MaxResources) throw new ResourceRefusedException(ResourceRefusal.TooMany, "A project holds at most " + MaxResources + " resources.");
             var newId = id ?? Guid.NewGuid();
-            if (images.Any(r => r.Id == newId)) throw new ArgumentException("The project already has a resource " + newId + ".", nameof(id));
+            if (HasId(newId)) throw new ArgumentException("The project already has a resource " + newId + ".", nameof(id));
             var held = Hold(content); // may throw OverBudget
             var image = new ImageResource(newId, name, held, origin, colorSpace);
             images.Add(image); added = true;
@@ -125,8 +132,8 @@ namespace Yozolab.YoluPainter.Core.Shelf
         public ImageResource Restore(Guid id, string name, ImageContent content, ResourceOrigin origin, ResourceColorSpace colorSpace, long revision = 0)
         {
             if (content == null) throw new ArgumentNullException(nameof(content));
-            if (images.Count >= MaxResources) throw new ResourceRefusedException(ResourceRefusal.TooMany, "A project holds at most " + MaxResources + " resources.");
-            if (images.Any(r => r.Id == id)) throw new ArgumentException("Two resources have the ID " + id + ".", nameof(id));
+            if (Count >= MaxResources) throw new ResourceRefusedException(ResourceRefusal.TooMany, "A project holds at most " + MaxResources + " resources.");
+            if (HasId(id)) throw new ArgumentException("Two resources have the ID " + id + ".", nameof(id));
             var image = new ImageResource(id, name, content, origin, colorSpace) { Revision = revision };
             image.Content = Hold(content);
             images.Add(image);
@@ -137,6 +144,7 @@ namespace Yozolab.YoluPainter.Core.Shelf
         public void Rename(Guid id, string name)
         {
             ImageResource.CheckName(name);
+            if (TryGetSmart(id, out var held)) { if (held.Name == name) return; held.Name = name; Raise(ResourceChangeKind.Renamed, id); return; }
             var image = Get(id);
             if (image.Name == name) return;
             image.Name = name; Raise(ResourceChangeKind.Renamed, id);
@@ -163,6 +171,7 @@ namespace Yozolab.YoluPainter.Core.Shelf
         /// <summary>Removes a resource. Refused (InUse) when a usage probe says something uses it.</summary>
         public void Remove(Guid id)
         {
+            if (TryGetSmart(id, out var held)) { smart.Remove(held); UsedBytes -= held.ByteSize; Raise(ResourceChangeKind.Removed, id); return; }
             var image = Get(id);
             var use = UsageOf(id);
             if (use != null) throw new ResourceRefusedException(ResourceRefusal.InUse, "\"" + image.Name + "\" is used by " + use + "; it was not removed.");
@@ -188,7 +197,7 @@ namespace Yozolab.YoluPainter.Core.Shelf
         /// <summary>Removes everything (a new project). Raises <see cref="ResourceChangeKind.Reset"/>.</summary>
         public void Clear()
         {
-            images.Clear(); contents.Clear(); UsedBytes = 0;
+            images.Clear(); smart.Clear(); contents.Clear(); UsedBytes = 0;
             Raise(ResourceChangeKind.Reset, Guid.Empty);
         }
 
@@ -198,10 +207,60 @@ namespace Yozolab.YoluPainter.Core.Shelf
         {
             if (source == null) throw new ArgumentNullException(nameof(source));
             if (source == this) return;
-            images.Clear(); contents.Clear();
-            images.AddRange(source.images); foreach (var c in source.contents) contents.Add(c.Key, c.Value); UsedBytes = source.UsedBytes;
-            source.images.Clear(); source.contents.Clear(); source.UsedBytes = 0;
+            images.Clear(); smart.Clear(); contents.Clear();
+            images.AddRange(source.images); smart.AddRange(source.smart); foreach (var c in source.contents) contents.Add(c.Key, c.Value); UsedBytes = source.UsedBytes;
+            source.images.Clear(); source.smart.Clear(); source.contents.Clear(); source.UsedBytes = 0;
             Raise(ResourceChangeKind.Reset, Guid.Empty);
+        }
+
+        bool HasId(Guid id) => images.Any(r => r.Id == id) || smart.Any(r => r.Id == id);
+
+        // ───────── スマートマテリアル・スマートマスク ─────────
+
+        public bool TryGetSmart(Guid id, out SmartResource resource) { resource = smart.FirstOrDefault(r => r.Id == id); return resource != null; }
+        public SmartResource GetSmart(Guid id) => TryGetSmart(id, out var r) ? r : throw new ResourceRefusedException(ResourceRefusal.Unknown, "The project has no smart material " + id + ".");
+        /// <summary>The smart resource holding exactly this file (SHA-256 of its bytes), or null.</summary>
+        public SmartResource FindSmartByHash(string hash) => smart.FirstOrDefault(r => r.Hash == hash);
+
+        /// <summary>Why adding a smart file of <paramref name="byteSize"/> bytes (<see cref="SmartResource.ByteSize"/>) would be refused, or null.</summary>
+        public string AddSmartRefusal(long byteSize, out ResourceRefusal refusal)
+        {
+            refusal = default;
+            if (Count >= MaxResources) { refusal = ResourceRefusal.TooMany; return "A project holds at most " + MaxResources + " resources."; }
+            if (UsedBytes + byteSize > budget) { refusal = ResourceRefusal.OverBudget; return OverBudget(byteSize); }
+            return null;
+        }
+
+        /// <summary>
+        /// Adds a smart material or smart mask (<paramref name="fileBytes"/>: its .ylsmart file, <paramref name="material"/>: what it reads
+        /// as). When the project already holds the very same file, nothing is added and that resource is returned with
+        /// <paramref name="added"/> false. Refused (nothing changes) when over the budget or count.
+        /// </summary>
+        public SmartResource AddSmart(string name, byte[] fileBytes, SmartMaterial material, ResourceOrigin origin, out bool added, Guid? id = null)
+        {
+            var resource = new SmartResource(id ?? Guid.NewGuid(), name, fileBytes, material, origin);
+            added = false;
+            var existing = FindSmartByHash(resource.Hash);
+            if (existing != null) return existing;
+            if (HasId(resource.Id)) throw new ArgumentException("The project already has a resource " + resource.Id + ".", nameof(id));
+            string why = AddSmartRefusal(resource.ByteSize, out var refusal);
+            if (why != null) throw new ResourceRefusedException(refusal, why);
+            smart.Add(resource); UsedBytes += resource.ByteSize; added = true;
+            Raise(ResourceChangeKind.Added, resource.Id);
+            return resource;
+        }
+
+        /// <summary>Adds a smart resource of a file as it was saved (ID kept, no deduplication). Used by the readers; refused like
+        /// <see cref="AddSmart"/>.</summary>
+        public SmartResource RestoreSmart(Guid id, string name, byte[] fileBytes, SmartMaterial material, ResourceOrigin origin)
+        {
+            if (HasId(id)) throw new ArgumentException("Two resources have the ID " + id + ".", nameof(id));
+            var resource = new SmartResource(id, name, fileBytes, material, origin);
+            string why = AddSmartRefusal(resource.ByteSize, out var refusal);
+            if (why != null) throw new ResourceRefusedException(refusal, why);
+            smart.Add(resource); UsedBytes += resource.ByteSize;
+            Raise(ResourceChangeKind.Added, id);
+            return resource;
         }
 
         ImageContent Hold(ImageContent content)

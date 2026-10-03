@@ -5,9 +5,9 @@ using System.Security.Cryptography;
 
 namespace Yozolab.YoluPainter.Core.Shelf
 {
-    /// <summary>What a resource is. Only images today; brushes, materials and smart materials join here (each new kind is a new
-    /// .ylp format, so an older YoluPainter refuses the file instead of dropping what it does not know).</summary>
-    public enum ResourceKind { Image = 0 }
+    /// <summary>What a resource is: images (.ylp format 4) and smart materials and smart masks (format 5). Brushes and materials join here
+    /// (each new kind is a new .ylp format, so an older YoluPainter refuses the file instead of dropping what it does not know).</summary>
+    public enum ResourceKind { Image = 0, SmartMaterial = 1, SmartMask = 2 }
 
     /// <summary>Where a resource's copy came from.</summary>
     public enum ResourceOriginKind

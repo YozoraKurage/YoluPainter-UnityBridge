@@ -11,7 +11,7 @@ YoluPainter の作業ファイル `.ylp` の決まり。読み書きのコード
 | 層 | 版 | 受け持ち | 変えたときの扱い |
 |---|---|---|---|
 | 外側（zip・mimetype・manifest・名前の決まり） | manifest の 1 行目。今は **`YOLUPAINTER-YLP-3`**（`YOLUPAINTER-YLP-1`・`-2` も読む） | `YlpArchive` | 変えたら manifest の番号を上げる。古い読み手は「新しい YoluPainter で書かれた」と断る |
-| 中身の形式（エントリの並び・ylp.json・project.json・resources.json） | `ylp.json` の `format`（無ければ 1）。今は **4** | `YlpFormat` | 下の「形式を変えるとき」 |
+| 中身の形式（エントリの並び・ylp.json・project.json・resources.json） | `ylp.json` の `format`（無ければ 1）。今は **5** | `YlpFormat` | 下の「形式を変えるとき」 |
 | エントリの中身 | エントリごとの版（下の表） | 各エントリの読み手 | そのエントリの版を上げ、古い版も読めるようにする |
 
 ### 外側
@@ -49,6 +49,7 @@ YoluPainter の作業ファイル `.ylp` の決まり。読み書きのコード
 | 2 | `ylp.json` を足した。エントリの並びは 1 と同じ | なにもしない（並びは同じ） |
 | 3 | テクスチャセット（1 つのプロジェクトに複数）。根に `project.json`（セットの並びと今のセット）、正本・選択範囲・取り込んだ PSD・合成・メッシュマップはセットごとに `sets/<ID>/` の下。`view.json` の `materialSlot` は使わない。manifest は `YOLUPAINTER-YLP-2` | 根の `document.utpaint`・`selection.bin`・`imported-original.psd`・`composite/*`・`meshmap-*.bin` を `sets/<文書の ID>/` へ動かし（ID は `document.utpaint` の頭にある文書の ID なので、同じファイルはいつも同じ ID）、`view.json` の `materialSlot`（無い・読めなければ 0 にして知らせる）から 1 つのセットの `project.json` を作る。名前は仮の `Texture Set 1`（ウィンドウはモデルのマテリアルの名前に付け直す）。`view.json`・`brush.json`・`thumbnail.png`・知らないエントリは根に残す |
 | 4 | プロジェクトのリソース（全部のテクスチャセットで共通の画像。アセットのパネル）。根に `resources.json`（並び）、画素は中身ごとに 1 つの `resources/<中身の SHA-256>.png`。どちらも正本。manifest は `YOLUPAINTER-YLP-3` | なにもしない（形式 3 のファイルにはリソースが無い。`resources.json` の無いファイルはリソース無し） |
+| 5 | リソースの種類にスマートマテリアルとスマートマスク（`resources.json` の `kind` が `smartMaterial` / `smartMask`、ファイルはそのまま `resources/<ファイルの SHA-256>.ylsmart`。下の「.ylsmart」）。どちらも正本。名前の決まりは同じなので manifest は `YOLUPAINTER-YLP-3` のまま | なにもしない（形式 4 のリソースは画像だけ） |
 
 ### project.json（形式 3 から）
 
@@ -88,7 +89,8 @@ YoluPainter の作業ファイル `.ylp` の決まり。読み書きのコード
 - `resources`（必須、0〜256 個、並びの順がパネルの順）: プロジェクトのリソース。リソースの無いプロジェクトは `resources.json` を書かない
   （無いファイルはリソース無し）。
   - `id`（必須）: 小文字のハイフン付きの GUID。レイヤーや段（塗りつぶしレイヤーの画像。これからデカールなど）が指す名前。ほかと重ならない。
-  - `kind`（必須）: 今は `"image"` だけ。ブラシ・マテリアル・スマートマテリアルを足すときは形式を上げる（知らない種類は断る。落として保存しない）。
+  - `kind`（必須）: `"image"`、形式 5 から `"smartMaterial"`・`"smartMask"`（下）。ブラシ・マテリアルを足すときは形式を上げる（知らない種類は
+    断る。落として保存しない）。
   - `name`（必須）: 1〜256 文字、空白だけでない、制御文字を含まない。重なってもよい。
   - `content`（必須）: 中身のハッシュ（64 桁の小文字 16 進）。ASCII の `YLPRGBA8`、幅と高さ（32 bit の little-endian）、straight RGBA8 の画素
     （下の行から）を続けた SHA-256（`ImageContent.ComputeHash`）。同じ画素はファイルが違っても同じハッシュ。画素は `resources/<content>.png`。
@@ -103,6 +105,13 @@ YoluPainter の作業ファイル `.ylp` の決まり。読み書きのコード
     - `file`: `path`（絶対パス）、`sha256`（ファイルのバイト列の SHA-256）、`length`。
     - `library`: `file`（自分の置き場のフォルダの中のファイルの名前。区切りを含まない）、`sha256`、`length`。
     - `builtIn`: `key`（a〜z・0〜9・`-`）、`version`（1 以上。内蔵の画像の画素を変えたら上げる）。
+- スマートマテリアル・スマートマスク（形式 5 から）は `id`・`kind`・`name`・`content`（ファイルのバイト列の SHA-256。ファイルは
+  `resources/<content>.ylsmart`）・`length`（必須、1〜512 MiB）・`origin`（`none`＝このプロジェクトで保存した・`library`・`builtIn`。
+  `unityAsset`・`file` は断る）を持ち、`width`・`height`・`colorSpace` は持たない。画像と同じ並びに入り、同じ 256 個と予算に数える。
+  ```json
+  { "id": "bbbbbbbb-0000-4000-8000-000000000002", "kind": "smartMaterial", "name": "Rusty", "content": "<ファイルの SHA-256>", "length": 5519,
+    "origin": { "type": "library", "file": "Rusty.ylsmart", "sha256": "<同じ>", "length": 5519 } }
+  ```
 - 知らないキーは読み飛ばす。壊れた JSON・型の違い・知らない種類・知らない出どころ・ID の重なり・257 個以上・1 MiB を超えるものは、どれも開くのを断る
   （リソースは作業の一部なので、落として開かない）。
 
@@ -113,6 +122,32 @@ YoluPainter の作業ファイル `.ylp` の決まり。読み書きのコード
 - 開くときに全部を復号し、画素のハッシュが名前と、大きさが並びと同じことを確かめる。並びにある PNG が無い・復号できない・ハッシュや大きさが
   違うものは、どのリソースかを添えて開くのを断る（黙って落とさない）。並びに無い PNG は知らないエントリとして知らせる（保存すると残らない）。
 - 保存は読んだ PNG のバイト列をそのまま書く（作り直さない）。
+
+### resources/&lt;content&gt;.ylsmart（形式 5 から）
+
+- スマートマテリアル・スマートマスクのファイル（下の「.ylsmart」）を、自分の置き場のファイルと同じバイト列のまま入れる（同じファイルは 1 つ）。
+- 開くときに、並びにあるファイルが無い・長さや SHA-256 が並びと違う・ファイルとして読めない（下の決まりで断られる）・種類が並びと違うものは、
+  どれかを添えて開くのを断る（黙って落とさない）。並びに無い `.ylsmart` は知らないエントリとして知らせる（保存すると残らない）。
+- 保存は読んだバイト列をそのまま書く。
+
+## .ylsmart（スマートマテリアル・スマートマスクのファイル）
+
+自分の置き場に置く 1 つのファイル（.ylp の形式 5 の中にも同じバイト列で入る）。読み書きは `SmartMaterialFile`（`Runtime/Core/Persistence/`）。
+
+- 外側は .ylp と同じ zip の層（`YlpArchive`。先頭は無圧縮の `mimetype`、次に `manifest.sha256`、名前・長さ・SHA-256・展開の上限の確かめ）で、
+  MIME タイプは `application/x-yolupainter-smart`、manifest の 1 行目は `YOLUPAINTER-SMART-1`（.ylp と取り違えない。新しい版は「新しい
+  YoluPainter で書かれた」と断る）。名前は根と `resources/` の下の 1 段。zip の日時は固定で、同じ中身はいつも同じバイト列（同じ実行環境の deflate）。
+- `smart.json`（正本）: `format`（今は 1。新しい版は書いたアプリを添えて断る）、`kind`（`smartMaterial` / `smartMask`。知らない種類は断る）、
+  `name`、`width`・`height`・`layers`・`channels`（並べるため。読むときに層と比べ、違えば断る）、`repin`（下）、`savedBy`（必須）。知らないキーは
+  読み飛ばす。
+- `layers.utpaint`（正本）: 断片の文書。選んだ層だけを持つネイティブの文書（`DocumentBinary`。読める版ならどれでも）で、保存したテクスチャセットの
+  大きさ。スマートマスクは値の無い塗りつぶしの層 1 つがマスクを持つ。モデルの上のパスは持たない（取り出すときに画素にする）。Generator は
+  ベイクへのピンを持たず、ピンがあった段の ID を `repin` に書く（置いた先で、使えるマップがあればそれに付け直す）。
+- `resources.json`・`resources/<content>.png`（正本、層が参照する画像があるとき）: .ylp と同じ形（画像だけ）。
+- `thumbnail.png`（派生）: パネルのサムネイル（見本のタイルに置いて描いたもの。読めなければ作り直す）。
+- 知らないエントリは読み飛ばす（ファイルのバイト列は持ち主がそのまま持つので、何も落とさない）。
+- 置くとき: 大きさの違うテクスチャセットへは文書ごとの再標本化（`PaintDocument.Resampled`: 画素・マスク・フィルターの半径・2D のパス）、
+  セットが使っていないチャンネルはオフにして値を残す。正本（document.utpaint）の版は変えない（置いた結果は今の正本の層そのもの）。
 
 ### ylp.json（形式 2 から）
 
@@ -141,6 +176,7 @@ YoluPainter の作業ファイル `.ylp` の決まり。読み書きのコード
 | `project.json` | 正本 | ○ | テクスチャセットの並びと今のセット（上のとおり） | `YlpFormat.ReadProject` |
 | `resources.json` | 正本 | リソースがあるとき | プロジェクトのリソースの並び（上のとおり。形式 4 から） | `ResourceIndex.Read` |
 | `resources/<content>.png` | 正本 | 並びにあるとき | リソースの画素（上のとおり。形式 4 から） | `ResourceIndex.Load` |
+| `resources/<content>.ylsmart` | 正本 | 並びにあるとき | スマートマテリアル・スマートマスクのファイル（上のとおり。形式 5 から） | `ResourceIndex.Load`・`SmartMaterialFile` |
 | `view.json` | 状態 | | モデル（GUID）・選んだチャンネル（形式 2 までの `materialSlot` は書かない・読まない） | ウィンドウ |
 | `brush.json` | 状態 | | ブラシの設定。`schema` 1〜3（2 で筆先・ゆらぎ・紙の質感、3 でダイナミクス。schema 3 のまま、マテリアルで塗る組と値 `material`・`materialChannels`・`materialEmission`・`materialRoughness`・`materialMetallic`・`materialHeight`・`materialNormalX/Y` を足した: 無い古いファイルはオフで読み、古い読み手は読み飛ばして今のチャンネル 1 つで塗る。知らないチャンネルの印・範囲の外の値は読まずに既定に戻して知らせる） | ウィンドウ |
 | `thumbnail.png` | 派生 | | 今のセットの Color（無ければ最初のチャンネル。どのチャンネルも使っていなければ並びの最初の描いたセット）の合成を長辺 256 px 以下に縮めたもの | インポーター |
@@ -279,9 +315,10 @@ ID マップ（`meshmap-Id.bin`）は、エントリの版を変えずに中身�
    古い読み手が読めないなら、その読み手が断る）。
 4. この文書の「版の歴史」「エントリ」の表を直す。
 5. 前の形式のフィクスチャ（`Tests/Editor/Persistence/Fixtures~/format<N>.ylp`。前の版の YoluPainter で作り、それ以後は変えない）
-   を足し、開ける・正本がバイト一致で読み書きできる・合成が正本と一致することを `YlpFormatTests` で確かめる。今あるのは形式 1・2・3
-   （形式 3 は形式 4 を足す前の YoluPainter のウィンドウの保存で作った、テクスチャセット 2 つのもの。`YlpResourceFormatTests`）。
-   形式 4 のフィクスチャは、次に形式を上げる人が、上げる前の YoluPainter で（できればリソースを持つもので）作る。
+   を足し、開ける・正本がバイト一致で読み書きできる・合成が正本と一致することを `YlpFormatTests` で確かめる。今あるのは形式 1・2・3・4
+   （形式 3 は形式 4 を足す前の YoluPainter のウィンドウの保存で作った、テクスチャセット 2 つのもの。`YlpResourceFormatTests`。形式 4 は形式 5 を
+   足す前（0.0.0 の ca54ac6）のウィンドウの保存で作った、テクスチャセット 2 つ・リソース 2 つのもの。`SmartMaterialFileTests`）。
+   形式 5 のフィクスチャは、次に形式を上げる人が、上げる前の YoluPainter で（できればスマートマテリアルを持つもので）作る。
 6. 1.0.0 より前は互換を壊す変更もありうるが、そのときも古いファイルは開けるようにし（移行の段）、新しい形式を古い版で開いたら
    理由を出して断る。
 
@@ -319,3 +356,9 @@ ID マップ（`meshmap-Id.bin`）は、エントリの版を変えずに中身�
   形式 4 で書き戻してバイト一致）。
 - `ResourceTests`（Core）: 中身のハッシュの固定値、PNG の往復・決定性・Unity の復号器との突き合わせ・壊れた PNG の拒否、予算・数・大きさ・
   使用中の拒否、同じ中身のまとめ、内蔵の画像のハッシュ。`ResourceWindowTests`: ウィンドウでの保存と開く・復旧・壊れたリソースで開かない。
+- `SmartMaterialFileTests`: .ylsmart の並びだけを読む（層を読まない）・同じ中身は同じバイト列・知らないエントリを読み飛ばす、新しい版・知らない種類と
+  チャンネル・層と合わない smart.json・名前・savedBy・repin・壊れた JSON・層の無いもの・画像の並びに別の種類・新しい manifest・壊れた zip・
+  .ylp との取り違えの拒否。形式 5 の .ylp の往復（スマートマテリアル・スマートマスク・出どころ 3 種、書き戻すと同じバイト、同じファイルは 1 つ、予算）と、
+  ファイルが無い・別のファイル・種類が違う・壊れた・持てない出どころ・長さ 0 の拒否、並びに無い .ylsmart の知らせ。形式 4 のフィクスチャを開く
+  （正本はバイト一致、今の形式で書き戻して同じバイト）。
+- `SmartMaterialTests`（Core）: 取り出して置く往復・大きさの違う文書・ピンの付け直し・画像・チャンネル・拒否・スマートマスク・パス・内蔵のハッシュ。

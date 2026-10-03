@@ -146,7 +146,7 @@ namespace Yozolab.YoluPainter.Tests
             var bytes = YlpArchive.Write(files);
             Assert.That(ManifestHeader(bytes), Is.EqualTo("YOLUPAINTER-YLP-3"));
             var opened = YlpFormat.Open(YlpArchive.Read(bytes));
-            Assert.That(opened.Info.Format, Is.EqualTo(4)); Assert.That(opened.Upgraded, Is.False); Assert.That(opened.UnknownEntries, Is.Empty);
+            Assert.That(opened.Info.Format, Is.EqualTo(YlpFormat.Current)); Assert.That(opened.Upgraded, Is.False); Assert.That(opened.UnknownEntries, Is.Empty);
             Assert.That(opened.Resources.Select(r => (r.Id, r.Name)), Is.EqualTo(new[] { (R1, "Scratches"), (R2, "Mask"), (R3, "Mask again") }), "the order is kept");
             var loaded = ResourceIndex.Load(opened.Files, opened.Resources);
             Assert.That(loaded.Images.Select(r => (r.Id, r.Name, r.ContentHash, r.ColorSpace, r.Origin.Kind)), Is.EqualTo(resources.Images.Select(r => (r.Id, r.Name, r.ContentHash, r.ColorSpace, r.Origin.Kind))));

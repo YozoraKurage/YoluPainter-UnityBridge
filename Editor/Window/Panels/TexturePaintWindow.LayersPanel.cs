@@ -68,10 +68,12 @@ namespace Yozolab.YoluPainter.Editor
             float content = document.Layers.Count * LayerRowHeight;
             var view = new Rect(0, 0, list.width - (content > list.height ? 10 : 0), content);
             layerScroll.y = Mathf.Clamp(layerScroll.y, 0, Mathf.Max(0, content - list.height));
+            bool overList = list.Contains(Event.current.mousePosition);
             PaintGui.BeginScroll(list, layerScroll);
             int row = 0;
             for (int i = document.Layers.Count - 1; i >= 0; i--, row++) DrawLayerRow(new Rect(0, row * LayerRowHeight, view.width, LayerRowHeight), document.Layers[i], i);
             HandleLayerDrag(view.width);
+            HandleSmartDrop(view.width, overList); // アセットのパネルからのスマートマテリアル・スマートマスク（Project/TexturePaintWindow.SmartMaterials.cs）
             PaintGui.EndScroll();
             if (Event.current.type == EventType.ScrollWheel && list.Contains(Event.current.mousePosition))
             { layerScroll.y = Mathf.Clamp(layerScroll.y + Event.current.delta.y * 12, 0, Mathf.Max(0, content - list.height)); Event.current.Use(); Repaint(); }
