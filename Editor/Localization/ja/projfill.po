@@ -162,9 +162,6 @@ msgstr "投影した正方形の中心のまわりに、画像を反時計回り
 msgid "Where the surface turns between the box's axes: 0 %: a hard switch to the axis it faces most; 100 %: mixed in proportion to the normal."
 msgstr "面の向きがボックスの軸のあいだで変わる所: 0 % はいちばん向いている軸へはっきり切り替え、100 % は法線の向きの割合で混ぜる。"
 
-msgid "Show the projection's box in the 3D view with handles: drag the arrows to move it, the rings to turn it and the squares on its faces to size it (Shift: both faces)."
-msgstr "投影のボックスをハンドル付きで 3D ビューに出す: 矢印のドラッグで動かし、輪で回し、面の四角で大きさを変える（Shift で両側の面）。"
-
 msgid "Fit the box to the model (its bounds; a cube for tri-planar and spherical)"
 msgstr "ボックスをモデルに合わせる（外形。トライプラナーと球は立方体）"
 

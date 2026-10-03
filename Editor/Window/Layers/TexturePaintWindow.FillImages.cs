@@ -238,8 +238,7 @@ namespace Yozolab.YoluPainter.Editor
             document.EndCoalescing();
             document.SetFillProjection(layerId, next);
             document.EndCoalescing();
-            if (mode != FillProjectionMode.Uv) ProjectionEditLayer = layerId;
-            else if (ProjectionEditLayer == layerId) ProjectionEditLayer = Guid.Empty;
+            if (mode != FillProjectionMode.Uv) ProjectionHandlesHidden = false; // 型の上の投影を選んだら、置き場をすぐ動かせるように
         }
 
         /// <summary>モデルの外形に合わせた置き場（モデルのルートの空間）: 中心は外形の中心、大きさは外形（トライプラナーは最も長い辺の立方体で、
@@ -256,22 +255,24 @@ namespace Yozolab.YoluPainter.Editor
             return new ShapeVolume(GeneratorShape.Box, center.x, center.y, center.z, 0, 0, 0, sx, sy, sz, 0);
         }
 
-        /// <summary>型の上の投影の置き場: 3D ビューで編集する・ギズモのモード・モデルに合わせる、中心・回転・大きさ（モデルのルートの空間、シーンの単位）。</summary>
+        /// <summary>型の上の投影の置き場: 3D ビューのハンドルを出す・隠す（Q）・ギズモのモード・モデルに合わせる、中心・回転・大きさ（モデルのルートの
+        /// 空間、シーンの単位）。ハンドルは層を選んでいる間に出る（マスクの編集中は出ない）ので、ボタンは Substance の Show/Hide manipulator と同じ切り替え。</summary>
         void DrawProjectionPlacement(UiRows rows, PaintLayer active)
         {
             var p = active.Projection; var v = p.Placement;
             bool editing = ProjectionEditLayer == active.Id;
             var row = rows.Row(24); float modes = 3 * 26 + 6;
-            if (PaintGui.Button(Spot("projection.edit", new Rect(row.x, row.y, row.width - modes, row.height)), L.Tr("Edit in 3D View"), editing, GUI.enabled && stroke == null,
-                    L.Tr("Show the projection's box in the 3D view with handles: drag the arrows to move it, the rings to turn it and the squares on its faces to size it (Shift: both faces)."), "view_in_ar"))
-                ProjectionEditLayer = editing ? Guid.Empty : active.Id;
+            if (PaintGui.Button(Spot("projection.edit", new Rect(row.x, row.y, row.width - modes, row.height)), L.Tr("Handles in 3D View"), !projectionHandlesHidden, GUI.enabled && stroke == null,
+                    L.Tr("Show or hide the projection's box in the 3D view (Q). While this layer is selected its handles show: drag the arrows to move it, the rings to turn it and the squares on its faces to size it (Shift: both faces)."), "view_in_ar"))
+                ProjectionHandlesHidden = !projectionHandlesHidden;
             if (PaintGui.IconButton(Spot("projection.move", new Rect(row.xMax - modes + 4, row.y, 26, row.height)), "transform", L.Tr("Handles: move (arrows along the model's axes, the square in the view's plane)"), shapeGizmoMode == ShapeGizmoMode.Move, GUI.enabled && editing, 16))
                 ShapeGizmoMode = ShapeGizmoMode.Move;
             if (PaintGui.IconButton(Spot("projection.rotate", new Rect(row.xMax - modes + 32, row.y, 26, row.height)), "3d_rotation", L.Tr("Handles: rotate (rings about the model's axes; Ctrl snaps to 15°)"), shapeGizmoMode == ShapeGizmoMode.Rotate, GUI.enabled && editing, 16))
                 ShapeGizmoMode = ShapeGizmoMode.Rotate;
             if (PaintGui.IconButton(Spot("projection.fit", new Rect(row.xMax - 26, row.y, 26, row.height)), "target", L.Tr("Fit the box to the model (its bounds; a cube for tri-planar and spherical)"), false, GUI.enabled && stroke == null && preview != null && preview.HasModel, 16))
                 TryAction(() => { document.EndCoalescing(); document.SetFillProjection(active.Id, active.Projection.WithPlacement(ModelPlacement(p.Mode))); document.EndCoalescing(); });
-            if (editing && surfaceRect.width <= 0) NoteRow(rows, L.Tr("Show the 3D view (View ▸ 3D or 2D | 3D) to see and drag the box."), NoteKind.Info);
+            if (EditingMask && !projectionHandlesHidden) NoteRow(rows, L.Tr("The handles hide while you edit the layer's mask; select the layer itself to move the box."), NoteKind.Info);
+            else if (editing && surfaceRect.width <= 0) NoteRow(rows, L.Tr("Show the 3D view (View ▸ 3D or 2D | 3D) to see and drag the box."), NoteKind.Info);
             else if (editing && (preview == null || !preview.HasModel)) NoteRow(rows, L.Tr("Load a model (or the demo cube) to see the box on it."), NoteKind.Info);
             PaintGui.GroupLabel(rows.Row(16), L.Tr("Placement"), L.Tr("In the model root's space: its position and rotation, in scene units (the root's scale is not applied). The same values as the handles in the 3D view."));
             var c = VectorRow(rows, "projection.center", L.Tr("Center"), v.CenterX, v.CenterY, v.CenterZ, .01f, "0.###", -ShapeVolume.MaxCoordinate, ShapeVolume.MaxCoordinate,

@@ -80,3 +80,23 @@ msgstr "{0} を {1} のデカールとして置いた。3D ビューのハンド
 
 msgid "Placed {0} as a decal in {1}, but it is not shown yet: {2}"
 msgstr "{0} を {1} のデカールとして置いたが、まだ出ていない: {2}"
+
+# ── 置き場のハンドル（選んだ層の間は出す。Q で隠す） ──
+
+msgid "Handles in 3D View"
+msgstr "3D ビューのハンドル"
+
+msgid "Show or hide the projection's box in the 3D view (Q). While this layer is selected its handles show: drag the arrows to move it, the rings to turn it and the squares on its faces to size it (Shift: both faces)."
+msgstr "3D ビューに投影のボックスを出す・隠す（Q）。この層を選んでいる間はハンドルが出る: 矢印のドラッグで動かし、輪で回し、面の四角で大きさを変える（Shift: 両側の面）。"
+
+msgid "The handles hide while you edit the layer's mask; select the layer itself to move the box."
+msgstr "層のマスクを編集している間はハンドルを出さない。ボックスを動かすには層そのものを選ぶ。"
+
+msgid "Projection handles hidden (Q shows them)."
+msgstr "投影のハンドルを隠した（Q で出す）。"
+
+msgid "Projection handles shown (Q hides them)."
+msgstr "投影のハンドルを出した（Q で隠す）。"
+
+msgid "Q shows or hides the handles of the selected fill layer's projection or decal"
+msgstr "Q: 選んだ塗りつぶしの層の投影・デカールのハンドルを出す・隠す"

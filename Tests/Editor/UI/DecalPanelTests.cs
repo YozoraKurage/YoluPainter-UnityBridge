@@ -95,6 +95,19 @@ namespace Yozolab.YoluPainter.Tests
                     }
                 }
                 Assert.That(drawn, Is.EqualTo(2 * 2 * 2));
+                // マスクの編集中はハンドルを出さない（選んでいる間は出す。Substance のマニピュレーターと同じ）。Q で隠したときも
+                L.OverrideLanguage(PainterLanguage.English); w.Channel = PaintChannel.Color;
+                d.AddLayerMask(decal.Id); w.EditMask = true;
+                string maskPath = Path.Combine(Folder, "editing-mask-1600.png");
+                OffscreenGui.RenderWindow(w, 1600, 950, maskPath);
+                Assert.That(Count(maskPath, 950, w.SurfaceRect).axis, Is.LessThan(5), "no handles while the mask is edited");
+                Assert.That(w.LayerControlPanelRects.Keys, Has.Member("projection.edit"));
+                w.EditMask = false; w.ProjectionHandlesHidden = true;
+                string hiddenPath = Path.Combine(Folder, "hidden-1600.png");
+                OffscreenGui.RenderWindow(w, 1600, 950, hiddenPath);
+                Assert.That(Count(hiddenPath, 950, w.SurfaceRect).axis, Is.LessThan(5), "hidden with Q");
+                w.ProjectionHandlesHidden = false;
+                d.RemoveLayerMask(decal.Id); d.ClearHistory();
                 // 3D ビューだけを大きく（人が目で確かめる絵）
                 L.OverrideLanguage(PainterLanguage.English); w.Channel = PaintChannel.Color;
                 w.View = TexturePaintWindow.ViewMode.Model;

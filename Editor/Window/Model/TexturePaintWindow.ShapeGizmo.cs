@@ -10,7 +10,9 @@ namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>
     /// 3D ビューの形のグラデーションのギズモ（<see cref="ShapeGizmo"/>）: プロパティの欄で「3D ビューで編集」にした Generator（選んだ層の
-    /// 画素かマスクのスタックにあるもの）か、塗りつぶしの層の投影の置き場（ボックス。TexturePaintWindow.FillImages.cs）の形の線とハンドルを 3D ビューに重ね、形の値をモデルの面に薄く重ねる
+    /// 画素かマスクのスタックにあるもの）か、選んでいる塗りつぶしの層の投影の置き場（ボックス。型の上の投影とデカール。TexturePaintWindow.FillImages.cs。
+    /// Substance Painter のマニピュレーターと同じく、層を選んでいる間は出し、マスクを編集している間と Q で隠したときは出さない）の形の線とハンドルを
+    /// 3D ビューに重ね、形の値をモデルの面に薄く重ねる
     /// （<see cref="IsolatedModelPreview.ShownShapeGradient"/>）。ハンドルを押した所から離すまでの変更は、スライダーと同じく
     /// <see cref="ApplyFilterSettings"/> で入れて 1 つの Undo にまとめ、描き直しも同じ流れ（文書の版が変わり、次の Repaint で合成する）。
     /// Esc・フォーカスの喪失・リロード・Play への移行ではドラッグの前に戻し、履歴にも残さない（<see cref="PaintDocument.CancelCoalescing"/>）。
@@ -18,23 +20,27 @@ namespace Yozolab.YoluPainter.Editor
     /// </summary>
     public sealed partial class TexturePaintWindow
     {
-        [SerializeField] string shapeEditFilter = "", projectionEditLayer = "";
+        [SerializeField] string shapeEditFilter = "";
+        /// <summary>投影の置き場のハンドルを隠している（Q・投影の欄のボタン。Substance の Show/Hide manipulator）。窓の状態で、保存しない。</summary>
+        [SerializeField] bool projectionHandlesHidden;
         [SerializeField] ShapeGizmoMode shapeGizmoMode = ShapeGizmoMode.Move;
         ShapeHandle shapeDrag; ShapeVolume shapeDragStart; Vector2 shapeDragFrom; Guid shapeDragFilter, shapeDragLayer; int shapeDragControl; bool shapeDragProjection;
 
-        /// <summary>3D ビューで編集している形のグラデーションの Generator（無ければ Guid.Empty）。窓の状態で、保存しない。投影の置き場の編集とは
-        /// どちらか一方（ギズモは 1 つ）。</summary>
+        /// <summary>3D ビューで編集している形のグラデーションの Generator（無ければ Guid.Empty）。窓の状態で、保存しない。編集している間は、
+        /// 投影の置き場より先にこちらを出す（ギズモは 1 つ）。</summary>
         internal Guid ShapeEditFilter
         {
             get => Guid.TryParse(shapeEditFilter, out var id) ? id : Guid.Empty;
-            set { if (value != ShapeEditFilter) CancelShapeDrag(); shapeEditFilter = value == Guid.Empty ? "" : value.ToString(); if (value != Guid.Empty) projectionEditLayer = ""; Repaint(); }
+            set { if (value != ShapeEditFilter) CancelShapeDrag(); shapeEditFilter = value == Guid.Empty ? "" : value.ToString(); Repaint(); }
         }
-        /// <summary>3D ビューで投影の置き場（ボックス）を編集している塗りつぶしの層（無ければ Guid.Empty。TexturePaintWindow.FillImages.cs）。
-        /// 窓の状態で、保存しない。形のグラデーションの編集とはどちらか一方。</summary>
-        internal Guid ProjectionEditLayer
+        /// <summary>今 3D ビューに置き場のハンドルが出ている塗りつぶしの層（無ければ Guid.Empty）: 選んでいる層の投影が型の上の投影かデカールで、
+        /// その層のマスクを編集しておらず、形のグラデーションを編集しておらず、ハンドルを隠していないとき。</summary>
+        internal Guid ProjectionEditLayer => EditedProjection()?.Id ?? Guid.Empty;
+        /// <summary>投影の置き場のハンドルを隠す（Q・投影の欄のボタン）。隠したら、ドラッグの最中なら取り消す。</summary>
+        internal bool ProjectionHandlesHidden
         {
-            get => Guid.TryParse(projectionEditLayer, out var id) ? id : Guid.Empty;
-            set { if (value != ProjectionEditLayer) CancelShapeDrag(); projectionEditLayer = value == Guid.Empty ? "" : value.ToString(); if (value != Guid.Empty) shapeEditFilter = ""; Repaint(); }
+            get => projectionHandlesHidden;
+            set { if (value == projectionHandlesHidden) return; if (value && shapeDragProjection) CancelShapeDrag(); projectionHandlesHidden = value; Repaint(); }
         }
         internal ShapeGizmoMode ShapeGizmoMode { get => shapeGizmoMode; set { if (shapeDrag == ShapeHandle.None) shapeGizmoMode = value; Repaint(); } }
         /// <summary>ギズモのハンドルをドラッグしている間 true。</summary>
@@ -50,12 +56,15 @@ namespace Yozolab.YoluPainter.Editor
             catch (KeyNotFoundException) { return null; }
             return effect != null && effect.Settings.IsGenerator && effect.Settings.Generator.Type == GeneratorType.ShapeGradient ? effect : null;
         }
-        /// <summary>編集している投影の層（選んだ層で、型の上に投影する塗りつぶし）。無ければ null。</summary>
+        /// <summary>
+        /// 置き場のハンドルを出す投影の層: 選んでいる層が型の上に投影する塗りつぶし（デカールを含む）なら、選んでいる間ずっと（Substance Painter の
+        /// マニピュレーターと同じ）。出さないのは、その層のマスクを編集している間（マスクを塗るクリックがハンドルに取られないように。Substance でも
+        /// マスクを選ぶと塗るツールになり、マニピュレーターは出ない）、形のグラデーションを編集している間（そちらを出す）、Q で隠したとき。無ければ null。
+        /// </summary>
         PaintLayer EditedProjection()
         {
-            var id = ProjectionEditLayer;
-            if (id == Guid.Empty || document == null || id != selectedLayer) return null;
-            var layer = document.Layers.FirstOrDefault(l => l.Id == id);
+            if (document == null || projectionHandlesHidden || EditingMask || EditedShapeGradient() != null) return null;
+            var layer = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
             return layer != null && layer.Kind == LayerKind.Fill && layer.Projection.ReadsMeshMaps ? layer : null;
         }
         /// <summary>ギズモが動かす形（モデルのルートの空間）: 形のグラデーションの形か、投影の置き場（球の投影は球として見せる）。無ければ false。</summary>

@@ -10,8 +10,8 @@ namespace Yozolab.YoluPainter.Editor
     /// <summary>
     /// デカール（Substance Painter の平面の投影を箱で切り抜いたもの）: 塗りつぶしの層の投影の種類「デカール」（<see cref="FillProjectionMode.Decal"/>）。
     /// アセットのパネル（か Unity の Project ウィンドウ）の画像を 3D ビューのモデルへ落とすと、落とした所の面に向けて、画像の縦横比の大きさで
-    /// 置く（選んだ層の上に新しい層、1 回の Undo。画像は今のチャンネルへ）。置いた後は投影の置き場と同じギズモで動かす
-    /// （TexturePaintWindow.ShapeGizmo.cs、1 回の Undo、Esc・フォーカスの喪失で戻す）。プロパティの投影の欄で奥行きと裏向きの間引きを変え、
+    /// 置く（選んだ層の上に新しい層、1 回の Undo。画像は今のチャンネルへ）。デカールの層を選んでいる間は、投影の置き場と同じギズモで動かせる
+    /// （TexturePaintWindow.ShapeGizmo.cs、1 回の Undo、Esc・フォーカスの喪失で戻す。マスクの編集中と Q で隠したときは出ない）。プロパティの投影の欄で奥行きと裏向きの間引きを変え、
     /// 2D キャンバスには選んだデカールの届く範囲を薄く重ねる。表示だけで、文書には何も足さない。
     /// </summary>
     public sealed partial class TexturePaintWindow
@@ -62,7 +62,7 @@ namespace Yozolab.YoluPainter.Editor
                 layerId = layer.Id;
             });
             selectedLayer = layerId; editMask = false; repaintPixels = true;
-            ProjectionEditLayer = layerId; // 置いたらすぐギズモで動かせる
+            ProjectionHandlesHidden = false; // 選んだデカールのハンドルを出して、置いたらすぐ動かせるように
             string problem = document.GetDecalProblem(layerId);
             message = problem == null ? L.Tr("Placed {0} as a decal in {1}. Drag the handles in the 3D view to move, turn or size it.", image.Name, L.Tr(target.ToString()))
                 : L.Tr("Placed {0} as a decal in {1}, but it is not shown yet: {2}", image.Name, L.Tr(target.ToString()), problem);

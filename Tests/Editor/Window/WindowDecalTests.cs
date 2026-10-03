@@ -13,8 +13,8 @@ using Yozolab.YoluPainter.Editor.Preview;
 namespace Yozolab.YoluPainter.Tests
 {
     /// <summary>描画ウィンドウのデカール（GUI モード、SendEvent）: アセットのパネルの画像を 3D ビューのモデルへドラッグすると、落とした所の面に
-    /// 向けて画像の縦横比のデカールを置き（選んだ層の上、1 回の Undo、Ctrl+Z / Ctrl+Shift+Z）、モデルの外では受け取らない。置いたらすぐ置き場の
-    /// ギズモが出て、矢印のドラッグで動き 1 回の Undo、Esc とフォーカスの喪失はドラッグの前に戻して履歴にも残さない。2D キャンバスには選んだ
+    /// 向けて画像の縦横比のデカールを置き（選んだ層の上、1 回の Undo、Ctrl+Z / Ctrl+Shift+Z）、モデルの外では受け取らない。デカールを選んでいる間は
+    /// 置き場のギズモが出て（マスクの編集中と Q で隠したときは出ない）、矢印のドラッグで動き 1 回の Undo、Esc とフォーカスの喪失はドラッグの前に戻して履歴にも残さない。2D キャンバスには選んだ
     /// デカールの届く範囲を重ね、投影の欄の間引きのスライダーのドラッグも 1 回の Undo。マップが無いときは欄のボタンで焼いて出す。</summary>
     public sealed partial class WindowTests
     {
@@ -134,6 +134,60 @@ namespace Yozolab.YoluPainter.Tests
             DragHandle(ring, ring + new Vector2(12, 12), release: false);
             Invoke(window, "OnLostFocus");
             Assert.That(window.ShapeDragging, Is.False); Assert.That(decal.Projection.Placement, Is.EqualTo(start)); Assert.That(d.UndoCount, Is.EqualTo(0));
+        }
+
+        /// <summary>Substance Painter のマニピュレーターと同じく、デカール（型の上の投影）の層を選んでいる間は置き場のハンドルが出て、選びを外すと
+        /// 消える。マスクの編集中は出さず、ハンドルのあった所のクリックはマスクを塗る（置き場は動かない）。層そのものを選び直すと出て、同じ所の
+        /// 押下はハンドルを掴んで塗らない（同じクリックで両方は起きない）。Q と投影の欄のボタンで隠す・出す。</summary>
+        [Test] public void SelectingADecalShowsItsHandlesAndEditingItsMaskOrQHidesThem()
+        {
+            DecalScene(); var d = window.Document;
+            var decal = DropDecal(out _);
+            var paint = d.AddLayer("Paint"); d.ClearHistory();
+            window.SelectedLayer = paint.Id; Repaint(window);
+            Assert.That(window.ShapeHandleGui(ShapeHandle.MoveFree), Is.Null, "a paint layer has no box");
+            Assert.That(window.ProjectionEditLayer, Is.EqualTo(Guid.Empty));
+            window.SelectedLayer = decal.Id; Repaint(window);
+            var centre = Handle(ShapeHandle.MoveFree);
+            Assert.That(window.ProjectionEditLayer, Is.EqualTo(decal.Id), "selecting the decal shows its handles");
+            // マスクの編集中: 出さない。ハンドルのあった所を描くツールで押すと、マスクを塗る
+            d.AddLayerMask(decal.Id); window.EditMask = true; window.SelectTool(TexturePaintWindow.PaintTool.Brush); d.ClearHistory(); Repaint(window);
+            Assert.That(window.ShapeHandleGui(ShapeHandle.MoveFree), Is.Null, "no handles while the mask is edited");
+            Assert.That(window.ShapeHandleAt(centre), Is.EqualTo(ShapeHandle.None));
+            var placement = decal.Projection.Placement; long mask = decal.Mask.Surface.Revision;
+            Mouse(window, EventType.MouseDown, centre); Assert.That(window.ShapeDragging, Is.False);
+            Mouse(window, EventType.MouseDrag, centre + new Vector2(12, 0)); Mouse(window, EventType.MouseUp, centre + new Vector2(12, 0)); Repaint(window);
+            Assert.That(decal.Mask.Surface.Revision, Is.Not.EqualTo(mask), "the press painted the mask: " + window.StatusMessage);
+            Assert.That(decal.Projection.Placement, Is.EqualTo(placement), "and did not move the box");
+            Assert.That(d.UndoCount, Is.EqualTo(1));
+            // 層そのものを選び直すと出る。ハンドルの押下は掴むだけで、塗らない
+            window.EditMask = false; Repaint(window);
+            Assert.That(window.ProjectionEditLayer, Is.EqualTo(decal.Id));
+            mask = decal.Mask.Surface.Revision;
+            var arrow = OnArrow(ShapeHandle.MoveX);
+            Mouse(window, EventType.MouseDown, arrow);
+            Assert.That(window.ShapeDragging, Is.True); Assert.That(d.HasActiveStroke, Is.False, "the press on a handle starts no stroke");
+            Mouse(window, EventType.MouseDrag, arrow + new Vector2(30, 0)); Mouse(window, EventType.MouseUp, arrow + new Vector2(30, 0)); Repaint(window);
+            Assert.That(decal.Projection.Placement, Is.Not.EqualTo(placement), window.StatusMessage);
+            Assert.That(decal.Mask.Surface.Revision, Is.EqualTo(mask), "nothing painted"); Assert.That(d.UndoCount, Is.EqualTo(2), "one step for the drag");
+            // Q で隠し、もう一度で出す
+            Key(window, KeyCode.Q); Repaint(window);
+            Assert.That(window.ProjectionHandlesHidden, Is.True); Assert.That(window.ShapeHandleGui(ShapeHandle.MoveFree), Is.Null);
+            Key(window, KeyCode.Q); Repaint(window);
+            Assert.That(window.ShapeHandleGui(ShapeHandle.MoveFree), Is.Not.Null);
+            // 投影の欄のボタンも同じ切り替え
+            var open = (Dictionary<string, bool>)typeof(TexturePaintWindow).GetField("sectionOpen", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(window);
+            open["projection"] = true; OpenLayerPanels();
+            ClickLayerControl("projection.edit");
+            Assert.That(window.ProjectionHandlesHidden, Is.True); Assert.That(window.ShapeHandleGui(ShapeHandle.MoveFree), Is.Null);
+            ClickLayerControl("projection.edit");
+            Assert.That(window.ShapeHandleGui(ShapeHandle.MoveFree), Is.Not.Null);
+            // ほかの型の上の投影（平面）の塗りつぶしも、選べば出る。UV に戻すと消える
+            var planar = d.AddFillLayer("Planar", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(10, 200, 10, 255) } });
+            window.SelectedLayer = planar.Id; window.SetProjectionMode(planar.Id, FillProjectionMode.Planar); Repaint(window);
+            Assert.That(window.ProjectionEditLayer, Is.EqualTo(planar.Id)); Assert.That(window.ShapeHandleGui(ShapeHandle.MoveFree), Is.Not.Null);
+            window.SetProjectionMode(planar.Id, FillProjectionMode.Uv); Repaint(window);
+            Assert.That(window.ShapeHandleGui(ShapeHandle.MoveFree), Is.Null);
         }
 
         [Test] public void TheCanvasShowsTheSelectedDecalsReachAndTheCullingSlidersAreOneUndoStep()

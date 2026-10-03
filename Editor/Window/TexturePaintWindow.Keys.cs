@@ -81,6 +81,7 @@ namespace Yozolab.YoluPainter.Editor
                 case KeyCode.V: SelectTool(PaintTool.Move); break;
                 case KeyCode.P: SelectTool(PaintTool.Path); break;
                 case KeyCode.I: SelectTool(PaintTool.Eyedropper); break;
+                case KeyCode.Q: if (e.shift) return false; ProjectionHandlesHidden = !ProjectionHandlesHidden; message = ProjectionHandlesHidden ? L.Tr("Projection handles hidden (Q shows them).") : L.Tr("Projection handles shown (Q hides them)."); break; // Substance と同じ Q（Model/TexturePaintWindow.ShapeGizmo.cs）
                 case KeyCode.Alpha4: case KeyCode.Keypad4: if (e.shift) return false; SelectTool(PaintTool.PolygonFill); break; // Substance Painter と同じ 4
                 case KeyCode.X: if (tool == PaintTool.PolygonFill && EditingMask) PolygonFillErase = !polyFillErase; else SwapColors(); break; // マスクのポリゴン塗りつぶしでは白と黒（Substance の X）
                 case KeyCode.D: DefaultColors(); break;
