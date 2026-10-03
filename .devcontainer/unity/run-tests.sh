@@ -13,6 +13,9 @@
 #   run-tests.sh --shards 3 [--mode gui --gui-only] 全件を 3 組に分け、同じモードの台で同時に回して結果を合わせる（auto = 動いている台の数、
 #                                                  3 まで。--both の全件は auto。分け方は shard-filters.py、重さはテストごとの時間の履歴）
 #   run-tests.sh --runner 2                        台を決めて回す
+#   run-tests.sh --priority …                      指揮役の統合（リリースの道筋）: 統合用の台（runners.conf の 3 列目 integration）を先に使い、
+#                                                  重い試験（Tests/Editor/Support/SlowTests.txt）も回す
+#   run-tests.sh --full …                          重い試験も回す（絞り込みの無い全件は、既定では重い試験を飛ばす）
 #   run-tests.sh --log                             失敗時に Unity ログの末尾も出す
 #
 # 台（runners.conf・runners.sh）: 台 0 はパッケージとして /workspace を直接読む。台 1 以上は依頼のたびに台の中の写しへ
@@ -34,6 +37,8 @@ SOURCE_DIR=""
 BOTH=0
 GUI_ONLY=0
 SHARDS=""
+PRIORITY=0
+FULL=0
 original_args=("$@")
 
 while [[ $# -gt 0 ]]; do
@@ -48,7 +53,9 @@ while [[ $# -gt 0 ]]; do
     --both)     BOTH=1; shift ;;
     --gui-only) GUI_ONLY=1; shift ;;
     --shards)   SHARDS="${2:?--shards に組の数か auto が要る}"; shift 2 ;;
-    -h|--help)  sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --priority) PRIORITY=1; FULL=1; shift ;;
+    --full)     FULL=1; shift ;;
+    -h|--help)  sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)          die "不明な引数: $1" ;;
   esac
 done
@@ -61,6 +68,12 @@ done
 if [[ -n "$SHA" ]]; then
   SHA="$(git -C "$PACKAGE_ROOT" rev-parse --verify "$SHA^{commit}" 2>/dev/null)" || die "コミットが無い: $SHA"
 fi
+# 全件の依頼か（組に分けた子の依頼も親の全件の一部として数える）。担当の全件は統合用の台を使わない
+IS_FULL_RUN=0
+[[ ( -z "$FILTER" && -z "$CATEGORY" ) || -n "${YOLUPAINTER_FULL_RUN:-}" ]] && IS_FULL_RUN=1
+runner_is_integration() { sed -n "s/^$1[[:space:]][[:space:]]*[a-z-]*[[:space:]][[:space:]]*\(integration\).*/\1/p" "$SCRIPT_DIR/runners.conf" 2>/dev/null | grep -q integration; }
+# この依頼が使ってよい台か: 統合用の台は、統合（--priority）か、担当の絞り込んだ短い依頼だけ
+runner_allowed() { [[ $PRIORITY == 1 || $IS_FULL_RUN == 0 ]] || ! runner_is_integration "$1"; }
 if [[ -n "$SOURCE_DIR" ]]; then
   SOURCE_DIR="$(cd "$SOURCE_DIR" 2>/dev/null && pwd)" || die "フォルダが無い: $SOURCE_DIR"
   [[ -f "$SOURCE_DIR/package.json" ]] || die "パッケージ（package.json）が無い: $SOURCE_DIR"
@@ -98,6 +111,7 @@ if [[ -n "$SHARDS" && "$SHARDS" != 1 ]]; then
     for n in $(runner_numbers) 0; do
       [[ "$(runner_live_mode "$n")" == "$want" ]] || continue
       [[ "$n" == 0 && ( -n "$SHA" || -n "$SOURCE_DIR" ) ]] && continue
+      runner_allowed "$n" || continue
       d="$(runner_project "$n")/TestDaemon"
       if ( exec 7>"$d/client.lock"; flock -n 7 ); then SHARDS=$((SHARDS + 1)); fi
     done
@@ -125,6 +139,7 @@ if [[ -n "$SHARDS" ]] && (( SHARDS > 1 )); then
     esac
   done
   export YOLUPAINTER_TEST_GROUP="${YOLUPAINTER_TEST_GROUP:-$(date +%Y%m%d-%H%M%S)-$$}"
+  export YOLUPAINTER_FULL_RUN=1
   info "全件を ${#shard_lines[@]} 組に分けて ${want} の台で同時に回す（$( [[ $kind == gui-only ]] && echo 'GUI でしか回らないテスト' || echo '全部のテスト')）"
   pids=(); i=0
   for line in "${shard_lines[@]}"; do
@@ -168,13 +183,21 @@ if [[ -z "${YOLUPAINTER_LOCK_HELD:-}" && -z "${YOLUPAINTER_DAEMON_SWITCHING:-}" 
   candidates=()
   if [[ -n "$RUNNER_ARG" ]]; then candidates=("$RUNNER_ARG")
   else
-    for n in $(runner_numbers) 0; do candidates+=("$n"); done
+    # 統合（--priority）は統合用の台を先に。ほかは統合用の台を後に（空いていれば絞り込んだ依頼は使ってよい）
+    if [[ $PRIORITY == 1 ]]; then
+      for n in $(runner_numbers); do runner_is_integration "$n" && candidates+=("$n"); done
+      for n in $(runner_numbers) 0; do runner_is_integration "$n" || candidates+=("$n"); done
+    else
+      for n in $(runner_numbers) 0; do runner_is_integration "$n" || candidates+=("$n"); done
+      for n in $(runner_numbers); do runner_is_integration "$n" && candidates+=("$n"); done
+    fi
   fi
   eligible=()
   for n in "${candidates[@]}"; do
     live="$(runner_live_mode "$n")"
     [[ "$live" == down ]] && continue
     [[ "$n" == 0 && ( -n "$SHA" || -n "$SOURCE_DIR" ) ]] && continue  # 台 0 は /workspace を直接読むので、コミットやフォルダを選べない
+    [[ -n "$RUNNER_ARG" ]] || runner_allowed "$n" || continue
     if [[ -n "$RUNNER_ARG" && -z "$MODE" ]] || [[ "$live" == "$want" ]]; then eligible+=("$n"); fi
   done
   if [[ ${#eligible[@]} -eq 0 ]]; then
@@ -253,6 +276,18 @@ if [[ $GUI_ONLY == 1 ]]; then
     warn "GuiOnlyFixtures.txt が無いので全件を回す: $list"
   fi
 fi
+# 絞り込みの無い全件（GUI でしか回らないテストだけの依頼を除く）は、既定で重い試験（SlowTests.txt）を飛ばす。統合と --full では回す。
+# 飛ばすのは「テストのメソッドの完全名」だけに当たる正規表現で表す（組（アセンブリ・名前空間・クラス）の名前に当たると、中の全部が回る）
+if [[ -z "$FILTER" && -z "$CATEGORY" && $FULL == 0 && $GUI_ONLY == 0 && -z "${YOLUPAINTER_FULL_RUN:-}" ]]; then
+  slow_list="$( [[ "$UNITY_RUNNER" != 0 ]] && runner_package "$UNITY_RUNNER" || echo "$PACKAGE_ROOT" )/Tests/Editor/Support/SlowTests.txt"  # 回す木の中の一覧
+  if [[ -f "$slow_list" ]]; then
+    slow_names="$(grep -v '^[[:space:]]*#' "$slow_list" | sed 's/[[:space:]]//g' | grep -v '^$' | sed 's/[.]/[.]/g' | paste -sd'|')"
+    if [[ -n "$slow_names" ]]; then
+      FILTER="Yozolab[.]YoluPainter[.]Tests[.](?!(?:${slow_names})(?:[(]|\$))[A-Za-z0-9_]+[.(]"
+      info "重い試験 $(grep -v '^[[:space:]]*#' "$slow_list" | grep -c '[^[:space:]]') 件を飛ばす（Tests/Editor/Support/SlowTests.txt。--full か --priority で全部）"
+    fi
+  fi
+fi
 if daemon_alive; then
   info "デーモンへ依頼 (台 $UNITY_RUNNER、PID $(cat "$DAEMON_DIR/daemon.pid"))"
   rm -f "$DAEMON_DIR/done" "$DAEMON_DIR/result.xml"
@@ -320,8 +355,14 @@ if daemon_alive; then
       # 本体と、その台のプロジェクトの取り込みの手伝い（AssetImportWorker。圧縮テクスチャの試験などで起きて何時間も残る、1 つ 1.4 GB ほど）の合計
       rss_kb=$(ps -eo rss=,args= | awk -v p="-projectPath $UNITY_PROJECT" 'index($0, p) { s += $1 } END { print s + 0 }')
       limit_kb=$(( ${YOLUPAINTER_RUNNER_RSS_LIMIT_MB:-4500} * 1024 ))
-      if [[ -n "$rss_kb" && "$rss_kb" -gt "$limit_kb" ]]; then
-        info "台 $UNITY_RUNNER の Unity が $(( rss_kb / 1024 )) MB に太ったので、裏で再起動する（1〜2 分。ログ $RUNNERS_HOME/$UNITY_RUNNER/restart.log）"
+      # GPU: WSL の GPU のドライバの層（Mesa の d3d12 ⇔ Windows）は、Unity が捨てたテクスチャ・描き先の分を Windows に返さずに溜め込み、
+      # プロセスが終わるとまとめて返す（2026-10-03: Unity 自身は GPU のメモリ 0.03 GB と答える GUI の台を 1 つ止めると、Windows の
+      # 「共有 GPU メモリ」が 37.4 → 27.3 GB に減った）。コンテナの中からは測れないので、全件（組に分けた子も）の後は必ず再起動する
+      reason=""
+      if [[ -n "$rss_kb" && "$rss_kb" -gt "$limit_kb" ]]; then reason="Unity が $(( rss_kb / 1024 )) MB に太った"
+      elif [[ $IS_FULL_RUN == 1 ]]; then reason="全件の後で、GPU のドライバの層に溜まった分を返す"; fi
+      if [[ -n "$reason" ]]; then
+        info "台 $UNITY_RUNNER を裏で再起動する（$reason。1〜2 分。ログ $RUNNERS_HOME/$UNITY_RUNNER/restart.log）"
         # setsid -f で頼んだ側のセッションとプロセスグループから切り離す（頼んだ側のコマンドが終わって、まとめて止められると、
         # 起動し直した Unity も止まり、台が落ちたままになった。2026-10-03）。ロックの fd 8 は引き継ぐので、終わるまで台は使われない
         YOLUPAINTER_LOCK_HELD=1 setsid -f "$SCRIPT_DIR/runners.sh" restart "$UNITY_RUNNER" > "$RUNNERS_HOME/$UNITY_RUNNER/restart.log" 2>&1 < /dev/null
