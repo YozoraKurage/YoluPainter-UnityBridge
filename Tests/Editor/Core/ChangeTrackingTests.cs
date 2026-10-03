@@ -70,6 +70,31 @@ namespace Yozolab.YoluPainter.Tests
             }
         }
 
+        /// <summary>A clipping mark has no effect on the bottom layer. Moving a marked layer to the bottom (or another layer under it)
+        /// changes where it shows, so its tiles are reported both ways — also when the layer itself did not move.</summary>
+        [Test] public void AClippingMarkThatStartsOrStopsApplyingReportsTheLayersTiles()
+        {
+            var doc = new PaintDocument(64, 32, 16);
+            var b = doc.AddLayer("B"); var a = doc.AddLayer("A");
+            Dot(doc, b.Id, 20, 5); Dot(doc, a.Id, 3, 3); // B in tile (1, 0), A in tile (0, 0)
+            doc.SetLayerClipping(a.Id, true); doc.ClearHistory();
+            void Step(string name, Action edit)
+            {
+                var before = doc.Composite(PaintChannel.Color); long since = doc.ChangeSerial; edit();
+                var after = doc.Composite(PaintChannel.Color); var changed = Changed(doc, PaintChannel.Color, since);
+                for (int i = 0; i < after.Length; i += 4)
+                    if (after[i] != before[i] || after[i + 1] != before[i + 1] || after[i + 2] != before[i + 2] || after[i + 3] != before[i + 3])
+                    {
+                        int p = i / 4; var tile = new TileCoord(p % 64 / 16, p / 64 / 16);
+                        Assert.That(changed, Does.Contain(tile), name + ": the composite changed in tile " + tile + " but it was not reported");
+                    }
+                Assert.That(after, Is.Not.EqualTo(before), name + ": the step changes the composite");
+            }
+            Step("B moves above A: A is the bottom layer and shows unclipped", () => doc.MoveLayer(b.Id, 1));
+            Step("undo: A is clipped to B again", () => doc.Undo());
+            Step("redo", () => doc.Redo());
+        }
+
         [Test] public void SerialsFromElsewhereAreNotTrusted()
         {
             var doc = new PaintDocument(16, 16, 16); doc.AddLayer("A");

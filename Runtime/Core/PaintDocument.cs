@@ -718,8 +718,10 @@ namespace Yozolab.YoluPainter.Core
             return new DelegateCommand(() => { apply(); MarkLayerChanged(layer, channel); MarkClippedLayersChanged(); },
                 () => { revert(); MarkLayerChanged(layer, channel); MarkClippedLayersChanged(); }, cost);
         }
+        /// <summary>Every layer with a clipping mark, the bottom one included: a marked layer at the bottom is drawn unclipped, so moving
+        /// it to or from the bottom changes where it shows.</summary>
         private void MarkClippedLayersChanged()
-        { for (int i = 1; i < layers.Count; i++) if (layers[i].Clipping) MarkLayerChanged(layers[i], null); }
+        { for (int i = 0; i < layers.Count; i++) if (layers[i].Clipping) MarkLayerChanged(layers[i], null); }
         internal void EnsureSourceGrowth(long additionalBytes)
         {
             if (additionalBytes > 0 && additionalBytes > sourceBudgetBytes - AllocatedBytes)
