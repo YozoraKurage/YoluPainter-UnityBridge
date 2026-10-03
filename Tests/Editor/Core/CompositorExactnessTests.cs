@@ -10,12 +10,19 @@ namespace Yozolab.YoluPainter.Tests
     /// (<see cref="FrozenCompositor"/>): on random documents with every mode, odd opacities (subnormal ones included), masks, uniform
     /// tiles, clipping, pass-through and isolated groups, adjustments and filters; and for every below/over byte pair at chosen source
     /// alphas. Also CompositeRegions: starting from a backdrop and capturing on the way give the same bytes as compositing from
-    /// transparent, and bad jobs are refused.</summary>
+    /// transparent, and bad jobs are refused. Each test runs three times: with the core's managed loops (no kernels), with the
+    /// registered kernels (Burst where the package is installed) and with those kernels while Burst compilation is switched off (the
+    /// same kernel code run as managed code); the last two are ignored where no kernels are registered.</summary>
+    [TestFixture(KernelChoice.Managed)]
+    [TestFixture(KernelChoice.Registered)]
+    [TestFixture(KernelChoice.RegisteredWithBurstOff)]
     public sealed class CompositorExactnessTests
     {
-        int savedDegree;
-        [SetUp] public void SaveDegree() { savedDegree = CoreParallelism.MaxDegreeOfParallelism; }
-        [TearDown] public void RestoreDegree() { CoreParallelism.MaxDegreeOfParallelism = savedDegree; }
+        readonly KernelChoice choice;
+        public CompositorExactnessTests(KernelChoice choice) { this.choice = choice; }
+        int savedDegree; KernelScope kernels;
+        [SetUp] public void SaveDegree() { savedDegree = CoreParallelism.MaxDegreeOfParallelism; kernels = KernelScope.Use(choice); }
+        [TearDown] public void RestoreDegree() { CoreParallelism.MaxDegreeOfParallelism = savedDegree; kernels?.Dispose(); }
 
         static readonly double[] OddOpacities = { 1, 1, .5, .7, 1e-305, 4.9e-324, .003921, .99999999, 0 };
 

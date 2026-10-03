@@ -515,152 +515,203 @@ namespace Yozolab.YoluPainter.Core
             return t;
         }
 
-        /// <summary>Tile variant of EvaluatePixel (it replaced the per-pixel EvaluateTile): composites count pixels of one tile row
-        /// (tile byte offset src in slot) onto res at resOff, which holds the backdrop, with the nodes [from, to). Node by node over the
-        /// span instead of pixel by pixel; every pixel goes through the same arithmetic in the same order as EvaluatePixel. Groups and
-        /// clipping use scratch spans per depth.</summary>
-        static void EvaluateSpan(Node[] nodes, int from, int to, byte[] res, int resOff, int slot, int src, int count, bool normal, SpanScratch scratch, int depth)
+        /// <summary>Tile variant of EvaluatePixel: composites a rectangle of rows × count pixels of one tile (tile byte offset src in slot,
+        /// rows tileStride apart) onto res (resOff, rows resStride apart), which holds the backdrop, with the nodes [from, to). Node by
+        /// node over the rectangle instead of pixel by pixel; every pixel goes through the same arithmetic in the same order as
+        /// EvaluatePixel. Groups and clipping use scratch rectangles per depth (rows count × 4 apart). Blends and clipping go through
+        /// the registered <see cref="CompositeKernels"/> when there are some (they give the same bytes), else the managed loops.</summary>
+        static void EvaluateRect(Node[] nodes, int from, int to, byte[] res, int resOff, int resStride, int slot, int src, int tileStride, int rows, int count, bool normal, RectScratch scratch, int depth, CompositeKernels kernels)
         {
+            int packed = count * 4;
             for (int index = from; index < to; index++)
             {
                 var n = nodes[index];
                 var b = n.Tile; if (!b.Present[slot]) continue;
                 if (n.Adjustment)
                 {
-                    for (int i = 0, r = resOff, t = src; i < count; i++, r += 4, t += 4) Write(res, r, n.Settings.Composite(Read(res, r), Amount(b, slot, t), n.AdjustmentMode));
+                    for (int y = 0; y < rows; y++)
+                        for (int i = 0, r = resOff + y * resStride, t = src + y * tileStride; i < count; i++, r += 4, t += 4) Write(res, r, n.Settings.Composite(Read(res, r), Amount(b, slot, t), n.AdjustmentMode));
                     continue;
                 }
                 if (n.PassesThrough)
                 {
-                    var inner = scratch.Get(depth, 0); Buffer.BlockCopy(res, resOff, inner, 0, count * 4);
-                    EvaluateSpan(n.Children, 0, n.Children.Length, inner, 0, slot, src, count, normal, scratch, depth + 1);
-                    for (int i = 0, r = resOff, t = src; i < count; i++, r += 4, t += 4) Write(res, r, StackFade(normal, Read(res, r), Read(inner, i * 4), Amount(b, slot, t)));
+                    var inner = scratch.Get(depth, 0);
+                    for (int y = 0; y < rows; y++) Buffer.BlockCopy(res, resOff + y * resStride, inner, y * packed, packed);
+                    EvaluateRect(n.Children, 0, n.Children.Length, inner, 0, packed, slot, src, tileStride, rows, count, normal, scratch, depth + 1, kernels);
+                    for (int y = 0; y < rows; y++)
+                        for (int i = 0, r = resOff + y * resStride, t = src + y * tileStride, o = y * packed; i < count; i++, r += 4, t += 4, o += 4)
+                            Write(res, r, StackFade(normal, Read(res, r), Read(inner, o), Amount(b, slot, t)));
                     continue;
                 }
-                byte[] g; int gOff;
+                byte[] g; int gOff, gStride;
                 if (n.Group)
                 {
-                    g = scratch.Get(depth, 1); gOff = 0; Array.Clear(g, 0, count * 4);
-                    EvaluateSpan(n.Children, 0, n.Children.Length, g, 0, slot, src, count, normal, scratch, depth + 1);
+                    g = scratch.Get(depth, 1); gOff = 0; gStride = packed; Array.Clear(g, 0, rows * packed);
+                    EvaluateRect(n.Children, 0, n.Children.Length, g, 0, packed, slot, src, tileStride, rows, count, normal, scratch, depth + 1, kernels);
                 }
-                else if (n.Clips.Length > 0) { g = scratch.Get(depth, 1); gOff = 0; Buffer.BlockCopy(b.Pixels[slot], src, g, 0, count * 4); }
-                else { g = b.Pixels[slot]; gOff = src; } // read in place (nothing changes the layer's own pixels)
+                else if (n.Clips.Length > 0)
+                {
+                    g = scratch.Get(depth, 1); gOff = 0; gStride = packed;
+                    for (int y = 0; y < rows; y++) Buffer.BlockCopy(b.Pixels[slot], src + y * tileStride, g, y * packed, packed);
+                }
+                else { g = b.Pixels[slot]; gOff = src; gStride = tileStride; } // read in place (nothing changes the layer's own pixels)
                 foreach (var clip in n.Clips)
                 {
                     var ct = clip.Tile; if (!ct.Present[slot]) continue;
                     if (clip.Adjustment)
                     {
-                        for (int i = 0, t = src; i < count; i++, t += 4) Write(g, gOff + i * 4, clip.Settings.Composite(Read(g, gOff + i * 4), Amount(ct, slot, t), clip.AdjustmentMode));
+                        for (int y = 0; y < rows; y++)
+                            for (int i = 0, o = gOff + y * gStride, t = src + y * tileStride; i < count; i++, o += 4, t += 4) Write(g, o, clip.Settings.Composite(Read(g, o), Amount(ct, slot, t), clip.AdjustmentMode));
                         continue;
                     }
-                    byte[] c; int cOff;
-                    if (clip.Group) { c = scratch.Get(depth, 2); cOff = 0; Array.Clear(c, 0, count * 4); EvaluateSpan(clip.Children, 0, clip.Children.Length, c, 0, slot, src, count, normal, scratch, depth + 1); }
-                    else { c = ct.Pixels[slot]; cOff = src; }
-                    if (normal)
-                        for (int i = 0, t = src; i < count; i++, t += 4)
-                            Write(g, gOff + i * 4, NormalMaps.ClipOnto(Read(g, gOff + i * 4), Read(c, cOff + i * 4), Amount(ct, slot, t), clip.Mode));
-                    else ClipSpan(g, gOff, c, cOff, count, ct, slot, src, clip.Mode, clip.Table);
+                    byte[] c; int cOff, cStride;
+                    if (clip.Group)
+                    {
+                        c = scratch.Get(depth, 2); cOff = 0; cStride = packed; Array.Clear(c, 0, rows * packed);
+                        EvaluateRect(clip.Children, 0, clip.Children.Length, c, 0, packed, slot, src, tileStride, rows, count, normal, scratch, depth + 1, kernels);
+                    }
+                    else { c = ct.Pixels[slot]; cOff = src; cStride = tileStride; }
+                    var clipRect = Rect(g, gOff, gStride, c, cOff, cStride, rows, count, ct, slot, src, tileStride, clip.Mode, clip.Table);
+                    if (normal) { if (kernels == null || !kernels.NormalClip(ref clipRect)) NormalClipRect(ref clipRect); }
+                    else if (kernels == null || !kernels.Clip(ref clipRect)) ClipRect(ref clipRect);
                 }
-                if (normal)
-                    for (int i = 0, r = resOff, t = src; i < count; i++, r += 4, t += 4) Write(res, r, NormalMaps.BlendUnchecked(Read(res, r), Read(g, gOff + i * 4), Amount(b, slot, t), n.Mode));
-                else BlendSpan(res, resOff, g, gOff, count, b, slot, src, n.Mode, n.Table);
+                var blendRect = Rect(res, resOff, resStride, g, gOff, gStride, rows, count, b, slot, src, tileStride, n.Mode, n.Table);
+                if (normal) { if (kernels == null || !kernels.NormalBlend(ref blendRect)) NormalBlendRect(ref blendRect); }
+                else if (kernels == null || !kernels.Blend(ref blendRect)) BlendRect(ref blendRect);
             }
+        }
+        static CompositeRect Rect(byte[] below, int belowOffset, int belowStride, byte[] over, int overOffset, int overStride, int rows, int count, LayerTile layer, int slot, int maskOffset, int maskStride, LayerBlendMode mode, double[] table)
+        {
+            return new CompositeRect
+            {
+                Below = below, BelowOffset = belowOffset, BelowStride = belowStride, Over = over, OverOffset = overOffset, OverStride = overStride, Rows = rows, Count = count,
+                Mask = layer.MaskSource == null ? null : layer.Mask[slot], MaskOffset = maskOffset, MaskStride = maskStride, Opacity = layer.Opacity, MaskFactor = layer.MaskFactor,
+                Mode = mode, Table = table, Unit = MathUtil.ByteUnit,
+            };
         }
         static double Amount(LayerTile layer, int slot, int offset) { return layer.MaskSource == null ? layer.Opacity : layer.Opacity * layer.MaskFactor[layer.Mask[slot][offset + 3]]; }
         static Rgba32 Read(byte[] a, int o) { return new Rgba32(a[o], a[o + 1], a[o + 2], a[o + 3]); }
         static void Write(byte[] a, int o, Rgba32 c) { a[o] = c.R; a[o + 1] = c.G; a[o + 2] = c.B; a[o + 3] = c.A; }
 
         /// <summary>Below this the product a·c of the transparent-backdrop shortcut could be subnormal and lose bits.</summary>
-        const double MinShortcutAlpha = 1e-300;
+        internal const double MinShortcutAlpha = 1e-300;
 
-        /// <summary><see cref="BlendUnchecked"/> over a span, reading and writing the bytes in place (the same result for every pixel;
+        /// <summary><see cref="BlendUnchecked"/> over a rectangle, reading and writing the bytes in place (the same result for every pixel;
         /// the editor's Mono runs this about twice as fast as passing each pixel as an Rgba32). Shortcuts that give the formula's own
         /// bytes: a transparent source pixel leaves the backdrop; an opaque one at amount 1 in Normal mode is copied; on a transparent
         /// backdrop the result is the source colour with alpha a (the weights are 0, a, 0 and (a·c)/a rounds back to c); on an opaque
         /// backdrop a = a_s + (1 − a_s) is exactly 1, so the division by a and the zero term drop out. Separable modes look their blend
-        /// colour up in <paramref name="table"/>.</summary>
-        static void BlendSpan(byte[] res, int resOff, byte[] src, int srcOff, int count, LayerTile layer, int slot, int tileOff, LayerBlendMode mode, double[] table)
+        /// colour up in the table.</summary>
+        static void BlendRect(ref CompositeRect q)
         {
-            var unit = MathUtil.ByteUnit; bool simple = mode == LayerBlendMode.Normal || mode == LayerBlendMode.PassThrough;
-            byte[] mask = layer.MaskSource == null ? null : layer.Mask[slot]; var factor = layer.MaskFactor; double opacity = layer.Opacity;
-            for (int r = resOff, s = srcOff, m = tileOff + 3, end = resOff + count * 4; r < end; r += 4, s += 4, m += 4)
-            {
-                byte sA = src[s + 3];
-                if (sA == 0) continue; // a_s = 0: the destination as it is
-                double amount = mask == null ? opacity : opacity * factor[mask[m]];
-                if (simple && sA == 255 && amount == 1) { res[r] = src[s]; res[r + 1] = src[s + 1]; res[r + 2] = src[s + 2]; res[r + 3] = 255; continue; } // BlendUnchecked と同じ近道
-                double sa = unit[sA] * amount;
-                if (sa <= 0) continue;
-                byte dA = res[r + 3];
-                if (dA == 0 && sa >= MinShortcutAlpha)
+            var unit = q.Unit; var mode = q.Mode; var table = q.Table; bool simple = mode == LayerBlendMode.Normal || mode == LayerBlendMode.PassThrough;
+            byte[] res = q.Below, src = q.Over, mask = q.Mask; var factor = q.MaskFactor; double opacity = q.Opacity;
+            for (int y = 0; y < q.Rows; y++)
+                for (int r = q.BelowOffset + y * q.BelowStride, s = q.OverOffset + y * q.OverStride, m = q.MaskOffset + 3 + y * q.MaskStride, end = r + q.Count * 4; r < end; r += 4, s += 4, m += 4)
                 {
-                    // 下が透明: 重みは 0・a_s・0 で色は (a_s·c)/a_s。積が正規化数なら c から 2 ulp 以内で、×255 + 0.5 の切り捨ては c のバイト
-                    res[r] = src[s]; res[r + 1] = src[s + 1]; res[r + 2] = src[s + 2];
-                    double v = sa * 255 + 0.5; res[r + 3] = v >= 255 ? (byte)255 : v > 0 ? (byte)(int)v : (byte)0;
-                    continue;
+                    byte sA = src[s + 3];
+                    if (sA == 0) continue; // a_s = 0: the destination as it is
+                    double amount = mask == null ? opacity : opacity * factor[mask[m]];
+                    if (simple && sA == 255 && amount == 1) { res[r] = src[s]; res[r + 1] = src[s + 1]; res[r + 2] = src[s + 2]; res[r + 3] = 255; continue; } // BlendUnchecked と同じ近道
+                    double sa = unit[sA] * amount;
+                    if (sa <= 0) continue;
+                    byte dA = res[r + 3];
+                    if (dA == 0 && sa >= MinShortcutAlpha)
+                    {
+                        // 下が透明: 重みは 0・a_s・0 で色は (a_s·c)/a_s。積が正規化数なら c から 2 ulp 以内で、×255 + 0.5 の切り捨ては c のバイト
+                        res[r] = src[s]; res[r + 1] = src[s + 1]; res[r + 2] = src[s + 2];
+                        double v = sa * 255 + 0.5; res[r + 3] = v >= 255 ? (byte)255 : v > 0 ? (byte)(int)v : (byte)0;
+                        continue;
+                    }
+                    double dr = unit[res[r]], dg = unit[res[r + 1]], db = unit[res[r + 2]];
+                    double sr = unit[src[s]], sg = unit[src[s + 1]], sb = unit[src[s + 2]];
+                    double br, bg, bb;
+                    if (simple) { br = sr; bg = sg; bb = sb; }
+                    else if (table != null) { br = table[res[r] << 8 | src[s]]; bg = table[res[r + 1] << 8 | src[s + 1]]; bb = table[res[r + 2] << 8 | src[s + 2]]; }
+                    else BlendRgb(mode, dr, dg, db, sr, sg, sb, out br, out bg, out bb);
+                    // MathUtil.ToByte written out (x × 255 + 0.5, floor by truncation of a positive value, clamped)
+                    double vr, vg, vb;
+                    if (dA == 255)
+                    {
+                        // 下が不透明: a = a_s + (1 − a_s) はちょうど 1、重みは 1 − a_s・0・a_s（0 の項と ÷1 は値を変えない）
+                        double t = 1 - sa;
+                        vr = (t * dr + sa * br) * 255 + 0.5; vg = (t * dg + sa * bg) * 255 + 0.5; vb = (t * db + sa * bb) * 255 + 0.5;
+                        res[r + 3] = 255;
+                    }
+                    else
+                    {
+                        double da = unit[dA], a = sa + da * (1 - sa);
+                        double wd = (1 - sa) * da, ws = (1 - da) * sa, wb = da * sa;
+                        vr = (wd * dr + ws * sr + wb * br) / a * 255 + 0.5; vg = (wd * dg + ws * sg + wb * bg) / a * 255 + 0.5;
+                        vb = (wd * db + ws * sb + wb * bb) / a * 255 + 0.5; double va = a * 255 + 0.5;
+                        res[r + 3] = va >= 255 ? (byte)255 : va > 0 ? (byte)(int)va : (byte)0;
+                    }
+                    res[r] = vr >= 255 ? (byte)255 : vr > 0 ? (byte)(int)vr : (byte)0;
+                    res[r + 1] = vg >= 255 ? (byte)255 : vg > 0 ? (byte)(int)vg : (byte)0;
+                    res[r + 2] = vb >= 255 ? (byte)255 : vb > 0 ? (byte)(int)vb : (byte)0;
                 }
-                double dr = unit[res[r]], dg = unit[res[r + 1]], db = unit[res[r + 2]];
-                double sr = unit[src[s]], sg = unit[src[s + 1]], sb = unit[src[s + 2]];
-                double br, bg, bb;
-                if (simple) { br = sr; bg = sg; bb = sb; }
-                else if (table != null) { br = table[res[r] << 8 | src[s]]; bg = table[res[r + 1] << 8 | src[s + 1]]; bb = table[res[r + 2] << 8 | src[s + 2]]; }
-                else BlendRgb(mode, dr, dg, db, sr, sg, sb, out br, out bg, out bb);
-                // MathUtil.ToByte written out (x × 255 + 0.5, floor by truncation of a positive value, clamped)
-                double vr, vg, vb;
-                if (dA == 255)
-                {
-                    // 下が不透明: a = a_s + (1 − a_s) はちょうど 1、重みは 1 − a_s・0・a_s（0 の項と ÷1 は値を変えない）
-                    double t = 1 - sa;
-                    vr = (t * dr + sa * br) * 255 + 0.5; vg = (t * dg + sa * bg) * 255 + 0.5; vb = (t * db + sa * bb) * 255 + 0.5;
-                    res[r + 3] = 255;
-                }
-                else
-                {
-                    double da = unit[dA], a = sa + da * (1 - sa);
-                    double wd = (1 - sa) * da, ws = (1 - da) * sa, wb = da * sa;
-                    vr = (wd * dr + ws * sr + wb * br) / a * 255 + 0.5; vg = (wd * dg + ws * sg + wb * bg) / a * 255 + 0.5;
-                    vb = (wd * db + ws * sb + wb * bb) / a * 255 + 0.5; double va = a * 255 + 0.5;
-                    res[r + 3] = va >= 255 ? (byte)255 : va > 0 ? (byte)(int)va : (byte)0;
-                }
-                res[r] = vr >= 255 ? (byte)255 : vr > 0 ? (byte)(int)vr : (byte)0;
-                res[r + 1] = vg >= 255 ? (byte)255 : vg > 0 ? (byte)(int)vg : (byte)0;
-                res[r + 2] = vb >= 255 ? (byte)255 : vb > 0 ? (byte)(int)vb : (byte)0;
-            }
         }
-        /// <summary><see cref="ClipOnto"/> over a span, in place on the clipping group g (the same arithmetic as ClipOnto → MixRgb for
-        /// every pixel: below + (B(below, over) − below) × a, the group's alpha kept). Separable modes look B up in table.</summary>
-        static void ClipSpan(byte[] g, int gOff, byte[] c, int cOff, int count, LayerTile layer, int slot, int tileOff, LayerBlendMode mode, double[] table)
+        /// <summary><see cref="ClipOnto"/> over a rectangle, in place on the clipping group (Below) (the same arithmetic as ClipOnto → MixRgb
+        /// for every pixel: below + (B(below, over) − below) × a, the group's alpha kept). Separable modes look B up in the table.</summary>
+        static void ClipRect(ref CompositeRect q)
         {
-            var unit = MathUtil.ByteUnit; bool simple = mode == LayerBlendMode.Normal || mode == LayerBlendMode.PassThrough;
-            byte[] mask = layer.MaskSource == null ? null : layer.Mask[slot]; var factor = layer.MaskFactor; double opacity = layer.Opacity;
-            for (int r = gOff, s = cOff, m = tileOff + 3, end = gOff + count * 4; r < end; r += 4, s += 4, m += 4)
-            {
-                byte cA = c[s + 3];
-                if (cA == 0 || g[r + 3] == 0) continue; // a = 0, or nothing to clip to: the group as it is
-                double a = unit[cA] * (mask == null ? opacity : opacity * factor[mask[m]]);
-                if (a <= 0) continue;
-                double dr = unit[g[r]], dg = unit[g[r + 1]], db = unit[g[r + 2]];
-                double br, bg, bb;
-                if (simple) { br = unit[c[s]]; bg = unit[c[s + 1]]; bb = unit[c[s + 2]]; }
-                else if (table != null) { br = table[g[r] << 8 | c[s]]; bg = table[g[r + 1] << 8 | c[s + 1]]; bb = table[g[r + 2] << 8 | c[s + 2]]; }
-                else BlendRgb(mode, dr, dg, db, unit[c[s]], unit[c[s + 1]], unit[c[s + 2]], out br, out bg, out bb);
-                double vr = (dr + (br - dr) * a) * 255 + 0.5, vg = (dg + (bg - dg) * a) * 255 + 0.5, vb = (db + (bb - db) * a) * 255 + 0.5;
-                g[r] = vr >= 255 ? (byte)255 : vr > 0 ? (byte)(int)vr : (byte)0;
-                g[r + 1] = vg >= 255 ? (byte)255 : vg > 0 ? (byte)(int)vg : (byte)0;
-                g[r + 2] = vb >= 255 ? (byte)255 : vb > 0 ? (byte)(int)vb : (byte)0;
-            }
+            var unit = q.Unit; var mode = q.Mode; var table = q.Table; bool simple = mode == LayerBlendMode.Normal || mode == LayerBlendMode.PassThrough;
+            byte[] g = q.Below, c = q.Over, mask = q.Mask; var factor = q.MaskFactor; double opacity = q.Opacity;
+            for (int y = 0; y < q.Rows; y++)
+                for (int r = q.BelowOffset + y * q.BelowStride, s = q.OverOffset + y * q.OverStride, m = q.MaskOffset + 3 + y * q.MaskStride, end = r + q.Count * 4; r < end; r += 4, s += 4, m += 4)
+                {
+                    byte cA = c[s + 3];
+                    if (cA == 0 || g[r + 3] == 0) continue; // a = 0, or nothing to clip to: the group as it is
+                    double a = unit[cA] * (mask == null ? opacity : opacity * factor[mask[m]]);
+                    if (a <= 0) continue;
+                    double dr = unit[g[r]], dg = unit[g[r + 1]], db = unit[g[r + 2]];
+                    double br, bg, bb;
+                    if (simple) { br = unit[c[s]]; bg = unit[c[s + 1]]; bb = unit[c[s + 2]]; }
+                    else if (table != null) { br = table[g[r] << 8 | c[s]]; bg = table[g[r + 1] << 8 | c[s + 1]]; bb = table[g[r + 2] << 8 | c[s + 2]]; }
+                    else BlendRgb(mode, dr, dg, db, unit[c[s]], unit[c[s + 1]], unit[c[s + 2]], out br, out bg, out bb);
+                    double vr = (dr + (br - dr) * a) * 255 + 0.5, vg = (dg + (bg - dg) * a) * 255 + 0.5, vb = (db + (bb - db) * a) * 255 + 0.5;
+                    g[r] = vr >= 255 ? (byte)255 : vr > 0 ? (byte)(int)vr : (byte)0;
+                    g[r + 1] = vg >= 255 ? (byte)255 : vg > 0 ? (byte)(int)vg : (byte)0;
+                    g[r + 2] = vb >= 255 ? (byte)255 : vb > 0 ? (byte)(int)vb : (byte)0;
+                }
         }
-        /// <summary>Scratch spans of one worker: per group depth, the pass-through backdrop copy, the group or clipping base, and a
-        /// clipped group.</summary>
-        sealed class SpanScratch
+        /// <summary>The Normal channel's blend over a rectangle (NormalMaps.BlendUnchecked per pixel).</summary>
+        static void NormalBlendRect(ref CompositeRect q)
         {
-            readonly List<byte[]> spans = new List<byte[]>(); readonly int length;
-            public SpanScratch(int tileSize) { length = tileSize * 4; }
-            public byte[] Get(int depth, int purpose)
+            for (int y = 0; y < q.Rows; y++)
+                for (int i = 0, r = q.BelowOffset + y * q.BelowStride, s = q.OverOffset + y * q.OverStride, m = q.MaskOffset + 3 + y * q.MaskStride; i < q.Count; i++, r += 4, s += 4, m += 4)
+                    Write(q.Below, r, NormalMaps.BlendUnchecked(Read(q.Below, r), Read(q.Over, s), q.Mask == null ? q.Opacity : q.Opacity * q.MaskFactor[q.Mask[m]], q.Mode));
+        }
+        /// <summary>The Normal channel's clipping over a rectangle (NormalMaps.ClipOnto per pixel).</summary>
+        static void NormalClipRect(ref CompositeRect q)
+        {
+            for (int y = 0; y < q.Rows; y++)
+                for (int i = 0, r = q.BelowOffset + y * q.BelowStride, s = q.OverOffset + y * q.OverStride, m = q.MaskOffset + 3 + y * q.MaskStride; i < q.Count; i++, r += 4, s += 4, m += 4)
+                    Write(q.Below, r, NormalMaps.ClipOnto(Read(q.Below, r), Read(q.Over, s), q.Mask == null ? q.Opacity : q.Opacity * q.MaskFactor[q.Mask[m]], q.Mode));
+        }
+        /// <summary>Scratch rectangles of one worker: per group depth, the pass-through backdrop copy, the group or clipping base, and a
+        /// clipped group. Made on the calling thread before the workers start, only those the plan uses (<see cref="ScratchNeeds"/>).</summary>
+        sealed class RectScratch
+        {
+            readonly byte[][] rects; readonly int bytes;
+            public RectScratch(bool[] needs, int bytes)
             {
-                int index = depth * 3 + purpose;
-                while (spans.Count <= index) spans.Add(null);
-                return spans[index] ?? (spans[index] = new byte[length]);
+                this.bytes = bytes; rects = new byte[needs.Length][];
+                for (int i = 0; i < needs.Length; i++) if (needs[i]) rects[i] = new byte[bytes];
+            }
+            public byte[] Get(int depth, int purpose) { int i = depth * 3 + purpose; return rects[i] ?? (rects[i] = new byte[bytes]); }
+        }
+        /// <summary>Which scratch rectangles (depth × 3 + purpose) EvaluateRect uses for these nodes.</summary>
+        static void ScratchNeeds(Node[] nodes, int depth, List<bool> needs)
+        {
+            void Need(int d, int purpose) { int i = d * 3 + purpose; while (needs.Count <= i) needs.Add(false); needs[i] = true; }
+            foreach (var n in nodes)
+            {
+                if (n.Adjustment) continue;
+                if (n.PassesThrough) { Need(depth, 0); ScratchNeeds(n.Children, depth + 1, needs); continue; }
+                if (n.Group) { Need(depth, 1); ScratchNeeds(n.Children, depth + 1, needs); }
+                else if (n.Clips.Length > 0) Need(depth, 1);
+                foreach (var clip in n.Clips) if (clip.Group) { Need(depth, 2); ScratchNeeds(clip.Children, depth + 1, needs); }
             }
         }
         /// <summary>Tile buffers held at once by one call when it composites several tiles in parallel (filter output only; other
@@ -697,30 +748,40 @@ namespace Yozolab.YoluPainter.Core
             // このスレッドからだけ触る。
             bool concurrentLoad = slots > 1 && !Node.Filtered(nodes);
             bool normal = channel == PaintChannel.Normal;
-            var scratches = new SpanScratch[Math.Max(slots, degree)]; for (int k = 0; k < scratches.Length; k++) scratches[k] = new SpanScratch(tile);
+            var kernels = CompositeKernels.Current; kernels?.Prepare();
+            var needList = new List<bool>(); ScratchNeeds(nodes, 0, needList); var needs = needList.ToArray();
             var any = new bool[slots];
             if (concurrentLoad && items.Count >= 2 * slots)
             {
                 // タイルが十分あれば、ワーカーごとに自分の枠で「読む → 計算する」をタイルごとに続ける（段ごとの待ち合わせが無い）
+                var scratches = new RectScratch[slots]; for (int k = 0; k < slots; k++) scratches[k] = new RectScratch(needs, tileBytes);
                 CoreParallelism.ForWorkers(items.Count, slots, (worker, i) =>
                 {
                     var item = items[i]; var job = jobs[item.Job];
                     bool pixels = Node.Load(nodes, job.Start, nodes.Length, channel, item.Coord, worker, out bool present);
-                    Compute(nodes, job, item.Coord, tile, worker, job.Start == 0 ? pixels : present, 0, tile, normal, scratches[worker], fresh);
+                    Compute(nodes, job, item.Coord, tile, worker, job.Start == 0 ? pixels : present, 0, tile, normal, scratches[worker], fresh, kernels);
                 });
                 return;
             }
+            RectScratch[] chunkScratches = null; int scratchRows = 0;
             for (int first = 0; first < items.Count; first += slots)
             {
                 int count = Math.Min(slots, items.Count - first), batch = first;
                 if (concurrentLoad) CoreParallelism.For(count, degree, k => { var job = jobs[items[batch + k].Job]; bool p = Node.Load(nodes, job.Start, nodes.Length, channel, items[batch + k].Coord, k, out bool present); any[k] = job.Start == 0 ? p : present; });
                 else for (int k = 0; k < count; k++) { var job = jobs[items[batch + k].Job]; bool p = Node.Load(nodes, job.Start, nodes.Length, channel, items[batch + k].Coord, k, out bool present); any[k] = job.Start == 0 ? p : present; }
                 // 行の束に分けて計算する（タイルが少ないときもスレッドが余らないように）
-                int chunks = Math.Max(1, Math.Min(tile / 8, (degree + count - 1) / count)), rowsPerChunk = (tile + chunks - 1) / chunks;
-                CoreParallelism.ForWorkers(count * chunks, Math.Min(degree, count * chunks), (worker, w) =>
+                int chunks = Math.Max(1, Math.Min(tile / 8, (degree + count - 1) / count)), rowsPerChunk = (tile + chunks - 1) / chunks, workers = Math.Min(degree, count * chunks);
+                if (chunkScratches == null || chunkScratches.Length < workers || scratchRows < rowsPerChunk)
+                {
+                    // 束の行数ぶんの作業の矩形を、使うワーカーの数だけ（ここで作り、ワーカーでは確保しない）
+                    scratchRows = rowsPerChunk; chunkScratches = new RectScratch[workers];
+                    for (int k = 0; k < workers; k++) chunkScratches[k] = new RectScratch(needs, rowsPerChunk * tile * 4);
+                }
+                var scratches = chunkScratches;
+                CoreParallelism.ForWorkers(count * chunks, workers, (worker, w) =>
                 {
                     int k = w / chunks, chunk = w - k * chunks; var item = items[batch + k];
-                    Compute(nodes, jobs[item.Job], item.Coord, tile, k, any[k], chunk * rowsPerChunk, (chunk + 1) * rowsPerChunk, normal, scratches[worker], fresh);
+                    Compute(nodes, jobs[item.Job], item.Coord, tile, k, any[k], chunk * rowsPerChunk, (chunk + 1) * rowsPerChunk, normal, scratches[worker], fresh, kernels);
                 });
             }
         }
@@ -741,26 +802,27 @@ namespace Yozolab.YoluPainter.Core
 
         /// <summary>Composites the rows [rowFrom, rowTo) of one tile (tile-relative) of a job's region, with the tile loaded in slot.
         /// any: whether anything from the job's Start up has something in this tile (if not, the result is the backdrop).</summary>
-        static void Compute(Node[] nodes, CompositeJob job, TileCoord c, int tile, int slot, bool any, int rowFrom, int rowTo, bool normal, SpanScratch scratch, bool fresh)
+        static void Compute(Node[] nodes, CompositeJob job, TileCoord c, int tile, int slot, bool any, int rowFrom, int rowTo, bool normal, RectScratch scratch, bool fresh, CompositeKernels kernels)
         {
             int tx = c.X, ty = c.Y;
             int x0 = Math.Max(job.X, tx * tile), x1 = Math.Min(job.X + job.Width, (tx + 1) * tile);
             int y0 = Math.Max(job.Y, ty * tile + rowFrom), y1 = Math.Min(job.Y + job.Height, Math.Min((ty + 1) * tile, ty * tile + rowTo));
-            int length = (x1 - x0) * 4, start = job.Start, capture = job.CaptureAt;
-            for (int py = y0; py < y1; py++)
+            if (y1 <= y0 || x1 <= x0) return;
+            int length = (x1 - x0) * 4, start = job.Start, capture = job.CaptureAt, rows = y1 - y0, stride = job.Width * 4, tileStride = tile * 4;
+            int off = ((y0 - job.Y) * job.Width + (x0 - job.X)) * 4, src = ((y0 - ty * tile) * tile + (x0 - tx * tile)) * 4;
+            for (int y = 0, o = off; y < rows; y++, o += stride)
             {
-                int off = ((py - job.Y) * job.Width + (x0 - job.X)) * 4, src = ((py - ty * tile) * tile + (x0 - tx * tile)) * 4;
-                if (start == 0) { if (!fresh) Array.Clear(job.Pixels, off, length); } // 透明から
-                else if (job.Backdrop != null) Buffer.BlockCopy(job.Backdrop, job.BackdropOffset + (py - job.Y) * job.BackdropStride + (x0 - job.X) * 4, job.Pixels, off, length);
-                if (!any) { if (capture >= 0) Buffer.BlockCopy(job.Pixels, off, job.Capture, off, length); continue; }
-                if (capture >= 0)
-                {
-                    EvaluateSpan(nodes, start, capture, job.Pixels, off, slot, src, x1 - x0, normal, scratch, 0);
-                    Buffer.BlockCopy(job.Pixels, off, job.Capture, off, length);
-                    EvaluateSpan(nodes, capture, nodes.Length, job.Pixels, off, slot, src, x1 - x0, normal, scratch, 0);
-                }
-                else EvaluateSpan(nodes, start, nodes.Length, job.Pixels, off, slot, src, x1 - x0, normal, scratch, 0);
+                if (start == 0) { if (!fresh) Array.Clear(job.Pixels, o, length); } // 透明から
+                else if (job.Backdrop != null) Buffer.BlockCopy(job.Backdrop, job.BackdropOffset + (y0 - job.Y + y) * job.BackdropStride + (x0 - job.X) * 4, job.Pixels, o, length);
             }
+            if (!any) { if (capture >= 0) for (int y = 0, o = off; y < rows; y++, o += stride) Buffer.BlockCopy(job.Pixels, o, job.Capture, o, length); return; }
+            if (capture >= 0)
+            {
+                EvaluateRect(nodes, start, capture, job.Pixels, off, stride, slot, src, tileStride, rows, x1 - x0, normal, scratch, 0, kernels);
+                for (int y = 0, o = off; y < rows; y++, o += stride) Buffer.BlockCopy(job.Pixels, o, job.Capture, o, length);
+                EvaluateRect(nodes, capture, nodes.Length, job.Pixels, off, stride, slot, src, tileStride, rows, x1 - x0, normal, scratch, 0, kernels);
+            }
+            else EvaluateRect(nodes, start, nodes.Length, job.Pixels, off, stride, slot, src, tileStride, rows, x1 - x0, normal, scratch, 0, kernels);
         }
     }
 }

@@ -17,7 +17,7 @@ namespace Yozolab.YoluPainter.Tests
     /// 経路だけ TileComposite が要る）。</summary>
     public sealed class CpuCompositingTests
     {
-        [TearDown] public void StopSimulating() { TileGpuCompositor.SimulatedGpuUnavailable = null; }
+        [TearDown] public void StopSimulating() { TileGpuCompositor.SimulatedGpuUnavailable = null; TileGpuCompositor.SimulatedDeviceName = null; }
 
         /// <summary>以前（33f9f9c まで）の CPU の代わりの経路の写し: 変更記録のタイルを 1 枚ずつ CompositeRegion で合成して全面の画素に
         /// 書き、全面を表示に載せ直していた。</summary>
@@ -387,6 +387,34 @@ namespace Yozolab.YoluPainter.Tests
 
         // ───────── 選択と、使えないときの代わり ─────────
 
+        /// <summary>自動は、GPU がソフトウェアの描画（llvmpipe・softpipe・lavapipe・SwiftShader・WARP など）なら CPU で合成する（そこでは
+        /// CPU の経路が速い。VALIDATION）。名前の判断と、自動の合成器がそれに従うこと（代わりではないので FellBackToCpu は立てない）。</summary>
+        [Test] public void AutomaticCompositesOnTheCpuWhenTheGpuIsASoftwareRenderer()
+        {
+            foreach (var name in new[] { "llvmpipe (LLVM 15.0.7, 256 bits)", "softpipe", "Mesa lavapipe", "Software Rasterizer", "Google SwiftShader", "SwiftShader Device (Subzero)", "Microsoft Basic Render Driver" })
+                Assert.That(TileGpuCompositor.IsSoftwareRenderer(name, ""), Is.True, name);
+            foreach (var name in new[] { "D3D12 (NVIDIA GeForce RTX 4080 SUPER)", "NVIDIA GeForce RTX 3070", "AMD Radeon RX 7900 XTX", "Intel(R) UHD Graphics 770", "Apple M2", "" })
+                Assert.That(TileGpuCompositor.IsSoftwareRenderer(name, "NVIDIA Corporation"), Is.False, name);
+            Assert.That(TileGpuCompositor.IsSoftwareRenderer("OpenGL renderer", "Mesa llvmpipe"), Is.True, "the vendor counts too");
+            Assert.That(TileGpuCompositor.IsSoftwareRenderer(null, null), Is.False);
+
+            TileGpuCompositor.SimulatedDeviceName = "llvmpipe (LLVM 15.0.7, 256 bits)";
+            Assert.That(TileGpuCompositor.ResolveAutomatic(out string note), Is.EqualTo(CompositorBackend.Cpu));
+            Assert.That(note, Does.Contain("software renderer").And.Contain("llvmpipe"));
+            var doc = Scene(300, 200, 32, out _);
+            using (var c = new TileGpuCompositor(CompositorBackend.Automatic))
+            {
+                c.Update(doc, PaintChannel.Color);
+                Assert.That(c.Path, Is.Not.EqualTo(TileGpuCompositor.CompositePath.Gpu), c.Backend);
+                Assert.That(c.FellBackToCpu, Is.False, "chosen by the automatic rule, not a fallback");
+                Assert.That(c.Backend, Does.StartWith("CPU compositor (automatic: the GPU is a software renderer (llvmpipe"));
+                Assert.That(c.Backend, Does.Contain("; inner loops: " + (CompositeKernels.Current == null ? "managed" : CompositeKernels.Current.Name)));
+                AssertSameBytes(doc.Composite(PaintChannel.Color), Read(c), "automatic on a software renderer");
+            }
+            TileGpuCompositor.SimulatedDeviceName = "NVIDIA GeForce RTX 4080 SUPER";
+            Assert.That(TileGpuCompositor.ResolveAutomatic(out note), Is.EqualTo(CompositorBackend.Gpu)); Assert.That(note, Is.Null);
+        }
+
         [Test] public void CpuIsUsedWhenChosenAndGpuFallsBackToCpuWhenItCannotBeUsed()
         {
             var doc = Scene(300, 200, 32, out _);
@@ -399,6 +427,7 @@ namespace Yozolab.YoluPainter.Tests
                 AssertSameBytes(doc.Composite(PaintChannel.Color), Read(chosen), "chosen CPU");
             }
             TileGpuCompositor.SimulatedGpuUnavailable = "simulated for the test";
+            TileGpuCompositor.SimulatedDeviceName = "NVIDIA GeForce RTX 4080 SUPER"; // 自動が GPU を望む GPU として（llvmpipe の環境では自動は初めから CPU）
             Assert.That(TileGpuCompositor.GpuCompositingAvailable(out string reason), Is.False); Assert.That(reason, Is.EqualTo("simulated for the test"));
             foreach (var choice in new[] { CompositorBackend.Gpu, CompositorBackend.Automatic })
                 using (var c = new TileGpuCompositor(choice))
@@ -412,10 +441,11 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(() => new TileGpuCompositor((CompositorBackend)7), Throws.TypeOf<ArgumentOutOfRangeException>());
         }
 
-        /// <summary>GPU が使える環境では、GPU を選べば（自動でも）今までどおり GPU で合成する。</summary>
+        /// <summary>GPU が使える環境では、GPU を選べば（ソフトウェアの描画でない GPU なら自動でも）今までどおり GPU で合成する。</summary>
         [Test, Category("GPU")] public void GpuAndAutomaticCompositeOnTheGpuWhereItWorks()
         {
             GpuTests.RequireWorkingShader("Hidden/YoluPainter/TileComposite");
+            TileGpuCompositor.SimulatedDeviceName = "NVIDIA GeForce RTX 4080 SUPER"; // 実際の GPU として（llvmpipe の環境でも）
             Assert.That(TileGpuCompositor.ResolveAutomatic(out _), Is.EqualTo(CompositorBackend.Gpu));
             var doc = Scene(300, 200, 32, out _);
             foreach (var choice in new[] { CompositorBackend.Gpu, CompositorBackend.Automatic })

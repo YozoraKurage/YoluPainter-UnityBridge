@@ -113,10 +113,11 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (!gpuChecked) { gpuUnavailable = TileGpuCompositor.GpuCompositingAvailable(out string reason) ? null : reason; gpuChecked = true; }
             p.displayCompositing = (CompositorBackend)EditorGUILayout.IntPopup(new GUIContent("Display compositing",
-                "Where the layers are composited for the 2D view and the 3D preview. Automatic: on the GPU when it can be used (as before). " +
-                "GPU: on the GPU; when it cannot be used, on the CPU, and the status bar says so. CPU: on the CPU with the threads below, sending only the " +
-                "changed tiles to the display. A brush stroke is about as fast either way, but changing a layer's opacity, blend mode or visibility " +
-                "composites the whole canvas again on the CPU (the GPU keeps the layers below). Saving, exporting and recovery always composite on the CPU, whatever is chosen. Open windows switch after the current stroke."),
+                "Where the layers are composited for the 2D view and the 3D preview. Automatic: on the GPU when it can be used, except on a software renderer " +
+                "(llvmpipe, SwiftShader, WARP and the like), where the CPU is faster. GPU: on the GPU; when it cannot be used, on the CPU, and the status bar says so. " +
+                "CPU: on the CPU with the threads below (with Burst where the package is installed), sending only the changed tiles to the display. A brush stroke " +
+                "is about as fast either way; changing a layer's opacity, blend mode or visibility is faster on a real GPU (both keep the composite below the " +
+                "changed layer). Saving, exporting and recovery always composite on the CPU, whatever is chosen. Open windows switch after the current stroke."),
                 (int)p.displayCompositing, CompositingNames, CompositingValues);
             EditorGUILayout.LabelField(" ", CompositingNote(p.displayCompositing, gpuUnavailable), EditorStyles.wordWrappedMiniLabel);
             p.cpuThreads = ThreadsPopup(p.cpuThreads);

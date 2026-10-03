@@ -12,7 +12,7 @@ namespace Yozolab.YoluPainter.Editor
     /// 保存・書き出し・復旧に入る合成はこれに依らず、いつも CPU の正本（YlpContent / PaintDocument.Composite）。</summary>
     internal enum CompositorBackend
     {
-        /// <summary>GPU で合成できれば GPU（<see cref="TileGpuCompositor.ResolveAutomatic"/>）。</summary>
+        /// <summary>GPU で合成できれば GPU、ただし GPU がソフトウェアの描画（llvmpipe など）なら CPU（<see cref="TileGpuCompositor.ResolveAutomatic"/>）。</summary>
         Automatic = 0,
         /// <summary>GPU で合成する。使えなければ CPU に落ちて <see cref="TileGpuCompositor.FellBackToCpu"/> を立てる。</summary>
         Gpu = 1,
@@ -177,7 +177,7 @@ namespace Yozolab.YoluPainter.Editor
                 Dispose(); SetSize(doc);
                 cpuFallback=new Texture2D(width,height,TextureFormat.RGBA32,false,true){hideFlags=HideFlags.HideAndDontSave,filterMode=FilterMode.Bilinear};
                 Path = CompositePath.CpuFrame; FellBackToCpu |= wasGpu;
-                Backend=(wasGpu ? "CPU composite fallback after GPU failure: " : "CPU composite fallback after a display failure: ")+ex.Message+"; the whole frame is uploaded to the display texture";
+                Backend=(wasGpu ? "CPU composite fallback after GPU failure: " : "CPU composite fallback after a display failure: ")+ex.Message+"; the whole frame is uploaded to the display texture"+KernelsNote();
                 UpdateTiles(doc,channel);
             }
         }
@@ -1063,12 +1063,36 @@ namespace Yozolab.YoluPainter.Editor
             blockTiles = Math.Max(1, Math.Min(TargetBlockPixels / tileSize, maxTiles)); blockSize = blockTiles * tileSize;
         }
 
-        /// <summary>この環境で <see cref="CompositorBackend.Automatic"/> がどちらで合成するか。今は「GPU で合成できれば GPU」
-        /// （GPU が使えなければ CPU に落ちるのは GPU を選んだときと同じ）。CPU のほうが速いのはストロークと最初の全面で、レイヤーの
-        /// 不透明度などの構造の変更は GPU が下の合成結果を残しているぶん速い（10 層で実 GPU は数十倍、llvmpipe でも 4 倍）。ストロークの差は
-        /// 測ったどの条件でも 1 回 4 ms 未満なので、構造の変更の差を取る。数値は VALIDATION.md「表示の合成の GPU と CPU」。</summary>
+        /// <summary>この環境で <see cref="CompositorBackend.Automatic"/> がどちらで合成するか。GPU がソフトウェアの描画（<see cref="IsSoftwareRenderer"/>）
+        /// なら CPU: llvmpipe では CPU の経路が測ったすべての条件で速かった（4096² 10 層で最初の全面 295–311 対 1038–1168 ms、一番上の層の
+        /// 不透明度 49–58 対 141–154 ms、真ん中の層 187–192 対 433–447 ms。VALIDATION.md「CPU の合成の内側のループと、CPU の表示の下の写し」）。
+        /// 実際の GPU なら GPU: 構造の変更（不透明度など）は GPU のほうがまだ速い（同じ文書で 7–8 対 54–66 ms）。GPU が使えなければ CPU に
+        /// 落ちるのは GPU を選んだときと同じ。</summary>
         /// <param name="note">自動で CPU にした理由（GPU のときは null）。</param>
-        internal static CompositorBackend ResolveAutomatic(out string note) { note = null; return CompositorBackend.Gpu; }
+        internal static CompositorBackend ResolveAutomatic(out string note)
+        {
+            string name = SimulatedDeviceName ?? SystemInfo.graphicsDeviceName, vendor = SimulatedDeviceName != null ? "" : SystemInfo.graphicsDeviceVendor;
+            if (IsSoftwareRenderer(name, vendor))
+            {
+                note = "the GPU is a software renderer (" + name + "), where the CPU composites faster";
+                return CompositorBackend.Cpu;
+            }
+            note = null; return CompositorBackend.Gpu;
+        }
+        /// <summary>テスト用: null でなければ、この環境の GPU の名前をこれとして <see cref="ResolveAutomatic"/> を決める。</summary>
+        internal static string SimulatedDeviceName;
+        /// <summary>CPU で描くソフトウェアの GPU の名前に含まれる語（Mesa の llvmpipe・softpipe・lavapipe・swrast・OpenSWR、Google の SwiftShader、
+        /// Windows の WARP = Microsoft Basic Render Driver）。小文字で比べる。</summary>
+        static readonly string[] SoftwareRenderers = { "llvmpipe", "softpipe", "lavapipe", "swrast", "software rasterizer", "openswr", "swiftshader", "basic render driver" };
+        /// <summary>GPU の名前か製造元の名前が、CPU で描くソフトウェアの描画を示すか（SystemInfo.graphicsDeviceName / graphicsDeviceVendor）。</summary>
+        internal static bool IsSoftwareRenderer(string deviceName, string vendor)
+        {
+            var text = ((deviceName ?? "") + " " + (vendor ?? "")).ToLowerInvariant();
+            foreach (var s in SoftwareRenderers) if (text.Contains(s)) return true;
+            return false;
+        }
+        /// <summary>CPU の経路の表示用: Core の内側のループに使っている核（Burst など）。</summary>
+        static string KernelsNote() { var k = CompositeKernels.Current; return k == null ? "; inner loops: managed" : "; inner loops: " + k.Name; }
 
         /// <summary>この環境で GPU の合成が使えるか（グラフィックスデバイス、RenderTexture の形式、TileComposite のシェーダー）。設定の画面の表示用。</summary>
         internal static bool GpuCompositingAvailable(out string reason)
@@ -1130,14 +1154,14 @@ namespace Yozolab.YoluPainter.Editor
                     if (!copyToRenderTexture) { material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave }; material.SetTexture("_LayerTex", Texture2D.blackTexture); }
                     composite = MakeRt(width, height, FilterMode.Bilinear); Clear(composite);
                     copyStageToDisplay = copyToRenderTexture; Path = CompositePath.CpuTiles;
-                    Backend = reason + "; changed tiles are copied to the display texture" + (copyToRenderTexture ? "" : " (draw copy)");
+                    Backend = reason + "; changed tiles are copied to the display texture" + (copyToRenderTexture ? "" : " (draw copy)") + KernelsNote();
                     return;
                 }
                 catch (Exception ex) { Dispose(); SetSize(doc); reason += "; the display render texture failed (" + ex.Message + ")"; }
             }
             cpuFallback = new Texture2D(width, height, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Bilinear };
             Path = CompositePath.CpuFrame;
-            Backend = reason + "; the whole frame is uploaded to the display texture";
+            Backend = reason + "; the whole frame is uploaded to the display texture" + KernelsNote();
         }
         static RenderTexture MakeRt(int w, int h, FilterMode filter)
         {

@@ -1,0 +1,12 @@
+{
+  "name": "Yozolab.YoluPainter.Core.Burst",
+  "rootNamespace": "Yozolab.YoluPainter.Core.Burst",
+  "references": ["Yozolab.YoluPainter.Core", "Unity.Burst", "Unity.Mathematics"],
+  "includePlatforms": ["Editor"],
+  "allowUnsafeCode": true,
+  "autoReferenced": false,
+  "defineConstraints": ["YOLUPAINTER_BURST"],
+  "versionDefines": [
+    { "name": "com.unity.burst", "expression": "1.8.7", "define": "YOLUPAINTER_BURST" }
+  ]
+}

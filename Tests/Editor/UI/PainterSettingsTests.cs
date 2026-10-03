@@ -204,9 +204,12 @@ namespace Yozolab.YoluPainter.Tests
                 Assert.That(PainterSettingsProvider.CompositingNote(CompositorBackend.Gpu, "no device (test)"), Does.Contain("the CPU is used"));
                 Assert.That(PainterSettingsProvider.CompositingNote(CompositorBackend.Automatic, "no device (test)"), Does.Contain("the CPU"));
                 Assert.That(PainterSettingsProvider.CompositingNote(CompositorBackend.Cpu, null), Does.Contain("on the CPU"));
+                TileGpuCompositor.SimulatedDeviceName = "NVIDIA GeForce RTX 4080 SUPER";
                 Assert.That(PainterSettingsProvider.CompositingNote(CompositorBackend.Automatic, null), Does.StartWith("Here: the GPU"));
+                TileGpuCompositor.SimulatedDeviceName = "llvmpipe (LLVM 15.0.7, 256 bits)"; // ソフトウェアの描画では自動は CPU
+                Assert.That(PainterSettingsProvider.CompositingNote(CompositorBackend.Automatic, null), Does.StartWith("Here: the CPU (the GPU is a software renderer"));
             }
-            finally { TileGpuCompositor.SimulatedGpuUnavailable = null; }
+            finally { TileGpuCompositor.SimulatedGpuUnavailable = null; TileGpuCompositor.SimulatedDeviceName = null; }
         }
 
         [Test] public void ABrokenFileIsKeptAsideWhenSettingsAreSaved()

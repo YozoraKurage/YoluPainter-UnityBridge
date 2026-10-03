@@ -3,7 +3,7 @@
 Unity Editor 内の専用ウィンドウで、同じレイヤーへ 2D と 3D から描くテクスチャ制作拡張です。現在は G0/G1 の実装プロトタイプで、仕様書 v0.1（`Documentation~/spec/`）の全機能完成版ではありません。
 
 - Unity 2022.3 以降 / パッケージ名 `net.yozolab.yolupainter` / エディタ専用
-- 依存パッケージなし（lilToon への出力は今後の範囲で、今は依存していません）
+- 依存パッケージ: com.unity.burst（1.8.7 以上）と com.unity.mathematics（1.2.6）。Unity のレジストリから自動で入る（どちらも Unity Companion License）。Unity 2022.3.22f1 ではエディタの決まりで Burst は 1.8.12 になる。無くても動く（.unitypackage で Assets に入れたときなど。CPU の合成の内側のループが Burst ではなく管理側のコードで動き、少し遅くなるだけ）。lilToon への出力は今後の範囲で、今は lilToon に依存していません
 
 ## 今あるもの
 
