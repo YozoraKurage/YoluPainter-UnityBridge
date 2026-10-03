@@ -57,7 +57,9 @@ namespace Yozolab.YoluPainter.Editor
             PaintGui.BeginScroll(r, propertiesScroll);
             var rows = new UiRows(new Rect(0, 0, view.width, 1e6f), 0);
             DrawPropertyBody(rows, context, routes, tabs, tab);
-            if (Event.current.type == EventType.Repaint && Mathf.Abs(rows.Used - propertiesContentHeight) > .5f) { propertiesContentHeight = rows.Used; Repaint(); }
+            // 中身の高さは Layout でも測る（描き直しの前の Layout で、はみ出すか＝スクロールの印の幅が決まり、最初の描画から同じ幅で描ける）
+            var measuring = Event.current.type;
+            if ((measuring == EventType.Repaint || measuring == EventType.Layout) && Mathf.Abs(rows.Used - propertiesContentHeight) > .5f) { propertiesContentHeight = rows.Used; if (measuring == EventType.Repaint) Repaint(); }
             PaintGui.EndScroll();
             if (Event.current.type == EventType.ScrollWheel && r.Contains(Event.current.mousePosition))
             { propertiesScroll.y = Mathf.Clamp(propertiesScroll.y + Event.current.delta.y * 14, 0, Mathf.Max(0, propertiesContentHeight - r.height)); Event.current.Use(); Repaint(); }

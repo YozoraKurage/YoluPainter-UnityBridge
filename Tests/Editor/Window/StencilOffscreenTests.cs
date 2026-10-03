@@ -21,7 +21,7 @@ namespace Yozolab.YoluPainter.Tests
         static Texture2D Render(TexturePaintWindow w, string name)
         {
             string path = Path.Combine(Folder, name + ".png");
-            OffscreenGui.RenderWindow(w, 1200, 800, path);
+            OffscreenGui.RenderWindow(w, 1500, 800, path); // 既定の配置の左の列（300）の分だけ広く: 表示域は前と同じ 856 px（ステンシルの大きさは表示の高さの割合なので、狭い表示ではみ出さないように）
             var t = new Texture2D(2, 2); t.LoadImage(File.ReadAllBytes(path)); return t;
         }
         static Color At(Texture2D t, Vector2 gui) => t.GetPixel(Mathf.RoundToInt(gui.x), t.height - 1 - Mathf.RoundToInt(gui.y));

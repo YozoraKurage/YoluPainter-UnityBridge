@@ -87,8 +87,8 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.PropertyContextTitle(), Is.EqualTo("Anchor"));
             int steps = d.UndoCount;
             var field = LayerControlPoint("anchor.name", .5f); HostMouse(EventType.MouseDown, field); HostMouse(EventType.MouseUp, field); Repaint(window);
-            window.SendEvent(new Event { type = EventType.KeyDown, keyCode = KeyCode.End });
-            for (int i = 0; i < anchor.Name.Length + 2; i++) window.SendEvent(new Event { type = EventType.KeyDown, keyCode = KeyCode.Backspace });
+            window.SendEvent(Event.KeyboardEvent("end")); // 本物のキーと同じく FunctionKey の印付き（無いと Unity の文字の欄のキーの表に当たらない）
+            for (int i = 0; i < anchor.Name.Length + 2; i++) window.SendEvent(Event.KeyboardEvent("backspace"));
             foreach (char c in "Wear base") window.SendEvent(new Event { type = EventType.KeyDown, character = c });
             window.SendEvent(new Event { type = EventType.KeyDown, keyCode = KeyCode.Return }); Repaint(window);
             Assert.That(d.GetLayer(layer.Id).Anchor.Name, Is.EqualTo("Wear base"), window.StatusMessage);
@@ -171,8 +171,8 @@ namespace Yozolab.YoluPainter.Tests
             HostMouse(EventType.MouseDown, box); HostMouse(EventType.MouseUp, box); Repaint(window);
             Assert.That(layer.Mask.Density, Is.EqualTo(.5).Within(.03), "pressing the box does not move the value");
             void Type(string text) { foreach (char ch in text) window.SendEvent(new Event { type = EventType.KeyDown, character = ch }); }
-            window.SendEvent(new Event { type = EventType.KeyDown, keyCode = KeyCode.End });
-            for (int i = 0; i < 6; i++) window.SendEvent(new Event { type = EventType.KeyDown, keyCode = KeyCode.Backspace });
+            window.SendEvent(Event.KeyboardEvent("end"));
+            for (int i = 0; i < 6; i++) window.SendEvent(Event.KeyboardEvent("backspace"));
             Type("25"); // 今の値を消して 25
             window.SendEvent(new Event { type = EventType.KeyDown, keyCode = KeyCode.Return }); Repaint(window);
             Assert.That(layer.Mask.Density, Is.EqualTo(.25).Within(.001), "the typed value: " + window.StatusMessage);

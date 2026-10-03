@@ -102,6 +102,9 @@ namespace Yozolab.YoluPainter.Editor
         /// 分からないので、予算に収まらなければ断る。</summary>
         internal void RefreshArchiveRoom()
         {
+            // 描いている間は測らない（文書の大きさを測る DocumentBinary.Measure はストロークの最中を断る。設定の変更はストロークの最中にも
+            // 届く）。リソースの取り込みはどれもストロークの最中を断り、その前にここを通るので、古い値のまま取り込むことは無い
+            if (stroke != null || textureSets.Any(s => s.Document.HasActiveStroke)) return;
             // 合成の PNG は圧縮の効かない場合も数え、余分なチャンク・小さな状態のエントリ用に余裕を取る。
             long reserved = 2L * 1024 * 1024;
             foreach (var set in textureSets)

@@ -7,10 +7,10 @@ using Yozolab.YoluPainter.Editor;
 
 namespace Yozolab.YoluPainter.Tests
 {
-    /// <summary>描画ウィンドウの Anchor: プロパティの欄のボタン（本物のマウスの入力）で描いた層に Anchor を置き、上の塗りつぶしのマスクに
+    /// <summary>描画ウィンドウの Anchor: レイヤーのメニューと同じ入口で描いた層に Anchor を置き（レイヤーの重なりの子の行に出る）、上の塗りつぶしのマスクに
     /// Generator「Anchor」を足すと、すぐ下の Anchor を読んで表示が変わる。キーボードで層を上へ動かすと参照が使えなくなり、知らせに理由が
-    /// 出て入力のまま通る（表示も）、Ctrl+Z で戻る。マスクの Anchor、名前の変更と Undo、外すボタン、.ylp の保存と開き直し（Anchor と参照が
-    /// 残る）。</summary>
+    /// 出て入力のまま通る（表示も）、Ctrl+Z で戻る。マスクの Anchor（マスクのタブのボタン、本物のマウスの入力）、名前の変更と Undo、外すボタン
+    /// （Anchor の行を選んだときのプロパティ）、.ylp の保存と開き直し（Anchor と参照が残る）。</summary>
     public sealed partial class WindowTests
     {
         [Test] public void AnAnchorFromThePropertiesDrivesAMaskAboveAndMovingItShowsWhy()
@@ -21,8 +21,10 @@ namespace Yozolab.YoluPainter.Tests
             d.Fill(paint.Id, PaintChannel.Height, new Rgba32(255, 255, 255, 255), 1, SelectionMask.Ellipse(d, 300, 300, 160, 110));
             int steps = d.UndoCount;
             OpenLayerPanels();
-            ClickLayerControl("anchor.add");
+            // ペイントの層を選んでいるとプロパティにはブラシが出るので、Anchor はレイヤーのメニュー（右クリック）の「Anchor を追加」と同じ入口で置く
+            Assert.That(window.AddAnchorTo(AnchorPlacement.Layer), Is.Not.Null, window.StatusMessage);
             Assert.That(paint.Anchor, Is.Not.Null, window.StatusMessage); Assert.That(d.UndoCount, Is.EqualTo(steps + 1));
+            LayerPanelPoint("anchor." + paint.Anchor.Id); // 置いた Anchor はレイヤーの重なりの層の下の子の行に出る（描かれていなければここで落ちる）
             Assert.That(window.StatusMessage, Does.Contain("Put the anchor"));
             Assert.That(paint.Anchor.Name, Is.EqualTo(paint.Name));
             var plain = d.Composite(PaintChannel.Color);
@@ -47,8 +49,9 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(d.AnchorIssues(), Is.Empty);
             AssertShows(window, worn, "undo brings the reference back");
 
-            // マスクの Anchor（プロパティの欄のボタン）と、名前の変更・Undo
-            window.SelectedLayer = paint.Id; d.AddLayerMask(paint.Id); OpenLayerPanels();
+            // マスクの Anchor（マスクに描くときのプロパティの「マスク」のタブのボタン）と、名前の変更・Undo
+            window.SelectedLayer = paint.Id; d.AddLayerMask(paint.Id);
+            window.EditMask = true; window.SetPropertyTab(PropertyContext.Brush, TexturePaintWindow.TabMask); OpenLayerPanels();
             ClickLayerControl("mask.anchor.add");
             Assert.That(paint.Mask.Anchor, Is.Not.Null, window.StatusMessage);
             window.RenameAnchor(paint.Anchor, "Height details");
@@ -72,8 +75,10 @@ namespace Yozolab.YoluPainter.Tests
             }
             finally { Close(other); }
 
-            // 外すボタン: 読む段は入力のまま通り、理由を知らせる
-            window.SelectedLayer = paint.Id; OpenLayerPanels();
+            // 外すボタン（レイヤーの重なりの Anchor の行を選んだときのプロパティ）: 読む段は入力のまま通り、理由を知らせる
+            window.SelectedLayer = paint.Id; window.EditMask = false; OpenLayerPanels();
+            var anchorRow = LayerPanelPoint("anchor." + paint.Anchor.Id, .5f); SendHost(EventType.MouseDown, anchorRow); SendHost(EventType.MouseUp, anchorRow); Repaint(window);
+            Assert.That(window.LastPropertyContext, Is.EqualTo(PropertyContext.Anchor), "the row shows the anchor in Properties");
             ClickLayerControl("anchor.remove");
             Assert.That(paint.Anchor, Is.Null);
             Assert.That(d.AnchorIssues().Single().Kind, Is.EqualTo(AnchorIssueKind.Missing));

@@ -148,10 +148,12 @@ namespace Yozolab.YoluPainter.Editor
 
         void DrawPenInputPanel()
         {
-            // 幅の狭い側ではもう片方のビューへ置く。並べる表示の比率や左右の入れ替えにも付いて行く。
+            // 幅の狭い側ではもう片方のビューへ置く。並べる表示の比率や左右の入れ替えにも付いて行く。どちらも狭ければ（左右の列のある既定の
+            // 配置で、窓が小さいとき）2 つの表示をまたいで置く
             Rect area = canvasRect.width >= 296 ? canvasRect : surfaceRect.width > canvasRect.width ? surfaceRect : canvasRect;
+            if (area.width < 176) area = Rect.MinMaxRect(Mathf.Min(canvasRect.xMin, surfaceRect.xMin), area.yMin, Mathf.Max(canvasRect.xMax, surfaceRect.xMax), area.yMax);
             float width = Mathf.Min(336, area.width - 16);
-            if (width < 160 || area.height < 200) return;
+            if (width < 160 || area.height < 200) { PenInputPanelRect = default; return; }
             float height = Mathf.Min(336, area.height - 16);
             var panel = new Rect(area.x + 8, area.y + 8, width, height); PenInputPanelRect = panel;
             PaintGui.Rounded(panel, PaintTheme.PanelBg); PaintGui.Outline(panel, PaintTheme.Border);

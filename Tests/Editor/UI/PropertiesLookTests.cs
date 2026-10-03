@@ -58,7 +58,7 @@ namespace Yozolab.YoluPainter.Tests
                         {
                             int width = dock - 1 - 8; // 枠とスクロールの印
                             string file = name + "-" + (language == PainterLanguage.English ? "en" : "ja") + "-" + dock;
-                            PaintGui.ShortenedTexts = 0; float used = 0; const int height = 1100;
+                            PaintGui.ShortenedTexts = 0; float used = 0; const int height = 1600; // 2 行のスライダーで、小見出しを開いたブラシは幅 220 で約 1220 px
                             string path = Path.Combine(Folder, file + ".png");
                             OffscreenGui.RenderToPng(width, height, () => used = w.DrawPropertiesOnly(new Rect(0, 0, width, height)), path, PaintTheme.PanelBg);
                             if (dock >= 300) Assert.That(PaintGui.ShortenedTexts, Is.Zero, file + ": a UI text did not fit and was shortened with …");

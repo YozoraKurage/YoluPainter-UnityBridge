@@ -26,7 +26,9 @@ namespace Yozolab.YoluPainter.Editor
             TextureSetSettingsSections(rows);
             rows.Indent = 0;
             rows.Space(8);
-            if (Event.current.type == EventType.Repaint && Mathf.Abs(rows.Used - textureSetSettingsHeight) > .5f) { textureSetSettingsHeight = rows.Used; Repaint(); }
+            // 中身の高さは Layout でも測る（描き直しの前の Layout で、はみ出すか＝スクロールの印の幅が決まり、最初の描画から同じ幅で描ける）
+            var measuring = Event.current.type;
+            if ((measuring == EventType.Repaint || measuring == EventType.Layout) && Mathf.Abs(rows.Used - textureSetSettingsHeight) > .5f) { textureSetSettingsHeight = rows.Used; if (measuring == EventType.Repaint) Repaint(); }
             PaintGui.EndScroll();
             if (Event.current.type == EventType.ScrollWheel && r.Contains(Event.current.mousePosition))
             { textureSetSettingsScroll.y = Mathf.Clamp(textureSetSettingsScroll.y + Event.current.delta.y * 14, 0, Mathf.Max(0, textureSetSettingsHeight - r.height)); Event.current.Use(); Repaint(); }

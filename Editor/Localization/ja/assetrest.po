@@ -111,3 +111,7 @@ msgstr ".ylp の保存予算を超えるため追加しませんでした（文�
 
 msgid "The library already has a file with that name."
 msgstr "置き場に同じ名前のファイルがあります。"
+
+# アセットのパネルのブラシの足元のボタン（パスの「ブラシを適用」は tools.po の msgctxt "path"）
+msgid "Use Brush"
+msgstr "ブラシとして使う"

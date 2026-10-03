@@ -23,7 +23,8 @@ namespace Yozolab.YoluPainter.Tests
             {
                 FailingInspectorGUI.Fail = false; FailingInspectorGUI.DrawCalls = 0;
                 window.SetModel(model); window.DockLayoutForTests.SetActive("material");
-                foreach (var id in new[] { "layers", "properties" }) window.DockLayoutForTests.GroupOf(id).collapsed = true;
+                // 欄に高さを渡すため、ほかのまとまりを畳む（既定の配置ではマテリアルはレイヤーと同じまとまりのタブなので、それは畳まない）
+                foreach (var id in new[] { "layers", "properties" }) { var g = window.DockLayoutForTests.GroupOf(id); if (g != window.DockLayoutForTests.GroupOf("material")) g.collapsed = true; }
                 Repaint(window); Repaint(window);
                 Assert.That(window.MaterialInspector, Is.Not.Null);
                 Assert.That(window.MaterialInspector.Problem, Is.Null);

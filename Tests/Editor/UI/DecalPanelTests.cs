@@ -101,7 +101,7 @@ namespace Yozolab.YoluPainter.Tests
                 string maskPath = Path.Combine(Folder, "editing-mask-1600.png");
                 OffscreenGui.RenderWindow(w, 1600, 950, maskPath);
                 Assert.That(Count(maskPath, 950, w.SurfaceRect).axis, Is.LessThan(5), "no handles while the mask is edited");
-                Assert.That(w.LayerControlPanelRects.Keys, Has.Member("projection.edit"));
+                Assert.That(w.LayerControlPanelRects.Keys, Has.No.Member("projection.edit"), "while the mask is painted, Properties shows the brush and the mask (the projection is the fill's)");
                 w.EditMask = false; w.ProjectionHandlesHidden = true;
                 string hiddenPath = Path.Combine(Folder, "hidden-1600.png");
                 OffscreenGui.RenderWindow(w, 1600, 950, hiddenPath);
