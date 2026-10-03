@@ -36,6 +36,7 @@
 | 2 | `~/unity-runners/2/project` | 台の中の写し `~/unity-runners/2/pkg` | GUI（`runners.conf`） |
 | 3 | `~/unity-runners/3/project` | 台の中の写し `~/unity-runners/3/pkg` | batch-gl（`runners.conf`。計測やエージェントの worktree 用に足した） |
 | 4 | `~/unity-runners/4/project` | 台の中の写し `~/unity-runners/4/pkg` | GUI（`runners.conf`。GUI の依頼が詰まったので足した） |
+| 5 | `~/unity-runners/5/project` | 台の中の写し `~/unity-runners/5/pkg` | GUI（`runners.conf`。担当 4 人が同時に GUI の全件を待ったので足した） |
 
 ```sh
 .devcontainer/unity/runners.sh setup        # 台 1・2 を作る（台 0 から設定とパッケージを写し、コールドで取り込む。1 台 40 秒ほど）
@@ -66,7 +67,7 @@
 - `switch-daemon.sh gui -- …` は、GUI の台が動いていれば台 0 を切り替えずにその台で回す（切り替えの数分を待たない）。
 - 台 1 以上のプロジェクトは名前付きボリュームではないので、コンテナを作り直すと消える（`runners.sh setup` で作り直す）。台 0 の Library は
   写さない（開いている Unity の Library を写すと、データベースが壊れた写しになり得る）。台 0 の Assets（`ZZ_UserAssets` を含む）も写さない。
-- 資源の目安: 3 台を常駐させても、この PC（メモリ 58 GB・32 スレッド）では余裕がある。GPU は WSL2 の d3d12 を共有する。
+- 資源の目安: 6 台（台 0〜5）を常駐させても、この PC（メモリ 58 GB・32 スレッド）では足りている。GPU は WSL2 の d3d12 を共有する。
 
 ### エージェントの掲示板（agent-board）
 
