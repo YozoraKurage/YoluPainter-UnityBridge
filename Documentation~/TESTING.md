@@ -34,6 +34,7 @@
 | 0 | `~/unity-testproject`（名前付きボリューム） | `/workspace` を直接読む | `switch-daemon.sh` で変わる |
 | 1 | `~/unity-runners/1/project` | 台の中の写し `~/unity-runners/1/pkg` | batch-gl（`runners.conf`） |
 | 2 | `~/unity-runners/2/project` | 台の中の写し `~/unity-runners/2/pkg` | GUI（`runners.conf`） |
+| 3 | `~/unity-runners/3/project` | 台の中の写し `~/unity-runners/3/pkg` | batch-gl（`runners.conf`。計測やエージェントの worktree 用に足した） |
 
 ```sh
 .devcontainer/unity/runners.sh setup        # 台 1・2 を作る（台 0 から設定とパッケージを写し、コールドで取り込む。1 台 40 秒ほど）
@@ -44,7 +45,12 @@
 .devcontainer/unity/run-tests.sh --both --sha HEAD             # コミットの木で、batch-gl と GUI の台で同時に全件
 .devcontainer/unity/run-tests.sh --source /path/to/worktree    # 別の worktree のパッケージで回す
 .devcontainer/unity/unity-do.sh --runner 1 run -e '…'          # 台を選んでスニペット
+.devcontainer/unity/unity-do.sh --runner 3 --source ~/wt run -e '…'   # 台 1 以上で、このフォルダに同期してからスニペット
 ```
+
+エージェントの worktree: 共有の作業ツリーで書きかけを保存し合わないよう、エージェントは自分の worktree（`/workspace/.worktrees/<名前>`、ブランチ
+`agent/<名前>`。`.git/info/exclude` で無視し、テストの台への同期でも写さない）で作業してコミットし、テストは `--source <worktree>` で台 1 以上へ
+回す。統合はメインがする。Agent ツールの `isolation: worktree` は main の最初のコミットから作られたので使わない（2026-10-03）。
 
 - 台 1 以上は、依頼のたびにソース（既定は `/workspace` の作業ツリー、`--sha` ならそのコミットを `git archive` で、`--source` ならそのフォルダ）を
   台の中の写しへ同期してから回す（`sync-package.py`。中身の違うファイルだけを写すので、Unity は変わった所だけを取り込み直す。

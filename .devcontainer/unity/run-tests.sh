@@ -63,7 +63,8 @@ if [[ $BOTH == 1 ]]; then
   out_dir="$(mktemp -d)"; trap 'rm -rf "$out_dir"' EXIT
   "$0" ${rest[@]+"${rest[@]}"} --mode batch-gl > "$out_dir/batch-gl" 2>&1 & p1=$!
   "$0" ${rest[@]+"${rest[@]}"} --mode gui > "$out_dir/gui" 2>&1 & p2=$!
-  wait $p1; c1=$?; wait $p2; c2=$?
+  # common.sh の set -e の下では、落ちた子の wait でここから抜けて結果を出さずに終わってしまう（全件で実際に起きた）
+  c1=0; wait $p1 || c1=$?; c2=0; wait $p2 || c2=$?
   echo "──── batch-gl ────"; cat "$out_dir/batch-gl"
   echo ""; echo "──── GUI ────"; cat "$out_dir/gui"
   [[ $c1 != 0 ]] && exit $c1
