@@ -50,11 +50,16 @@ if [[ "${YOLUPAINTER_GPU:-1}" != 0 && -e /dev/dxg && -d /usr/lib/wsl/lib ]]; the
   # Dockerfile でビルドした新しい Mesa（d3d12 が OpenGL 4.6 を出す）があれば優先する。
   # システムの Mesa 23.2 は 4.2 止まりで、Unity が CopyTexture と compute shader を無効にする。
   # YOLUPAINTER_MESA=system でシステムの Mesa に戻せる。
-  if [[ "${YOLUPAINTER_MESA:-bundled}" != system && -f /opt/mesa-d3d12/lib/libGLX_mesa.so.0 ]]; then
+  # 比較ビルドは /tmp などに置き、同梱の /opt を変更せず選ぶ。
+  mesa_prefix="${YOLUPAINTER_MESA_PREFIX:-/opt/mesa-d3d12}"
+  if [[ "${YOLUPAINTER_MESA:-bundled}" != system && -f "$mesa_prefix/lib/libGLX_mesa.so.0" ]]; then
     # Mesa 24.2 の libGLX_mesa は libgallium を直接リンクするので、DRI ドライバの置き場は要らない。
-    export LD_LIBRARY_PATH="/opt/mesa-d3d12/lib:$LD_LIBRARY_PATH"
+    export LD_LIBRARY_PATH="$mesa_prefix/lib:$LD_LIBRARY_PATH"
     export __GLX_VENDOR_LIBRARY_NAME=mesa
   fi
+  # 同梱パッチが解釈する、3 系統それぞれの未使用バッファーキャッシュ上限（MiB）。
+  # 既定は上流と同じ 512。実測して選ぶ（64 は GLX で比較、Unity は未確認）。
+  export D3D12_BUFFER_CACHE_MB="${D3D12_BUFFER_CACHE_MB:-${YOLUPAINTER_GPU_CACHE_MB:-512}}"
   # 複数の GPU があるときは MESA_D3D12_DEFAULT_ADAPTER_NAME（部分一致）で選べる。
 fi
 

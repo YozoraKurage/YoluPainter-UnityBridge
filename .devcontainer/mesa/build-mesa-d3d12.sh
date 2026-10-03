@@ -13,6 +13,7 @@
 
 MESA_VERSION="${MESA_VERSION:-24.2.8}"
 PREFIX="${MESA_PREFIX:-/opt/mesa-d3d12}"  # MESA_PREFIX はこのスクリプト自体の試験用
+PATCH_DIR="${MESA_PATCH_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 LOG=/tmp/mesa-build.log
 
 if [[ "${1:-}" == --inner ]]; then
@@ -21,7 +22,7 @@ if [[ "${1:-}" == --inner ]]; then
   set -euxo pipefail
   apt-get -q update
   apt-get -q install -y --no-install-recommends \
-    build-essential pkg-config ninja-build bison flex ca-certificates curl xz-utils git \
+    build-essential pkg-config ninja-build bison flex ca-certificates curl xz-utils git patch \
     python3 python3-pip \
     libdrm-dev libexpat1-dev zlib1g-dev libzstd-dev libelf-dev libglvnd-dev \
     libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxshmfence-dev libxxf86vm-dev libxrandr-dev \
@@ -34,6 +35,8 @@ if [[ "${1:-}" == --inner ]]; then
   curl -fsSL "https://archive.mesa3d.org/mesa-${MESA_VERSION}.tar.xz" -o mesa.tar.xz
   tar xf mesa.tar.xz
   cd "mesa-${MESA_VERSION}"
+  # D3D12_BUFFER_CACHE_MB でキャッシュだけを制限する。既定の寿命・上限は上流のまま。
+  patch -p1 < "$PATCH_DIR/d3d12-buffer-cache.patch"
   # 24.2 では swrast が softpipe + llvmpipe を意味し、llvmpipe は LLVM を要求する。LLVM は
   # 入れない（llvmpipe はシステムの Mesa が持っている）ので softpipe を明示する。
   # libGLX_mesa は libgallium を直接リンクするので、DRI ドライバ（*_dri.so）は作られない。
@@ -53,6 +56,7 @@ if [[ "${1:-}" == --inner ]]; then
   find "$PREFIX/lib" -name '*.a' -delete
   test -f "$PREFIX/lib/libGLX_mesa.so.0"
   echo "$MESA_VERSION" > "$PREFIX/VERSION"
+  echo d3d12-buffer-cache > "$PREFIX/PATCHES"
   exit 0
 fi
 

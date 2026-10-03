@@ -1,0 +1,17 @@
+--- a/src/gallium/drivers/d3d12/d3d12_screen.cpp
++++ b/src/gallium/drivers/d3d12/d3d12_screen.cpp
+@@ -1731 +1731,7 @@
+-   screen->cache_bufmgr = pb_cache_manager_create(screen->bufmgr, 0xfffff, 2, 0, 512 * 1024 * 1024);
++   /* Bound each reusable buffer cache without changing live resource lifetime. */
++   int64_t cache_mb = debug_get_num_option("D3D12_BUFFER_CACHE_MB", 512);
++   if (cache_mb < 0 || cache_mb > 512)
++      cache_mb = 512;
++   uint64_t cache_bytes = (uint64_t)cache_mb * 1024 * 1024;
++
++   screen->cache_bufmgr = pb_cache_manager_create(screen->bufmgr, 0xfffff, 2, 0, cache_bytes);
+@@ -1735 +1741 @@
+-   screen->slab_cache_bufmgr = pb_cache_manager_create(screen->bufmgr, 0xfffff, 2, 0, 512 * 1024 * 1024);
++   screen->slab_cache_bufmgr = pb_cache_manager_create(screen->bufmgr, 0xfffff, 2, 0, cache_bytes);
+@@ -1746 +1752 @@
+-   screen->readback_slab_cache_bufmgr = pb_cache_manager_create(screen->bufmgr, 0xfffff, 2, 0, 512 * 1024 * 1024);
++   screen->readback_slab_cache_bufmgr = pb_cache_manager_create(screen->bufmgr, 0xfffff, 2, 0, cache_bytes);

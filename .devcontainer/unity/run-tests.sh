@@ -355,12 +355,22 @@ if daemon_alive; then
       # 本体と、その台のプロジェクトの取り込みの手伝い（AssetImportWorker。圧縮テクスチャの試験などで起きて何時間も残る、1 つ 1.4 GB ほど）の合計
       rss_kb=$(ps -eo rss=,args= | awk -v p="-projectPath $UNITY_PROJECT" 'index($0, p) { s += $1 } END { print s + 0 }')
       limit_kb=$(( ${YOLUPAINTER_RUNNER_RSS_LIMIT_MB:-4500} * 1024 ))
-      # GPU: WSL の GPU のドライバの層（Mesa の d3d12 ⇔ Windows）は、Unity が捨てたテクスチャ・描き先の分を Windows に返さずに溜め込み、
-      # プロセスが終わるとまとめて返す（2026-10-03: Unity 自身は GPU のメモリ 0.03 GB と答える GUI の台を 1 つ止めると、Windows の
-      # 「共有 GPU メモリ」が 37.4 → 27.3 GB に減った）。コンテナの中からは測れないので、全件（組に分けた子も）の後は必ず再起動する
+      # GPU: WSL の GPU のドライバの層（Mesa の d3d12 ⇔ Windows）は、Unity が捨てたテクスチャ・描き先の分の一部を Windows に返さずに
+      # 持ち続け、プロセスが終わるとまとめて返す（2026-10-03: Unity 自身は GPU のメモリ 0.03 GB と答える GUI の台を 1 つ止めると、Windows の
+      # 「共有 GPU メモリ」が 37.4 → 27.3 GB に減った。Mesa の未使用バッファーのキャッシュは 1 プロセス 約 280 MiB までで、それだけでは
+      # 説明できない）。台ごとの量を確かに測る道具がまだ無いので、全件（組に分けた子も）の後は必ず再起動する。
+      # 加えて YOLUPAINTER_RUNNER_GPU_SHARED_LIMIT_MB（MiB、既定 0 で無効）を決めると、アダプター全体の共有の常駐量がそれを超え、
+      # この台の共有の確保が 128 MiB 以上のときも再起動する（全体は Windows とほかのアプリも含む。測れなければ GPU を理由にしない）
       reason=""
-      if [[ -n "$rss_kb" && "$rss_kb" -gt "$limit_kb" ]]; then reason="Unity が $(( rss_kb / 1024 )) MB に太った"
-      elif [[ $IS_FULL_RUN == 1 ]]; then reason="全件の後で、GPU のドライバの層に溜まった分を返す"; fi
+      gpu_limit_mib="${YOLUPAINTER_RUNNER_GPU_SHARED_LIMIT_MB:-0}"
+      if [[ "$gpu_limit_mib" =~ ^[1-9][0-9]{0,5}$ && -r "$DAEMON_DIR/daemon.pid" ]]; then
+        gpu_args=(--restart-limit-mib "$gpu_limit_mib" --pid "$(cat "$DAEMON_DIR/daemon.pid")")
+        gpu_adapter="${MESA_D3D12_DEFAULT_ADAPTER_NAME:-}"
+        [[ -z "$gpu_adapter" ]] || gpu_args+=(--adapter "$gpu_adapter")
+        reason=$("$SCRIPT_DIR/gpu-memory.sh" "${gpu_args[@]}" 2>/dev/null) || reason=""
+      fi
+      if [[ -n "$rss_kb" && "$rss_kb" -gt "$limit_kb" ]]; then reason="Unity と取り込みの手伝いが $(( rss_kb / 1024 )) MB に太った"
+      elif [[ -z "$reason" && $IS_FULL_RUN == 1 ]]; then reason="全件の後で、GPU のドライバの層に溜まった分を返す"; fi
       if [[ -n "$reason" ]]; then
         info "台 $UNITY_RUNNER を裏で再起動する（$reason。1〜2 分。ログ $RUNNERS_HOME/$UNITY_RUNNER/restart.log）"
         # setsid -f で頼んだ側のセッションとプロセスグループから切り離す（頼んだ側のコマンドが終わって、まとめて止められると、
