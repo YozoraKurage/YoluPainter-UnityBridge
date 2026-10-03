@@ -390,11 +390,12 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>The composite inside a group for a job's region (<see cref="CompositeJob.Resume"/>, <see cref="CompositeJob.Captures"/>):
         /// the group's inner result after its first Index children — the children composited from transparent for an isolated group (and a
         /// group with clipped layers), onto the composite below the group for a pass-through one (so it holds that backdrop too). Only the
-        /// groups of entries (<see cref="StackEntry.Children"/>) are addressed, not clipped groups.</summary>
+        /// groups of entries (<see cref="StackEntry.Children"/>) and clipped groups are addressed.</summary>
         public sealed class NestedCopy
         {
             /// <param name="group">Plan indices from the top level: the top-level entry, then the index in its Children, and so on; every
-            /// step is a group.</param>
+            /// step is a group, except that an entry followed by ~clipIndex selects its ClipEntries[clipIndex] instead of its
+            /// own children. A clipped group starts from transparent, even with PassThrough.</param>
             /// <param name="index">0 .. the group's child count.</param>
             /// <param name="pixels">Row r of the job's region at pixels[offset + r × stride].</param>
             public NestedCopy(IReadOnlyList<int> group, int index, byte[] pixels, int offset, int stride)
@@ -529,14 +530,22 @@ namespace Yozolab.YoluPainter.Core
                 for (int d = 0; d < c.Group.Count; d++)
                 {
                     int i = c.Group[d];
-                    if (i < 0 || i >= level.Count || !level[i].Base.IsGroup) throw new ArgumentOutOfRangeException("jobs", "A nested copy's path is not a group of the plan.");
-                    level = level[i].Children;
+                    if (i < 0 || i >= level.Count) throw new ArgumentOutOfRangeException("jobs", "A nested copy's path is not a group of the plan.");
+                    var entry = level[i];
+                    if (d + 1 < c.Group.Count && c.Group[d + 1] < 0)
+                    {
+                        int clip = ~c.Group[++d];
+                        if (clip >= entry.ClipEntries.Count) throw new ArgumentOutOfRangeException("jobs", "A nested copy's clipping index is outside its entry.");
+                        entry = entry.ClipEntries[clip];
+                    }
+                    if (!entry.Base.IsGroup) throw new ArgumentOutOfRangeException("jobs", "A nested copy's path is not a group of the plan.");
+                    level = entry.Children;
                 }
                 if (c.Index < 0 || c.Index > level.Count) throw new ArgumentOutOfRangeException("jobs", "A nested copy's index is outside its group.");
                 if (c.Group[0] < job.Start) throw new ArgumentOutOfRangeException("jobs", "A nested copy is in an entry below the job's Start.");
                 // 中身を写しから始めるグループの中では、写しより上の子だけが合成される
                 foreach (var r in resumes)
-                    if (r.Group.Count < c.Group.Count && IsPrefix(r.Group, c.Group) && c.Group[r.Group.Count] < r.Index)
+                    if (SkipsNestedGroup(r.Group, r.Index, c.Group))
                         throw new ArgumentOutOfRangeException("jobs", "A nested copy is inside the resumed part of a group.");
             }
             for (int i = 0; i < resumes.Count; i++)
@@ -556,6 +565,10 @@ namespace Yozolab.YoluPainter.Core
             for (int i = 0; i < prefix.Count; i++) if (prefix[i] != path[i]) return false;
             return true;
         }
+
+        /// <summary>A group's inner copy skips child entries below index, but never its own clipping entries.</summary>
+        public static bool SkipsNestedGroup(IReadOnlyList<int> group, int index, IReadOnlyList<int> path)
+        { return group.Count < path.Count && IsPrefix(group, path) && path[group.Count] >= 0 && path[group.Count] < index; }
 
         public static byte[] CompositeRegion(PaintDocument document, PaintChannel channel, int x, int y, int width, int height)
         {
@@ -733,28 +746,29 @@ namespace Yozolab.YoluPainter.Core
                 return nodes;
             }
             /// <summary>After <see cref="Load"/> of nodes [from, to): replaces every loaded tile by its sample (the same nodes Load read).</summary>
-            public static void Sample(Node[] nodes, int from, int to, int slot, int tile, int step)
+            public static void Sample(Node[] nodes, int from, int to, int slot, int tile, int step, Nest nest)
             {
                 for (int i = from; i < to; i++)
                 {
                     var n = nodes[i];
                     n.Tile.Sample(slot, tile, step);
-                    if (n.Group) Sample(n.Children, 0, n.Children.Length, slot, tile, step);
-                    if (n.Tile.Present[slot]) Sample(n.Clips, 0, n.Clips.Length, slot, tile, step);
+                    if (n.Group) Sample(n.Children, 0, n.Children.Length, slot, tile, step, nest);
+                    if (n.Tile.Present[slot] || nest != null && nest.CaptureBelow[n.Id]) Sample(n.Clips, 0, n.Clips.Length, slot, tile, step, nest);
                 }
             }
             /// <summary>Loads the tiles of nodes [from, to) into slot; returns true when any raster or fill pixels are present below
             /// them. present is set when any of them has anything at all (an adjustment counts).</summary>
-            public static bool Load(Node[] nodes, int from, int to, PaintChannel channel, TileCoord coord, int slot, out bool present)
+            public static bool Load(Node[] nodes, int from, int to, PaintChannel channel, TileCoord coord, int slot, out bool present, Nest nest)
             {
                 bool any = false; present = false;
                 for (int i = from; i < to; i++)
                 {
                     var n = nodes[i];
                     bool pixels;
-                    if (n.Group) { pixels = Load(n.Children, 0, n.Children.Length, channel, coord, slot, out _); n.Tile.Present[slot] = pixels || HasAdjustment(n.Children, slot); n.Tile.LoadMask(coord, slot); }
+                    if (n.Group) { pixels = Load(n.Children, 0, n.Children.Length, channel, coord, slot, out _, nest); n.Tile.Present[slot] = pixels || HasAdjustment(n.Children, slot); n.Tile.LoadMask(coord, slot); }
                     else { n.Tile.Load(channel, coord, slot); pixels = !n.Adjustment && n.Tile.Present[slot]; }
-                    if (n.Tile.Present[slot]) { pixels |= Load(n.Clips, 0, n.Clips.Length, channel, coord, slot, out _); present = true; }
+                    if (n.Tile.Present[slot]) { pixels |= Load(n.Clips, 0, n.Clips.Length, channel, coord, slot, out _, nest); present = true; }
+                    else if (nest != null && nest.CaptureBelow[n.Id]) Load(n.Clips, 0, n.Clips.Length, channel, coord, slot, out _, nest);
                     any |= pixels;
                 }
                 return any;
@@ -784,7 +798,17 @@ namespace Yozolab.YoluPainter.Core
             static Node Find(Node[] nodes, IReadOnlyList<int> path, bool[] below)
             {
                 Node n = null;
-                foreach (int i in path) { n = nodes[i]; if (below != null) below[n.Id] = true; nodes = n.Children; }
+                for (int d = 0; d < path.Count; d++)
+                {
+                    n = nodes[path[d]];
+                    if (below != null) below[n.Id] = true;
+                    if (d + 1 < path.Count && path[d + 1] < 0)
+                    {
+                        n = n.Clips[~path[++d]];
+                        if (below != null) below[n.Id] = true;
+                    }
+                    nodes = n.Children;
+                }
                 return n;
             }
         }
@@ -801,14 +825,20 @@ namespace Yozolab.YoluPainter.Core
                 if (from == null) Array.Clear(c.Pixels, o, count * 4); else Buffer.BlockCopy(from, fromOffset + y * fromStride, c.Pixels, o, count * 4);
             }
         }
-        /// <summary>A group with nothing in this tile is skipped, so every state inside it is its start: transparent for an isolated group,
-        /// the composite below it (start, null = transparent) for a pass-through one. Fills the captures it holds with that.</summary>
-        static void FillAbsent(Node n, byte[] start, int startOffset, int startStride, int rows, int count, Nest nest, int row, int column)
+        /// <summary>Fills captures in a skipped entry. Its clipped groups can have pixels even when their base has none:
+        /// their inner copies are evaluated from transparent independently of the missing base.</summary>
+        static void CaptureAbsent(Node n, byte[] start, int startOffset, int startStride, int slot, int src, int tileStride, int rows, int count, bool normal, RectScratch scratch, int depth, CompositeKernels kernels, Nest nest, int row, int column, bool isolated = false)
         {
-            if (!n.PassesThrough) start = null;
-            var cap = nest.Capture[n.Id];
-            if (cap != null) CopyOut(cap, start, startOffset, startStride, rows, count, row, column);
-            foreach (var c in n.Children) if (c.Group && nest.CaptureBelow[c.Id]) FillAbsent(c, start, startOffset, startStride, rows, count, nest, row, column);
+            int packed = count * 4;
+            if (n.Group)
+            {
+                var inner = scratch.Get(depth, isolated ? 2 : n.PassesThrough ? 0 : 1);
+                if (isolated || !n.PassesThrough || start == null) Array.Clear(inner, 0, rows * packed);
+                else for (int y = 0; y < rows; y++) Buffer.BlockCopy(start, startOffset + y * startStride, inner, y * packed, packed);
+                EvaluateChildren(n, 0, inner, 0, packed, slot, src, tileStride, rows, count, normal, scratch, depth, kernels, nest, row, column);
+            }
+            foreach (var clip in n.Clips)
+                if (nest.CaptureBelow[clip.Id]) CaptureAbsent(clip, null, 0, 0, slot, src, tileStride, rows, count, normal, scratch, depth, kernels, nest, row, column, true);
         }
 
         // 分離できるモードの B(下, 上) は 2 つの 8 bit の値だけで決まるので、256×256 の表に Separable の値そのものを入れて引く（同じ関数の
@@ -841,7 +871,7 @@ namespace Yozolab.YoluPainter.Core
                 if (!b.Present[slot])
                 {
                     // 飛ばすグループの中の写しは、グループの始め（分離は透明、通過は下の結果）のまま
-                    if (nest != null && n.Group && nest.CaptureBelow[n.Id]) FillAbsent(n, res, resOff, resStride, rows, count, nest, nestRow, nestColumn);
+                    if (nest != null && nest.CaptureBelow[n.Id]) CaptureAbsent(n, res, resOff, resStride, slot, src, tileStride, rows, count, normal, scratch, depth, kernels, nest, nestRow, nestColumn);
                     continue;
                 }
                 if (n.Adjustment)
@@ -885,7 +915,12 @@ namespace Yozolab.YoluPainter.Core
                 else { g = b.Pixels[slot]; gOff = src; gStride = tileStride; } // read in place (nothing changes the layer's own pixels)
                 foreach (var clip in n.Clips)
                 {
-                    var ct = clip.Tile; if (!ct.Present[slot]) continue;
+                    var ct = clip.Tile;
+                    if (!ct.Present[slot])
+                    {
+                        if (nest != null && nest.CaptureBelow[clip.Id]) CaptureAbsent(clip, null, 0, 0, slot, src, tileStride, rows, count, normal, scratch, depth, kernels, nest, nestRow, nestColumn, true);
+                        continue;
+                    }
                     if (clip.Adjustment)
                     {
                         for (int y = 0; y < rows; y++)
@@ -895,8 +930,10 @@ namespace Yozolab.YoluPainter.Core
                     byte[] c; int cOff, cStride;
                     if (clip.Group)
                     {
-                        c = scratch.Get(depth, 2); cOff = 0; cStride = packed; Array.Clear(c, 0, rows * packed);
-                        EvaluateRect(clip.Children, 0, clip.Children.Length, c, 0, packed, slot, src, tileStride, rows, count, normal, scratch, depth + 1, kernels, null, 0, 0);
+                        c = scratch.Get(depth, 2); cOff = 0; cStride = packed;
+                        var resume = nest?.Resume[clip.Id];
+                        if (resume != null) CopyIn(resume, c, 0, packed, rows, count, nestRow, nestColumn); else Array.Clear(c, 0, rows * packed);
+                        EvaluateChildren(clip, resume?.Index ?? 0, c, 0, packed, slot, src, tileStride, rows, count, normal, scratch, depth, kernels, nest, nestRow, nestColumn);
                     }
                     else { c = ct.Pixels[slot]; cOff = src; cStride = tileStride; }
                     var clipRect = Rect(g, gOff, gStride, c, cOff, cStride, rows, count, ct, slot, src, tileStride, clip.Mode, clip.Table);
@@ -1101,8 +1138,8 @@ namespace Yozolab.YoluPainter.Core
                 CoreParallelism.ForWorkers(items.Count, slots, (worker, i) =>
                 {
                     var item = items[i]; var job = jobs[item.Job];
-                    bool pixels = Node.Load(nodes, job.Start, nodes.Length, channel, item.Coord, worker, out bool present);
-                    if (step > 1) Node.Sample(nodes, job.Start, nodes.Length, worker, full, step);
+                    bool pixels = Node.Load(nodes, job.Start, nodes.Length, channel, item.Coord, worker, out bool present, nests[item.Job]);
+                    if (step > 1) Node.Sample(nodes, job.Start, nodes.Length, worker, full, step, nests[item.Job]);
                     Compute(nodes, job, nests[item.Job], item.Coord, tile, worker, job.Start == 0 ? pixels : present, 0, tile, normal, scratches[worker], fresh, kernels);
                 });
                 return;
@@ -1111,8 +1148,8 @@ namespace Yozolab.YoluPainter.Core
             for (int first = 0; first < items.Count; first += slots)
             {
                 int count = Math.Min(slots, items.Count - first), batch = first;
-                if (concurrentLoad) CoreParallelism.For(count, degree, k => { var job = jobs[items[batch + k].Job]; bool p = Node.Load(nodes, job.Start, nodes.Length, channel, items[batch + k].Coord, k, out bool present); if (step > 1) Node.Sample(nodes, job.Start, nodes.Length, k, full, step); any[k] = job.Start == 0 ? p : present; });
-                else for (int k = 0; k < count; k++) { var job = jobs[items[batch + k].Job]; bool p = Node.Load(nodes, job.Start, nodes.Length, channel, items[batch + k].Coord, k, out bool present); if (step > 1) Node.Sample(nodes, job.Start, nodes.Length, k, full, step); any[k] = job.Start == 0 ? p : present; }
+                if (concurrentLoad) CoreParallelism.For(count, degree, k => { var item = items[batch + k]; var job = jobs[item.Job]; bool p = Node.Load(nodes, job.Start, nodes.Length, channel, item.Coord, k, out bool present, nests[item.Job]); if (step > 1) Node.Sample(nodes, job.Start, nodes.Length, k, full, step, nests[item.Job]); any[k] = job.Start == 0 ? p : present; });
+                else for (int k = 0; k < count; k++) { var item = items[batch + k]; var job = jobs[item.Job]; bool p = Node.Load(nodes, job.Start, nodes.Length, channel, item.Coord, k, out bool present, nests[item.Job]); if (step > 1) Node.Sample(nodes, job.Start, nodes.Length, k, full, step, nests[item.Job]); any[k] = job.Start == 0 ? p : present; }
                 // 行の束に分けて計算する（タイルが少ないときもスレッドが余らないように）
                 int chunks = Math.Max(1, Math.Min(tile / 8, (degree + count - 1) / count)), rowsPerChunk = (tile + chunks - 1) / chunks, workers = Math.Min(degree, count * chunks);
                 if (chunkScratches == null || chunkScratches.Length < workers || scratchRows < rowsPerChunk)
@@ -1160,11 +1197,9 @@ namespace Yozolab.YoluPainter.Core
                 else if (job.Backdrop != null) Buffer.BlockCopy(job.Backdrop, job.BackdropOffset + (y0 - job.Y + y) * job.BackdropStride + (x0 - job.X) * 4, job.Pixels, o, length);
             }
             int nestRow = y0 - job.Y, nestColumn = x0 - job.X;
-            if (!any)
+            if (!any && nest == null)
             {
                 if (capture >= 0) for (int y = 0, o = off; y < rows; y++, o += stride) Buffer.BlockCopy(job.Pixels, o, job.Capture, o, length);
-                // 何も無いタイル: 入れ子の写しはグループの始めのまま（通過は下の結果 = 今の画素）
-                if (nest != null) for (int i = start; i < nodes.Length; i++) if (nodes[i].Group && nest.CaptureBelow[nodes[i].Id]) FillAbsent(nodes[i], job.Pixels, off, stride, rows, x1 - x0, nest, nestRow, nestColumn);
                 return;
             }
             if (capture >= 0)

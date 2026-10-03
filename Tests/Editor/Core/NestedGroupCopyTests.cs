@@ -109,22 +109,35 @@ namespace Yozolab.YoluPainter.Tests
             return d;
         }
 
-        /// <summary>計画の中のグループ（クリッピングの基の項目のグループ）の位置。</summary>
+        /// <summary>計画の中のグループの位置。クリッピングされたグループへは ~clipIndex で降りる。</summary>
         internal static List<int[]> GroupPaths(IReadOnlyList<CpuCompositor.StackEntry> plan, int[] prefix = null)
         {
             prefix = prefix ?? new int[0];
             var list = new List<int[]>();
             for (int i = 0; i < plan.Count; i++)
+            {
                 if (plan[i].Base.IsGroup)
                 {
                     var p = prefix.Concat(new[] { i }).ToArray();
                     list.Add(p); list.AddRange(GroupPaths(plan[i].Children, p));
                 }
+                for (int c = 0; c < plan[i].ClipEntries.Count; c++)
+                    if (plan[i].ClipEntries[c].Base.IsGroup)
+                    {
+                        var p = prefix.Concat(new[] { i, ~c }).ToArray();
+                        list.Add(p); list.AddRange(GroupPaths(plan[i].ClipEntries[c].Children, p));
+                    }
+            }
             return list;
         }
         static IReadOnlyList<CpuCompositor.StackEntry> ChildrenAt(IReadOnlyList<CpuCompositor.StackEntry> plan, int[] path)
         {
-            foreach (int i in path) plan = plan[i].Children;
+            for (int d = 0; d < path.Length; d++)
+            {
+                var entry = plan[path[d]];
+                if (d + 1 < path.Length && path[d + 1] < 0) entry = entry.ClipEntries[~path[++d]];
+                plan = entry.Children;
+            }
             return plan;
         }
         static bool IsPrefix(int[] prefix, int[] path) => prefix.Length < path.Length && prefix.SequenceEqual(path.Take(prefix.Length));
@@ -164,7 +177,7 @@ namespace Yozolab.YoluPainter.Tests
                         {
                             var path = t.Group.ToArray();
                             if (path[0] < start || rnd.Next(4) == 0) continue;
-                            if (chosen.Any(o => IsPrefix(o.Group.ToArray(), path) && path[o.Group.Count] < o.Index)) continue;
+                            if (chosen.Any(o => CpuCompositor.SkipsNestedGroup(o.Group, o.Index, path))) continue;
                             chosen.Add(t);
                         }
                         // 領域に分けて（写しの配列は全面の並びのまま、領域の位置から読む）
@@ -222,6 +235,63 @@ namespace Yozolab.YoluPainter.Tests
                 checkedCount++;
             }
             Assert.That(checkedCount, Is.GreaterThan(20));
+        }
+
+        [TestCase(PaintChannel.Color), TestCase(PaintChannel.Roughness), TestCase(PaintChannel.Normal)]
+        public void ClippedGroupCopiesKeepTheirContentsEvenWhereTheBaseHasNoTiles(PaintChannel channel)
+        {
+            var d = new PaintDocument(35, 27, 8);
+            var basis = d.AddLayer("base"); d.SetChannelEnabled(basis.Id, channel, true);
+            basis.GetChannel(channel).SetPixel(34, 26, new Rgba32(110, 120, 230, 255)); // 基底は有効だが、ほとんどのタイルは無い。
+            var a = d.AddFillLayer("a", new Dictionary<PaintChannel, Rgba32> { { channel, new Rgba32(90, 140, 220, 200) } });
+            var b = d.AddFillLayer("b", new Dictionary<PaintChannel, Rgba32> { { channel, new Rgba32(180, 70, 130, 255) } });
+            var inner = d.GroupLayers(new[] { b.Id }, "inner"); d.SetLayerOpacity(inner.Id, .7);
+            var outer = d.GroupLayers(new[] { a.Id, inner.Id }, "clipped"); d.SetLayerClipping(outer.Id, true);
+            // [base ~0: clipped[a, inner[b]]]. 外側は通過でも、クリッピングの中身は透明から。
+            int[] outerPath = { 0, ~0 }, innerPath = { 0, ~0, 1 };
+            int bytes = d.Width * d.Height * 4;
+            byte[] Pixels() { var p = new byte[bytes]; for (int i = 0; i < p.Length; i++) p[i] = 0xcc; return p; }
+            var outerCopy = Pixels(); var innerCopy = Pixels();
+            var capture = new CpuCompositor.CompositeJob(0, 0, d.Width, d.Height, Pixels())
+            { Captures = new[] { new CpuCompositor.NestedCopy(outerPath, 2, outerCopy, 0, d.Width * 4), new CpuCompositor.NestedCopy(innerPath, 1, innerCopy, 0, d.Width * 4) } };
+            CpuCompositor.CompositeRegions(d, channel, new[] { capture });
+            CpuCompositingTests.AssertSameBytes(d.Composite(channel), capture.Pixels, "empty base");
+            Assert.That(outerCopy.Any(x => x != 0), Is.True, "the missing base does not make its clipped group's inner copy transparent");
+            using (var stroke = d.BeginStroke(basis.Id, channel, new BrushSettings { Radius = 100, Color = new Rgba32(110, 120, 230, 255), PressureSize = false, PressureOpacity = false })) { stroke.Add(new BrushSample(17, 13)); stroke.Commit(); }
+            var resume = new CpuCompositor.CompositeJob(0, 0, d.Width, d.Height, Pixels()) { Resume = new[] { new CpuCompositor.NestedCopy(outerPath, 2, outerCopy, 0, d.Width * 4) } };
+            CpuCompositor.CompositeRegions(d, channel, new[] { resume });
+            CpuCompositingTests.AssertSameBytes(d.Composite(channel), resume.Pixels, "base painted after the copies were captured");
+            var freshOuter = Pixels(); var freshInner = Pixels();
+            CpuCompositor.CompositeRegions(d, channel, new[] { new CpuCompositor.CompositeJob(0, 0, d.Width, d.Height, Pixels())
+            { Captures = new[] { new CpuCompositor.NestedCopy(outerPath, 2, freshOuter, 0, d.Width * 4), new CpuCompositor.NestedCopy(innerPath, 1, freshInner, 0, d.Width * 4) } } });
+            CpuCompositingTests.AssertSameBytes(freshOuter, outerCopy, "clipped inner result is independent of the base");
+            CpuCompositingTests.AssertSameBytes(freshInner, innerCopy, "nested pass-through result starts within the clipped group");
+            // 外側の中身の写しは、その外側自身に付くクリッピングを飛ばさない。
+            var baseGroup = d.GroupLayers(new[] { basis.Id }, "base group");
+            var root = CpuCompositor.Plan(d, channel); Assert.That(root[0].ClipEntries.Count, Is.EqualTo(1));
+            var baseCopy = Pixels();
+            CpuCompositor.CompositeRegions(d, channel, new[] { new CpuCompositor.CompositeJob(0, 0, d.Width, d.Height, Pixels())
+            { Captures = new[] { new CpuCompositor.NestedCopy(new[] { 0 }, 1, baseCopy, 0, d.Width * 4) } } });
+            var together = new CpuCompositor.CompositeJob(0, 0, d.Width, d.Height, Pixels())
+            { Resume = new[] { new CpuCompositor.NestedCopy(new[] { 0 }, 1, baseCopy, 0, d.Width * 4), new CpuCompositor.NestedCopy(outerPath, 2, outerCopy, 0, d.Width * 4) } };
+            CpuCompositor.CompositeRegions(d, channel, new[] { together });
+            CpuCompositingTests.AssertSameBytes(d.Composite(channel), together.Pixels, "base group and its clipped group resume together");
+        }
+
+        [Test] public void BadClippedGroupPathsAreRefusedBeforeAnyPixelsChange()
+        {
+            var d = new PaintDocument(8, 8, 8); var basis = d.AddLayer("base"); basis.GetChannel(PaintChannel.Color).SetPixel(0, 0, new Rgba32(100, 100, 100, 255));
+            var plain = d.AddLayer("clip raster"); d.SetLayerClipping(plain.Id, true);
+            plain.GetChannel(PaintChannel.Color).SetPixel(0, 0, new Rgba32(140, 120, 100, 255));
+            var child = d.AddLayer("child"); var group = d.GroupLayers(new[] { child.Id }, "clip group"); d.SetLayerClipping(group.Id, true);
+            var pixels = Enumerable.Repeat((byte)0x7b, 256).ToArray();
+            foreach (var path in new[] { new[] { ~0 }, new[] { 0, ~5 }, new[] { 0, ~0 }, new[] { 0, ~1, ~0 }, new[] { 0, ~1, 0 } })
+            {
+                var job = new CpuCompositor.CompositeJob(0, 0, 8, 8, pixels)
+                { Captures = new[] { new CpuCompositor.NestedCopy(path, 0, new byte[256], 0, 32) } };
+                Assert.That(() => CpuCompositor.CompositeRegions(d, PaintChannel.Color, new[] { job }), Throws.InstanceOf<ArgumentException>(), string.Join(",", path));
+                Assert.That(pixels.All(x => x == 0x7b), Is.True, "refusal is before writing");
+            }
         }
 
         [Test] public void BadNestedCopiesAreRefused()

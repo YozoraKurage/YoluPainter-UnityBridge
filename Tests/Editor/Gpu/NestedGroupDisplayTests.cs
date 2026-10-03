@@ -5,6 +5,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Yozolab.YoluPainter.Core;
+using Yozolab.YoluPainter.Core.Persistence;
 using Yozolab.YoluPainter.Core.Shelf;
 using Yozolab.YoluPainter.Editor;
 
@@ -407,6 +408,181 @@ namespace Yozolab.YoluPainter.Tests
                 for (int i = 0; i <= TileGpuCompositor.IdleUpdatesBeforeRelease; i++) c.Update(d, PaintChannel.Color);
                 Assert.That(c.NestedCopyCount, Is.Zero, "copies unused for a while are released");
                 Drag("after the idle release");
+            }
+        }
+
+        [Test, Category("GPU")]
+        public void SmallGpuBudgetsKeepCompositeCopiesAheadOfUploadedInputs()
+        {
+            GpuTests.RequireWorkingShader(ShaderName);
+            var d = TenLayers("2 isolated", out var middle, out _, out _);
+            using (var c = Compositor("Gpu"))
+            {
+                c.ResidentBudgetBytes = 4L * 512 * 512 * 4; // 2 ブロック × 下の写しとグループの写しだけ。
+                c.Update(d, PaintChannel.Color);
+                for (int i = 0; i < 5; i++)
+                {
+                    d.SetLayerOpacity(middle.Id, .4 + i * .02, coalesce: true); c.Update(d, PaintChannel.Color);
+                    CpuCompositingTests.AssertSameBytes(Expected("Gpu", d), Read(c), "small budget change " + i);
+                    Assert.That(c.Path, Is.EqualTo(TileGpuCompositor.CompositePath.Gpu), c.Backend);
+                    Assert.That(c.LastCopyEvictionCount, Is.Zero, "input uploads cannot evict composite copies");
+                    Assert.That(c.NestedCopyCount, Is.EqualTo(2));
+                    Assert.That(c.ResidentBytes, Is.LessThanOrEqualTo(c.ResidentBudgetBytes));
+                    if (i > 0) { Assert.That(c.LastNestedReuseCount, Is.EqualTo(2)); Assert.That(c.LastBelowReuseCount, Is.EqualTo(2)); }
+                }
+                c.ResidentBudgetBytes = 0;
+                Assert.That(c.ResidentBytes, Is.Zero); Assert.That(c.NestedCopyCount, Is.Zero);
+                d.SetLayerOpacity(middle.Id, .7); c.Update(d, PaintChannel.Color);
+                CpuCompositingTests.AssertSameBytes(Expected("Gpu", d), Read(c), "zero budget");
+                Assert.That(c.LastNestedCaptureCount, Is.Zero);
+            }
+        }
+
+        [Test]
+        public void InvalidatedCpuCopiesReuseTheirArraysWithinTheResidentBudget()
+        {
+            var d = TenLayers("2 isolated", out var middle, out _, out _);
+            var lower = d.Layers.First(l => l.Name == "L2");
+            using (var c = Compositor("Cpu"))
+            {
+                c.ResidentBudgetBytes = 4L * 512 * 512 * 4;
+                void Check() { c.Update(d, PaintChannel.Color); CpuCompositingTests.AssertSameBytes(d.Composite(PaintChannel.Color), Read(c), "CPU reused arrays"); Assert.That(c.ResidentBytes, Is.LessThanOrEqualTo(c.ResidentBudgetBytes)); }
+                Check(); d.SetLayerOpacity(middle.Id, .5); Check();
+                Assert.That(c.LastResidentArrayAllocationCount, Is.EqualTo(4));
+                d.SetLayerOpacity(lower.Id, .4); Check();
+                Assert.That(c.LastResidentArrayReuseCount, Is.EqualTo(2));
+                Assert.That(c.LastResidentArrayAllocationCount, Is.Zero, "retaking below an invalidated group copy does not allocate another pixel array");
+                // 0 の位置へ変わると写しを取り直さない。使わない配列も予算に数える。
+                var bottom = d.Layers.First(l => l.Name == "L0"); d.SetLayerOpacity(bottom.Id, .3); Check();
+                Assert.That(c.PooledResidentBytes, Is.EqualTo(2L * 512 * 512 * 4));
+                Assert.That(c.NestedCopyCount, Is.Zero);
+                Assert.That(c.ResidentBytes, Is.EqualTo(c.ResidentBudgetBytes));
+                for (int i = 0; i <= TileGpuCompositor.IdleUpdatesBeforeRelease; i++) c.Update(d, PaintChannel.Color);
+                Assert.That(c.ResidentBytes, Is.Zero); Assert.That(c.PooledResidentBytes, Is.Zero);
+                d.SetLayerOpacity(middle.Id, .6); Check(); d.SetLayerOpacity(lower.Id, .6); Check();
+                c.ResidentBudgetBytes = c.ResidentBytes - 1;
+                Assert.That(c.ResidentBytes, Is.Zero); Assert.That(c.PooledResidentBytes, Is.Zero);
+                Assert.That(() => c.ResidentBudgetBytes = -1, Throws.TypeOf<ArgumentOutOfRangeException>());
+                c.ResidentBudgetBytes = 8L << 20; d.SetLayerOpacity(middle.Id, .7); Check();
+                var other = TenLayers("isolated", out _, out _, out _, 384, 192);
+                c.Update(other, PaintChannel.Color);
+                Assert.That(c.NestedCopyCount, Is.Zero); Assert.That(c.PooledResidentBytes, Is.Zero);
+                CpuCompositingTests.AssertSameBytes(other.Composite(PaintChannel.Color), Read(c), "document and size changed");
+                c.ReleaseResidentCaches(); Assert.That(c.ResidentBytes, Is.Zero);
+            }
+        }
+
+        /// <summary>クリッピングされたグループの中で Anchor を読むマスク: 別チャンネルの参照元を変えると、中身の写しも更新する。</summary>
+        [TestCase("Cpu", true), TestCase("Cpu", false), TestCase("Gpu", true), TestCase("Gpu", false)]
+        public void ClippedGroupCopiesFollowAnchorChangesInAnotherChannel(string backend, bool copyTexture)
+        {
+            if (backend == "Gpu") GpuTests.RequireWorkingShader(ShaderName);
+            var d = new PaintDocument(96, 64, 16);
+            var source = d.AddFillLayer("height", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Height, new Rgba32(100, 100, 100, 255) } });
+            var anchor = d.AddAnchor(source.Id, AnchorPlacement.Layer, "height anchor");
+            d.AddFillLayer("clip base", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(40, 70, 120, 200) } });
+            var prefix = d.AddFillLayer("prefix", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(90, 80, 130, 255) } });
+            var reader = d.AddFillLayer("reader", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(220, 140, 30, 255) } });
+            d.AddLayerMask(reader.Id);
+            d.AddFilter(reader.Id, FilterTarget.Mask, FilterSettings.FromGenerator(GeneratorSettings.Default(GeneratorType.Anchor).WithAnchor(anchor.Id, PaintChannel.Height, AnchorRead.Value)));
+            var inner = d.GroupLayers(new[] { prefix.Id, reader.Id }, "inner");
+            var outer = d.GroupLayers(new[] { inner.Id }, "clipped group"); d.SetLayerClipping(outer.Id, true);
+            d.ClearHistory();
+            using (var c = new TileGpuCompositor(backend == "Gpu", copyTexture) { ResidentBudgetBytes = 4L << 20 })
+            {
+                void Check(string step)
+                {
+                    c.Update(d, PaintChannel.Color);
+                    var actual = Read(c);
+                    var fresh = DocumentBinary.Read(DocumentBinary.Write(d));
+                    CpuCompositingTests.AssertSameBytes(Expected(backend, fresh), actual, step + ": fresh display");
+                    if (backend == "Gpu")
+                    {
+                        GpuTests.AssertMatches(fresh.Composite(PaintChannel.Color), actual, step + ": CPU reference");
+                        Assert.That(c.Path, Is.EqualTo(TileGpuCompositor.CompositePath.Gpu), c.Backend);
+                    }
+                    Assert.That(c.ResidentBytes, Is.LessThanOrEqualTo(c.ResidentBudgetBytes));
+                }
+                Check("first"); d.SetLayerOpacity(reader.Id, .8); Check("capture");
+                d.SetLayerOpacity(reader.Id, .7); Check("reuse");
+                Assert.That(c.LastNestedReuseCount, Is.GreaterThan(0));
+                var before = Read(c);
+                d.SetFillValue(source.Id, PaintChannel.Height, new Rgba32(230, 230, 230, 255)); Check("Height changes Color");
+                Assert.That(Read(c), Is.Not.EqualTo(before), "the anchor changes the clipped reader's mask");
+                d.Undo(); Check("undo Height"); d.Redo(); Check("redo Height");
+                d.RemoveAnchor(anchor.Id); Check("anchor removed"); d.Undo(); Check("undo removal");
+                d.SetFillValue(prefix.Id, PaintChannel.Color, new Rgba32(130, 100, 40, 255)); Check("retake lower");
+                c.ResidentBudgetBytes = 0;
+                d.SetFillValue(source.Id, PaintChannel.Height, new Rgba32(30, 30, 30, 255)); Check("zero budget");
+                Assert.That(c.NestedCopyCount, Is.Zero);
+            }
+        }
+
+        static PaintDocument ClippedDocument(out PaintLayer middle, out PaintLayer basis, out PaintLayer outer)
+        {
+            var d = new PaintDocument(96, 64, 16);
+            var values = new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(80, 110, 140, 255) }, { PaintChannel.Roughness, new Rgba32(120, 120, 120, 255) }, { PaintChannel.Normal, new Rgba32(128, 128, 255, 255) } };
+            d.AddFillLayer("background", values);
+            basis = d.AddLayer("clip base");
+            var bottom = d.AddFillLayer("bottom", values);
+            middle = d.AddLayer("middle");
+            var top = d.AddFillLayer("top", values);
+            foreach (var ch in NestedGroupCopyTests.Channels)
+            {
+                d.SetChannelEnabled(basis.Id, ch, true); d.SetChannelEnabled(middle.Id, ch, true);
+                for (int y = 0; y < d.Height; y++) for (int x = 0; x < d.Width; x++)
+                {
+                    var p = ch == PaintChannel.Normal ? new Rgba32(136, 120, 250, 255) : ch == PaintChannel.Roughness ? new Rgba32(160, 160, 160, 255) : new Rgba32((byte)(30 + x), (byte)(70 + y), 180, 255);
+                    middle.GetChannel(ch).SetPixel(x, y, p);
+                    if (x >= 16 || y >= 16) basis.GetChannel(ch).SetPixel(x, y, values[ch]); // 基底の左下のタイルは無い。
+                }
+            }
+            var inner = d.GroupLayers(new[] { bottom.Id, middle.Id, top.Id }, "inner"); d.SetLayerBlendMode(inner.Id, LayerBlendMode.Normal);
+            outer = d.GroupLayers(new[] { inner.Id }, "clipped group"); d.SetLayerClipping(outer.Id, true);
+            d.AddLayerMask(outer.Id); d.SetLayerMaskDensity(outer.Id, .8);
+            d.SetLayerOpacity(top.Id, .5); d.ClearHistory();
+            return d;
+        }
+
+        [TestCase("Cpu", true), TestCase("Cpu", false), TestCase("Gpu", true), TestCase("Gpu", false)]
+        public void ClippedGroupCopiesStayExactThroughEditsUndoCancellationAndReload(string backend, bool copyTexture)
+        {
+            if (backend == "Gpu") GpuTests.RequireWorkingShader(ShaderName);
+            var d = ClippedDocument(out var middle, out var basis, out var outer);
+            using (var c = new TileGpuCompositor(backend == "Gpu", copyTexture))
+            {
+                foreach (var channel in NestedGroupCopyTests.Channels)
+                {
+                    void Check(string step, bool sliced = false)
+                    {
+                        var schedule = sliced ? new CompositeSchedule { BudgetMilliseconds = 0 } : null;
+                        while (!c.Update(d, channel, schedule)) { }
+                        var actual = Read(c);
+                        CpuCompositingTests.AssertSameBytes(Expected(backend, d, channel), actual, step + ": cache vs no cache");
+                        if (backend == "Gpu") { GpuTests.AssertMatches(d.Composite(channel), actual, step + ": CPU vs GPU"); Assert.That(c.Path, Is.EqualTo(TileGpuCompositor.CompositePath.Gpu), c.Backend); }
+                        Assert.That(c.ResidentBytes, Is.LessThanOrEqualTo(c.ResidentBudgetBytes));
+                    }
+                    Check("first"); d.SetLayerOpacity(middle.Id, .6); Check("capture");
+                    Assert.That(c.LastNestedCaptureCount, Is.GreaterThan(0));
+                    d.SetLayerOpacity(middle.Id, .5); Check("resume", true);
+                    Assert.That(c.LastNestedReuseCount, Is.GreaterThan(0));
+                    d.SetLayerOpacity(outer.Id, .7); Check("clipped group's opacity");
+                    d.SetLayerOpacity(outer.Id, .6); Check("whole clipped contents");
+                    Assert.That(c.LastNestedReuseCount, Is.GreaterThan(0));
+                    using (var s = d.BeginStroke(basis.Id, channel, new BrushSettings { Radius = 20, Color = new Rgba32(130, 130, 230, 255), PressureSize = false, PressureOpacity = false })) { s.Add(new BrushSample(8, 8)); s.Commit(); }
+                    Check("base gains its missing tile"); d.Undo(); Check("undo base"); d.Redo(); Check("redo base");
+                    using (var s = d.BeginStroke(middle.Id, channel, new BrushSettings { Radius = 12, Color = new Rgba32(170, 150, 220, 255), PressureSize = false, PressureOpacity = false })) { s.Add(new BrushSample(35, 30)); Check("active stroke"); s.Cancel(); }
+                    Check("cancel stroke", true);
+                    using (var s = d.BeginMaskStroke(outer.Id, new BrushSettings { Radius = 12, Color = new Rgba32(0, 0, 0, 150), PressureSize = false, PressureOpacity = false })) { s.Add(new BrushSample(40, 30)); s.Commit(); }
+                    Check("group mask"); d.SetLayerBlendMode(outer.Id, LayerBlendMode.Normal); Check("isolated clip");
+                    d.SetLayerClipping(outer.Id, false); Check("unclip"); d.SetLayerClipping(outer.Id, true); Check("clip again");
+                    var binary = DocumentBinary.Write(d); var restored = DocumentBinary.Read(binary);
+                    c.Update(restored, channel); CpuCompositingTests.AssertSameBytes(Expected(backend, restored, channel), Read(c), "save and reload");
+                    Assert.That(c.LastNestedReuseCount, Is.Zero, "another document never resumes the previous document's copies");
+                    Assert.That(DocumentBinary.Write(restored), Is.EqualTo(binary), "display caches do not enter the native document");
+                    c.ResidentBudgetBytes = 0; d.SetLayerOpacity(middle.Id, .8); Check("no copy budget");
+                    Assert.That(c.NestedCopyCount, Is.Zero); c.ResidentBudgetBytes = 64L << 20;
+                }
             }
         }
 

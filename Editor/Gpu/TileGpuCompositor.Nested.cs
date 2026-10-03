@@ -13,8 +13,8 @@ namespace Yozolab.YoluPainter.Editor
     /// なので、下の結果がそのまま（グループの位置と、その下の項目、さらに外側の通過グループの下）のときだけ有効。</para>
     /// <para>前回の署名の木と今の木を比べて、最上段から「最初に違う項目」がグループなら中へ降り、中身の最初に違う項目を探す（違う道）。写しは
     /// この道に沿って、浅い段から取る（予算が足りなければ深い段は取らない。写しが無ければ今までどおりグループの始めから合成する）。署名の木が
-    /// 前回と同じ所は、写しの中身も同じ（署名は CpuCompositor の計画とブロックの書き換え番号から作る）。クリッピングされたグループの中身は
-    /// 写しを持たない（そのクリッピングの基の項目ごと、今までどおり合成する）。</para>
+    /// 前回と同じ所は、写しの中身も同じ（署名は CpuCompositor の計画とブロックの書き換え番号から作る）。クリッピングされたグループの中身も
+    /// 透明からの写しを持ち、基のアルファへのクリッピングは写しの外で毎回行う。</para>
     /// </remarks>
     internal sealed partial class TileGpuCompositor
     {
@@ -22,11 +22,12 @@ namespace Yozolab.YoluPainter.Editor
         internal sealed class SigNode
         {
             public string Sig; public Guid Id;
-            /// <summary>グループ（クリッピングの基の項目としてのグループ。中身は Children）。</summary>
+            /// <summary>グループ（クリッピングされたものも含む。中身は Children）。</summary>
             public bool Group;
             /// <summary>中身を透明から合成するグループ（通過でない、またはクリッピングのある通過）。</summary>
             public bool Isolated;
             public SigNode[] Children;
+            public SigNode[] Clips;
         }
 
         SigNode[] BuildSigs(IReadOnlyList<CpuCompositor.StackEntry> plan, PaintChannel channel, int bx, int by)
@@ -35,7 +36,7 @@ namespace Yozolab.YoluPainter.Editor
             for (int i = 0; i < plan.Count; i++) nodes[i] = BuildSig(plan[i], channel, bx, by);
             return nodes;
         }
-        SigNode BuildSig(CpuCompositor.StackEntry entry, PaintChannel channel, int bx, int by)
+        SigNode BuildSig(CpuCompositor.StackEntry entry, PaintChannel channel, int bx, int by, bool clipped = false)
         {
             SigNode[] children = null;
             if (entry.Base.IsGroup)
@@ -43,9 +44,11 @@ namespace Yozolab.YoluPainter.Editor
                 children = new SigNode[entry.Children.Count];
                 for (int i = 0; i < children.Length; i++) children[i] = BuildSig(entry.Children[i], channel, bx, by);
             }
+            var clips = new SigNode[entry.ClipEntries.Count];
+            for (int i = 0; i < clips.Length; i++) clips[i] = BuildSig(entry.ClipEntries[i], channel, bx, by, true);
             var sb = new StringBuilder(96);
-            AppendSignature(sb, entry, channel, bx, by, children);
-            return new SigNode { Sig = sb.ToString(), Id = entry.Base.Id, Group = entry.Base.IsGroup, Isolated = !entry.PassesThrough, Children = children };
+            AppendSignature(sb, entry, channel, bx, by, children, clips);
+            return new SigNode { Sig = sb.ToString(), Id = entry.Base.Id, Group = entry.Base.IsGroup, Isolated = clipped || !entry.PassesThrough, Children = children, Clips = clips };
         }
         static int FirstDifference(SigNode[] before, SigNode[] now)
         {
@@ -59,7 +62,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             /// <summary>最上段で最初に違う項目（同じなら短いほうの数）。</summary>
             public int RootFirst;
-            /// <summary>今の計画のグループごと（クリッピングの基の項目のグループだけ）。</summary>
+            /// <summary>今の計画のグループごと（クリッピングされたものも含む）。</summary>
             public readonly Dictionary<Guid, GroupDiff> Groups = new Dictionary<Guid, GroupDiff>();
             /// <summary>違う道: 最上段の最初に違う項目がグループなら、そのグループと中身の最初に違う項目、それもグループなら…の並び。</summary>
             public readonly List<(Guid Group, int Index)> Path = new List<(Guid, int)>();
@@ -67,7 +70,7 @@ namespace Yozolab.YoluPainter.Editor
         internal sealed class GroupDiff
         {
             public SigNode Node;
-            /// <summary>今の計画の中の位置（最上段の添え字、中身の添え字、…）。</summary>
+            /// <summary>今の計画の中の位置（最上段の添え字、中身の添え字、…。負の ~clipIndex は直前の項目のクリッピング）。</summary>
             public int[] Address;
             /// <summary>中身で最初に違う項目（前回と比べられないとき −1: 前回に無い、または分離と通過が入れ替わった）。</summary>
             public int First = -1;
@@ -82,34 +85,62 @@ namespace Yozolab.YoluPainter.Editor
             void Index(SigNode[] level, Guid parent)
             {
                 for (int i = 0; i < level.Length; i++)
-                    if (level[i].Group) { old[level[i].Id] = (level[i], parent, i); Index(level[i].Children, level[i].Id); }
+                {
+                    var node = level[i];
+                    old[node.Id] = (node, parent, i);
+                    if (node.Group) Index(node.Children, node.Id);
+                    Index(node.Clips ?? Array.Empty<SigNode>(), node.Id);
+                }
             }
             Index(before, Guid.Empty);
             void Visit(SigNode[] level, Guid parent, int[] prefix, int levelFirst, bool levelStart)
             {
                 for (int i = 0; i < level.Length; i++)
                 {
-                    var g = level[i]; if (!g.Group) continue;
+                    var g = level[i];
                     var address = new int[prefix.Length + 1]; Array.Copy(prefix, address, prefix.Length); address[prefix.Length] = i;
+                    VisitEntry(g, parent, i, address, levelFirst, levelStart);
+                }
+            }
+            void VisitEntry(SigNode g, Guid parent, int index, int[] address, int levelFirst, bool levelStart)
+            {
+                if (g.Group)
+                {
                     var d = new GroupDiff { Node = g, Address = address };
-                    if (old.TryGetValue(g.Id, out var o) && o.node.Isolated == g.Isolated)
+                    if (old.TryGetValue(g.Id, out var o) && o.node.Group && o.node.Isolated == g.Isolated)
                     {
                         d.First = FirstDifference(o.node.Children, g.Children);
                         // 下の結果が同じ: 親の段の始めが同じで、親の中身でこの位置より下が前回と同じ、前回も同じ親の同じ位置
-                        d.StartUnchanged = g.Isolated || o.parent == parent && o.index == i && levelStart && levelFirst >= 0 && i <= levelFirst;
+                        d.StartUnchanged = g.Isolated || o.parent == parent && o.index == index && levelStart && levelFirst >= 0 && index <= levelFirst;
                     }
                     diff.Groups[g.Id] = d;
                     Visit(g.Children, g.Id, address, d.First, d.First >= 0 && d.StartUnchanged);
                 }
+                var clips = g.Clips ?? Array.Empty<SigNode>();
+                for (int i = 0; i < clips.Length; i++)
+                {
+                    var path = new int[address.Length + 1]; Array.Copy(address, path, address.Length); path[address.Length] = ~i;
+                    VisitEntry(clips[i], g.Id, i, path, -1, false);
+                }
             }
             Visit(now, Guid.Empty, new int[0], diff.RootFirst, true);
-            var nodes = now; int first = diff.RootFirst;
-            while (first < nodes.Length && nodes[first].Group && diff.Groups[nodes[first].Id].First >= 0)
+            void Changed(SigNode node)
             {
-                var d = diff.Groups[nodes[first].Id];
-                diff.Path.Add((d.Node.Id, d.First));
-                nodes = d.Node.Children; first = d.First;
+                if (node.Group && diff.Groups[node.Id].First >= 0)
+                {
+                    var d = diff.Groups[node.Id];
+                    diff.Path.Add((node.Id, d.First));
+                    if (d.First < node.Children.Length) Changed(node.Children[d.First]);
+                }
+                if (old.TryGetValue(node.Id, out var o))
+                {
+                    var clips = node.Clips ?? Array.Empty<SigNode>();
+                    int first = FirstDifference(o.node.Clips ?? Array.Empty<SigNode>(), clips);
+                    if (first < clips.Length) Changed(clips[first]);
+                }
             }
+            if (diff.RootFirst < now.Length) Changed(now[diff.RootFirst]);
+            diff.Path.Sort((a, b) => diff.Groups[a.Group].Address.Length.CompareTo(diff.Groups[b.Group].Address.Length));
             return diff;
         }
 
@@ -144,7 +175,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             List<Guid> stale = null;
             foreach (var pair in copies) if (!StillValid(pair.Value, diff)) (stale ?? (stale = new List<Guid>())).Add(pair.Key);
-            if (stale != null) foreach (var id in stale) { ReleaseGroupCopy(copies[id]); copies.Remove(id); }
+            if (stale != null) foreach (var id in stale) { ReleaseGroupCopy(copies[id], recycle: true); copies.Remove(id); }
             if (diff == null) return null;
             var plan = new NestPlan { Diff = diff };
             foreach (var pair in copies) plan.Resume.Add(pair.Key, pair.Value);
@@ -174,22 +205,55 @@ namespace Yozolab.YoluPainter.Editor
             foreach (var c in plan.Resume.Values)
             {
                 var outer = plan.Diff.Groups[c.Group].Address;
-                if (outer.Length >= address.Length) continue;
-                bool prefix = true; for (int i = 0; i < outer.Length && prefix; i++) prefix = outer[i] == address[i];
-                if (prefix && address[outer.Length] < c.Index) return false;
+                if (CpuCompositor.SkipsNestedGroup(outer, c.Index, address)) return false;
             }
             return true;
         }
-        void ReleaseGroupCopy(GroupCopy copy)
+        void ReleaseGroupCopy(GroupCopy copy, bool recycle = false)
         {
             if (copy.Texture != null) { Release(copy.Texture); ResidentBytes -= BlockBytes; copy.Texture = null; }
-            if (copy.Pixels != null) { ResidentBytes -= copy.Pixels.Length; copy.Pixels = null; }
+            if (copy.Pixels != null) { if (recycle) ReturnResidentPixels(copy.Pixels); else ResidentBytes -= copy.Pixels.Length; copy.Pixels = null; }
         }
         void ReleaseGroupCopies(Dictionary<Guid, GroupCopy> copies)
         {
             foreach (var c in copies.Values) ReleaseGroupCopy(c);
             copies.Clear();
         }
+
+        // 再利用する CPU の写しも常駐予算に数える。作業用の cpuPool とは所有権を分け、予約中のジョブの配列を貸し直さない。
+        readonly List<byte[]> residentPixelPool = new List<byte[]>();
+        int residentPixelPoolLastUsed;
+        internal long PooledResidentBytes { get; private set; }
+        internal int LastResidentArrayAllocationCount { get; private set; }
+        internal int LastResidentArrayReuseCount { get; private set; }
+        internal int LastInputEvictionCount { get; private set; }
+        internal int LastCopyEvictionCount { get; private set; }
+        byte[] RentResidentPixels(long bytes, bool spare)
+        {
+            for (int i = residentPixelPool.Count - 1; i >= 0; i--)
+                if (residentPixelPool[i].LongLength == bytes)
+                {
+                    if (spare && !SpareRoom(0)) return null;
+                    var pixels = residentPixelPool[i]; residentPixelPool.RemoveAt(i);
+                    PooledResidentBytes -= bytes; LastResidentArrayReuseCount++;
+                    residentPixelPoolLastUsed = updateIndex;
+                    return pixels;
+                }
+            if (spare ? !SpareRoom(bytes) : !MakeRoomCpu(bytes)) return null;
+            var result = new byte[bytes]; ResidentBytes += bytes; LastResidentArrayAllocationCount++;
+            return result;
+        }
+        void ReturnResidentPixels(byte[] pixels)
+        {
+            if (residentPixelPool.Count >= CpuWaveBlocks) { ResidentBytes -= pixels.Length; return; }
+            residentPixelPool.Add(pixels); PooledResidentBytes += pixels.Length; residentPixelPoolLastUsed = updateIndex;
+        }
+        void DropPooledResidentPixels()
+        {
+            int last = residentPixelPool.Count - 1; var pixels = residentPixelPool[last]; residentPixelPool.RemoveAt(last);
+            PooledResidentBytes -= pixels.Length; ResidentBytes -= pixels.Length;
+        }
+        void ClearResidentPixelPool() { while (residentPixelPool.Count > 0) DropPooledResidentPixels(); }
         /// <summary>写しを捨てて場所を作るとき、そのブロックの写しのうち最初に捨てるもの（深い段から）。</summary>
         static GroupCopy DeepestCopy(Dictionary<Guid, GroupCopy> copies)
         {
