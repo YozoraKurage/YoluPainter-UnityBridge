@@ -322,8 +322,9 @@ if daemon_alive; then
       limit_kb=$(( ${YOLUPAINTER_RUNNER_RSS_LIMIT_MB:-4500} * 1024 ))
       if [[ -n "$rss_kb" && "$rss_kb" -gt "$limit_kb" ]]; then
         info "台 $UNITY_RUNNER の Unity が $(( rss_kb / 1024 )) MB に太ったので、裏で再起動する（1〜2 分。ログ $RUNNERS_HOME/$UNITY_RUNNER/restart.log）"
-        ( YOLUPAINTER_LOCK_HELD=1 "$SCRIPT_DIR/runners.sh" restart "$UNITY_RUNNER" > "$RUNNERS_HOME/$UNITY_RUNNER/restart.log" 2>&1 ) &
-        disown
+        # setsid -f で頼んだ側のセッションとプロセスグループから切り離す（頼んだ側のコマンドが終わって、まとめて止められると、
+        # 起動し直した Unity も止まり、台が落ちたままになった。2026-10-03）。ロックの fd 8 は引き継ぐので、終わるまで台は使われない
+        YOLUPAINTER_LOCK_HELD=1 setsid -f "$SCRIPT_DIR/runners.sh" restart "$UNITY_RUNNER" > "$RUNNERS_HOME/$UNITY_RUNNER/restart.log" 2>&1 < /dev/null
       fi
     fi
     exit "$code"
