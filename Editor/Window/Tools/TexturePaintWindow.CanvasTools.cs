@@ -86,6 +86,7 @@ namespace Yozolab.YoluPainter.Editor
             var layer=document.Layers.FirstOrDefault(l=>l.Id==selectedLayer);
             var c=wandSampleAll||layer==null||layer.IsGroup?document.CompositePixel(channel,x,y):layer.GetOutputPixel(channel,x,y);
             if(c.A==0){message=L.Tr("Nothing to pick there (transparent).");return;}
+            if(brush.material){PickIntoMaterial(c);message=L.Tr("Picked")+" R "+c.R+" G "+c.G+" B "+c.B+" ("+L.Tr(channel.ToString())+").";return;} // マテリアルの今のチャンネルの値に
             brush.color=new Color(c.R/255f,c.G/255f,c.B/255f,1);
             message=L.Tr("Picked")+" R "+c.R+" G "+c.G+" B "+c.B+".";
         }

@@ -327,7 +327,8 @@ namespace Yozolab.YoluPainter.Tests
             d.SetLayerClipping(fill.Id, true);
             d.SetLayerLocks(a.Id, LayerLocks.Transparency | LayerLocks.Position); d.SetLayerLocks(g.Id, LayerLocks.All); d.SetLayerLocks(fill.Id, LayerLocks.Pixels);
             var bytes = DocumentBinary.Write(d);
-            Assert.That(BitConverter.ToInt32(bytes, 8), Is.EqualTo(DocumentBinary.CurrentVersion)); Assert.That(DocumentBinary.CurrentVersion, Is.GreaterThanOrEqualTo(12), "locks came with version 12");
+            Assert.That(BitConverter.ToInt32(bytes, 8), Is.EqualTo(DocumentBinary.CurrentVersion));
+            Assert.That(DocumentBinary.CurrentVersion, Is.GreaterThanOrEqualTo(12), "locks came with version 12 (version 14 added per-channel blend settings, laid out after the locks)");
             var read = DocumentBinary.Read(bytes);
             Assert.That(read.Layers.Select(l => (l.Name, l.Locks, l.Clipping)), Is.EqualTo(d.Layers.Select(l => (l.Name, l.Locks, l.Clipping))));
             Assert.That(read.CanUndo, Is.False, "the locks are loaded, not edited");
@@ -356,8 +357,14 @@ namespace Yozolab.YoluPainter.Tests
             var d = NewDocument(); var l = d.AddLayer("L"); d.SetLayerLocks(l.Id, LayerLocks.Position);
             var bytes = DocumentBinary.Write(d); int at = AttributeByte(l);
             Assert.That(bytes[at], Is.EqualTo(2));
-            var unknownAttribute = (byte[])bytes.Clone(); unknownAttribute[at] = 2 | 4;
+            var unknownAttribute = (byte[])bytes.Clone(); unknownAttribute[at] = 2 | 8;
             Assert.That(() => DocumentBinary.Read(unknownAttribute), Throws.InstanceOf<InvalidDataException>().With.Message.Contains("Unknown layer attribute flags"));
+            // ビット 2（版 14 のチャンネルごとの合成の設定）は、版 12・13 の正本では知らないビット
+            foreach (int older in new[] { 12, 13 })
+            {
+                var old = (byte[])bytes.Clone(); old[at] = 2 | 4; BitConverter.GetBytes(older).CopyTo(old, 8);
+                Assert.That(() => DocumentBinary.Read(old), Throws.InstanceOf<InvalidDataException>().With.Message.Contains("Unknown layer attribute flags"), "version " + older);
+            }
             var unknownLock = (byte[])bytes.Clone(); BitConverter.GetBytes((int)LayerLocks.Position | 16).CopyTo(unknownLock, at + 1);
             Assert.That(() => DocumentBinary.Read(unknownLock), Throws.InstanceOf<InvalidDataException>().With.Message.Contains("Unknown layer lock flags"));
             var empty = (byte[])bytes.Clone(); BitConverter.GetBytes(0).CopyTo(empty, at + 1);

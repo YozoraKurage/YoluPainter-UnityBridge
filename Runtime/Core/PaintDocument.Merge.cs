@@ -163,7 +163,7 @@ namespace Yozolab.YoluPainter.Core
             RefuseLockedPixels(upper, erase: false); RefuseLockedPixels(lower, erase: false);
             RefuseInactiveGenerators(upper, true, true); RefuseInactiveGenerators(lower, true, false);
             bool upperClipped = IsEffectivelyClipped(layers.IndexOf(upper)), lowerClipped = IsEffectivelyClipped(layers.IndexOf(lower));
-            bool plain = lower.BlendMode == LayerBlendMode.Normal && lower.Opacity == 1 && (lower.Mask == null || lower.Mask.IsNeutral);
+            bool plain = PlainInEveryChannel(lower) && (lower.Mask == null || lower.Mask.IsNeutral);
             MergeMethod method = upperClipped && !lowerClipped ? MergeMethod.IntoClippingBase
                 : !upperClipped && !lowerClipped && !plain && NothingShowsBelow(lower) ? MergeMethod.Isolated : MergeMethod.OntoLowerLayer;
             // 透明部分のロックの下の層: クリッピングの基へ当てる結合は基のアルファを変えないので行う。ほかは下の層のアルファが変わるので断る
@@ -178,6 +178,7 @@ namespace Yozolab.YoluPainter.Core
             else
             {
                 result.Visible = lower.Visible; result.Opacity = lower.Opacity; result.BlendMode = lower.BlendMode; result.Clipping = lower.Clipping;
+                result.CopyChannelBlendsFrom(lower); // チャンネルごとの合成モードと不透明度も下の層のもの
                 if (lower.Mask != null) result.Mask = CloneMask(lower.Mask, result);
             }
             long budget = 0;
@@ -186,7 +187,7 @@ namespace Yozolab.YoluPainter.Core
                 bool lowerHas = lower.Kind == LayerKind.Fill ? lower.FillValues.ContainsKey(c) : lower.Channels.ContainsKey(c);
                 bool lowerOn = lowerHas && lower.IsChannelEnabled(c);
                 var upperNode = MakeNode(upper, c);
-                bool upperOn = upperNode != null && (method != MergeMethod.IntoClippingBase || lowerOn && lower.Opacity > 0);
+                bool upperOn = upperNode != null && (method != MergeMethod.IntoClippingBase || lowerOn && lower.OpacityIn(c) > 0);
                 if (!lowerHas && !upperOn) continue;
                 var tiles = new SortedSet<TileCoord>(lower.EnumerateContentTiles(c));
                 if (lower.Kind == LayerKind.Raster && lower.Channels.TryGetValue(c, out var raw)) tiles.UnionWith(raw.EnumerateTileCoordinates());
@@ -229,7 +230,12 @@ namespace Yozolab.YoluPainter.Core
         /// level, or a group in another mode than pass through), so the backdrop under the layer is transparent.</summary>
         bool NothingShowsBelow(PaintLayer layer)
         {
-            if (layer.ParentId != Guid.Empty && GetLayer(layer.ParentId).BlendMode == LayerBlendMode.PassThrough) return false;
+            if (layer.ParentId != Guid.Empty)
+            {
+                // 通過するチャンネルが 1 つでもあれば、そのチャンネルでは下が見える
+                var parent = GetLayer(layer.ParentId);
+                foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel))) if (parent.BlendModeIn(c) == LayerBlendMode.PassThrough) return false;
+            }
             for (int i = layers.IndexOf(layer) - 1; i >= 0; i--) if (layers[i].ParentId == layer.ParentId && layers[i].Visible) return false;
             return true;
         }
@@ -260,6 +266,7 @@ namespace Yozolab.YoluPainter.Core
             Guid id = NewLayerId(resultId);
             var result = new PaintLayer(this, group.Name, id)
             { Visible = group.Visible, Opacity = group.Opacity, Clipping = group.Clipping, BlendMode = group.BlendMode == LayerBlendMode.PassThrough ? LayerBlendMode.Normal : group.BlendMode, Locks = group.Locks };
+            result.CopyChannelBlendsFrom(group, passThroughAsNormal: true);
             if (group.Mask != null) result.Mask = CloneMask(group.Mask, result);
             long budget = 0;
             foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel)))
@@ -430,7 +437,7 @@ namespace Yozolab.YoluPainter.Core
                     foreach (var m in members)
                     {
                         var n = MakeNode(m, c); if (n == null) continue;
-                        n.PassesThrough = n.Group && m.BlendMode == LayerBlendMode.PassThrough;
+                        n.PassesThrough = n.Group && n.RawMode == LayerBlendMode.PassThrough;
                         nodes.Add(n);
                     }
                 }
@@ -583,7 +590,10 @@ namespace Yozolab.YoluPainter.Core
         /// with its contents, and per-slot tile buffers.</summary>
         sealed class MergeNode
         {
-            internal PaintLayer Layer; internal bool Adjustment, Group, PassesThrough; internal LayerBlendMode Mode;
+            internal PaintLayer Layer; internal bool Adjustment, Group, PassesThrough;
+            /// <summary>The layer's mode and opacity in the merged channel (<see cref="PaintLayer.BlendModeIn"/>, <see cref="PaintLayer.OpacityIn"/>);
+            /// Mode is RawMode with pass through as Normal.</summary>
+            internal LayerBlendMode Mode, RawMode; internal double Opacity;
             internal readonly List<MergeNode> Children = new List<MergeNode>(), Clips = new List<MergeNode>();
             internal byte[][] Pixels, Hide; internal bool[] Present; internal double[] Factor;
             internal void Allocate(int slots, int tileBytes)
@@ -600,7 +610,7 @@ namespace Yozolab.YoluPainter.Core
             }
         }
         static bool ActiveIn(PaintLayer layer, PaintChannel channel)
-        { return layer.Visible && layer.Opacity > 0 && layer.IsChannelEnabled(channel) && layer.HasContent(channel); }
+        { return layer.Visible && layer.OpacityIn(channel) > 0 && layer.IsChannelEnabled(channel) && layer.HasContent(channel); }
         /// <summary>The plan of a group's contents (Guid.Empty: the top level) for a channel, as <see cref="CpuCompositor.Plan"/> builds it.</summary>
         List<MergeNode> PlanNodes(Guid parent, PaintChannel channel)
         {
@@ -618,7 +628,7 @@ namespace Yozolab.YoluPainter.Core
                 var node = MakeNode(siblings[k], channel); if (node == null) continue;
                 if (siblings[k].Kind != LayerKind.Adjustment)
                     for (int m = k + 1; m < siblings.Count && siblings[m].Clipping; m++) { var clip = MakeNode(siblings[m], channel); if (clip != null) node.Clips.Add(clip); }
-                node.PassesThrough = node.Group && siblings[k].BlendMode == LayerBlendMode.PassThrough && node.Clips.Count == 0;
+                node.PassesThrough = node.Group && node.RawMode == LayerBlendMode.PassThrough && node.Clips.Count == 0;
                 plan.Add(node);
             }
             return plan;
@@ -627,10 +637,11 @@ namespace Yozolab.YoluPainter.Core
         /// shows nothing in the channel.</summary>
         MergeNode MakeNode(PaintLayer layer, PaintChannel channel)
         {
-            var node = new MergeNode { Layer = layer, Adjustment = layer.Kind == LayerKind.Adjustment, Group = layer.IsGroup, Mode = layer.BlendMode == LayerBlendMode.PassThrough ? LayerBlendMode.Normal : layer.BlendMode };
+            var mode = layer.BlendModeIn(channel);
+            var node = new MergeNode { Layer = layer, Adjustment = layer.Kind == LayerKind.Adjustment, Group = layer.IsGroup, RawMode = mode, Mode = mode == LayerBlendMode.PassThrough ? LayerBlendMode.Normal : mode, Opacity = layer.OpacityIn(channel) };
             if (layer.IsGroup)
             {
-                if (!layer.Visible || layer.Opacity <= 0) return null;
+                if (!layer.Visible || node.Opacity <= 0) return null;
                 node.Children.AddRange(PlanNodes(layer.Id, channel));
                 return node.Children.Count == 0 ? null : node;
             }
@@ -718,7 +729,7 @@ namespace Yozolab.YoluPainter.Core
         static void ClearPresence(List<MergeNode> nodes, int slot) { foreach (var n in nodes) { n.Present[slot] = false; ClearPresence(n.Children, slot); ClearPresence(n.Clips, slot); } }
 
         static Rgba32 Read(byte[] bytes, int o) => new Rgba32(bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]);
-        static double Amount(MergeNode n, int slot, int i) => n.Hide == null ? n.Layer.Opacity : n.Layer.Opacity * n.Factor[n.Hide[slot][i * 4 + 3]];
+        static double Amount(MergeNode n, int slot, int i) => n.Hide == null ? n.Opacity : n.Opacity * n.Factor[n.Hide[slot][i * 4 + 3]];
 
         /// <summary>The compositor's per-pixel stack (CpuCompositor.EvaluatePixel) over these nodes, onto backdrop.</summary>
         static Rgba32 EvaluateNodes(List<MergeNode> nodes, Rgba32 backdrop, int slot, int i, bool normal)
@@ -731,7 +742,7 @@ namespace Yozolab.YoluPainter.Core
         {
             if (!n.Present[slot]) return result;
             double amount = Amount(n, slot, i);
-            if (n.Adjustment) return n.Layer.Adjustment.Composite(result, amount, n.Layer.BlendMode);
+            if (n.Adjustment) return n.Layer.Adjustment.Composite(result, amount, n.RawMode);
             if (n.PassesThrough)
             {
                 var inner = EvaluateNodes(n.Children, result, slot, i, normal);
@@ -746,7 +757,7 @@ namespace Yozolab.YoluPainter.Core
         {
             if (!clip.Present[slot]) return g;
             double a = Amount(clip, slot, i);
-            if (clip.Adjustment) return clip.Layer.Adjustment.Composite(g, a, clip.Layer.BlendMode);
+            if (clip.Adjustment) return clip.Layer.Adjustment.Composite(g, a, clip.RawMode);
             var c = clip.Group ? EvaluateNodes(clip.Children, Rgba32.Transparent, slot, i, normal) : Read(clip.Pixels[slot], i * 4);
             return normal ? NormalMaps.ClipOnto(g, c, a, clip.Mode) : CpuCompositor.ClipOnto(g, c, a, clip.Mode);
         }

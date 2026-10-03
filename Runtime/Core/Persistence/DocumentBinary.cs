@@ -28,18 +28,28 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// bit, refuses the archive. A document without locks is laid out exactly as version 11 (the byte is 0 or 1), only the version
     /// number differs. Version 13 adds the shape gradient (generator type 5): its generator block is followed by the shape (int) and
     /// the volume (centre x, y, z, rotation x, y, z, size x, y, z, falloff as doubles); generators of other types are written as in
-    /// version 11. Type 5 in an older archive and an unknown shape are refused. Older archives still load.</summary>
+    /// version 11. Type 5 in an older archive and an unknown shape are refused. Version 14 adds attribute bit 2 "the layer's per-channel
+    /// blend settings follow" (<see cref="ChannelBlend"/>): after the locks, a byte count (1..6) and per entry, in channel order, an int
+    /// channel, a byte of parts (bit 0 mode, bit 1 opacity, never 0) and then an int blend mode and/or a double opacity. An unknown part
+    /// bit, channel or mode, pass through on a layer that is not a group, an opacity outside 0..1, a repeated channel or an empty list
+    /// refuses the archive; bit 2 in an older archive (12 or 13) is an unknown bit. A document without per-channel settings is laid out
+    /// exactly as version 13, only the version number differs. Older archives still load.</summary>
     public static class DocumentBinary
     {
-        const int Version = 13;
+        /// <summary>The version that added per-channel blend modes and opacities (attribute bit 2).</summary>
+        internal const int ChannelBlendsVersion = 14;
+        const int Version = ChannelBlendsVersion;
         /// <summary>The version <see cref="Write"/> produces.</summary>
         public const int CurrentVersion = Version;
         /// <summary>The version that added the shape gradient (generator type 5 and its volume after the generator block).</summary>
         internal const int ShapeGradientVersion = 13;
         static bool IsReadable(int version) => version >= 1 && version <= Version;
         const long MaxArchiveBytes = 512L * 1024 * 1024;
-        /// <summary>Version 12 layer attribute byte: bit 0 clipping, bit 1 an int of layer locks follows.</summary>
-        const int AttributeClipping = 1, AttributeLocks = 2;
+        /// <summary>Version 12 layer attribute byte: bit 0 clipping, bit 1 an int of layer locks follows; version 14 bit 2 the per-channel
+        /// blend settings follow.</summary>
+        const int AttributeClipping = 1, AttributeLocks = 2, AttributeChannelBlends = 4;
+        /// <summary>Parts of a per-channel blend entry.</summary>
+        const int BlendPartMode = 1, BlendPartOpacity = 2;
         static readonly byte[] Magic = Encoding.ASCII.GetBytes("DOTPAINT");
 
         public static byte[] Write(PaintDocument document)
@@ -61,8 +71,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     writer.Write(layer.Id.ToByteArray()); WriteString(writer, layer.Name);
                     writer.Write(layer.Visible); writer.Write(layer.Opacity); writer.Write((int)layer.BlendMode);
                     // 版 12: 属性の印（ビット 0 クリッピング、ビット 1 ロックが続く）。ロックの無い層は版 11 と同じ 0 か 1
-                    writer.Write((byte)((layer.Clipping ? AttributeClipping : 0) | (layer.Locks != LayerLocks.None ? AttributeLocks : 0)));
+                    writer.Write((byte)((layer.Clipping ? AttributeClipping : 0) | (layer.Locks != LayerLocks.None ? AttributeLocks : 0) | (layer.HasChannelBlends ? AttributeChannelBlends : 0)));
                     if (layer.Locks != LayerLocks.None) writer.Write((int)layer.Locks);
+                    if (layer.HasChannelBlends) WriteChannelBlends(writer, layer); // 版 14
                     writer.Write((int)layer.Kind);
                     writer.Write(layer.ParentId.ToByteArray());
                     var fills = layer.FillValues.Keys.OrderBy(c => c).ToArray();
@@ -161,11 +172,12 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         bool visible = reader.ReadBoolean(); double opacity = reader.ReadDouble(); int blend = reader.ReadInt32();
                         if (double.IsNaN(opacity) || double.IsInfinity(opacity) || opacity < 0 || opacity > 1 || !Enum.IsDefined(typeof(LayerBlendMode), blend))
                             throw new InvalidDataException("Invalid layer attributes.");
-                        bool clipping = false; var locks = LayerLocks.None;
+                        bool clipping = false; var locks = LayerLocks.None; System.Collections.Generic.List<(PaintChannel, ChannelBlend)> channelBlends = null;
                         if (version >= 12)
                         {
                             int attributes = reader.ReadByte();
-                            if ((attributes & ~(AttributeClipping | AttributeLocks)) != 0) throw new InvalidDataException("Unknown layer attribute flags " + attributes + "; a newer reader is required (source retained unchanged).");
+                            int known = AttributeClipping | AttributeLocks | (version >= ChannelBlendsVersion ? AttributeChannelBlends : 0);
+                            if ((attributes & ~known) != 0) throw new InvalidDataException("Unknown layer attribute flags " + attributes + "; a newer reader is required (source retained unchanged).");
                             clipping = (attributes & AttributeClipping) != 0;
                             if ((attributes & AttributeLocks) != 0)
                             {
@@ -173,6 +185,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                                 if (value == 0 || (value & ~(int)PaintDocument.KnownLocks) != 0) throw new InvalidDataException("Unknown layer lock flags " + value + "; a newer reader is required (source retained unchanged).");
                                 locks = (LayerLocks)value;
                             }
+                            if ((attributes & AttributeChannelBlends) != 0) channelBlends = ReadChannelBlends(reader);
                         }
                         else clipping = version >= 5 && reader.ReadBoolean();
                         int kind = version >= 3 ? reader.ReadInt32() : (int)LayerKind.Raster;
@@ -227,6 +240,12 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         doc.SetParentForLoad(layer, parentId);
                         doc.SetLayerVisibility(layer.Id, visible); doc.SetLayerOpacity(layer.Id, opacity); doc.SetLayerBlendMode(layer.Id, (LayerBlendMode)blend);
                         doc.SetLayerClipping(layer.Id, clipping);
+                        if (channelBlends != null)
+                            foreach (var (blendChannel, channelBlend) in channelBlends)
+                            {
+                                try { doc.SetChannelBlendForLoad(layer, blendChannel, channelBlend); }
+                                catch (ArgumentException ex) { throw new InvalidDataException("Invalid per-channel blend setting of layer '" + layerName + "': " + ex.Message, ex); }
+                            }
                         int channelCount = ReadCount(reader, 6, "channels");
                         if (layer.Kind != LayerKind.Raster && channelCount != 0) throw new InvalidDataException("Only raster layers have pixel channels.");
                         var seenChannels = new System.Collections.Generic.HashSet<int>();
@@ -285,6 +304,47 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 }
                 catch (EndOfStreamException ex) { throw new InvalidDataException("Native archive is truncated.", ex); }
             }
+        }
+        static void WriteChannelBlends(BinaryWriter writer, PaintLayer layer)
+        {
+            var channels = layer.ChannelBlends.Keys.OrderBy(c => c).ToArray();
+            writer.Write((byte)channels.Length);
+            foreach (var channel in channels)
+            {
+                var b = layer.ChannelBlends[channel];
+                writer.Write((int)channel);
+                writer.Write((byte)((b.Mode.HasValue ? BlendPartMode : 0) | (b.Opacity.HasValue ? BlendPartOpacity : 0)));
+                if (b.Mode.HasValue) writer.Write((int)b.Mode.Value);
+                if (b.Opacity.HasValue) writer.Write(b.Opacity.Value);
+            }
+        }
+        /// <summary>The version 14 per-channel blend block. Values are checked against the layer (pass through on groups only) once it exists.</summary>
+        static System.Collections.Generic.List<(PaintChannel, ChannelBlend)> ReadChannelBlends(BinaryReader reader)
+        {
+            int count = reader.ReadByte();
+            if (count < 1 || count > 6) throw new InvalidDataException("Invalid count of per-channel blend settings (" + count + ").");
+            var list = new System.Collections.Generic.List<(PaintChannel, ChannelBlend)>(); var seen = new System.Collections.Generic.HashSet<int>();
+            for (int i = 0; i < count; i++)
+            {
+                int channel = reader.ReadInt32(); int parts = reader.ReadByte();
+                if (!Enum.IsDefined(typeof(PaintChannel), channel) || !seen.Add(channel)) throw new InvalidDataException("Invalid or duplicate channel in per-channel blend settings.");
+                if (parts == 0 || (parts & ~(BlendPartMode | BlendPartOpacity)) != 0) throw new InvalidDataException("Unknown per-channel blend parts " + parts + "; a newer reader is required (source retained unchanged).");
+                LayerBlendMode? mode = null; double? opacity = null;
+                if ((parts & BlendPartMode) != 0)
+                {
+                    int m = reader.ReadInt32();
+                    if (!Enum.IsDefined(typeof(LayerBlendMode), m)) throw new InvalidDataException("Unknown blend mode " + m + " in per-channel blend settings; a newer reader is required (source retained unchanged).");
+                    mode = (LayerBlendMode)m;
+                }
+                if ((parts & BlendPartOpacity) != 0)
+                {
+                    double o = reader.ReadDouble();
+                    if (double.IsNaN(o) || double.IsInfinity(o) || o < 0 || o > 1) throw new InvalidDataException("Invalid per-channel opacity.");
+                    opacity = o;
+                }
+                list.Add(((PaintChannel)channel, new ChannelBlend(mode, opacity)));
+            }
+            return list;
         }
         static void WriteFilters(BinaryWriter writer, System.Collections.Generic.IReadOnlyList<FilterEffect> filters, bool content)
         {

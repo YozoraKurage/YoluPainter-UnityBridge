@@ -29,19 +29,22 @@ namespace Yozolab.YoluPainter.Editor
 
         /// <summary>彩度×明度の四角の高さ（低い画面では小さく）。円のときは円の直径。</summary>
         float SvHeight => ColorWheel ? Mathf.Clamp((colorColumnHeight - 480) * .6f, 120, 196) : Mathf.Clamp((colorColumnHeight - 480) * .5f, 72, 128);
-        float ColorPanelHeight => channel == PaintChannel.Color || channel == PaintChannel.Emission ? 8 + SvHeight + 6 + 22 + 6 + 16 + 8 : 70;
+        float ColorPanelHeight => ColorPanelPicksColor ? 8 + SvHeight + 6 + 22 + 6 + 16 + 8 : 70;
+        /// <summary>色のパネルが色を選ぶか（Color・Emission のとき。マテリアルで塗るときはいつも描画色 = Color の値。ほかのチャンネルの値は
+        /// ブラシの欄の「マテリアル」の節）。</summary>
+        bool ColorPanelPicksColor => brush.material || channel == PaintChannel.Color || channel == PaintChannel.Emission;
         /// <summary>色相の円の太さ（半径に対する割合）。</summary>
         internal const float RingThickness = .17f;
 
         void DrawColorPanel(Rect r)
         {
             var rows = new UiRows(r, 8);
-            if (channel == PaintChannel.Normal)
+            if (!brush.material && channel == PaintChannel.Normal)
             {
                 PaintGui.Text(rows.Row(36), L.Tr("The Normal channel paints a direction. Choose it in Properties ▸ Normal."), PaintTheme.Wrap);
                 return;
             }
-            if (channel == PaintChannel.Roughness || channel == PaintChannel.Metallic || channel == PaintChannel.Height)
+            if (!brush.material && (channel == PaintChannel.Roughness || channel == PaintChannel.Metallic || channel == PaintChannel.Height))
             {
                 var row = rows.Row(24);
                 float value = PaintGui.Slider(row, L.Tr("Value"), brush.color.r * 255, 0, 255, "0", "", L.Tr("The value the brush paints (0–255)")) / 255;
@@ -227,7 +230,8 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>描き始めたブラシの色を使った色の履歴の先頭に足す（カラーとエミッションのとき。同じ色は前へ移す）。</summary>
         void RememberColor()
         {
-            if (channel != PaintChannel.Color && channel != PaintChannel.Emission || EditingMask || brush.erase) return;
+            if (brush.material ? !MaterialIncludes(PaintChannel.Color) : channel != PaintChannel.Color && channel != PaintChannel.Emission) return;
+            if (EditingMask || brush.erase) return;
             var c = brush.color;
             recentColors.RemoveAll(x => Mathf.Abs(x.r - c.r) < .002f && Mathf.Abs(x.g - c.g) < .002f && Mathf.Abs(x.b - c.b) < .002f && Mathf.Abs(x.a - c.a) < .002f);
             recentColors.Insert(0, c);

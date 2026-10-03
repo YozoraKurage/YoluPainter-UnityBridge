@@ -89,15 +89,27 @@ namespace Yozolab.YoluPainter.Core
             if (!channels.TryGetValue(channel, out surface))
             {
                 document.EnsureNoStroke();
-                surface = new SparseTileSurface(document.Width, document.Height, document.TileSize);
-                surface.BeforeExternalMutation = document.BeforeExternalMutation;
-                surface.AfterExternalMutation = document.AfterExternalMutation;
-                surface.BeforeSourceGrowth = document.EnsureSourceGrowth;
-                surface.TileChanged = coord => document.MarkSourceTileChanged(this, channel, coord);
+                surface = NewChannelSurface(channel);
                 channels.Add(channel, surface); enabled.Add(channel);
             }
             return surface;
         }
+        /// <summary>An empty surface for a channel of this layer, wired to the document (budget, change journal), not yet attached.</summary>
+        internal SparseTileSurface NewChannelSurface(PaintChannel channel)
+        {
+            var surface = new SparseTileSurface(document.Width, document.Height, document.TileSize);
+            surface.BeforeExternalMutation = document.BeforeExternalMutation;
+            surface.AfterExternalMutation = document.AfterExternalMutation;
+            surface.BeforeSourceGrowth = document.EnsureSourceGrowth;
+            surface.TileChanged = coord => document.MarkSourceTileChanged(this, channel, coord);
+            return surface;
+        }
+        /// <summary>Puts a channel's surface back (the redo of switching a new channel on): the same object, so history entries that
+        /// refer to it (strokes painted on it) find it again.</summary>
+        internal void AttachChannel(PaintChannel channel, SparseTileSurface surface)
+        { if (!channels.ContainsKey(channel)) channels.Add(channel, surface); }
+        /// <summary>Removes a channel's surface (the undo of creating it). The caller keeps the object for the redo.</summary>
+        internal void DetachChannel(PaintChannel channel) { channels.Remove(channel); }
         public bool TryGetChannel(PaintChannel channel, out SparseTileSurface surface) { return channels.TryGetValue(channel, out surface); }
         /// <summary>Removes a disabled channel's surface again when it holds no tiles (the undo of enabling it), so the layer is
         /// exactly as before and saves no empty surface.</summary>
@@ -570,9 +582,13 @@ namespace Yozolab.YoluPainter.Core
             RefuseLockedAttributes(layer);
             if (enabled && layer.Kind == LayerKind.Adjustment && !layer.Adjustment.AppliesTo(channel))
                 throw new InvalidOperationException(layer.Adjustment.Type + " cannot be applied to the " + channel + " channel.");
-            // 有効にして初めて面ができたときは、取り消しで面も消す（空の面が残ると保存のバイト列が変わる）
+            // 有効にして初めて面ができたときは、取り消しで面も外す（空の面が残ると保存のバイト列が変わる）。やり直しでは同じ面を付け直す
+            // （作り直すと、その面に描いた後の履歴が、外れた面へ画素を戻してしまう）
             bool hadSurface = layer.TryGetChannel(channel, out _);
-            Execute(LayerScoped(layer, channel, () => layer.Enable(channel, enabled), () => { layer.Enable(channel, old); if (!hadSurface) layer.DropEmptyChannel(channel); }, 64));
+            SparseTileSurface created = null;
+            Execute(LayerScoped(layer, channel,
+                () => { if (created != null) layer.AttachChannel(channel, created); layer.Enable(channel, enabled); if (!hadSurface && created == null) layer.TryGetChannel(channel, out created); },
+                () => { layer.Enable(channel, old); if (!hadSurface) layer.DropEmptyChannel(channel); }, 64));
         }
         /// <summary>Adds an empty raster mask (reveals everything) to a layer. Undoable.</summary>
         public RasterMask AddLayerMask(Guid id)

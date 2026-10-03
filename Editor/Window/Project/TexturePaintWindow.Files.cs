@@ -177,7 +177,12 @@ namespace Yozolab.YoluPainter.Editor
                 openedFormat=opened.Info.Format; projectCreatedBy=opened.Info.CreatedBy;
                 var notes=new List<string>();
                 var budgetNote=ApplyBudgets(); if(budgetNote!=null)notes.Add(budgetNote);
-                if(files.TryGetValue(YlpContent.BrushName,out var preset)){brush=ReadBrushState(System.Text.Encoding.UTF8.GetString(preset));var missing=MissingTipNote();if(missing!=null)notes.Add(missing);}
+                if(files.TryGetValue(YlpContent.BrushName,out var preset))
+                {
+                    // 状態のエントリ: 読めなければ今のブラシのまま開いて知らせる（正本は読めているので開くのを止めない）
+                    try{brush=ReadBrushState(System.Text.Encoding.UTF8.GetString(preset));var missing=MissingTipNote();if(missing!=null)notes.Add(missing);}
+                    catch(Exception ex) when(ex is InvalidDataException||ex is ArgumentException){notes.Add("The saved brush settings could not be read ("+ex.Message+"); the brush keeps its current settings.");}
+                }
                 if(files.TryGetValue(YlpContent.ViewName,out var view))
                 {
                     var state=JsonUtility.FromJson<ViewState>(System.Text.Encoding.UTF8.GetString(view));channel=(PaintChannel)state.selectedChannel;

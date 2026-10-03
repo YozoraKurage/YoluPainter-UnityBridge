@@ -968,8 +968,9 @@ namespace Yozolab.YoluPainter.Editor
         void AppendSignature(StringBuilder sb, CpuCompositor.StackEntry entry, PaintChannel channel, int bx, int by)
         {
             var layer = entry.Base;
-            sb.Append(layer.Id.ToString("N")).Append('|').Append((int)layer.Kind).Append('|').Append(layer.Opacity.ToString("R", CultureInfo.InvariantCulture))
-              .Append('|').Append((int)layer.BlendMode);
+            // 不透明度と合成モードは、このチャンネルでのもの（層のチャンネルごとの設定があればそれ）
+            sb.Append(layer.Id.ToString("N")).Append('|').Append((int)layer.Kind).Append('|').Append(entry.Opacity.ToString("R", CultureInfo.InvariantCulture))
+              .Append('|').Append((int)entry.BlendMode);
             var mask = layer.Mask;
             if (mask == null) sb.Append("|m-");
             else
@@ -1025,7 +1026,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>不透明度 1 でマスクが効いていない通過グループは、フェードが中身そのもの（CpuCompositor.Fade の amount ≥ 1）なので
         /// 同じ段で重ねられる。</summary>
         static bool PassesThroughWhole(CpuCompositor.StackEntry e)
-        { return e.PassesThrough && e.Base.Opacity >= 1 && (e.Base.Mask == null || e.Base.Mask.IsNeutral); }
+        { return e.PassesThrough && e.Opacity >= 1 && (e.Base.Mask == null || e.Base.Mask.IsNeutral); }
         /// <summary>この計画の合成に要る入れ子の段の数（CompositeEntry と同じ規則で数える）。</summary>
         internal static int LevelsNeeded(IReadOnlyList<CpuCompositor.StackEntry> plan)
         {
@@ -1085,7 +1086,7 @@ namespace Yozolab.YoluPainter.Editor
             if (layer.Kind == LayerKind.Adjustment)
             {
                 // 自分の画素は無く、下の合成結果に調整をかける。透明な画素はシェーダーがそのまま返す。
-                SetAdjustment(layer.Adjustment); SetLayer(layer.Opacity, layer.BlendMode, layer.Mask, bx, by, keep);
+                SetAdjustment(layer.Adjustment); SetLayer(entry.Opacity, entry.BlendMode, layer.Mask, bx, by, keep);
                 return Step(current, level, 2, null);
             }
             if (layer.IsGroup && (skipGroups || !TouchesBlock(entry, channel, bx, by))) return current;
@@ -1096,14 +1097,14 @@ namespace Yozolab.YoluPainter.Editor
                 var inner = LevelAt(depth + 1);
                 Blit(current, inner.A, 1, null);
                 var innerResult = CompositeLevel(entry.Children, inner, inner.A, depth + 1, channel, bx, by, keep, skipGroups);
-                SetLayer(layer.Opacity, LayerBlendMode.Normal, layer.Mask, bx, by, keep);
+                SetLayer(entry.Opacity, LayerBlendMode.Normal, layer.Mask, bx, by, keep);
                 return Step(current, level, 4, innerResult);
             }
             Source source;
             if (layer.IsGroup) source = new Source { Texture = Isolated(entry.Children, depth + 1, channel, bx, by, keep, skipGroups) };
             else if (!TryGetSource(layer, channel, bx, by, keep, out source)) return current; // このブロックに画素が無い（クリッピングのまとまりも透明）
             if (entry.ClipEntries.Count > 0) source = new Source { Texture = BuildClippingGroup(entry, source, level, depth, channel, bx, by, keep, skipGroups) };
-            SetLayer(layer.Opacity, ModeOf(layer), layer.Mask, bx, by, keep);
+            SetLayer(entry.Opacity, ModeOf(entry), layer.Mask, bx, by, keep);
             SetSource(source);
             return Step(current, level, 0, source.Texture);
         }
@@ -1144,14 +1145,15 @@ namespace Yozolab.YoluPainter.Editor
                     if (!TryGetSource(c, channel, bx, by, keep, out source)) continue;
                     pass = 3;
                 }
-                SetLayer(c.Opacity, c.Kind == LayerKind.Adjustment ? c.BlendMode : ModeOf(c), c.Mask, bx, by, keep);
+                SetLayer(clip.Opacity, c.Kind == LayerKind.Adjustment ? clip.BlendMode : ModeOf(clip), c.Mask, bx, by, keep);
                 if (pass == 3) SetSource(source);
                 Blit(current, other, pass, source.Texture);
                 var swap = current; current = other; other = swap;
             }
             return current;
         }
-        static LayerBlendMode ModeOf(PaintLayer layer) { return layer.BlendMode == LayerBlendMode.PassThrough ? LayerBlendMode.Normal : layer.BlendMode; }
+        /// <summary>計画の項目の合成モード（このチャンネルでのもの。通過は Normal）。</summary>
+        static LayerBlendMode ModeOf(CpuCompositor.StackEntry entry) { return entry.BlendMode == LayerBlendMode.PassThrough ? LayerBlendMode.Normal : entry.BlendMode; }
         /// <summary>current（level の A か B）を読み、もう片方へ書く。読みと書きが同じブロックになることは無い。</summary>
         RenderTexture Step(RenderTexture current, Level level, int pass, Texture layerTex)
         {

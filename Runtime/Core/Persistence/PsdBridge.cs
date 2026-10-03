@@ -11,7 +11,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// refused instead of being flattened into pixels.</summary>
     public static class PsdBridge
     {
-        /// <summary>Export a native channel. The merged image is the CPU composite of that channel. Opacity and mask density are
+        /// <summary>Export a native channel. The merged image is the CPU composite of that channel. Each layer is written with its opacity
+        /// and blend mode in that channel (<see cref="PaintLayer.OpacityIn"/>, <see cref="PaintLayer.BlendModeIn"/>: a per-channel setting
+        /// when the layer has one), so the layers recomposite to the merged image. Opacity and mask density are
         /// rounded to the nearest 1/255 (PSD stores bytes). For the Normal channel the merged image is the evaluated Normal
         /// output (<see cref="NormalMaps.FileOutput"/>: vector composite flattened onto flat, opaque, with Height → Normal when
         /// it is on), which Photoshop does not reproduce when it recomposites the layers; the derived normal is not written as
@@ -72,34 +74,35 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 if (byteBudget > 128L * 1024 * 1024) throw new InvalidOperationException("PSD projection exceeds the prototype's 128 MiB decoded-layer budget. Save the native project instead.");
             }
             var mask = layer.Mask == null ? null : ExportMask(layer.Mask, source.Width, source.Height);
-            var opacity = (byte)Math.Round(layer.Opacity * 255);
+            // 書き出すチャンネルでの不透明度と合成モード（層のチャンネルごとの設定があればそれ）。PSD は 1 チャンネルずつなので、そのチャンネルの値で書く
+            var opacity = (byte)Math.Round(layer.OpacityIn(channel) * 255); var blendMode = layer.BlendModeIn(channel);
             if (layer.Kind == LayerKind.Adjustment)
             {
-                if (PsdCodec.BlendKey(layer.BlendMode) == null) throw new InvalidOperationException("Blend mode " + layer.BlendMode + " has no PSD equivalent for an adjustment layer. Native project can still be saved losslessly.");
+                if (PsdCodec.BlendKey(blendMode) == null) throw new InvalidOperationException("Blend mode " + blendMode + " has no PSD equivalent for an adjustment layer. Native project can still be saved losslessly.");
                 // An adjustment that does not apply to this channel (or is switched off in it) exports hidden, as raster layers do.
                 return new PsdRasterLayer { Id = UniqueId(guid, 0, usedIds), Name = layer.Name, Opacity = opacity,
                     Visible = layer.Visible && layer.IsChannelEnabled(channel) && layer.Adjustment.AppliesTo(channel),
-                    BlendMode = layer.BlendMode, Clipping = layer.Clipping, Mask = mask, Adjustment = layer.Adjustment, PixelsRgba = new byte[0], Locks = layer.Locks };
+                    BlendMode = blendMode, Clipping = layer.Clipping, Mask = mask, Adjustment = layer.Adjustment, PixelsRgba = new byte[0], Locks = layer.Locks };
             }
             if (layer.Kind == LayerKind.Fill)
             {
-                if (PsdCodec.BlendKey(layer.BlendMode) == null) throw new InvalidOperationException("Blend mode " + layer.BlendMode + " has no PSD equivalent for a fill layer. Native project can still be saved losslessly.");
+                if (PsdCodec.BlendKey(blendMode) == null) throw new InvalidOperationException("Blend mode " + blendMode + " has no PSD equivalent for a fill layer. Native project can still be saved losslessly.");
                 // 塗りつぶしは単色の SoCo として書く（画素に焼かない）。このチャンネルに値が無ければ非表示で書く
                 bool covers = layer.FillValues.TryGetValue(channel, out var value) && layer.IsChannelEnabled(channel);
                 return new PsdRasterLayer { Id = UniqueId(guid, 0, usedIds), Name = layer.Name, Opacity = opacity, Visible = layer.Visible && covers,
-                    BlendMode = layer.BlendMode, Clipping = layer.Clipping, Mask = mask, FillColor = covers ? value : new Rgba32(0, 0, 0, 255), PixelsRgba = new byte[0], Locks = layer.Locks };
+                    BlendMode = blendMode, Clipping = layer.Clipping, Mask = mask, FillColor = covers ? value : new Rgba32(0, 0, 0, 255), PixelsRgba = new byte[0], Locks = layer.Locks };
             }
             if (layer.IsGroup)
             {
-                if (layer.BlendMode != LayerBlendMode.PassThrough && PsdCodec.BlendKey(layer.BlendMode) == null)
-                    throw new InvalidOperationException("Blend mode " + layer.BlendMode + " has no PSD folder equivalent. Native project can still be saved losslessly.");
+                if (blendMode != LayerBlendMode.PassThrough && PsdCodec.BlendKey(blendMode) == null)
+                    throw new InvalidOperationException("Blend mode " + blendMode + " has no PSD folder equivalent. Native project can still be saved losslessly.");
                 var group = new PsdRasterLayer { Id = UniqueId(guid, 0, usedIds), Name = layer.Name, Opacity = opacity, Visible = layer.Visible,
-                    BlendMode = layer.BlendMode, Clipping = layer.Clipping, Mask = mask, PixelsRgba = new byte[0], Locks = layer.Locks };
+                    BlendMode = blendMode, Clipping = layer.Clipping, Mask = mask, PixelsRgba = new byte[0], Locks = layer.Locks };
                 group.DividerId = UniqueId(guid, 4, usedIds);
                 group.Children = ExportLevel(source, channel, layer.Id, usedIds, ref byteBudget);
                 return group;
             }
-            if (PsdCodec.BlendKey(layer.BlendMode) == null) throw new InvalidOperationException("Blend mode " + layer.BlendMode + " has no PSD equivalent for a raster layer. Native project can still be saved losslessly.");
+            if (PsdCodec.BlendKey(blendMode) == null) throw new InvalidOperationException("Blend mode " + blendMode + " has no PSD equivalent for a raster layer. Native project can still be saved losslessly.");
             int left = source.Width, bottom = source.Height, right = 0, top = 0;
             SparseTileSurface surface;
             if (layer.TryGetChannel(channel, out surface))
@@ -123,7 +126,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 }
             return new PsdRasterLayer { Id=UniqueId(guid, 0, usedIds), Name=layer.Name, Left=left, Top=source.Height-top,
                 Width=width, Height=height, Opacity=opacity, Visible=layer.Visible && layer.IsChannelEnabled(channel),
-                BlendMode=layer.BlendMode, Clipping=layer.Clipping, Mask=mask, PixelsRgba=pixels, Locks=layer.Locks };
+                BlendMode=blendMode, Clipping=layer.Clipping, Mask=mask, PixelsRgba=pixels, Locks=layer.Locks };
         }
 
         /// <summary>Native mask (hide amount in alpha, bottom-left origin) → PSD mask (255 shows, top-down). The rectangle is the

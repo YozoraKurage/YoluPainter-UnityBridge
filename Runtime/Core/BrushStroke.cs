@@ -3,7 +3,9 @@ using System.Collections.Generic;
 
 namespace Yozolab.YoluPainter.Core
 {
-    /// <summary>A transaction for exactly one layer/channel. Dispose cancels unless committed. Brush settings are
+    /// <summary>A transaction for one layer: one channel (<see cref="PaintDocument.BeginStroke"/>), a layer mask, or several channels of the
+    /// layer painted together with one coverage (<see cref="PaintDocument.BeginMaterialStroke"/>, Substance Painter's material painting).
+    /// Dispose cancels unless committed. Brush settings are
     /// frozen at start. Input order/time and every arc-length stamp are retained; there is no final-endpoint double dab.
     /// Paint builds up per pixel during the stroke like Photoshop / CLIP STUDIO: each dab moves the pixel's stroke coverage
     /// toward the dab's ceiling (Opacity × pressure) by its flow (Flow × coverage × pressure), and the pixel is recomputed
@@ -14,23 +16,44 @@ namespace Yozolab.YoluPainter.Core
     /// ApplyPixel (mesh dabs) uses one colour per stroke and no dual brush, fade or tilt.
     /// With CurveInterpolation the path points (after the stabilizer) are joined by a centripetal Catmull-Rom curve, cut into
     /// pieces of about <see cref="CurvePieceLength"/> px that go through the same straight-segment spacing, dual-brush and taper
-    /// steps; the segment to the newest point waits for the next point (or the commit).</summary>
+    /// steps; the segment to the newest point waits for the next point (or the commit).
+    /// <para>Several channels: the dabs, the dual brush and the per-pixel stroke coverage are computed once and shared; each channel
+    /// (a target) keeps its own pixels before the stroke, its own colour (and its own colour-dynamics stream, seeded as a stroke of that
+    /// channel alone would seed it) and applies the shared coverage with the arithmetic of a one-channel stroke, so every channel ends
+    /// with exactly the bytes a stroke of that channel alone gives. Lock Transparent Pixels is decided per channel and pixel. The
+    /// rollback copies of every channel and the shared coverage count together against the document's active-stroke budget. One
+    /// commit is one undo step for every channel.</para></summary>
     public sealed class BrushStroke : IDisposable
     {
         private readonly PaintDocument document;
-        private readonly SparseTileSurface surface;
+        /// <summary>The settings that shape the dabs (the first target's; the targets' settings differ only in colour).</summary>
         private readonly BrushSettings settings;
-        private readonly Dictionary<TileCoord, TileStorage> before = new Dictionary<TileCoord, TileStorage>();
-        /// <summary>What the stroke keeps for one tile it has touched (created together with the tile's entry in before).</summary>
+        /// <summary>One surface the stroke paints: its settings (the colour painted there), its colour (and colour stream) and the tiles
+        /// it has taken over (rollback copies, in <see cref="Before"/>).</summary>
+        private sealed class Target
+        {
+            public SparseTileSurface Surface; public BrushSettings Settings;
+            public Rgba32 StrokeColor, DabColor; public Random ColorRandom; public bool TipColors;
+            public readonly Dictionary<TileCoord, TileStorage> Before = new Dictionary<TileCoord, TileStorage>();
+        }
+        private readonly Target[] targets;
+        /// <summary>True when some target keeps per-tip colours (then a pixel at the ceiling still moves toward the dab colour).</summary>
+        private readonly bool anyTipColors;
+        /// <summary>What the stroke keeps for one tile it has touched (created together with the first target's entry in Before).</summary>
         private sealed class StrokeTile
         {
-            public TileStorage Before;
-            /// <summary>Accumulated stroke coverage (0..1) per pixel, tile-local row-major. Freed with the stroke.</summary>
+            /// <summary>Accumulated stroke coverage (0..1) per pixel, tile-local row-major, shared by every target. Freed with the stroke.</summary>
             public float[] Wash;
-            /// <summary>Per-tip colours: the stroke colour per pixel (straight RGBA 0..1), or null.</summary>
-            public float[] Paint;
-            /// <summary>The last pixel pass (<see cref="passSerial"/>) that changed a pixel of the tile.</summary>
-            public long ChangedInPass = -1;
+            /// <summary>Per target: whether its pixels of the tile were taken over, its rollback copy, and per-tip colours (the stroke
+            /// colour per pixel, straight RGBA 0..1) or null.</summary>
+            public bool[] Captured; public TileStorage[] Before; public float[][] Paint;
+            /// <summary>Per target: the last pixel pass (<see cref="passSerial"/>) that changed a pixel of the tile.</summary>
+            public long[] ChangedInPass;
+            public StrokeTile(int targets, float[] wash)
+            {
+                Wash = wash; Captured = new bool[targets]; Before = new TileStorage[targets]; Paint = new float[targets][];
+                ChangedInPass = new long[targets]; for (int k = 0; k < targets; k++) ChangedInPass[k] = -1;
+            }
         }
         private readonly Dictionary<TileCoord, StrokeTile> strokeTiles = new Dictionary<TileCoord, StrokeTile>();
         /// <summary>The tile the pixel loop is in. Each dab (or ApplyPixel call) looks its tiles up once per tile instead of once
@@ -38,13 +61,21 @@ namespace Yozolab.YoluPainter.Core
         private sealed class TileCursor
         {
             public int X, Y; public TileCoord Coord;
-            public StrokeTile Stroke; public TileStorage Surface, Selected; public float[] Dual;
-            public void Reset() { X = int.MinValue; Y = int.MinValue; Stroke = null; Surface = null; Selected = null; Dual = null; }
+            public StrokeTile Stroke; public TileStorage Selected; public float[] Dual;
+            /// <summary>Per target: the surface's tile (updated when a write creates it).</summary>
+            public readonly TileStorage[] Surfaces;
+            /// <summary>Per target: whether the pixel being worked on is painted there (scratch of ApplyPixelAt).</summary>
+            public readonly bool[] Accepts;
+            public TileCursor(int targets) { Surfaces = new TileStorage[targets]; Accepts = new bool[targets]; }
+            public void Reset() { X = int.MinValue; Y = int.MinValue; Stroke = null; Selected = null; Dual = null; Array.Clear(Surfaces, 0, Surfaces.Length); }
         }
-        private readonly TileCursor cursor = new TileCursor();
-        // ひと通りの画素の処理（ダブ 1 つ、ApplyPixel 1 回）で変えたタイル。面の書き換え番号と変更の記録は、画素ごとでなく
+        private readonly TileCursor cursor;
+        /// <summary>The size shared by every target surface.</summary>
+        private readonly int width, height, tileSize;
+        // ひと通りの画素の処理（ダブ 1 つ、ApplyPixel 1 回）で変えたタイル（とその面）。面の書き換え番号と変更の記録は、画素ごとでなく
         // その処理の終わりにタイルごとに 1 回進める（結果の画素も、どのタイルが変わったと伝わるかも同じ）。
-        private readonly List<TileCoord> passChanged = new List<TileCoord>();
+        private struct PassChange { public int Target; public TileCoord Coord; }
+        private readonly List<PassChange> passChanged = new List<PassChange>();
         private long passSerial;
         /// <summary>The document's selection when the stroke began (null = everything). Results are mixed back toward the
         /// pixel before the stroke by the selected amount, so a half-selected pixel never changes more than halfway.</summary>
@@ -60,12 +91,9 @@ namespace Yozolab.YoluPainter.Core
         private readonly Queue<PendingDab> pending = new Queue<PendingDab>();
         private readonly Random random;
         // カラーダイナミクス: 乱数は位置のゆらぎと別の列（色を足してもダブの位置は動かない）。tipColors ではダブごとに色が変わるので、
-        // 画素ごとにストロークの色（straight RGBA 0〜1）を持ち、ダブの色へ流量の割合で寄せる。
+        // 画素ごとにストロークの色（straight RGBA 0〜1）を持ち、ダブの色へ流量の割合で寄せる。色の列はターゲットごとに持つ（そのチャンネル
+        // だけを塗ったときと同じ列）。
         private const int ColorStream = 0x2545F491, DualStream = 0x5DEECE6;
-        private readonly Random colorRandom;
-        private readonly bool tipColors;
-        private readonly Rgba32 strokeColor;
-        private Rgba32 dabColor;
         // デュアルブラシ: 2 つ目の筆先のダブ（道筋の上の位置と線の長さ）と、画素ごとの最大の被覆率
         private struct DualDab { public double X, Y, Arc; }
         private readonly DualBrush dual;
@@ -87,25 +115,48 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>Lock Transparent Pixels: every pixel keeps its alpha and only its colour moves towards the paint (source-atop);
         /// fully transparent pixels are left as they are, RGB included. Never with Erase (refused when the stroke begins).</summary>
         private readonly bool keepAlpha;
+        /// <summary>Channels the stroke switched on when it began (a material stroke on a layer without them), applied already: undone with
+        /// a cancel or a commit that changed nothing, else part of the stroke's undo step. Null when none.</summary>
+        private readonly IHistoryCommand enabling;
         public Guid TransactionId { get; private set; }
         public bool IsFinished { get { return finished; } }
         public long SampleCount { get; private set; }
         public long StampCount { get; private set; }
-        public int ChangedTileCount { get { return before.Count; } }
+        /// <summary>Tiles taken over, summed over the channels the stroke paints.</summary>
+        public int ChangedTileCount { get { int n = 0; foreach (var t in targets) n += t.Before.Count; return n; } }
+        /// <summary>Rollback payload of the stroke: every channel's tile copies, the shared coverage and the scratch it keeps.</summary>
         public long RollbackBytes { get { return rollbackBytes; } }
+        /// <summary>How many surfaces the stroke paints (1 for a channel or a mask).</summary>
+        public int TargetCount { get { return targets.Length; } }
         internal BrushStroke(PaintDocument document, SparseTileSurface surface, BrushSettings settings, bool keepAlpha = false)
+            : this(document, new[] { (surface, settings) }, keepAlpha, null) { }
+        /// <param name="paint">The surfaces with their settings (the shape settings must be the same; only the colour and colour
+        /// dynamics may differ).</param>
+        internal BrushStroke(PaintDocument document, IReadOnlyList<(SparseTileSurface surface, BrushSettings settings)> paint, bool keepAlpha, IHistoryCommand enabling)
         {
+            if (paint == null || paint.Count == 0) throw new ArgumentException("A stroke paints at least one surface.", nameof(paint));
+            settings = paint[0].settings;
             if (keepAlpha && settings.Erase) throw new InvalidOperationException("Erasing removes alpha, which a stroke that keeps alpha cannot do.");
-            this.keepAlpha = keepAlpha;
-            selection = document.Selection; this.document = document; this.surface = surface; this.settings = settings; TransactionId = Guid.NewGuid(); random = new Random(settings.Seed);
-            strokeColor = settings.Color;
-            if (settings.HasColorDynamics && !settings.Erase)
+            this.keepAlpha = keepAlpha; this.enabling = enabling;
+            selection = document.Selection; this.document = document; TransactionId = Guid.NewGuid(); random = new Random(settings.Seed);
+            targets = new Target[paint.Count];
+            for (int k = 0; k < targets.Length; k++)
             {
-                // ストロークの色を最初に 1 回引く（ダブごとでないとき、また 3D の面のブラシ（ダブを持たない）はこの色で塗る）。
-                colorRandom = new Random(settings.Seed ^ ColorStream); strokeColor = ColorDynamics.Next(settings, colorRandom);
-                if (settings.ColorPerTip) tipColors = true;
+                var s = paint[k].settings;
+                var t = new Target { Surface = paint[k].surface, Settings = s, StrokeColor = s.Color };
+                if (s.HasColorDynamics && !s.Erase)
+                {
+                    // ストロークの色を最初に 1 回引く（ダブごとでないとき、また 3D の面のブラシ（ダブを持たない）はこの色で塗る）。
+                    t.ColorRandom = new Random(s.Seed ^ ColorStream); t.StrokeColor = ColorDynamics.Next(s, t.ColorRandom);
+                    if (s.ColorPerTip) { t.TipColors = true; anyTipColors = true; }
+                }
+                t.DabColor = t.StrokeColor;
+                targets[k] = t;
             }
-            dabColor = strokeColor;
+            cursor = new TileCursor(targets.Length);
+            width = targets[0].Surface.Width; height = targets[0].Surface.Height; tileSize = targets[0].Surface.TileSize;
+            foreach (var t in targets)
+                if (t.Surface.Width != width || t.Surface.Height != height || t.Surface.TileSize != tileSize) throw new ArgumentException("Every surface of a stroke must have the same size.", nameof(paint));
             if (settings.Dual != null)
             { dual = settings.Dual; dualRandom = new Random(settings.Seed ^ DualStream); dualPending = new Queue<DualDab>(); dualCoverage = new Dictionary<TileCoord, float[]>(); }
         }
@@ -273,9 +324,9 @@ namespace Yozolab.YoluPainter.Core
                 MathUtil.RequireFinite(coverage, nameof(coverage)); MathUtil.RequireFinite(pressure, nameof(pressure));
                 if (coverage < 0 || coverage > 1 || pressure < 0 || pressure > 1) throw new ArgumentOutOfRangeException("coverage/pressure");
                 bool changed = false;
-                if (x >= 0 && y >= 0 && x < surface.Width && y < surface.Height)
+                if (x >= 0 && y >= 0 && x < width && y < height)
                 {
-                    int tile = surface.TileSize; BeginPass();
+                    int tile = tileSize; BeginPass();
                     try { changed = ApplyPixelAt(cursor, true, x / tile, y / tile, (y % tile) * tile + x % tile, coverage, pressure, 1, 1); }
                     finally { EndPass(); }
                 }
@@ -298,7 +349,7 @@ namespace Yozolab.YoluPainter.Core
             bool changed = false;
             for (int n = 0; n < settings.Count; n++)
             {
-                if (tipColors) dabColor = ColorDynamics.Next(settings, colorRandom);
+                if (anyTipColors) foreach (var t in targets) if (t.TipColors) t.DabColor = ColorDynamics.Next(t.Settings, t.ColorRandom);
                 double radius = settings.Radius * (settings.PressureSize ? pressure : 1) * sizeFactor;
                 if (sizeControl != 1) radius *= sizeControl;
                 if (settings.SizeJitter > 0) radius *= 1 - settings.SizeJitter * random.NextDouble();
@@ -349,12 +400,12 @@ namespace Yozolab.YoluPainter.Core
         private void DualDabAt(double x, double y)
         {
             double radius = dual.Radius, extent = dual.Tip == null ? radius : radius * 1.4142135623730951;
-            int minX = Math.Max(0, (int)Math.Ceiling(x - extent - 0.5)), maxX = Math.Min(surface.Width - 1, (int)Math.Floor(x + extent - 0.5));
-            int minY = Math.Max(0, (int)Math.Ceiling(y - extent - 0.5)), maxY = Math.Min(surface.Height - 1, (int)Math.Floor(y + extent - 0.5));
+            int minX = Math.Max(0, (int)Math.Ceiling(x - extent - 0.5)), maxX = Math.Min(width - 1, (int)Math.Floor(x + extent - 0.5));
+            int minY = Math.Max(0, (int)Math.Ceiling(y - extent - 0.5)), maxY = Math.Min(height - 1, (int)Math.Floor(y + extent - 0.5));
             double angle = dual.Angle * Math.PI / 180, cos = Math.Cos(angle), sin = Math.Sin(angle);
             double aspectX = 1, aspectY = 1;
             if (dual.Tip != null) { if (dual.Tip.Width >= dual.Tip.Height) aspectY = dual.Tip.Height / (double)dual.Tip.Width; else aspectX = dual.Tip.Width / (double)dual.Tip.Height; }
-            int tile = surface.TileSize;
+            int tile = tileSize;
             float[] cells = null; int cellsX = int.MinValue, cellsY = int.MinValue; // 今いるタイルの溜まり（タイルが変わったときだけ引く）
             for (int py = minY; py <= maxY; py++)
             {
@@ -396,8 +447,8 @@ namespace Yozolab.YoluPainter.Core
             public BrushTip Tip; public bool Plain, Textured;
         }
         private readonly DabShape shape = new DabShape();
-        /// <summary>Dabs whose bounding box has at least this many pixels may change the tiles the stroke has already taken over on
-        /// worker threads (see Dab). Below it the cost of starting workers outweighs the gain (measured with radius 32 and 128 on
+        /// <summary>Dabs whose bounding box times the number of channels painted has at least this many pixels may change the tiles the
+        /// stroke has already taken over on worker threads (see Dab). Below it the cost of starting workers outweighs the gain (measured with radius 32 and 128 on
         /// tiles of 128). Not changed by the core; a harness may lower it to drive the worker path with small documents.</summary>
         internal static int ParallelDabPixels = 128 * 128;
         /// <summary>One dab. With the round tip, no rotation and roundness 1 this is exactly the original circular dab.
@@ -412,9 +463,9 @@ namespace Yozolab.YoluPainter.Core
         {
             double extent = tip == null ? radius : radius * 1.4142135623730951; // a square tip's corners reach √2·r when rotated
             int minX = Math.Max(0, (int)Math.Ceiling(x - extent - 0.5));
-            int maxX = Math.Min(surface.Width - 1, (int)Math.Floor(x + extent - 0.5));
+            int maxX = Math.Min(width - 1, (int)Math.Floor(x + extent - 0.5));
             int minY = Math.Max(0, (int)Math.Ceiling(y - extent - 0.5));
-            int maxY = Math.Min(surface.Height - 1, (int)Math.Floor(y + extent - 0.5));
+            int maxY = Math.Min(height - 1, (int)Math.Floor(y + extent - 0.5));
             var s = shape;
             s.X = x; s.Y = y; s.Radius = radius; s.Cos = Math.Cos(angle); s.Sin = Math.Sin(angle); s.Roundness = roundness; s.Tip = tip;
             s.AspectX = 1; s.AspectY = 1;
@@ -423,15 +474,16 @@ namespace Yozolab.YoluPainter.Core
             s.Plain = angle == 0 && roundness == 1;
             s.Hardness = settings.Hardness; s.Pressure = pressure; s.OpacityScale = opacityScale; s.FlowScale = flowScale;
             if (minX > maxX || minY > maxY) return false;
-            int tile = surface.TileSize, tx0 = minX / tile, ty0 = minY / tile, columns = maxX / tile - tx0 + 1, rows = maxY / tile - ty0 + 1;
+            int tile = tileSize, tx0 = minX / tile, ty0 = minY / tile, columns = maxX / tile - tx0 + 1, rows = maxY / tile - ty0 + 1;
             bool[] safe = null; int safeCount = 0, degree = CoreParallelism.Degree;
-            if (degree > 1 && (long)(maxX - minX + 1) * (maxY - minY + 1) >= ParallelDabPixels && columns * rows > 1)
+            // 画素ごとの仕事はチャンネルの数だけ増えるので、外接の箱 × チャンネルの数で比べる（1 チャンネルなら以前と同じ）
+            if (degree > 1 && (long)(maxX - minX + 1) * (maxY - minY + 1) * targets.Length >= ParallelDabPixels && columns * rows > 1)
             {
                 safe = new bool[columns * rows];
                 for (int j = 0; j < rows; j++) for (int i = 0; i < columns; i++)
                 {
-                    var coord = new TileCoord(tx0 + i, ty0 + j); var live = surface.PeekTile(coord);
-                    if (live != null && live.Writable && strokeTiles.ContainsKey(coord)) { safe[j * columns + i] = true; safeCount++; }
+                    var coord = new TileCoord(tx0 + i, ty0 + j);
+                    if (strokeTiles.TryGetValue(coord, out var held) && SafeForWorkers(held, coord)) { safe[j * columns + i] = true; safeCount++; }
                 }
                 if (safeCount == 0) safe = null;
             }
@@ -451,19 +503,31 @@ namespace Yozolab.YoluPainter.Core
                         int n = item / chunks, chunk = item - n * chunks, k = jobs[n], tx = tx0 + k % columns, ty = ty0 + k / columns;
                         int y0 = Math.Max(minY, ty * tile + chunk * rowsPerChunk), y1 = Math.Min(maxY, Math.Min(ty * tile + tile - 1, ty * tile + (chunk + 1) * rowsPerChunk - 1));
                         if (y0 > y1) return;
-                        var c = new TileCursor(); c.Reset();
+                        var c = new TileCursor(targets.Length); c.Reset();
                         results[item] = DabPixels(s, c, false, Math.Max(minX, tx * tile), Math.Min(maxX, tx * tile + tile - 1), y0, y1, null, 0, 0, 0);
                     });
                     foreach (bool r in results) changed |= r;
                     for (int n = 0; n < safeCount; n++)
                     {
-                        int k = jobs[n]; var coord = new TileCoord(tx0 + k % columns, ty0 + k / columns);
-                        if (strokeTiles[coord].ChangedInPass == passSerial) passChanged.Add(coord);
+                        int k = jobs[n]; var coord = new TileCoord(tx0 + k % columns, ty0 + k / columns); var held = strokeTiles[coord];
+                        for (int t = 0; t < targets.Length; t++) if (held.ChangedInPass[t] == passSerial) passChanged.Add(new PassChange { Target = t, Coord = coord });
                     }
                 }
             }
             finally { EndPass(); }
             return changed;
+        }
+        /// <summary>True when worker threads may change the tile: every target has taken it over (its rollback copy and coverage exist)
+        /// and its pixels there are the surface's own writable buffer, so no write can allocate or meet a budget.</summary>
+        private bool SafeForWorkers(StrokeTile held, TileCoord coord)
+        {
+            for (int k = 0; k < targets.Length; k++)
+            {
+                if (!held.Captured[k]) return false;
+                var live = targets[k].Surface.PeekTile(coord);
+                if (live == null || !live.Writable) return false;
+            }
+            return true;
         }
         /// <summary>The pixels [minX, maxX] × [minY, maxY] of the dab in raster order, leaving out the tiles marked in skip (indexed
         /// from tile (tx0, ty0), columns wide). collect: record changed tiles in passChanged (only on the calling thread).</summary>
@@ -472,7 +536,7 @@ namespace Yozolab.YoluPainter.Core
             double x = s.X, y = s.Y, radius = s.Radius, cos = s.Cos, sin = s.Sin, roundness = s.Roundness, hardness = s.Hardness;
             double aspectX = s.AspectX, aspectY = s.AspectY, pressure = s.Pressure, opacityScale = s.OpacityScale, flowScale = s.FlowScale;
             BrushTip tip = s.Tip; bool plain = s.Plain, textured = s.Textured;
-            int tile = surface.TileSize; bool changed = false;
+            int tile = tileSize; bool changed = false;
             for (int py = minY; py <= maxY; py++)
             {
                 int ty = py / tile, row = (py - ty * tile) * tile, tx = minX / tile, lx = minX - tx * tile;
@@ -539,7 +603,7 @@ namespace Yozolab.YoluPainter.Core
         {
             cursor.Reset();
             if (passChanged.Count == 0) return;
-            for (int i = 0; i < passChanged.Count; i++) surface.NotifyTileChanged(passChanged[i]);
+            for (int i = 0; i < passChanged.Count; i++) targets[passChanged[i].Target].Surface.NotifyTileChanged(passChanged[i].Coord);
             passChanged.Clear();
         }
         private void MoveTo(TileCursor c, int tx, int ty)
@@ -547,12 +611,13 @@ namespace Yozolab.YoluPainter.Core
             if (c.X == tx && c.Y == ty) return;
             c.X = tx; c.Y = ty; c.Coord = new TileCoord(tx, ty);
             strokeTiles.TryGetValue(c.Coord, out c.Stroke);
-            c.Surface = surface.PeekTile(c.Coord);
+            for (int k = 0; k < targets.Length; k++) c.Surfaces[k] = targets[k].Surface.PeekTile(c.Coord);
             c.Selected = selection == null ? null : selection.Surface.PeekTile(c.Coord);
             c.Dual = null; if (dual != null) dualCoverage.TryGetValue(c.Coord, out c.Dual);
         }
         /// <summary>One pixel of a pass: (tx, ty) is its tile, local its index in the tile. The same arithmetic and the same budget
-        /// checks in the same order as a per-pixel lookup; only the dictionary lookups are made once per tile.</summary>
+        /// checks in the same order as a per-pixel lookup; only the dictionary lookups are made once per tile. The coverage is accumulated
+        /// once and applied to every target with that target's colour and pixels before the stroke.</summary>
         private bool ApplyPixelAt(TileCursor c, bool collect, int tx, int ty, int local, double coverage, double pressure, double opacityScale, double flowScale)
         {
             MoveTo(c, tx, ty);
@@ -562,117 +627,173 @@ namespace Yozolab.YoluPainter.Core
             double flow = coverage * settings.Flow * flowScale * (settings.PressureFlow ? pressure : 1);
             if (flow <= 0 || ceiling <= 0) return false;
             var st = c.Stroke;
-            if (st != null && st.Wash[local] >= ceiling && !tipColors) return false;
+            if (st != null && st.Wash[local] >= ceiling && !anyTipColors) return false;
+            int n = targets.Length, tile = tileSize;
             // アルファを守るストロークでは、透明な画素は変わらない（アルファは変わらないので、今の面の値が描く前の値と同じ）。
-            // 巻き戻しの写しを取る前に見るので、透明なタイルには何も割り当てない
-            if (keepAlpha && (c.Surface == null || c.Surface.Get(local * 4).A == 0)) return false;
-            int tile = surface.TileSize;
+            // 巻き戻しの写しを取る前にチャンネルごとに見るので、透明なタイルには何も割り当てない
+            var accepts = c.Accepts; bool any = false;
+            for (int k = 0; k < n; k++) { bool a = !keepAlpha || (c.Surfaces[k] != null && c.Surfaces[k].Get(local * 4).A != 0); accepts[k] = a; any |= a; }
+            if (!any) return false;
             if (st == null)
             {
-                long nextBytes = rollbackBytes + 64 + (c.Surface == null ? 0 : c.Surface.ByteSize) + (long)tile * tile * (tipColors ? 20 : 4);
+                // タイルを初めて触る: 共有の被覆率と、この画素を塗るチャンネルの写しを合わせて 1 回で予算と比べる（1 チャンネルなら以前と同じ 1 回）
+                long nextBytes = rollbackBytes + 64 + (long)tile * tile * 4;
+                for (int k = 0; k < n; k++) if (accepts[k]) nextBytes += CaptureBytes(k, c.Coord, c.Surfaces[k]);
                 document.EnsureStrokeBudget(nextBytes);
-                var captured = c.Surface == null ? null : c.Surface.Clone();
-                before.Add(c.Coord, captured); rollbackBytes = nextBytes;
-                st = new StrokeTile { Before = captured, Wash = new float[tile * tile], Paint = tipColors ? new float[tile * tile * 4] : null };
-                strokeTiles.Add(c.Coord, st); c.Stroke = st;
+                st = new StrokeTile(n, new float[tile * tile]);
+                for (int k = 0; k < n; k++) if (accepts[k]) Capture(k, st, c.Coord, c.Surfaces[k]);
+                strokeTiles.Add(c.Coord, st); c.Stroke = st; rollbackBytes = nextBytes;
             }
+            else
+                for (int k = 0; k < n; k++)
+                    if (accepts[k] && !st.Captured[k])
+                    {
+                        // 透明部分のロックで、このタイルでは初めてこのチャンネルを塗る（ほかのチャンネルが先に塗っていた）
+                        long nextBytes = rollbackBytes + CaptureBytes(k, c.Coord, c.Surfaces[k]);
+                        document.EnsureStrokeBudget(nextBytes);
+                        Capture(k, st, c.Coord, c.Surfaces[k]); rollbackBytes = nextBytes;
+                    }
             float[] wash = st.Wash;
             double previousWash = wash[local];
             // 天井に届いた画素も、ダブごとの色ならその色へは寄せる（濃さは天井のまま）。
             double accumulated = previousWash >= ceiling ? previousWash : wash[local] + (ceiling - wash[local]) * Math.Min(1, flow);
             wash[local] = (float)accumulated;
-            Rgba32 paint = strokeColor;
-            if (tipColors)
+            bool changed = false;
+            for (int k = 0; k < n; k++)
             {
-                float[] p = st.Paint; int o = local * 4; double w = Math.Min(1, flow);
-                Rgba32 k = dabColor;
-                if (previousWash <= 0) { p[o] = k.R / 255f; p[o + 1] = k.G / 255f; p[o + 2] = k.B / 255f; p[o + 3] = k.A / 255f; }
-                else
+                if (!accepts[k]) continue;
+                var t = targets[k];
+                Rgba32 paint = t.StrokeColor;
+                if (t.TipColors)
                 {
-                    p[o] += (float)((k.R / 255.0 - p[o]) * w); p[o + 1] += (float)((k.G / 255.0 - p[o + 1]) * w);
-                    p[o + 2] += (float)((k.B / 255.0 - p[o + 2]) * w); p[o + 3] += (float)((k.A / 255.0 - p[o + 3]) * w);
+                    float[] p = st.Paint[k]; int o = local * 4; double w = Math.Min(1, flow);
+                    Rgba32 dab = t.DabColor;
+                    if (previousWash <= 0) { p[o] = dab.R / 255f; p[o + 1] = dab.G / 255f; p[o + 2] = dab.B / 255f; p[o + 3] = dab.A / 255f; }
+                    else
+                    {
+                        p[o] += (float)((dab.R / 255.0 - p[o]) * w); p[o + 1] += (float)((dab.G / 255.0 - p[o + 1]) * w);
+                        p[o + 2] += (float)((dab.B / 255.0 - p[o + 2]) * w); p[o + 3] += (float)((dab.A / 255.0 - p[o + 3]) * w);
+                    }
+                    paint = new Rgba32(MathUtil.ToByte(p[o]), MathUtil.ToByte(p[o + 1]), MathUtil.ToByte(p[o + 2]), MathUtil.ToByte(p[o + 3]));
                 }
-                paint = new Rgba32(MathUtil.ToByte(p[o]), MathUtil.ToByte(p[o + 1]), MathUtil.ToByte(p[o + 2]), MathUtil.ToByte(p[o + 3]));
+                TileStorage original = st.Before[k];
+                Rgba32 start = original == null ? Rgba32.Transparent : original.Get(local * 4), next;
+                if (t.Settings.Erase)
+                {
+                    byte alpha = MathUtil.ToByte(start.A / 255.0 * (1 - accumulated * t.Settings.Color.A / 255.0));
+                    next = alpha == 0 ? Rgba32.Transparent : new Rgba32(start.R, start.G, start.B, alpha);
+                }
+                else if (keepAlpha) next = PaintDocument.PaintKeepingAlpha(start, paint, Math.Min(1, accumulated) * selected); // 選択の割合も色の寄せ方に入れる（丸めは 1 回）
+                else next = CpuCompositor.BlendUnchecked(start, paint, Math.Min(1, accumulated), LayerBlendMode.Normal); // 0..1 なので Blend の検査は要らない
+                if (selected < 1 && !keepAlpha) next = CpuCompositor.Fade(start, next, selected);
+                if (!t.Surface.WritePixelQuiet(c.Coord, ref c.Surfaces[k], local * 4, next)) continue;
+                if (st.ChangedInPass[k] != passSerial) { st.ChangedInPass[k] = passSerial; if (collect) passChanged.Add(new PassChange { Target = k, Coord = c.Coord }); }
+                changed = true;
             }
-            TileStorage original = st.Before;
-            Rgba32 start = original == null ? Rgba32.Transparent : original.Get(local * 4), next;
-            if (settings.Erase)
-            {
-                byte alpha = MathUtil.ToByte(start.A / 255.0 * (1 - accumulated * settings.Color.A / 255.0));
-                next = alpha == 0 ? Rgba32.Transparent : new Rgba32(start.R, start.G, start.B, alpha);
-            }
-            else if (keepAlpha) next = PaintDocument.PaintKeepingAlpha(start, paint, Math.Min(1, accumulated) * selected); // 選択の割合も色の寄せ方に入れる（丸めは 1 回）
-            else next = CpuCompositor.BlendUnchecked(start, paint, Math.Min(1, accumulated), LayerBlendMode.Normal); // 0..1 なので Blend の検査は要らない
-            if (selected < 1 && !keepAlpha) next = CpuCompositor.Fade(start, next, selected);
-            if (!surface.WritePixelQuiet(c.Coord, ref c.Surface, local * 4, next)) return false;
-            if (st.ChangedInPass != passSerial) { st.ChangedInPass = passSerial; if (collect) passChanged.Add(c.Coord); }
-            return true;
+            return changed;
         }
-        // ───── whole-tile edits (TriangleFill): tiles computed from their state before the stroke, not from dabs ─────
+        /// <summary>Rollback payload of taking over target k's tile: the copy (counted in full although it is shared copy-on-write until the
+        /// first write; nothing when a whole-tile edit took it over already) and, with per-tip colours, the per-pixel stroke colour.</summary>
+        private long CaptureBytes(int k, TileCoord coord, TileStorage live)
+        { return (targets[k].Before.ContainsKey(coord) || live == null ? 0 : live.ByteSize) + (targets[k].TipColors ? (long)tileSize * tileSize * 16 : 0); }
+        private void Capture(int k, StrokeTile st, TileCoord coord, TileStorage live)
+        {
+            // 塗りつぶし（タイル丸ごとの編集）が先に写しを取っていれば、それがストロークの前の画素
+            if (!targets[k].Before.TryGetValue(coord, out var captured)) { captured = live == null ? null : live.Clone(); targets[k].Before.Add(coord, captured); }
+            st.Before[k] = captured; st.Captured[k] = true;
+            if (targets[k].TipColors) st.Paint[k] = new float[tileSize * tileSize * 4];
+        }
 
+        // ───── whole-tile edits (TriangleFill): tiles computed from their state before the stroke, not from dabs ─────
+        // 1 チャンネル（マスクを含む）のストロークだけ。マテリアルのストローク（複数のチャンネル）では断る。
+
+        /// <summary>The single surface of a one-channel (or mask) stroke; whole-tile edits are refused for a material stroke.</summary>
+        private Target Single
+        {
+            get
+            {
+                if (targets.Length != 1) throw new InvalidOperationException("Whole-tile edits (polygon fill) paint one channel or a mask; this stroke paints " + targets.Length + " channels.");
+                return targets[0];
+            }
+        }
         /// <summary>The tile as it was before the stroke (null when absent), captured now under the rollback budget the first time a
         /// whole-tile edit asks for it. The returned object is never written to.</summary>
         internal TileStorage OriginalTile(TileCoord coord)
         {
-            CheckOpen();
-            if (before.TryGetValue(coord, out var original)) return original;
-            var current = surface.PeekTile(coord);
+            CheckOpen(); var t = Single;
+            if (t.Before.TryGetValue(coord, out var original)) return original;
+            var current = t.Surface.PeekTile(coord);
             long next = rollbackBytes + 64 + (current == null ? 0 : current.ByteSize);
             document.EnsureStrokeBudget(next);
             original = current == null ? null : current.Clone();
-            before.Add(coord, original); rollbackBytes = next;
+            t.Before.Add(coord, original); rollbackBytes = next;
             return original;
         }
         /// <summary>Puts after (computed from <see cref="OriginalTile"/>) in place of a captured tile, under the source budget. Commit
         /// records it like any other changed tile; Cancel puts the original back.</summary>
         internal void ReplaceTile(TileCoord coord, TileStorage after)
         {
-            CheckOpen();
-            if (!before.ContainsKey(coord)) throw new InvalidOperationException("Capture the tile with OriginalTile before replacing it.");
-            surface.EnsureGrowth((after == null ? 0 : after.ByteSize) - surface.TileBytesAt(coord));
-            surface.Restore(coord, after); cursor.Reset();
+            CheckOpen(); var t = Single;
+            if (!t.Before.ContainsKey(coord)) throw new InvalidOperationException("Capture the tile with OriginalTile before replacing it.");
+            t.Surface.EnsureGrowth((after == null ? 0 : after.ByteSize) - t.Surface.TileBytesAt(coord));
+            t.Surface.Restore(coord, after); cursor.Reset();
         }
         /// <summary>The tile the surface holds now (read only, not a copy; null when absent).</summary>
-        internal TileStorage PeekSurfaceTile(TileCoord coord) => surface.PeekTile(coord);
+        internal TileStorage PeekSurfaceTile(TileCoord coord) => Single.Surface.PeekTile(coord);
         /// <summary>Scratch memory a whole-tile edit keeps until the stroke ends, counted in the rollback budget like the brush's own
         /// per-tile scratch (throws, changing nothing, when it does not fit).</summary>
         internal void ReserveScratch(long bytes)
         {
-            CheckOpen();
+            CheckOpen(); _ = Single;
             if (bytes < 0) throw new ArgumentOutOfRangeException(nameof(bytes));
             long next = rollbackBytes + bytes; document.EnsureStrokeBudget(next); rollbackBytes = next;
         }
 
-        /// <summary>Commits exact before/after tile states. Returns false when the stroke made no net pixel change.</summary>
+        /// <summary>Commits exact before/after tile states of every channel as one undo step (with the channels the stroke switched on).
+        /// Returns false when the stroke made no net pixel change; then nothing is recorded and switched-on channels are off again.</summary>
         public bool Commit()
         {
             CheckOpen();
-            var changes = new List<TileChange>();
             try
             {
                 FinishInput();
-                var coordinates = new List<TileCoord>(before.Keys); coordinates.Sort();
-                foreach (var coord in coordinates)
+                var parts = new List<TileStrokeCommand>();
+                foreach (var t in targets)
                 {
-                    surface.Compact(coord); TileStorage after = surface.Capture(coord);
-                    if (!TileStorage.Same(before[coord], after)) changes.Add(new TileChange(coord, before[coord], after));
+                    var changes = new List<TileChange>();
+                    var coordinates = new List<TileCoord>(t.Before.Keys); coordinates.Sort();
+                    foreach (var coord in coordinates)
+                    {
+                        t.Surface.Compact(coord); TileStorage after = t.Surface.Capture(coord);
+                        if (!TileStorage.Same(t.Before[coord], after)) changes.Add(new TileChange(coord, t.Before[coord], after));
+                    }
+                    if (changes.Count > 0) parts.Add(new TileStrokeCommand(t.Surface, changes, TransactionId));
                 }
-                var command = changes.Count > 0 ? new TileStrokeCommand(surface, changes, TransactionId) : null;
+                IHistoryCommand command = parts.Count == 0 ? null : parts.Count == 1 ? parts[0] : (IHistoryCommand)new MultiSurfaceStrokeCommand(parts);
+                if (enabling != null)
+                {
+                    // 有効にしたチャンネルは、何も変わらなければ戻し、変われば同じ Undo に入れる（Redo は有効にしてから画素を戻す）
+                    if (command == null) document.RevertStrokeSetup(enabling);
+                    else command = new CompoundCommand(new List<IHistoryCommand> { enabling, command });
+                }
                 document.FinishStroke(this, command); finished = true; ReleaseScratch();
-                return changes.Count > 0;
+                return parts.Count > 0;
             }
             catch { if (!finished) Cancel(); throw; }
         }
         public void Cancel()
         {
             if (finished) return;
-            foreach (var snapshot in before) surface.Restore(snapshot.Key, snapshot.Value);
-            if (before.Count > 0) document.PixelsChanged();
+            bool restored = false;
+            foreach (var t in targets) foreach (var snapshot in t.Before) { t.Surface.Restore(snapshot.Key, snapshot.Value); restored = true; }
+            if (restored) document.PixelsChanged();
+            if (enabling != null) document.RevertStrokeSetup(enabling);
             document.FinishStroke(this, null); finished = true; ReleaseScratch();
         }
         private void ReleaseScratch()
         {
-            before.Clear(); strokeTiles.Clear(); passChanged.Clear(); cursor.Reset(); rollbackBytes = 0; curvePieces.Clear(); curvePoints = 0;
+            foreach (var t in targets) t.Before.Clear();
+            strokeTiles.Clear(); passChanged.Clear(); cursor.Reset(); rollbackBytes = 0; curvePieces.Clear(); curvePoints = 0;
             if (dual != null) { dualCoverage.Clear(); dualPending.Clear(); }
         }
         public void Dispose() { Cancel(); }
@@ -697,7 +818,10 @@ namespace Yozolab.YoluPainter.Core
         }
         public void Apply() { RestoreAll(false); }
         public void Revert() { RestoreAll(true); }
-        private void RestoreAll(bool backwards)
+        internal SparseTileSurface Surface { get { return surface; } }
+        private void RestoreAll(bool backwards) { surface.EnsureGrowth(Growth(backwards)); RestoreUnchecked(backwards); }
+        /// <summary>Source bytes the surface grows by when it goes to the after (or before) state.</summary>
+        internal long Growth(bool backwards)
         {
             long growth = 0;
             foreach (var change in changes)
@@ -705,8 +829,26 @@ namespace Yozolab.YoluPainter.Core
                 var state = backwards ? change.Before : change.After;
                 growth += (state == null ? 0 : state.ByteSize) - surface.TileBytesAt(change.Coord);
             }
-            surface.EnsureGrowth(growth);
-            foreach (var change in changes) surface.Restore(change.Coord, backwards ? change.Before : change.After);
+            return growth;
+        }
+        internal void RestoreUnchecked(bool backwards) { foreach (var change in changes) surface.Restore(change.Coord, backwards ? change.Before : change.After); }
+    }
+    /// <summary>The tile changes of a stroke that painted several surfaces (a material stroke), undone and redone together. The source
+    /// budget is checked once for the growth of all of them before any surface changes, so a refused undo or redo changes nothing.</summary>
+    internal sealed class MultiSurfaceStrokeCommand : IHistoryCommand
+    {
+        private readonly List<TileStrokeCommand> parts;
+        public long ByteCost { get; private set; }
+        internal MultiSurfaceStrokeCommand(List<TileStrokeCommand> parts)
+        { this.parts = parts; foreach (var p in parts) ByteCost += p.ByteCost; }
+        public void Apply() { RestoreAll(false); }
+        public void Revert() { RestoreAll(true); }
+        private void RestoreAll(bool backwards)
+        {
+            long growth = 0;
+            foreach (var p in parts) growth += p.Growth(backwards);
+            parts[0].Surface.EnsureGrowth(growth); // 面はどれも同じ文書の予算（BeforeSourceGrowth）を見る
+            foreach (var p in parts) p.RestoreUnchecked(backwards);
         }
     }
 }

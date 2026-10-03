@@ -69,7 +69,7 @@ namespace Example
 
 | 口 | 内容 |
 |---|---|
-| `Width`・`Height`・`ProjectPath`・`Model`・`Channel`・`SelectedLayer`・`Layers` | 読むだけ。`Model` は元のアセットなので変えないこと（YoluPainter は元のアセットを変えない約束） |
+| `Width`・`Height`・`ProjectPath`・`Model`・`Channel`・`SelectedLayer`・`Layers` | 読むだけ。`Model` は元のアセットなので変えないこと（YoluPainter は元のアセットを変えない約束）。`PainterLayerInfo.Opacity` はレイヤー自身の不透明度で、チャンネルごとの設定（ネイティブ版 14 の `ChannelBlend`）は API 0.1 では見せない（`ReadComposite` はチャンネルごとの設定で合成した結果） |
 | `ReadComposite(channel)` | チャンネルの全レイヤーの合成（Normal は Unity 向けの出力: OpenGL の向き、Height からの導出込み） |
 | `ReadLayer(layerId, channel)` | ペイントのレイヤーのチャンネルの画素 |
 | `AddImageLayer(name, channel, rgba)` | 選んでいるレイヤーの上に、画像を中身にした新しいペイントのレイヤーを足して選ぶ（選択範囲に関係なく全体。1 回の Undo） |

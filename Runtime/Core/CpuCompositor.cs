@@ -151,6 +151,10 @@ namespace Yozolab.YoluPainter.Core
             readonly System.Collections.Generic.List<PaintLayer> clips = new System.Collections.Generic.List<PaintLayer>();
             readonly System.Collections.Generic.List<StackEntry> clipEntries = new System.Collections.Generic.List<StackEntry>();
             public PaintLayer Base { get; internal set; }
+            /// <summary>The base's opacity in the planned channel (<see cref="PaintLayer.OpacityIn"/>: its own for the channel, else the layer's).</summary>
+            public double Opacity { get; internal set; }
+            /// <summary>The base's blend mode in the planned channel (<see cref="PaintLayer.BlendModeIn"/>). Pass through only on a group.</summary>
+            public LayerBlendMode BlendMode { get; internal set; }
             public System.Collections.Generic.IReadOnlyList<PaintLayer> Clips { get { return clips; } }
             /// <summary>The clipped layers as entries (a clipped group carries its own Children).</summary>
             public System.Collections.Generic.IReadOnlyList<StackEntry> ClipEntries { get { return clipEntries; } }
@@ -158,10 +162,10 @@ namespace Yozolab.YoluPainter.Core
             public System.Collections.Generic.IReadOnlyList<StackEntry> Children { get; internal set; } = new StackEntry[0];
             internal void AddClip(StackEntry entry) { clips.Add(entry.Base); clipEntries.Add(entry); }
             /// <summary>A pass-through group without clipped layers: its children composite straight onto the backdrop.</summary>
-            public bool PassesThrough { get { return Base.IsGroup && Base.BlendMode == LayerBlendMode.PassThrough && clipEntries.Count == 0; } }
+            public bool PassesThrough { get { return Base.IsGroup && BlendMode == LayerBlendMode.PassThrough && clipEntries.Count == 0; } }
         }
         static bool Active(PaintLayer layer, PaintChannel channel)
-        { return layer.Visible && layer.Opacity > 0 && layer.IsChannelEnabled(channel) && layer.HasContent(channel); }
+        { return layer.Visible && layer.OpacityIn(channel) > 0 && layer.IsChannelEnabled(channel) && layer.HasContent(channel); }
         /// <summary>Groups the layers into clipping groups for a channel, dropping what cannot show: a hidden (or empty in this
         /// channel) base hides its clipped layers too, and an adjustment base has no pixels to clip to. Groups recurse; a hidden
         /// group or one with nothing active inside is dropped with everything in it. Clipping only reaches siblings.</summary>
@@ -189,13 +193,15 @@ namespace Yozolab.YoluPainter.Core
         {
             if (layer.IsGroup)
             {
-                if (!layer.Visible || layer.Opacity <= 0) return null;
+                if (!layer.Visible || layer.OpacityIn(channel) <= 0) return null;
                 var children = PlanLevel(document, channel, layer.Id);
-                return children.Count == 0 ? null : new StackEntry { Base = layer, Children = children };
+                return children.Count == 0 ? null : new StackEntry { Base = layer, Children = children, Opacity = layer.OpacityIn(channel), BlendMode = layer.BlendModeIn(channel) };
             }
-            return Active(layer, channel) ? new StackEntry { Base = layer } : null;
+            return Active(layer, channel) ? new StackEntry { Base = layer, Opacity = layer.OpacityIn(channel), BlendMode = layer.BlendModeIn(channel) } : null;
         }
-        static LayerBlendMode ModeOf(PaintLayer layer) { return layer.BlendMode == LayerBlendMode.PassThrough ? LayerBlendMode.Normal : layer.BlendMode; }
+        /// <summary>The mode an entry blends with: its mode in the planned channel, Normal for pass through (a pass-through group with clipped
+        /// layers composites isolated).</summary>
+        static LayerBlendMode ModeOf(StackEntry entry) { return entry.BlendMode == LayerBlendMode.PassThrough ? LayerBlendMode.Normal : entry.BlendMode; }
         // Normal チャンネルはベクトルとして合成する（同じ構造の NormalMaps の式）。他のチャンネルは色の式。
         static Rgba32 StackBlend(bool normal, Rgba32 below, Rgba32 over, double amount, LayerBlendMode mode)
         { return normal ? NormalMaps.BlendUnchecked(below, over, amount, mode) : BlendUnchecked(below, over, amount, mode); }
@@ -225,18 +231,18 @@ namespace Yozolab.YoluPainter.Core
             foreach (var entry in plan)
             {
                 var layer = entry.Base;
-                double amount = layer.Opacity * (layer.Mask == null ? 1 : layer.Mask.FactorAt(x, y));
-                if (layer.Kind == LayerKind.Adjustment) { result = layer.Adjustment.Composite(result, amount, layer.BlendMode); continue; }
+                double amount = entry.Opacity * (layer.Mask == null ? 1 : layer.Mask.FactorAt(x, y));
+                if (layer.Kind == LayerKind.Adjustment) { result = layer.Adjustment.Composite(result, amount, entry.BlendMode); continue; }
                 if (entry.PassesThrough) { result = StackFade(normal, result, EvaluatePixel(entry.Children, result, channel, x, y), amount); continue; }
                 Rgba32 group = layer.IsGroup ? EvaluatePixel(entry.Children, Rgba32.Transparent, channel, x, y) : layer.GetOutputPixel(channel, x, y);
                 foreach (var clip in entry.ClipEntries)
                 {
                     var c = clip.Base;
-                    double clipAmount = c.Opacity * (c.Mask == null ? 1 : c.Mask.FactorAt(x, y));
-                    if (c.Kind == LayerKind.Adjustment) group = c.Adjustment.Composite(group, clipAmount, c.BlendMode);
-                    else group = StackClip(normal, group, c.IsGroup ? EvaluatePixel(clip.Children, Rgba32.Transparent, channel, x, y) : c.GetOutputPixel(channel, x, y), clipAmount, ModeOf(c));
+                    double clipAmount = clip.Opacity * (c.Mask == null ? 1 : c.Mask.FactorAt(x, y));
+                    if (c.Kind == LayerKind.Adjustment) group = c.Adjustment.Composite(group, clipAmount, clip.BlendMode);
+                    else group = StackClip(normal, group, c.IsGroup ? EvaluatePixel(clip.Children, Rgba32.Transparent, channel, x, y) : c.GetOutputPixel(channel, x, y), clipAmount, ModeOf(clip));
                 }
-                result = StackBlend(normal, result, group, amount, ModeOf(layer));
+                result = StackBlend(normal, result, group, amount, ModeOf(entry));
             }
             return result;
         }
@@ -414,9 +420,9 @@ namespace Yozolab.YoluPainter.Core
             /// <summary>An unfiltered fill layer's tile (null: the fill has no colour in this channel or it is transparent).</summary>
             readonly byte[] fillTile; readonly bool fill;
             readonly SharedTiles shared;
-            public LayerTile(PaintLayer layer, PaintChannel channel, int tileBytes, int slots, SharedTiles shared)
+            public LayerTile(PaintLayer layer, double opacity, PaintChannel channel, int tileBytes, int slots, SharedTiles shared)
             {
-                Layer = layer; Opacity = layer.Opacity; Present = new bool[slots]; this.shared = shared;
+                Layer = layer; Opacity = opacity; Present = new bool[slots]; this.shared = shared;
                 if (layer.Kind != LayerKind.Adjustment && !layer.IsGroup)
                 {
                     Pixels = new byte[slots][];
@@ -517,9 +523,9 @@ namespace Yozolab.YoluPainter.Core
                     var e = plan[i]; var layer = e.Base;
                     nodes[i] = new Node
                     {
-                        Entry = e, Tile = new LayerTile(layer, channel, tileBytes, slots, shared), Children = Build(e.Children, channel, tileBytes, slots, shared, sampledBytes), Clips = Build(e.ClipEntries, channel, tileBytes, slots, shared, sampledBytes),
+                        Entry = e, Tile = new LayerTile(layer, e.Opacity, channel, tileBytes, slots, shared), Children = Build(e.Children, channel, tileBytes, slots, shared, sampledBytes), Clips = Build(e.ClipEntries, channel, tileBytes, slots, shared, sampledBytes),
                         Adjustment = layer.Kind == LayerKind.Adjustment, Group = layer.IsGroup, PassesThrough = e.PassesThrough,
-                        Mode = ModeOf(layer), AdjustmentMode = layer.BlendMode, Settings = layer.Adjustment,
+                        Mode = ModeOf(e), AdjustmentMode = e.BlendMode, Settings = layer.Adjustment,
                     };
                     if (channel != PaintChannel.Normal) nodes[i].Table = SeparableTable(nodes[i].Mode);
                     if (sampledBytes > 0) nodes[i].Tile.PrepareSampling(slots, sampledBytes);

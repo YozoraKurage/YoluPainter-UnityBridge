@@ -148,6 +148,7 @@ namespace Yozolab.YoluPainter.Core
             }
             copy.SetParentForLoad(target, layer.ParentId);
             target.Visible = layer.Visible; target.Opacity = layer.Opacity; target.BlendMode = layer.BlendMode; target.Clipping = layer.Clipping;
+            target.CopyChannelBlendsFrom(layer);
             return target;
         }
 

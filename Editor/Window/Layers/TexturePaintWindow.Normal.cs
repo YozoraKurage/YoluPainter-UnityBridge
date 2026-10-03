@@ -73,8 +73,8 @@ namespace Yozolab.YoluPainter.Editor
                 if (show != showNormalOutput) ShowNormalOutput = show;
                 DrawNormalBrushValue(rows);
                 var layer = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
-                if (layer != null && !layer.IsGroup && layer.Kind != LayerKind.Adjustment && !NormalMaps.IsVectorMode(layer.BlendMode))
-                    NoteRow(rows, L.Tr("{0} has no meaning for normals: in the Normal channel this layer replaces what is below, like Normal. Use Overlay to add it as detail (reoriented normal mapping).", L.TrIn("blend mode", BlendName(layer.BlendMode))), NoteKind.Info);
+                if (layer != null && !layer.IsGroup && layer.Kind != LayerKind.Adjustment && !NormalMaps.IsVectorMode(layer.BlendModeIn(PaintChannel.Normal)))
+                    NoteRow(rows, L.Tr("{0} has no meaning for normals: in the Normal channel this layer replaces what is below, like Normal. Use Overlay to add it as detail (reoriented normal mapping).", L.TrIn("blend mode", BlendName(layer.BlendModeIn(PaintChannel.Normal)))), NoteKind.Info);
                 else if (layer != null && layer.Kind == LayerKind.Adjustment)
                     NoteRow(rows, L.Tr("Adjustments change the encoded values of the Normal channel (not the vectors); the output renormalizes them."));
             }
@@ -84,14 +84,17 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>ブラシの値を法線の傾きで選ぶ（X: 右、Y: 上、Z は単位長さになるように決める）。</summary>
         void DrawNormalBrushValue(UiRows rows)
         {
-            PaintGui.GroupLabel(rows.Row(16), L.Tr("Brush value (normal)"));
+            // マテリアルで塗るときは、マテリアルの Normal の値（ブラシの欄の「マテリアル」と同じ）を変える
+            bool material = brush.material;
+            PaintGui.GroupLabel(rows.Row(16), material ? L.Tr("Material value (normal)") : L.Tr("Brush value (normal)"));
             var row = rows.Row();
             var c = UiRows.Split(new Rect(row.x, row.y, row.width - 28, row.height), 2, 6);
-            double x = brush.color.r * 2 - 1, y = brush.color.g * 2 - 1;
+            double x = material ? brush.materialNormalX : brush.color.r * 2 - 1, y = material ? brush.materialNormalY : brush.color.g * 2 - 1;
             double nx = PaintGui.KeepSlider(Spot("normal.tiltX", c[0]), L.TrIn("normal brush", "Tilt X"), x, -1, 1, "0.00", "", L.Tr("The brush value as a normal: +1 leans right"));
             double ny = PaintGui.KeepSlider(c[1], L.TrIn("normal brush", "Tilt Y"), y, -1, 1, "0.00", "", L.Tr("+1 leans up (OpenGL / Unity)"));
-            if (nx != x || ny != y) SetBrushNormal((float)nx, (float)ny);
-            if (PaintGui.IconButton(Spot("normal.flat", new Rect(row.xMax - 24, row.y, 24, row.height)), "restart_alt", L.Tr("Flat brush value (128, 128, 255): paints a flat normal"), false, GUI.enabled, 16)) SetBrushNormal(0, 0);
+            if (nx != x || ny != y) { if (material) SetMaterialNormal((float)nx, (float)ny); else SetBrushNormal((float)nx, (float)ny); }
+            if (PaintGui.IconButton(Spot("normal.flat", new Rect(row.xMax - 24, row.y, 24, row.height)), "restart_alt", L.Tr("Flat brush value (128, 128, 255): paints a flat normal"), false, GUI.enabled, 16)) { if (material) SetMaterialNormal(0, 0); else SetBrushNormal(0, 0); }
+            if (material && !MaterialIncludes(PaintChannel.Normal)) NoteRow(rows, L.Tr("The material does not paint Normal now. Check it in Properties ▸ Brush ▸ Brush Material."), NoteKind.Info);
         }
         /// <summary>ブラシの値を (x, y, √(1 − x² − y²)) の法線にする（長さが 1 を超える傾きは z = 0 の向きに縮める）。</summary>
         internal void SetBrushNormal(float x, float y)

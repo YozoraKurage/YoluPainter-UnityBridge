@@ -12,6 +12,8 @@ namespace Yozolab.YoluPainter.Editor
     public sealed partial class TexturePaintWindow
     {
         const float LayerRowHeight = 30, LayerToolbarHeight = 30;
+        /// <summary>レイヤーのパネルの上の行の左の、今のチャンネルに層の自分の合成モードと不透明度を持たせる切り替えの幅。</summary>
+        const float ChannelBlendToggleWidth = 18;
         /// <summary>ロックの切り替えを合成モードと不透明度の行の右に並べられる幅か（既定のドックの幅 300 では並べ、一覧の高さを減らさない。
         /// 狭いドックでは 2 行目に出す）。</summary>
         static bool LockRowInline(float panelWidth) => panelWidth - 2 * PaintTheme.Padding >= 270;
@@ -31,16 +33,30 @@ namespace Yozolab.YoluPainter.Editor
             bool lockInline = LockRowInline(r.width);
             var lockRect = lockInline ? new Rect(top.xMax - LockButtonsWidth, top.y, LockButtonsWidth, top.height) : new Rect(top.x, top.yMax + 4, top.width, LockRowHeight);
             if (lockInline) top.width -= LockButtonsWidth + 6;
-            // ロックを並べるときは不透明度（名前と値を出す）に広く取る。合成モードの名前は前から長いものは詰めて出している
+            // 左端にチャンネルごとの合成の切り替え。残りを合成モードと不透明度で分ける（ロックを並べるときは不透明度（名前と値を出す）に広く
+            // 取る。合成モードの名前は前から長いものは詰めて出している）
+            var own = new Rect(top.x, top.y, ChannelBlendToggleWidth, top.height);
+            top = new Rect(top.x + ChannelBlendToggleWidth + 2, top.y, top.width - ChannelBlendToggleWidth - 2, top.height);
             var halves = !lockInline ? UiRows.Split(top, 2, 6)
                 : new[] { new Rect(top.x, top.y, Mathf.Floor((top.width - 6) * .42f), top.height), new Rect(top.x + Mathf.Floor((top.width - 6) * .42f) + 6, top.y, top.width - Mathf.Floor((top.width - 6) * .42f) - 6, top.height) };
             if (active != null)
             {
                 var modes = ((LayerBlendMode[])Enum.GetValues(typeof(LayerBlendMode))).Where(m => active.IsGroup || m != LayerBlendMode.PassThrough).ToArray();
                 bool settingsLocked = (document.EffectiveLocks(active.Id) & LayerLocks.All) != 0; // すべてのロックでは合成モードと不透明度も変えない
-                PaintGui.EnumDropdown(halves[0], null, active.BlendMode, modes, m => L.TrIn("blend mode", BlendName(m)), m => TryAction(() => document.SetLayerBlendMode(active.Id, m)), !settingsLocked);
-                float opacity = PaintGui.Slider(halves[1], L.Tr("Opacity"), (float)active.Opacity * 100, 0, 100, "0", "%", null, !settingsLocked) / 100;
-                if (Math.Abs(opacity - active.Opacity) > .00001) TryAction(() => document.SetLayerOpacity(active.Id, opacity, coalesce: true));
+                // チャンネルごとの合成（Substance と同じく、今のチャンネルの合成モードと不透明度を見せる）: 左の切り替えがオンなら、このチャンネル
+                // だけの値を見せて変える。オフなら層の値（自分の値を持たないチャンネル全部に効く）
+                PanelSpot("channelBlend", own);
+                bool perChannel = active.ChannelBlends.ContainsKey(channel);
+                if (PaintGui.IconButton(own, ChannelIcon(channel), perChannel ? L.Tr("Blend mode and opacity for {0} only. Click to use the layer's again.", L.Tr(channel.ToString()))
+                        : L.Tr("Blend mode and opacity of the layer, shared by every channel without its own. Click to give {0} its own.", L.Tr(channel.ToString())), perChannel, !settingsLocked, 15))
+                    TryAction(() => SetOwnChannelBlend(active.Id, !perChannel));
+                var mode = active.BlendModeIn(channel); double shownOpacity = active.OpacityIn(channel);
+                PaintGui.EnumDropdown(PanelSpot("blendMode", halves[0]), null, mode, modes, m => L.TrIn("blend mode", BlendName(m)),
+                    m => TryAction(() => { if (perChannel) document.SetChannelBlendMode(active.Id, channel, m); else document.SetLayerBlendMode(active.Id, m); }), !settingsLocked);
+                float opacity = PaintGui.Slider(PanelSpot("opacity", halves[1]), L.Tr("Opacity"), (float)shownOpacity * 100, 0, 100, "0", "%", null, !settingsLocked) / 100;
+                if (Math.Abs(opacity - shownOpacity) > .00001)
+                    TryAction(() => { if (perChannel) document.SetChannelOpacity(active.Id, channel, opacity, coalesce: true); else document.SetLayerOpacity(active.Id, opacity, coalesce: true); });
+                if (perChannel) PaintGui.Outline(new Rect(halves[0].x - 2, halves[0].y - 2, halves[1].xMax - halves[0].x + 4, halves[0].height + 4), PaintTheme.Accent, 1, 4); // このチャンネルだけの値を見せている印
             }
             // ロック（選んでいる層の全部に効く）
             DrawLockRow(lockRect, !lockInline);
@@ -247,6 +263,14 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
 
+
+        /// <summary>今のチャンネルに層の自分の合成モードと不透明度を持たせる（今の値から始める）か、層の値に戻す（1 回の Undo）。</summary>
+        internal void SetOwnChannelBlend(Guid layerId, bool own)
+        {
+            var layer = document.GetLayer(layerId);
+            document.SetChannelBlend(layerId, channel, own ? new ChannelBlend(layer.BlendMode, layer.Opacity) : default);
+            message = own ? L.Tr("{0} now has its own blend mode and opacity on this layer.", L.Tr(channel.ToString())) : L.Tr("{0} uses the layer's blend mode and opacity again.", L.Tr(channel.ToString()));
+        }
 
         Guid? AboveSelected() => document.Layers.Any(l => l.Id == selectedLayer) ? selectedLayer : (Guid?)null;
         void AddPaintLayer() => selectedLayer = document.AddLayer(L.Tr("Layer") + " " + (document.Layers.Count + 1), above: AboveSelected()).Id;

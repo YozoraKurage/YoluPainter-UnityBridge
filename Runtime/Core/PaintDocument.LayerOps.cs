@@ -157,6 +157,7 @@ namespace Yozolab.YoluPainter.Core
         {
             var copy = new PaintLayer(this, name, id, source.Kind)
             { Visible = source.Visible, Opacity = source.Opacity, BlendMode = source.BlendMode, Clipping = source.Clipping, ParentId = source.ParentId, Adjustment = source.Adjustment, Locks = source.Locks };
+            copy.CopyChannelBlendsFrom(source);
             foreach (var entry in source.FillValues) copy.SetFillValueInternal(entry.Key, entry.Value);
             foreach (var entry in source.Channels)
             {

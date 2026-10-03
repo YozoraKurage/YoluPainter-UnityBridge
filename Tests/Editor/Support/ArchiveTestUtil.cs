@@ -12,13 +12,13 @@ namespace Yozolab.YoluPainter.Tests
         /// <summary>Normal の出力設定の位置（magic, 版, 文書 ID, 幅・高さ・タイルの後）。</summary>
         public const int NormalSettingsOffset = 8 + 4 + 16 + 12;
 
-        /// <summary>targetVersion: 12・11・10 なら版の数だけを書き換える（版 13 で足した形のグラデーションを持たない文書は版 12 と、版 12 で足したロックを持たない文書は版 11 と、版 11 で足した Generator の段を持たない文書は版 10 と同じ並び）。9 なら版 10 で各レイヤーの最後に足した 2D パスの有無（1 バイト。1 レイヤーの文書ではファイルの最後）を抜く。8 なら版 9 で各レイヤーの最後に足したフィルターの有無（1 バイト。1 レイヤーの文書ではファイルの最後）を抜く。7 なら版 8 で各レイヤーの最後に足したパスの有無（1 バイト）も抜く。6 なら版 7 で足した Normal の出力設定（21 バイト）も抜く。5 なら版 6 で足した親グループ ID（16 バイト）も
+        /// <summary>今の版（<see cref="Core.Persistence.DocumentBinary.CurrentVersion"/>）から変える。targetVersion: 13・12・11・10 なら版の数だけを書き換える（版 14 で足したチャンネルごとの合成の設定を持たない文書は版 13 と、版 13 で足した形のグラデーションを持たない文書は版 12 と、版 12 で足したロックを持たない文書は版 11 と、版 11 で足した Generator の段を持たない文書は版 10 と同じ並び）。9 なら版 10 で各レイヤーの最後に足した 2D パスの有無（1 バイト。1 レイヤーの文書ではファイルの最後）を抜く。8 なら版 9 で各レイヤーの最後に足したフィルターの有無（1 バイト。1 レイヤーの文書ではファイルの最後）を抜く。7 なら版 8 で各レイヤーの最後に足したパスの有無（1 バイト）も抜く。6 なら版 7 で足した Normal の出力設定（21 バイト）も抜く。5 なら版 6 で足した親グループ ID（16 バイト）も
         /// 抜く。4 以下ならクリッピングの 1 バイト（版 5）も抜く。版 3 以下で無くなる種類・Fill・調整の並びは呼び出し側が持たない文書で使うこと。</summary>
         public static byte[] AsVersion(byte[] current, string layerName, int targetVersion)
         {
             Assert.That(BitConverter.ToInt32(current, 8), Is.EqualTo(Yozolab.YoluPainter.Core.Persistence.DocumentBinary.CurrentVersion), "the helper converts from the current version");
             current = (byte[])current.Clone();
-            if (targetVersion >= 10 && targetVersion <= 12) { BitConverter.GetBytes(targetVersion).CopyTo(current, 8); return current; }
+            if (targetVersion >= 10 && targetVersion <= 13) { BitConverter.GetBytes(targetVersion).CopyTo(current, 8); return current; }
             Assert.That(current[current.Length - 1], Is.EqualTo(0), "a layer without a canvas path");
             current = current.Take(current.Length - 1).ToArray();
             if (targetVersion == 9) { BitConverter.GetBytes(9).CopyTo(current, 8); return current; }

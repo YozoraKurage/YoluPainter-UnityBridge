@@ -143,7 +143,9 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (next == channel) return;
             channel = next; repaintPixels = true;
-            message = channel == PaintChannel.Normal ? L.Tr("Normal channel: layers composite as unit normals (Overlay adds detail, other modes replace).") : L.Tr("Painting only the selected channel; the other channels stay as they are.");
+            message = channel == PaintChannel.Normal ? L.Tr("Normal channel: layers composite as unit normals (Overlay adds detail, other modes replace).")
+                : brush.material ? L.Tr("Showing {0}. The material brush paints the channels checked in Properties ▸ Brush ▸ Brush Material.", L.Tr(channel.ToString()))
+                : L.Tr("Painting only the selected channel; the other channels stay as they are.");
         }
 
         void HandleModelDrop(Rect box)

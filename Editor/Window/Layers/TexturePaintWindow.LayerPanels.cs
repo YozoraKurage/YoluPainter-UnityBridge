@@ -101,15 +101,35 @@ namespace Yozolab.YoluPainter.Editor
         void DrawLayerDetails(UiRows rows, PaintLayer active)
         {
             if (active.IsGroup)
-                NoteRow(rows, active.BlendMode == LayerBlendMode.PassThrough ? L.Tr("Pass through: the contents blend with the layers below as if they were not grouped.") : L.Tr("Isolated: the contents are composited together first, then blended."));
+                NoteRow(rows, active.BlendModeIn(channel) == LayerBlendMode.PassThrough ? L.Tr("Pass through: the contents blend with the layers below as if they were not grouped.") : L.Tr("Isolated: the contents are composited together first, then blended."));
             else
             {
                 bool on = active.IsChannelEnabled(channel);
                 bool next = PaintGui.FitToggle(Spot("layer.channel", rows.Row()), L.Tr("Paint this channel") + " (" + L.Tr(channel.ToString()) + ")", on, L.Tr("Off: this layer is left out of the selected channel (what it holds there is kept)."));
                 if (next != on) TryAction(() => document.SetChannelEnabled(active.Id, channel, next));
             }
+            DrawChannelBlends(rows, active);
             if (active.Kind == LayerKind.Fill) DrawFill(rows, active);
             if (active.Kind == LayerKind.Adjustment) DrawAdjustment(rows, active);
+        }
+
+        /// <summary>チャンネルごとの合成モードと不透明度の一覧（自分の値を持つチャンネルだけ。× で層の値に戻す）。今のチャンネルの値は
+        /// レイヤーのパネルの上の行で変える。</summary>
+        void DrawChannelBlends(UiRows rows, PaintLayer active)
+        {
+            if (!active.HasChannelBlends) return;
+            PaintGui.GroupLabel(rows.Row(16), L.Tr("Own blending per channel"), L.Tr("These channels use their own blend mode or opacity instead of the layer's. Select a channel to change its values in the Layers panel."));
+            foreach (var c in Channels)
+            {
+                if (!active.ChannelBlends.TryGetValue(c, out var b)) continue;
+                var row = Spot("layer.channelBlend." + c, rows.Row());
+                string text = L.Tr(c.ToString()) + ": " + L.TrIn("blend mode", BlendName(active.BlendModeIn(c))) + " · " + Mathf.RoundToInt((float)active.OpacityIn(c) * 100) + "%";
+                PaintGui.Icon(new Rect(row.x, row.y, 18, row.height), ChannelIcon(c), c == channel ? PaintTheme.Accent : PaintTheme.TextDim, 14);
+                PaintGui.Text(new Rect(row.x + 22, row.y, row.width - 50, row.height), PaintGui.Fit(text, row.width - 50, PaintTheme.Label), PaintTheme.Label, GUI.enabled ? PaintTheme.Text : PaintTheme.TextDisabled);
+                var ch = c;
+                if (PaintGui.IconButton(Spot("layer.channelBlend.clear." + c, new Rect(row.xMax - 24, row.y, 24, row.height)), "close", L.Tr("Use the layer's blend mode and opacity in {0} again", L.Tr(c.ToString())), false, GUI.enabled, 15))
+                    TryAction(() => document.SetChannelBlend(active.Id, ch, default));
+            }
         }
 
         void DrawFill(UiRows rows, PaintLayer active)

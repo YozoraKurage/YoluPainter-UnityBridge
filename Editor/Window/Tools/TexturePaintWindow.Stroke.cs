@@ -43,9 +43,9 @@ namespace Yozolab.YoluPainter.Editor
                     else
                     {
                         if(document.GetLayer(selectedLayer).IsGroup) throw new InvalidOperationException("A group has no pixels. Select a layer inside it to paint, or paint the group's mask.");
-                        document.EnsurePixelsEditable(selectedLayer,brush.erase); // ロックで断るなら、チャンネルを有効にする前に（何も残さない）
-                        if(!document.GetLayer(selectedLayer).IsChannelEnabled(channel)) document.SetChannelEnabled(selectedLayer,channel,true);
-                        stroke=document.BeginStroke(selectedLayer,channel,GetBrush());
+                        // 今のチャンネル 1 つ、またはマテリアルの組（Tools/TexturePaintWindow.MaterialBrush.cs）。ロックで断るときは何も変えず、層で無効の
+                        // チャンネルはストロークの中で有効にする（ストロークと同じ 1 回の Undo。取消で戻る）
+                        stroke=document.BeginMaterialStroke(selectedLayer,StrokeChannels(),GetBrush());
                     }
                     previousPointer=e.mousePosition; previousPressure=Pressure(e); surfaceHasBefore=surfaceHasHeld=false;
                     PaintAt(e.mousePosition,previousPressure); GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive);

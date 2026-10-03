@@ -36,6 +36,7 @@ namespace Yozolab.YoluPainter.Editor
             if(b==null||b.schema<1||b.schema>3||b.pressureCurve==null)throw new InvalidDataException("Unsupported brush settings");
             if(b.schema<2){b.roundness=1;b.textureScale=1;b.count=1;b.randomSeedPerStroke=true;b.schema=2;}
             UpgradeBrushState(b);
+            ValidateMaterial(b);
             return b;
         }
         internal BrushSettings GetBrush() { var s = NewBrushSettings(); BrushTips.Apply(s, brush.tipId);
@@ -53,7 +54,7 @@ namespace Yozolab.YoluPainter.Editor
         internal void ApplyPreset(Core.BrushPreset preset)
         {
             var s=preset.CreateSettings(); var color=brush.color; var curve=brush.pressureCurve; var assist=(brush.stabilizer,brush.taperIn,brush.taperOut);
-            var secondary=brush.secondaryColor;
+            var secondary=brush.secondaryColor; var previous=brush;
             brush=new BrushState{ presetId=preset.Id, presetName=preset.Name, radius=(float)s.Radius, hardness=(float)s.Hardness, spacing=(float)s.Spacing, opacity=(float)s.Opacity, flow=(float)s.Flow,
                 color=color, pressureCurve=curve, pressureSize=s.PressureSize, pressureOpacity=s.PressureOpacity, pressureFlow=s.PressureFlow, erase=s.Erase,
                 tipId=BrushTips.IdOf(s), textureId=BrushTips.IdOf(s.Texture), angle=(float)s.Angle, roundness=(float)s.Roundness, followDirection=s.FollowDirection,
@@ -61,6 +62,7 @@ namespace Yozolab.YoluPainter.Editor
                 scatter=(float)s.Scatter, count=s.Count, textureDepth=(float)s.TextureDepth, textureScale=(float)s.TextureScale,
                 stabilizer=assist.Item1, taperIn=assist.Item2, taperOut=assist.Item3 }; // 補正と入り抜きは描き手の設定として残す
             CopyPresetDynamics(s,secondary);
+            CopyMaterial(previous,brush); // マテリアル（塗るチャンネルと値）は描画色と同じく描き手のものとして残す
         }
         void SavePreset(){string p=Dialogs.SaveFile("Save brush",Application.dataPath,"brush","json");if(!String.IsNullOrEmpty(p))TryAction(()=>File.WriteAllText(p,JsonUtility.ToJson(brush,true)));}
         /// <summary>ブラシのファイルを取り込み、プロジェクトのライブラリに入れて 1 つ目を選ぶ。対応していない設定は
