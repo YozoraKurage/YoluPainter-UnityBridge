@@ -239,6 +239,11 @@ if ! daemon_client_lock_held && [[ -z "${YOLUPAINTER_DAEMON_SWITCHING:-}" ]]; th
         exec 8>"$dir/client.lock"
         if flock -n 8; then
           if [[ -f "$dir/switching" ]]; then exec 8>&-; continue; fi
+          # 空き待ちの間に落ちた・再起動した台を、古い候補のまま使わない（ロックを取った後で死活とモードを見直す）
+          live="$(runner_live_mode "$n")"
+          if [[ "$live" == down ]] || { [[ -z "$RUNNER_ARG" || -n "$MODE" ]] && [[ "$live" != "$want" ]]; }; then
+            exec 8>&-; continue
+          fi
           export YOLUPAINTER_RUNNER="$n" YOLUPAINTER_LOCK_HELD=1
           exec "$0" "${original_args[@]}"
         fi
