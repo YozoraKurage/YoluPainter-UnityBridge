@@ -15,7 +15,7 @@
 # - どちらでも、Codex のプロセスには push の資格情報を渡さない（下の scrub）。
 set -euo pipefail
 name="${1:?担当の名前（/workspace/.worktrees/<名前>）が要る}"; shift
-WT="/workspace/.worktrees/$name"
+WT="${CODEX_WT:-/workspace/.worktrees/$name}"  # CODEX_WT で別のリポジトリの worktree も（YoluPainter-rs など）
 [[ -d "$WT" ]] || { echo "worktree が無い: $WT" >&2; exit 2; }
 A="$WT/.agent"; mkdir -p "$A"
 MODEL="${CODEX_MODEL:-gpt-6.1-sol}"; EFFORT="${CODEX_EFFORT:-xhigh}"; SANDBOX=(--approve-for-me); action=start; RESUME=""
@@ -56,7 +56,7 @@ scrub=(env -u REMOTE_CONTAINERS_IPC -u GIT_ASKPASS -u VSCODE_GIT_ASKPASS_NODE -u
   GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0= GIT_CONFIG_KEY_1=remote.origin.pushurl GIT_CONFIG_VALUE_1=/nonexistent/push-is-for-the-coordinator)
 resume_args=()
 if [[ -n "$RESUME" ]]; then
-  sid=$(grep -m1 "^session id:" "$A/codex.log" 2>/dev/null | awk '{print $3}')
+  sid=$(grep -a -m1 "^session id:" "$A/codex.log" 2>/dev/null | awk '{print $3}')
   [[ -n "$sid" ]] || { echo "前のセッションの ID が $A/codex.log に無い（--resume なしで始め直す）" >&2; exit 2; }
   n=1; while [[ -f "$A/codex.log.$n" ]]; do n=$((n + 1)); done; mv "$A/codex.log" "$A/codex.log.$n"
   # exec resume には -C と --approve-for-me が無いので、作業フォルダへ移り、自動の審査は設定で渡す（--approve-for-me と同じ中身）
