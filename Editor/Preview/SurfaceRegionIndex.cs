@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Yozolab.YoluPainter.Core.MeshMaps;
 
 namespace Yozolab.YoluPainter.Editor.Preview
 {
@@ -8,7 +9,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
     /// スナップショットの三角形から範囲をすぐ引く索引（ポリゴン塗りつぶしの、ポインタの下の範囲とクリック・ドラッグ）。ジオメトリごとに作り、
     /// UV アイランド・メッシュの塊の成分は初めて要るときに 1 回だけ求める。範囲は <see cref="SurfaceRegions.Region"/> と同じ三角形の集まり
     /// （同じスロットの中で、UV（1e-6 で丸めた端点）か 3D の位置（1e-5 で丸めた端点）の辺を共有してつながる三角形。三角形が 3 つ以上
-    /// 集まる辺もつなぐ）。Region は呼ぶたびに辺の表を作るので、三角形が変わるたびに引く強調には使えない。
+    /// 集まる辺もつなぐ）。分け方は Core の <see cref="MeshRegions"/> で、ID マップの「メッシュの塊」「UV アイランド」の部品と同じ。
+    /// Region は呼ぶたびに辺の表を作るので、三角形が変わるたびに引く強調には使えない。
     /// 2D キャンバスのクリックのために、スロットごとの UV の格子（点を含む三角形を引く）と、範囲の UV の輪郭（範囲の中で 1 回だけ現れる
     /// UV の辺）も持つ。どれも読むだけで、ジオメトリを変えない。
     /// </summary>
@@ -76,52 +78,38 @@ namespace Yozolab.YoluPainter.Editor.Preview
             return Grouped(of, ids.Count);
         }
 
-        readonly struct VertexKey : IEquatable<VertexKey>
-        {
-            readonly int slot; readonly long x, y, z;
-            public VertexKey(int slot, long x, long y, long z) { this.slot = slot; this.x = x; this.y = y; this.z = z; }
-            public bool Equals(VertexKey o) => slot == o.slot && x == o.x && y == o.y && z == o.z;
-            public override bool Equals(object obj) => obj is VertexKey o && Equals(o);
-            public override int GetHashCode() { unchecked { return (((slot * 397) ^ x.GetHashCode()) * 397 ^ y.GetHashCode()) * 397 ^ z.GetHashCode(); } }
-        }
-
-        /// <summary>辺を共有する三角形をつなぐ（UV か 3D の位置。端点は SurfaceRegions.Region と同じ丸め）。頂点の鍵はスロットごとなので、
-        /// スロットをまたいではつながない。辺は (小さい頂点, 大きい頂点) の 64 ビットにして並べ、同じ辺の三角形を union-find でまとめる
-        /// （辞書に辺を入れるより少ない記憶で、三角形が多いモデルでも O(n log n)）。</summary>
+        /// <summary>辺を共有する三角形をつなぐ（UV か 3D の位置）。分け方は Core の <see cref="MeshRegions"/>（ID マップのベイクと同じ決まり）:
+        /// 同じスロットの中で、端点を丸めた辺を共有する三角形を union-find でまとめ、成分の番号はいちばん小さい三角形の順。</summary>
         Components Connect(bool uv)
         {
-            int n = triangles.Count;
-            var vertices = new Dictionary<VertexKey, int>();
-            int Vertex(int slot, Vector2 u, Vector3 p)
-            {
-                var key = uv ? new VertexKey(slot, (long)Math.Round(u.x * 1e6), (long)Math.Round(u.y * 1e6), 0)
-                    : new VertexKey(slot, (long)Math.Round(p.x * 1e5), (long)Math.Round(p.y * 1e5), (long)Math.Round(p.z * 1e5));
-                if (!vertices.TryGetValue(key, out int id)) vertices.Add(key, id = vertices.Count);
-                return id;
-            }
-            var keys = new long[3 * n]; var owners = new int[3 * n]; var corners = uv ? new int[3 * n] : null; var firstUv = uv ? new List<Vector2>() : null;
+            int n = triangles.Count; var slots = new int[n];
+            float[] values = new float[n * (uv ? 6 : 9)];
             for (int i = 0; i < n; i++)
             {
-                var t = triangles[i];
-                int a = Vertex(t.MaterialSlot, t.UvA, t.A), b = Vertex(t.MaterialSlot, t.UvB, t.B), c = Vertex(t.MaterialSlot, t.UvC, t.C);
-                keys[3 * i] = Edge(a, b); keys[3 * i + 1] = Edge(b, c); keys[3 * i + 2] = Edge(c, a);
-                owners[3 * i] = owners[3 * i + 1] = owners[3 * i + 2] = i;
-                if (uv)
+                var t = triangles[i]; slots[i] = t.MaterialSlot;
+                if (uv) { int k = i * 6; values[k] = t.UvA.x; values[k + 1] = t.UvA.y; values[k + 2] = t.UvB.x; values[k + 3] = t.UvB.y; values[k + 4] = t.UvC.x; values[k + 5] = t.UvC.y; }
+                else
                 {
-                    corners[3 * i] = a; corners[3 * i + 1] = b; corners[3 * i + 2] = c;
-                    if (a == firstUv.Count) firstUv.Add(t.UvA); if (b == firstUv.Count) firstUv.Add(t.UvB); if (c == firstUv.Count) firstUv.Add(t.UvC);
+                    int k = i * 9;
+                    values[k] = t.A.x; values[k + 1] = t.A.y; values[k + 2] = t.A.z; values[k + 3] = t.B.x; values[k + 4] = t.B.y; values[k + 5] = t.B.z;
+                    values[k + 6] = t.C.x; values[k + 7] = t.C.y; values[k + 8] = t.C.z;
                 }
             }
-            if (uv) { uvCorners = corners; uvVertexUv = firstUv.ToArray(); }
-            Array.Sort(keys, owners);
-            var parent = new int[n]; for (int i = 0; i < n; i++) parent[i] = i;
-            int Find(int v) { while (parent[v] != v) { parent[v] = parent[parent[v]]; v = parent[v]; } return v; }
-            for (int k = 1; k < keys.Length; k++)
-                if (keys[k] == keys[k - 1]) { int r1 = Find(owners[k]), r2 = Find(owners[k - 1]); if (r1 != r2) parent[Math.Max(r1, r2)] = Math.Min(r1, r2); }
-            // 成分の番号は、成分のいちばん小さい三角形の順
-            var of = new int[n]; var ids = new Dictionary<int, int>();
-            for (int i = 0; i < n; i++) { int root = Find(i); if (!ids.TryGetValue(root, out int id)) ids.Add(root, id = ids.Count); of[i] = id; }
-            return Grouped(of, ids.Count);
+            int count; int[] of;
+            if (uv)
+            {
+                of = MeshRegions.UvIslands(values, slots, out count, out var corners, out int vertexCount);
+                // UV の頂点の番号ごとに、最初に現れた角の UV（輪郭に使う）
+                var firstUv = new Vector2[vertexCount]; var seen = new bool[vertexCount];
+                for (int c = 0; c < corners.Length; c++)
+                {
+                    int v = corners[c]; if (seen[v]) continue;
+                    seen[v] = true; var t = triangles[c / 3]; firstUv[v] = c % 3 == 0 ? t.UvA : c % 3 == 1 ? t.UvB : t.UvC;
+                }
+                uvCorners = corners; uvVertexUv = firstUv;
+            }
+            else of = MeshRegions.MeshParts(values, slots, out count);
+            return Grouped(of, count);
         }
 
         static long Edge(int a, int b) => a <= b ? ((long)a << 32) | (uint)b : ((long)b << 32) | (uint)a;

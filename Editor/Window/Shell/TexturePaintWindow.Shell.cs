@@ -46,6 +46,7 @@ namespace Yozolab.YoluPainter.Editor
             new ToolSlot { Tool = PaintTool.SelectEllipse, Id = "select-ellipse", Name = "Ellipse Select", Key = "Shift+M" },
             new ToolSlot { Tool = PaintTool.Lasso, Id = "lasso", Name = "Lasso", Key = "L" },
             new ToolSlot { Tool = PaintTool.MagicWand, Id = "magic-wand", Name = "Magic Wand", Key = "W" },
+            new ToolSlot { Tool = PaintTool.IdSelect, Id = "id-select", Name = "ID Color Select", Key = "Shift+W" },
             null,
             new ToolSlot { Tool = PaintTool.Move, Id = "move", Name = "Move / Transform", Key = "V" },
             new ToolSlot { Tool = PaintTool.Path, Id = "path", Name = "Path", Key = "P" },
@@ -198,6 +199,7 @@ namespace Yozolab.YoluPainter.Editor
                     wandSampleAll = PaintGui.Toggle(Next(150), L.Tr("Sample All Layers"), wandSampleAll, L.Tr("Pick from the composite instead of the selected layer"));
                     { var t = L.Tr("Click the 2D canvas to pick the brush color."); PaintGui.Text(Fit(t), t, PaintTheme.LabelDim); }
                     break;
+                case PaintTool.IdSelect: IdSelectOptions(Next, Fit); break; // Tools/TexturePaintWindow.IdSelect.cs
                 case PaintTool.PolygonFill: // Tools/TexturePaintWindow.PolygonFill.cs
                 {
                     PaintGui.Dropdown(Mark("polyfill-region", Next(200)), L.TrIn("3D pick", "Region"), SurfacePickName(surfacePick), OpenSurfacePickMenu, L.Tr("What a click or drag fills: the triangle, the connected mesh part, the UV island or the whole material of this texture set"));

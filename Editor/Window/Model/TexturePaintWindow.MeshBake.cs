@@ -632,8 +632,11 @@ namespace Yozolab.YoluPainter.Editor
                         L.Tr("Edges within this distance count (relative to the bounding-box diagonal). Larger = wider, softer edges"));
                     break;
                 case MeshMapKind.Id:
-                    BakeChoice(host, rows.Row(), L.Tr("Colors from"), s.IdSource, (MeshIdSource[])Enum.GetValues(typeof(MeshIdSource)), IdSourceName, v => meshBakeSettings.IdSource = v,
+                    BakeChoice(host, rows.Row(), L.Tr("Colors from"), s.IdSource, IdSourceChoices, IdSourceName, v => meshBakeSettings.IdSource = v,
                         L.Tr("What gets its own colour in the ID map"));
+                    NoteRow(rows, IdSourceDescription(s.IdSource));
+                    if ((s.IdSource == MeshIdSource.MaterialSlot || s.IdSource == MeshIdSource.Mesh) && highPolyModel == null)
+                        NoteRow(rows, L.Tr("Without a high poly, every texel of one texture set has the same slot and mesh, so this ID map is one colour. Use mesh parts, UV islands or vertex colours, or choose a high poly."), NoteKind.Warning);
                     break;
                 default:
                     NoteRow(rows, L.Tr("This map has no settings of its own; Common Settings apply."), NoteKind.Plain);
@@ -655,9 +658,24 @@ namespace Yozolab.YoluPainter.Editor
                 case MeshMapKind.Thickness: return L.Tr("How far rays travel inward before leaving the other side, divided by the max distance: 0 = thin, 1 = thick.");
                 case MeshMapKind.TangentNormal: return L.Tr("The high poly's normals in this model's tangent space (OpenGL, Y+). Flat where the high poly is missed.");
                 case MeshMapKind.Height: return L.Tr("The signed distance from this model to the high poly along the projection (outside is brighter). 0.5 where it is missed.");
-                case MeshMapKind.Id: return L.Tr("A fixed colour for each material slot, mesh, vertex colour or UV island.");
+                case MeshMapKind.Id: return L.Tr("A flat colour for each part (material slot, mesh, connected mesh part or UV island) or each triangle's vertex colour. Select by these colours with Shift+W or the ID colour generator.");
                 case MeshMapKind.BentNormal: return L.Tr("The average unblocked direction of the ambient occlusion rays (world space).");
                 default: return L.Tr("1 where the high poly is hit, 0 where it is missed (1 wherever this model covers when there is no high poly).");
+            }
+        }
+
+        /// <summary>ID の色の元の並び（ドロップダウン）。</summary>
+        static readonly MeshIdSource[] IdSourceChoices = { MeshIdSource.MeshPart, MeshIdSource.UvIsland, MeshIdSource.MaterialSlot, MeshIdSource.Mesh, MeshIdSource.VertexColor };
+        /// <summary>ID の色の元の説明（右の設定の、元の選択の下）。</summary>
+        static string IdSourceDescription(MeshIdSource source)
+        {
+            switch (source)
+            {
+                case MeshIdSource.MeshPart: return L.Tr("Each connected piece of the mesh (triangles sharing edges in 3D, across UV seams) gets its own colour, split the same way as the polygon fill's Mesh Part.");
+                case MeshIdSource.UvIsland: return L.Tr("Each UV island gets its own colour, split the same way as the polygon fill's UV Island.");
+                case MeshIdSource.Mesh: return L.Tr("Each mesh (renderer) gets its own colour; with a high poly, each of its meshes.");
+                case MeshIdSource.VertexColor: return L.Tr("Each triangle takes the vertex colour most of its corners have (not blended, so every texel is a colour of the mesh). White when the mesh has no vertex colours.");
+                default: return L.Tr("Each material slot (a renderer's submesh) gets its own colour; with a high poly, each of its slots.");
             }
         }
 

@@ -133,7 +133,7 @@ namespace Yozolab.YoluPainter.Editor
 
         // ───────── 足す ─────────
 
-        static readonly GeneratorType[] GeneratorMenu = { GeneratorType.EdgeWear, GeneratorType.Dirt, GeneratorType.PositionGradient, GeneratorType.ShapeGradient, GeneratorType.Thickness, GeneratorType.Direction };
+        static readonly GeneratorType[] GeneratorMenu = { GeneratorType.EdgeWear, GeneratorType.Dirt, GeneratorType.PositionGradient, GeneratorType.ShapeGradient, GeneratorType.Thickness, GeneratorType.Direction, GeneratorType.IdColor };
 
         /// <summary>選んだ層のスタックに Generator を足す（画素なら今のチャンネルだけ）。足せたら知らせに、読むマップが無ければその理由も添える。</summary>
         internal FilterEffect AddGenerator(FilterTarget target, GeneratorType type)
@@ -182,6 +182,7 @@ namespace Yozolab.YoluPainter.Editor
                 case GeneratorType.PositionGradient: return L.Tr("Position gradient");
                 case GeneratorType.ShapeGradient: return L.Tr("Shape gradient");
                 case GeneratorType.Thickness: return L.TrIn("generator", "Thickness");
+                case GeneratorType.IdColor: return L.Tr("ID color");
                 default: return L.TrIn("generator", "Direction");
             }
         }
@@ -284,6 +285,9 @@ namespace Yozolab.YoluPainter.Editor
                     case GeneratorType.ShapeGradient:
                         next = ShapeGradientRows(rows, e, next, indent); // 形・置き場・シーンから写す（TexturePaintWindow.ShapeGradient.cs）
                         break;
+                    case GeneratorType.IdColor:
+                        next = IdColorRows(rows, e, next, indent); // 色の一覧・スポイト・許容の幅（Tools/TexturePaintWindow.IdSelect.cs）
+                        break;
                     case GeneratorType.Direction:
                     {
                         (double x, double y, double z) current = (next.DirectionX, next.DirectionY, next.DirectionZ);
@@ -297,15 +301,18 @@ namespace Yozolab.YoluPainter.Editor
                         break;
                     }
                 }
-                // レベル: 低と高は入れ違わない（0.001 以上離す）
-                var c = PaintGui.LabeledColumns(Indent(rows.Row(), indent), L.TrIn("generator", "Range"), PropertyLabelWidth, 2);
-                double low = PaintGui.KeepSlider(Spot("generator.low", c[0]), L.TrIn("generator", "Low"), next.Low, 0, 1, "0.###", "", L.Tr("Base values at or below this give 0"));
-                double high = PaintGui.KeepSlider(Spot("generator.high", c[1]), L.TrIn("generator", "High"), next.High, 0, 1, "0.###", "", L.Tr("Base values at or above this give 1"));
-                if (low != next.Low) low = Math.Max(0, Math.Min(low, next.High - GeneratorSettings.MinLevelRange));
-                if (high != next.High) high = Math.Min(1, Math.Max(high, low + GeneratorSettings.MinLevelRange));
-                double softness = PaintGui.KeepSlider(Spot("generator.softness", Indent(rows.Row(), indent)), L.TrIn("generator", "Softness"), next.Softness, 0, 1, "0", "%",
-                    L.Tr("0 %: a straight ramp from low to high. 100 %: a smooth S curve."), true, 100);
-                next = next.WithLevels(low, high, softness);
+                // レベル: 低と高は入れ違わない（0.001 以上離す）。ID の色は 0 か 1 なので、範囲とやわらかさは出さない（反転は出す）
+                if (g.Type != GeneratorType.IdColor)
+                {
+                    var c = PaintGui.LabeledColumns(Indent(rows.Row(), indent), L.TrIn("generator", "Range"), PropertyLabelWidth, 2);
+                    double low = PaintGui.KeepSlider(Spot("generator.low", c[0]), L.TrIn("generator", "Low"), next.Low, 0, 1, "0.###", "", L.Tr("Base values at or below this give 0"));
+                    double high = PaintGui.KeepSlider(Spot("generator.high", c[1]), L.TrIn("generator", "High"), next.High, 0, 1, "0.###", "", L.Tr("Base values at or above this give 1"));
+                    if (low != next.Low) low = Math.Max(0, Math.Min(low, next.High - GeneratorSettings.MinLevelRange));
+                    if (high != next.High) high = Math.Min(1, Math.Max(high, low + GeneratorSettings.MinLevelRange));
+                    double softness = PaintGui.KeepSlider(Spot("generator.softness", Indent(rows.Row(), indent)), L.TrIn("generator", "Softness"), next.Softness, 0, 1, "0", "%",
+                        L.Tr("0 %: a straight ramp from low to high. 100 %: a smooth S curve."), true, 100);
+                    next = next.WithLevels(low, high, softness);
+                }
                 next = next.WithInvert(PaintGui.FitToggle(Spot("generator.invert", Indent(rows.Row(), indent)), L.TrIn("generator", "Invert"), next.Invert, L.Tr("Swap 0 and 1 after the range")));
                 // 崩し
                 PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.Tr("Breakup"), L.Tr("Seeded noise that wears the result away in patches, so edges and dirt do not look uniform (100 %: gone where the noise is strongest). The same seed always gives the same result."));

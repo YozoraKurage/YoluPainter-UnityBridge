@@ -33,12 +33,18 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// channel, a byte of parts (bit 0 mode, bit 1 opacity, never 0) and then an int blend mode and/or a double opacity. An unknown part
     /// bit, channel or mode, pass through on a layer that is not a group, an opacity outside 0..1, a repeated channel or an empty list
     /// refuses the archive; bit 2 in an older archive (12 or 13) is an unknown bit. A document without per-channel settings is laid out
-    /// exactly as version 13, only the version number differs. Older archives still load.</summary>
+    /// exactly as version 13, only the version number differs. Version 15 adds the ID colour generator (type 6): its generator block is
+    /// followed by the tolerance (int, 0–255), the number of colours (int, 0–<see cref="GeneratorSettings.MaxIdColors"/>) and the colours
+    /// (int 0xRRGGBB each, in the generator's order, no repeats); generators of other types are written as before, so a document without
+    /// one is laid out exactly as version 14 and only the version number differs. Type 6 in an older archive, a colour outside 0–0xFFFFFF,
+    /// a repeated colour and a count or tolerance out of range are refused. Older archives still load.</summary>
     public static class DocumentBinary
     {
         /// <summary>The version that added per-channel blend modes and opacities (attribute bit 2).</summary>
         internal const int ChannelBlendsVersion = 14;
-        const int Version = ChannelBlendsVersion;
+        /// <summary>The version that added the ID colour generator (generator type 6 and its colours after the generator block).</summary>
+        internal const int IdColorVersion = 15;
+        const int Version = IdColorVersion;
         /// <summary>The version <see cref="Write"/> produces.</summary>
         public const int CurrentVersion = Version;
         /// <summary>The version that added the shape gradient (generator type 5 and its volume after the generator block).</summary>
@@ -375,14 +381,19 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 writer.Write((int)v.Shape);
                 foreach (double d in new[] { v.CenterX, v.CenterY, v.CenterZ, v.RotationX, v.RotationY, v.RotationZ, v.SizeX, v.SizeY, v.SizeZ, v.Falloff }) writer.Write(d);
             }
+            if (g.Type == GeneratorType.IdColor)
+            {
+                writer.Write(g.IdTolerance); writer.Write(g.IdColors.Count);
+                foreach (int c in g.IdColors) writer.Write(c);
+            }
         }
         const int MaxGeneratorPins = 8;
-        /// <summary>The generator block (version 11; the shape gradient's volume from version 13). Unknown values are refused, never
-        /// replaced by defaults.</summary>
+        /// <summary>The generator block (version 11; the shape gradient's volume from version 13; the ID colours from
+        /// <see cref="IdColorVersion"/>). Unknown values are refused, never replaced by defaults.</summary>
         static GeneratorSettings ReadGenerator(BinaryReader reader, int version)
         {
             int type = reader.ReadInt32(), algorithm = reader.ReadInt32();
-            if (!Enum.IsDefined(typeof(GeneratorType), type) || type == (int)GeneratorType.ShapeGradient && version < ShapeGradientVersion)
+            if (!Enum.IsDefined(typeof(GeneratorType), type) || type == (int)GeneratorType.ShapeGradient && version < ShapeGradientVersion || type == (int)GeneratorType.IdColor && version < IdColorVersion)
                 throw new InvalidDataException("Unknown generator type " + type + "; a newer reader is required (source retained unchanged).");
             if (algorithm != GeneratorSettings.AlgorithmVersionOf((GeneratorType)type)) throw new InvalidDataException("Generator algorithm version " + algorithm + " of " + (GeneratorType)type + " is not supported by this reader; source retained unchanged.");
             double low = reader.ReadDouble(), high = reader.ReadDouble(), softness = reader.ReadDouble(); bool invert = reader.ReadBoolean();
@@ -407,10 +418,17 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 var v = new double[10]; for (int k = 0; k < v.Length; k++) v[k] = reader.ReadDouble();
                 volume = new ShapeVolume((GeneratorShape)shape, v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9]);
             }
+            int tolerance = IdMapColors.DefaultTolerance; int[] colors = null;
+            if (type == (int)GeneratorType.IdColor)
+            {
+                tolerance = reader.ReadInt32();
+                colors = new int[ReadCount(reader, GeneratorSettings.MaxIdColors, "ID colour")];
+                for (int k = 0; k < colors.Length; k++) colors[k] = reader.ReadInt32();
+            }
             try
             {
                 return GeneratorSettings.FromValues((GeneratorType)type, low, high, softness, invert, noiseAmount, noiseScale, noiseSeed, (GeneratorNoiseSpace)noiseSpace,
-                    (GeneratorBlend)blend, balance, axis, dx, dy, dz, bent, pins, volume);
+                    (GeneratorBlend)blend, balance, axis, dx, dy, dz, bent, pins, volume, colors, tolerance);
             }
             catch (ArgumentException ex) { throw new InvalidDataException("Invalid generator parameters: " + ex.Message, ex); }
         }

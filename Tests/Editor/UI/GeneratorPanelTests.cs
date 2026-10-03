@@ -63,7 +63,10 @@ namespace Yozolab.YoluPainter.Tests
                                 Render(w, width, height, name);
                                 Assert.That(PaintGui.ShortenedTexts, Is.Zero, name + ": a UI text did not fit and was shortened with …");
                                 Assert.That((d.Revision, d.UndoCount), Is.EqualTo((revision, undo)), name + ": drawing changed the document");
-                                Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.pin").And.Member("generator.low").And.Member("generator.blend").And.Member("generator.add.Mask"), name);
+                                Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.pin").And.Member("generator.invert").And.Member("generator.blend").And.Member("generator.add.Mask"), name);
+                                // ID の色は 0 か 1 なので範囲の行を出さず、色の一覧・スポイト・許容の幅を出す
+                                if (type == GeneratorType.IdColor) Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.id.pick").And.Member("generator.id.tolerance").And.No.Member("generator.low"), name);
+                                else Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.low"), name);
                                 if (!status.Active) Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.bake"), name + ": the way to the bake window");
                                 drawn++;
                             }

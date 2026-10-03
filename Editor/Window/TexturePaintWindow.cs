@@ -28,7 +28,7 @@ namespace Yozolab.YoluPainter.Editor
         Vector2 previousPointer, layerScroll;
         float previousPressure = 1;
         /// <summary>キャンバスでの左ボタンの働き。</summary>
-        internal enum PaintTool { Brush, Fill, Gradient, SelectRectangle, SelectEllipse, Lasso, MagicWand, Move, Path, Eyedropper, PolygonFill }
+        internal enum PaintTool { Brush, Fill, Gradient, SelectRectangle, SelectEllipse, Lasso, MagicWand, Move, Path, Eyedropper, PolygonFill, IdSelect }
         PaintTool tool;
         int materialSlot, resolution = 1024;
         double lastRecovery, lastExternalCheck;
@@ -221,7 +221,7 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         internal BrushState Brush { get => brush; set => brush = value; }
-        internal PaintTool Tool { get => tool; set { CancelToolDrag(); tool = value; } }
+        internal PaintTool Tool { get => tool; set { CancelToolDrag(); if (value != tool) EndIdColorPick(); tool = value; } }
 
         void TryAction(Action action)
         {

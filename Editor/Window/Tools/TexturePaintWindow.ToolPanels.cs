@@ -23,6 +23,7 @@ namespace Yozolab.YoluPainter.Editor
                 case PaintTool.SelectRectangle: case PaintTool.SelectEllipse: case PaintTool.Lasso: case PaintTool.MagicWand:
                     SurfacePickSection(rows);
                     SelectionModifySection(rows); break;
+                case PaintTool.IdSelect: IdMapSection(rows); SelectionModifySection(rows); break; // Tools/TexturePaintWindow.IdSelect.cs
                 case PaintTool.Move: TransformSection(rows); break;
                 case PaintTool.Path: PathSection(rows); break;
             }
@@ -31,7 +32,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>初めは閉じておくセクション（細かい設定。Photoshop のブラシ設定の一覧のように、見出しだけを並べる）。</summary>
         static readonly HashSet<string> ToolSectionsClosedAtFirst = new HashSet<string> { "brush-jitter", "brush-texture", "brush-dual", "brush-color", "brush-fade" };
         /// <summary>ツールのセクションのキー（テストがすべて開いて描くため）。</summary>
-        internal static readonly string[] ToolSectionKeys = { "brush", "brush-material", "brush-stroke", "brush-symmetry", "brush-jitter", "brush-texture", "brush-dual", "brush-color", "brush-fade", "surface-pick", "selection-modify", "move", "path" };
+        internal static readonly string[] ToolSectionKeys = { "brush", "brush-material", "brush-stroke", "brush-symmetry", "brush-jitter", "brush-texture", "brush-dual", "brush-color", "brush-fade", "surface-pick", "selection-modify", "id-map", "move", "path" };
         internal void SetToolSectionsOpen(bool open) { foreach (var key in ToolSectionKeys) sectionOpen[key] = open; }
 
         /// <summary>ツールのセクションの見出し（開いていれば true）。初めの開閉は <see cref="ToolSectionsClosedAtFirst"/>。</summary>

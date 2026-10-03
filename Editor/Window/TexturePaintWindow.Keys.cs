@@ -71,7 +71,7 @@ namespace Yozolab.YoluPainter.Editor
                 case KeyCode.G: SelectTool(e.shift ? PaintTool.Gradient : PaintTool.Fill); break;
                 case KeyCode.M: SelectTool(e.shift ? PaintTool.SelectEllipse : PaintTool.SelectRectangle); break;
                 case KeyCode.L: SelectTool(PaintTool.Lasso); break;
-                case KeyCode.W: SelectTool(PaintTool.MagicWand); break;
+                case KeyCode.W: SelectTool(e.shift ? PaintTool.IdSelect : PaintTool.MagicWand); break; // Shift+W: ID の色で選択（Tools/TexturePaintWindow.IdSelect.cs）
                 case KeyCode.V: SelectTool(PaintTool.Move); break;
                 case KeyCode.P: SelectTool(PaintTool.Path); break;
                 case KeyCode.I: SelectTool(PaintTool.Eyedropper); break;

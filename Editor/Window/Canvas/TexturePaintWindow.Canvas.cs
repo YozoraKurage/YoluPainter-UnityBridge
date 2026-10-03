@@ -51,6 +51,7 @@ namespace Yozolab.YoluPainter.Editor
                 if(e.type==EventType.ScrollWheel){ZoomCanvasView(canvasZoom*Mathf.Exp(-e.delta.y*.07f),e.mousePosition);e.Use();return;}
                 if(e.type==EventType.MouseDrag && e.button==2){canvasPan+=e.delta;e.Use();Repaint();return;}
             }
+            if(HandleIdColorInput(e))return; // ID の色で選ぶ・Generator「ID の色」のスポイト（2D と 3D。Tools/TexturePaintWindow.IdSelect.cs）
             if(HandlePolygonFillInput(e))return; // ポリゴン塗りつぶし（2D と 3D。ドラッグの最中も）
             if(stroke==null&&HandleToolInput(e))return;
             if(stroke==null&&HandlePathTool(e))return;

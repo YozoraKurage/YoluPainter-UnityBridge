@@ -9,7 +9,7 @@ namespace Yozolab.YoluPainter.Core
 {
     /// <summary>Built-in generators: values made from the texture set's baked mesh maps and parameters. Values are stored in the
     /// native format; append only.</summary>
-    public enum GeneratorType { EdgeWear = 0, Dirt = 1, PositionGradient = 2, Thickness = 3, Direction = 4, ShapeGradient = 5 }
+    public enum GeneratorType { EdgeWear = 0, Dirt = 1, PositionGradient = 2, Thickness = 3, Direction = 4, ShapeGradient = 5, IdColor = 6 }
 
     /// <summary>How a generator's value g is combined with its stage input s. On a mask s is the visibility (1 = the layer shows,
     /// 1 − the stored hide amount), on layer pixels the channel value. Values are stored in the native format; append only.</summary>
@@ -37,6 +37,9 @@ namespace Yozolab.YoluPainter.Core
     /// <item>ShapeGradient (Position): the texel's point on the model, read back from the Position map with the bake's bounding box
     /// (p = min + v (max − min)) and moved into the model root's space with the document's <see cref="GeneratorModelFrame"/>, gets
     /// the base value of <see cref="Volume"/> (a box, sphere or plane; see <see cref="ShapeVolume"/>).</item>
+    /// <item>IdColor (Id): b = 1 where the ID map's colour (8-bit RGB, see <see cref="IdMapColors"/>) is within <see cref="IdTolerance"/>
+    /// (largest channel difference) of one of <see cref="IdColors"/>, else 0 (Substance Painter's colour selection as a mask). Without
+    /// colours the stage passes its input through and says so.</item>
     /// </list></item>
     /// <item>Levels: t = clamp((b − Low) / (High − Low)), then t + Softness (t² (3 − 2t) − t) (0 = linear ramp, 1 = smoothstep),
     /// then 1 − t when <see cref="Invert"/>.</item>
@@ -59,6 +62,9 @@ namespace Yozolab.YoluPainter.Core
     {
         public const double MinLevelRange = 0.001, MinNoiseScale = 0.001, MaxNoiseScale = 1, MaxDirectionComponent = 1e6;
         public const int NoiseOctaves = 4;
+        /// <summary>IdColor: at most this many colours (the native format bounds the list).</summary>
+        public const int MaxIdColors = 32;
+        static readonly IReadOnlyList<int> NoColors = Array.AsReadOnly(new int[0]);
         const double DefaultBalance = .5; const int DefaultAxis = 1;
         static readonly IReadOnlyDictionary<MeshMapKind, string> NoPins = new ReadOnlyDictionary<MeshMapKind, string>(new Dictionary<MeshMapKind, string>());
 
@@ -93,10 +99,16 @@ namespace Yozolab.YoluPainter.Core
         public IReadOnlyDictionary<MeshMapKind, string> Pins { get; private set; }
         /// <summary>ShapeGradient: the shape and where it is in the model root's space. Other types keep <see cref="ShapeVolume.Default"/>.</summary>
         public ShapeVolume Volume { get; private set; }
+        /// <summary>IdColor: the ID colours (0xRRGGBB) that give 1, in the order they were added; no repeats. Other types keep none.</summary>
+        public IReadOnlyList<int> IdColors { get; private set; }
+        /// <summary>IdColor: how far (largest 8-bit channel difference, 0..255) a texel's ID colour may be from a listed colour. Other types keep
+        /// <see cref="IdMapColors.DefaultTolerance"/>.</summary>
+        public int IdTolerance { get; private set; }
 
         GeneratorSettings(GeneratorType type)
         {
             Type = type; High = 1; NoiseScale = .05; Balance = DefaultBalance; Axis = DefaultAxis; DirectionY = 1; Pins = NoPins; Volume = ShapeVolume.Default;
+            IdColors = NoColors; IdTolerance = IdMapColors.DefaultTolerance;
         }
 
         /// <summary>The settings a newly added generator of the type starts with.</summary>
@@ -108,7 +120,7 @@ namespace Yozolab.YoluPainter.Core
                 case GeneratorType.EdgeWear: g.Low = .04; g.High = .3; g.Softness = .5; g.NoiseAmount = .6; break;
                 case GeneratorType.Dirt: g.Low = .15; g.High = .6; g.Softness = .5; g.NoiseAmount = .4; break;
                 case GeneratorType.Direction: g.Low = .6; g.High = .95; g.Softness = .5; g.NoiseAmount = .3; break;
-                default: break; // PositionGradient, Thickness, ShapeGradient: the map (the shape's value) as it is
+                default: break; // PositionGradient, Thickness, ShapeGradient, IdColor: the map (the shape's value, the match) as it is
             }
             return Checked(g);
         }
@@ -122,11 +134,18 @@ namespace Yozolab.YoluPainter.Core
         public static GeneratorSettings FromValues(GeneratorType type, double low, double high, double softness, bool invert, double noiseAmount, double noiseScale, int noiseSeed,
             GeneratorNoiseSpace noiseSpace, GeneratorBlend blend, double balance, int axis, double directionX, double directionY, double directionZ, bool useBentNormal,
             IEnumerable<KeyValuePair<MeshMapKind, string>> pins, ShapeVolume volume)
+            => FromValues(type, low, high, softness, invert, noiseAmount, noiseScale, noiseSeed, noiseSpace, blend, balance, axis, directionX, directionY, directionZ, useBentNormal, pins, volume,
+                null, IdMapColors.DefaultTolerance);
+        /// <summary>Settings from stored values with the ID colours and their tolerance (none and the default for other types).</summary>
+        public static GeneratorSettings FromValues(GeneratorType type, double low, double high, double softness, bool invert, double noiseAmount, double noiseScale, int noiseSeed,
+            GeneratorNoiseSpace noiseSpace, GeneratorBlend blend, double balance, int axis, double directionX, double directionY, double directionZ, bool useBentNormal,
+            IEnumerable<KeyValuePair<MeshMapKind, string>> pins, ShapeVolume volume, IEnumerable<int> idColors, int idTolerance)
         {
             var g = new GeneratorSettings(type)
             {
                 Low = low, High = high, Softness = softness, Invert = invert, NoiseAmount = noiseAmount, NoiseScale = noiseScale, NoiseSeed = noiseSeed, NoiseSpace = noiseSpace,
                 Blend = blend, Balance = balance, Axis = axis, DirectionX = directionX, DirectionY = directionY, DirectionZ = directionZ, UseBentNormal = useBentNormal, Volume = volume,
+                IdColors = ColorList(idColors), IdTolerance = idTolerance,
             };
             g.Pins = PinTable(pins);
             return Checked(g);
@@ -143,6 +162,14 @@ namespace Yozolab.YoluPainter.Core
         public GeneratorSettings WithBentNormal(bool value) { var g = Copy(); g.UseBentNormal = value; return Checked(g); }
         /// <summary>ShapeGradient: another shape or placement.</summary>
         public GeneratorSettings WithVolume(ShapeVolume value) { var g = Copy(); g.Volume = value; return Checked(g); }
+        /// <summary>IdColor: another list of colours (0xRRGGBB, no repeats, at most <see cref="MaxIdColors"/>).</summary>
+        public GeneratorSettings WithIdColors(IEnumerable<int> colors) { var g = Copy(); g.IdColors = ColorList(colors); return Checked(g); }
+        /// <summary>IdColor: the colour added at the end (unchanged if it is listed already).</summary>
+        public GeneratorSettings WithIdColorAdded(int rgb) => IdColors.Contains(rgb) ? Checked(Copy()) : WithIdColors(IdColors.Concat(new[] { rgb }));
+        /// <summary>IdColor: the colour taken out (unchanged if it is not listed).</summary>
+        public GeneratorSettings WithIdColorRemoved(int rgb) => WithIdColors(IdColors.Where(c => c != rgb));
+        /// <summary>IdColor: another tolerance (0..255).</summary>
+        public GeneratorSettings WithIdTolerance(int value) { var g = Copy(); g.IdTolerance = value; return Checked(g); }
         /// <summary>Pins the kind to one bake (its condition key), or follows the current map again when key is null.</summary>
         public GeneratorSettings WithPin(MeshMapKind kind, string key)
         {
@@ -159,8 +186,14 @@ namespace Yozolab.YoluPainter.Core
             {
                 Low = Low, High = High, Softness = Softness, Invert = Invert, NoiseAmount = NoiseAmount, NoiseScale = NoiseScale, NoiseSeed = NoiseSeed, NoiseSpace = NoiseSpace,
                 Blend = Blend, Balance = Balance, Axis = Axis, DirectionX = DirectionX, DirectionY = DirectionY, DirectionZ = DirectionZ, UseBentNormal = UseBentNormal, Pins = Pins,
-                Volume = Volume,
+                Volume = Volume, IdColors = IdColors, IdTolerance = IdTolerance,
             };
+        }
+        static IReadOnlyList<int> ColorList(IEnumerable<int> colors)
+        {
+            if (colors == null) return NoColors;
+            var list = colors.ToList();
+            return list.Count == 0 ? NoColors : list.AsReadOnly();
         }
         static IReadOnlyDictionary<MeshMapKind, string> PinTable(IEnumerable<KeyValuePair<MeshMapKind, string>> pins)
         {
@@ -199,6 +232,14 @@ namespace Yozolab.YoluPainter.Core
             else if (DirectionX != 0 || DirectionY != 1 || DirectionZ != 0 || UseBentNormal) throw new ArgumentException("The direction belongs to the direction generator.", "direction");
             if (Type == GeneratorType.ShapeGradient) { string why = Volume.Refusal(); if (why != null) throw new ArgumentOutOfRangeException("volume", why); }
             else if (!Volume.Equals(ShapeVolume.Default)) throw new ArgumentException("The shape belongs to the shape gradient.", "volume");
+            if (Type == GeneratorType.IdColor)
+            {
+                if (IdColors.Count > MaxIdColors) throw new ArgumentOutOfRangeException(nameof(IdColors), "At most " + MaxIdColors + " ID colours.");
+                foreach (int c in IdColors) if (c < 0 || c > 0xFFFFFF) throw new ArgumentOutOfRangeException(nameof(IdColors), "ID colours are 0xRRGGBB (0–0xFFFFFF).");
+                if (IdColors.Distinct().Count() != IdColors.Count) throw new ArgumentException("An ID colour is listed twice.", nameof(IdColors));
+                if (IdTolerance < 0 || IdTolerance > IdMapColors.MaxTolerance) throw new ArgumentOutOfRangeException(nameof(IdTolerance), "The tolerance must be 0–" + IdMapColors.MaxTolerance + ".");
+            }
+            else if (IdColors.Count != 0 || IdTolerance != IdMapColors.DefaultTolerance) throw new ArgumentException("ID colours belong to the ID colour generator.", nameof(IdColors));
             var candidates = CandidateMaps(Type);
             foreach (var pin in Pins)
             {
@@ -227,6 +268,7 @@ namespace Yozolab.YoluPainter.Core
                 case GeneratorType.PositionGradient: return new[] { MeshMapKind.Position };
                 case GeneratorType.Thickness: return new[] { MeshMapKind.Thickness, MeshMapKind.Position };
                 case GeneratorType.ShapeGradient: return new[] { MeshMapKind.Position };
+                case GeneratorType.IdColor: return new[] { MeshMapKind.Id, MeshMapKind.Position };
                 default: return new[] { MeshMapKind.WorldNormal, MeshMapKind.BentNormal, MeshMapKind.Position };
             }
         }
@@ -247,6 +289,7 @@ namespace Yozolab.YoluPainter.Core
                     case GeneratorType.PositionGradient: kinds.Add(MeshMapKind.Position); break;
                     case GeneratorType.Thickness: kinds.Add(MeshMapKind.Thickness); break;
                     case GeneratorType.ShapeGradient: kinds.Add(MeshMapKind.Position); break;
+                    case GeneratorType.IdColor: kinds.Add(MeshMapKind.Id); break;
                     default: kinds.Add(UseBentNormal ? MeshMapKind.BentNormal : MeshMapKind.WorldNormal); break;
                 }
                 if (NoiseAmount > 0 && NoiseSpace == GeneratorNoiseSpace.Model && !kinds.Contains(MeshMapKind.Position)) kinds.Add(MeshMapKind.Position);
@@ -266,6 +309,7 @@ namespace Yozolab.YoluPainter.Core
                     case GeneratorType.PositionGradient: return "Position gradient";
                     case GeneratorType.Thickness: return "Thickness";
                     case GeneratorType.ShapeGradient: return "Shape gradient";
+                    case GeneratorType.IdColor: return "ID color";
                     default: return "Direction";
                 }
             }
@@ -276,19 +320,20 @@ namespace Yozolab.YoluPainter.Core
             if (other == null || Type != other.Type || Low != other.Low || High != other.High || Softness != other.Softness || Invert != other.Invert || NoiseAmount != other.NoiseAmount
                 || NoiseScale != other.NoiseScale || NoiseSeed != other.NoiseSeed || NoiseSpace != other.NoiseSpace || Blend != other.Blend || Balance != other.Balance || Axis != other.Axis
                 || DirectionX != other.DirectionX || DirectionY != other.DirectionY || DirectionZ != other.DirectionZ || UseBentNormal != other.UseBentNormal || Pins.Count != other.Pins.Count
-                || !Volume.Equals(other.Volume)) return false;
+                || !Volume.Equals(other.Volume) || IdTolerance != other.IdTolerance || !IdColors.SequenceEqual(other.IdColors)) return false;
             foreach (var p in Pins) if (!other.Pins.TryGetValue(p.Key, out var key) || key != p.Value) return false;
             return true;
         }
         public override bool Equals(object obj) { return Equals(obj as GeneratorSettings); }
         public override int GetHashCode()
         {
-            unchecked { return ((int)Type * 397) ^ Low.GetHashCode() ^ (High.GetHashCode() * 7) ^ (NoiseAmount.GetHashCode() * 31) ^ (NoiseSeed * 17) ^ ((int)Blend << 8) ^ Pins.Count ^ (Volume.GetHashCode() * 3); }
+            unchecked { return ((int)Type * 397) ^ Low.GetHashCode() ^ (High.GetHashCode() * 7) ^ (NoiseAmount.GetHashCode() * 31) ^ (NoiseSeed * 17) ^ ((int)Blend << 8) ^ Pins.Count ^ (Volume.GetHashCode() * 3) ^ (IdColors.Count << 20) ^ (IdTolerance << 12); }
         }
         public override string ToString()
         {
             var c = CultureInfo.InvariantCulture;
-            return string.Format(c, "{0} {1:0.###}–{2:0.###}{3} {4}", Name, Low, High, Invert ? " inverted" : "", Blend) + (Pins.Count > 0 ? " pinned" : "");
+            return string.Format(c, "{0} {1:0.###}–{2:0.###}{3} {4}", Name, Low, High, Invert ? " inverted" : "", Blend) + (Pins.Count > 0 ? " pinned" : "")
+                + (Type == GeneratorType.IdColor ? " " + string.Join(",", IdColors.Select(IdMapColors.Hex)) + " ±" + IdTolerance : "");
         }
     }
 
@@ -349,6 +394,8 @@ namespace Yozolab.YoluPainter.Core
         readonly bool noise, uvNoise, invert; readonly uint[] octaveSeeds;
         // ShapeGradient: the Position map's 16-bit values → the shape's space (l = shapeMatrix · v + shapeOffset), and the shape
         readonly double[] shapeMatrix, shapeOffset; readonly ShapeEvaluator shape;
+        // IdColor: the colours and the tolerance
+        readonly int[] idColors; readonly int idTolerance;
 
         BoundGenerator(GeneratorSettings g, int width, int height, BakedMeshMap primary, BakedMeshMap secondary, BakedMeshMap position, GeneratorModelFrame frame)
         {
@@ -386,6 +433,7 @@ namespace Yozolab.YoluPainter.Core
                 }
                 shape = new ShapeEvaluator(v);
             }
+            if (g.Type == GeneratorType.IdColor) { idColors = g.IdColors.ToArray(); idTolerance = g.IdTolerance; }
             octaveSeeds = new uint[GeneratorSettings.NoiseOctaves];
             uint seed = FilterEngine.Hash((uint)g.NoiseSeed ^ 0x9e3779b9U);
             for (int o = 0; o < octaveSeeds.Length; o++) octaveSeeds[o] = FilterEngine.Hash(seed + (uint)o * 0x85ebca6bU);
@@ -417,6 +465,10 @@ namespace Yozolab.YoluPainter.Core
                 case GeneratorType.ShapeGradient:
                     position = Get(MeshMapKind.Position);
                     if (frame == null) { reason = "Where the model root is is not known, so the shape cannot be placed on the model (load the model)."; return null; }
+                    break;
+                case GeneratorType.IdColor:
+                    primary = Get(MeshMapKind.Id);
+                    if (g.IdColors.Count == 0) { reason = "No ID colours are chosen yet: pick parts with the eyedropper on the 2D canvas or the 3D view."; return null; }
                     break;
                 default: primary = Get(g.UseBentNormal ? MeshMapKind.BentNormal : MeshMapKind.WorldNormal); break;
             }
@@ -453,6 +505,13 @@ namespace Yozolab.YoluPainter.Core
                     if (primaryCoverage[i] == 0) return false;
                     b = primary[i] / 65535.0;
                     break;
+                case GeneratorType.IdColor:
+                {
+                    if (primaryCoverage[i] == 0) return false;
+                    int rgb = IdMapColors.Rgb(primary, i); b = 0;
+                    foreach (int c in idColors) if (IdMapColors.Near(rgb, c, idTolerance)) { b = 1; break; }
+                    break;
+                }
                 case GeneratorType.ShapeGradient:
                 {
                     if (positionCoverage[i] == 0) return false;

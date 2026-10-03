@@ -251,7 +251,8 @@ namespace Yozolab.YoluPainter.Editor
                 case MeshIdSource.Mesh: return L.Tr("Mesh");
                 case MeshIdSource.VertexColor: return L.Tr("Vertex color");
                 case MeshIdSource.UvIsland: return L.Tr("UV island");
-                default: return L.TrIn("mesh map", "Material slot");
+                case MeshIdSource.MeshPart: return L.TrIn("3D pick", "Mesh Part");
+                default: return L.TrIn("mesh map", "Material slot (submesh)");
             }
         }
 

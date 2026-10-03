@@ -25,7 +25,8 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         /// <summary>高さ。低ポリの面から高ポリの面までの、投影の向きに沿った符号付き距離（外が +）を、前後のレイの長さの大きい方で
         /// 割って 0.5 ± 0.5 にしたもの。高ポリが無い・当たらない所は 0.5。</summary>
         Height = 6,
-        /// <summary>ID。マテリアルスロット・メッシュ（レンダラー）・頂点カラー・UV アイランドごとの決まった色。</summary>
+        /// <summary>ID。マテリアルスロット（サブメッシュ）・メッシュ（レンダラー）・メッシュの塊・UV アイランドごとの決まった色
+        /// （<see cref="IdPalette"/>）か、三角形ごとの頂点カラー。どの色も補間しない（ID の色で選ぶため）。</summary>
         Id = 7,
         /// <summary>ベントノーマル。AO のレイのうち遮られなかった向きの平均（ワールド）。全部遮られたら面の法線。</summary>
         BentNormal = 8,
@@ -33,8 +34,10 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         Opacity = 9,
     }
 
-    /// <summary>ID の色の元。値は保存形式（設定の文字列）に入るので、並べ替えない。</summary>
-    public enum MeshIdSource { MaterialSlot = 0, Mesh = 1, VertexColor = 2, UvIsland = 3 }
+    /// <summary>ID の色の元。名前は由来の設定の文字列（<see cref="MeshBakeSettings.KindKey"/>）に、値はウィンドウの状態に入るので、並べ替えず
+    /// 末尾に足す。MaterialSlot は全体を平らにしたスロット（レンダラーとサブメッシュの組。Unity ではサブメッシュ i がマテリアル i で描かれる）。
+    /// MeshPart と UvIsland の分け方はポリゴン塗りつぶしの範囲と同じ（<see cref="MeshRegions"/>）。</summary>
+    public enum MeshIdSource { MaterialSlot = 0, Mesh = 1, VertexColor = 2, UvIsland = 3, MeshPart = 4 }
 
     /// <summary>テクセルの由来。Empty は三角形も余白も届かない所で、値は 0（データを作らない）。Overlap は UV が
     /// 別の三角形とも重なっていた所（添字の小さい三角形の値を持つ）。Padding は島の外の余白で、いちばん近い島のテクセルの写し。</summary>
@@ -82,6 +85,10 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         /// <summary>曲率を集める球の半径。</summary>
         public double CurvatureRadius = 0.02;
         public MeshIdSource IdSource = MeshIdSource.MaterialSlot;
+        /// <summary>ID の色の決め方の版（由来の設定の文字列に入る。上げると前の ID マップだけが古くなり、ほかの種類は古くならない）。
+        /// 2: 部品の数に合わせた格子の色（<see cref="IdPalette"/>。1 はハッシュの色相で、近い色がありえた）、頂点カラーは三角形ごと（1 は補間）、
+        /// UV アイランドはスロットごと・1e-6 の丸め（ポリゴン塗りつぶしと同じ）。</summary>
+        public const int IdAlgorithm = 2;
         /// <summary>高ポリへの投影: 低ポリの点から外へ ReferenceFrontal だけ出た所から、内へ Frontal + Rear の範囲で最初に当たる高ポリの面。</summary>
         public double ReferenceFrontal = 0.01, ReferenceRear = 0.01;
         /// <summary>投影の向きに、位置で溶接した全部の面の平均の法線（ハードエッジでも割れない「ケージ」）を使う。false なら頂点法線。</summary>
@@ -139,7 +146,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                     return "samples=" + ThicknessSamples + ";max=" + R(ThicknessMaxDistance) + ";spread=" + R(ThicknessSpreadDegrees) + ";occluders=" + Occluders;
                 case MeshMapKind.TangentNormal: return "frame=unity-vertex-tangents;y=up";
                 case MeshMapKind.Height: return "normalize=max-ray-distance";
-                case MeshMapKind.Id: return "source=" + IdSource;
+                case MeshMapKind.Id: return "source=" + IdSource + ";algorithm=" + IdAlgorithm;
                 case MeshMapKind.BentNormal:
                     return "samples=" + AoSamples + ";max=" + R(AoMaxDistance) + ";spread=" + R(AoSpreadDegrees) + ";backfaces=" + (AoIgnoreBackfaces ? "ignore" : "occlude") + ";occluders=" + Occluders;
                 case MeshMapKind.Opacity: return "hit=reference";
@@ -224,6 +231,8 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         public long CoveredTexels, OverlapTexels, PaddedTexels, EmptyTexels, Rays, EstimatedBytes;
         /// <summary>高ポリへの投影を試したサブサンプルの数と、高ポリに当たらず低ポリで焼いた数。</summary>
         public long ProjectedSamples, MissedSamples;
+        /// <summary>ID マップで色を振った部品の数（頂点カラーでは 0）。</summary>
+        public int IdParts;
         public int ReferenceTriangles;
         /// <summary>AO・ベントノーマル・厚みのレイを処理したもの（"CPU" か GPU の名前）。</summary>
         public string RayBackend = "CPU";

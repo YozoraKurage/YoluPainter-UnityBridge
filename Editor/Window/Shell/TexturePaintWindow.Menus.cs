@@ -203,7 +203,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void HelpMenu(GenericMenu m)
         {
-            Item(m, "Keyboard Shortcuts", () => Dialogs.Inform(L.Tr("Keyboard Shortcuts"), L.Tr(ShortcutHelp) + "\n" + L.Tr("2D view: - / ^ (or =) rotate 15° · R + drag rotates (with Shift in 15° steps) · Shift + middle drag rotates · Shift+R resets the rotation · H flips horizontally · Ctrl+0 also resets the rotation")));
+            Item(m, "Keyboard Shortcuts", () => Dialogs.Inform(L.Tr("Keyboard Shortcuts"), L.Tr(ShortcutHelp) + "\n" + L.Tr("2D view: - / ^ (or =) rotate 15° · R + drag rotates (with Shift in 15° steps) · Shift + middle drag rotates · Shift+R resets the rotation · H flips horizontally · Ctrl+0 also resets the rotation") + "\n" + L.Tr("Shift+W ID colour select (click a part on the 2D canvas or the 3D view; needs a baked ID map)")));
             Item(m, "Implementation Limits", () => Dialogs.Inform(L.Tr("Implementation Limits"), L.Tr(LimitsHelp)));
             Item(m, "Plugins…", ShowPluginList);
         }

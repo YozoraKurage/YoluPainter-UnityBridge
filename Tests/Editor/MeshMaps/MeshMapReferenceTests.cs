@@ -350,7 +350,8 @@ namespace Yozolab.YoluPainter.Tests
                         var input = TexturePaintWindow.BuildMeshBakeInput(preview.Geometry, a);
                         Assert.That(input.NormalSource, Is.EqualTo("authored")); Assert.That(input.HasTangents && input.HasColors, Is.True);
                         var id = MeshBaker.Bake(input, new MeshBakeSettings { Width = 32, Height = 32, Padding = 0, Maps = new[] { MeshMapKind.Id }, IdSource = MeshIdSource.VertexColor }).Maps[0];
-                        Assert.That(id.RawValue(3, 4, 0), Is.GreaterThan(60000), "the red corner is red");
+                        // 頂点カラーは補間しない（ID の色で選ぶため）: 角が赤・緑・青の三角形は、3 つとも違うので値のいちばん小さい青（白なら色が届いていない）
+                        Assert.That(((int)id.RawValue(3, 4, 0), (int)id.RawValue(3, 4, 1), (int)id.RawValue(3, 4, 2)), Is.EqualTo((0, 0, 65535)), "the vertex colours reach the bake, one colour per triangle, not blended");
                         Assert.That(input.Hash, Is.Not.EqualTo(TexturePaintWindow.BuildMeshBakeInput(preview.Geometry).Hash), "authored attributes change the fingerprint");
                     }
                 }

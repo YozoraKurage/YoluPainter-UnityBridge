@@ -66,7 +66,11 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             bytes += triangles * (6 * 8 + 4 * 4 + 4 + 2 * 4);             // UV の三角形と帯の参照（1 つあたり 2 帯と見る）
             bytes += ((long)settings.Height / BandRows + 2) * 4;
             bytes += triangles * (9 * 4 * 2);                              // 接線・従法線
-            if (settings.Includes(MeshMapKind.Id)) bytes += triangles * 8;
+            if (settings.Includes(MeshMapKind.Id))
+            {
+                bytes += IdTable.EstimateBytes(triangles, settings.IdSource);
+                if (reference != null && settings.IdSource != MeshIdSource.UvIsland) bytes += IdTable.EstimateBytes(reference.TriangleCount, settings.IdSource);
+            }
             if (reference != null)
             {
                 bytes += triangles * 9 * 4;                                // ケージの法線
@@ -177,12 +181,12 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                 report.ReferenceTriangles = all.Count;
             }
             var frames = new LowFrames(input, low, receivers, settings.Includes(MeshMapKind.TangentNormal));
-            int[] islands = settings.Includes(MeshMapKind.Id) && settings.IdSource == MeshIdSource.UvIsland ? UvIslands(input, receivers) : null;
+            var ids = settings.Includes(MeshMapKind.Id) ? new IdTable(input, reference, settings.IdSource, receivers) : null;
             var raster = new UvRaster(input, receivers, width, height, settings.Antialiasing, remaining);
             report.PrepareSeconds = control.Clock.Elapsed.TotalSeconds;
             if (!Report(progress, control, 0.05, "Baking")) return Stopped(control, report);
 
-            var job = new Job(input, settings, raster, low, high, projection, frames, islands, control);
+            var job = new Job(input, settings, raster, low, high, projection, frames, ids, control);
             int threads = Threads(budget);
             var options = new ParallelOptions { MaxDegreeOfParallelism = threads };
             int batch = Math.Max(16, Math.Min(256, threads * 4));
@@ -247,6 +251,16 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             if (reference != null && report.MissedSamples > 0)
                 report.Diagnostics.Add(report.MissedSamples + " of " + report.ProjectedSamples + " samples found no high-poly surface within the frontal/rear distances" + (settings.ReferenceMatchByName ? " (or no high-poly part with a matching name)" : "")
                     + "; they were baked from the low poly (tangent normal flat, height 0.5, opacity 0).");
+            if (ids != null)
+            {
+                report.IdParts = ids.Parts;
+                if (settings.IdSource == MeshIdSource.VertexColor)
+                {
+                    if (!input.HasColors) report.Diagnostics.Add("The model has no vertex colours, so the ID map is white.");
+                }
+                else report.Diagnostics.Add("ID map: " + ids.Parts + " part(s) (" + settings.IdSource + "); any two of their colours differ by at least " + IdPalette.MinimumSeparation(ids.Parts)
+                    + " in one 8-bit channel, so a colour selection with a smaller tolerance picks one part.");
+            }
             if (reference == null && (settings.Includes(MeshMapKind.TangentNormal) || settings.Includes(MeshMapKind.Height)))
                 report.Diagnostics.Add("No high-poly reference: the tangent-space normal is flat and the height is 0.5.");
             var maps = new List<BakedMeshMap>();
@@ -283,25 +297,81 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             return new MeshBakeResult(control.Reason == MeshBakeStatus.Completed ? MeshBakeStatus.Canceled : control.Reason, null, report);
         }
 
-        /// <summary>UV アイランド: 焼き込む三角形のうち、UV の座標が同じ辺を共有するものをつなぐ。島の名前はいちばん小さい三角形の番号。</summary>
-        static int[] UvIslands(MeshBakeInput input, List<int> receivers)
+        /// <summary>
+        /// ID の色の表（三角形ごとの 0xRRGGBB）。部品の分け方は元ごと: マテリアルスロット（全体を平らにした番号 = レンダラーとサブメッシュの組）、
+        /// メッシュ（レンダラー）、メッシュの塊・UV アイランド（<see cref="MeshRegions"/>。ポリゴン塗りつぶしの範囲と同じ）。部品の番号は、
+        /// スロット・レンダラーはその番号の小さい順、塊・アイランドは成分のいちばん小さい三角形の順で、低ポリは焼き込む三角形が持つ部品だけ、
+        /// 高ポリは全部の部品を数え、低ポリ → 高ポリの順に <see cref="IdPalette"/> の色を振る（高ポリに当たらなかった所の色は高ポリの部品の色と
+        /// 重ならない）。UV アイランドはいつも低ポリの島。頂点カラーは補間しない: 三角形ごとに角の色（8 bit に丸めた RGB）の多数決、3 つとも
+        /// 違えば値のいちばん小さい色（どの角の色でもない混ぜた色を作らない。角の並びによらない）。
+        /// </summary>
+        sealed class IdTable
         {
-            var uvs = input.Uvs; var parent = new int[input.TriangleCount];
-            for (int i = 0; i < parent.Length; i++) parent[i] = i;
-            int Find(int i) { while (parent[i] != i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; }
-            var edges = new Dictionary<(long, long), int>();
-            long Key(int t, int c) { int k = t * 6 + c * 2; return (long)Math.Round(uvs[k] * 1048576.0) << 32 ^ (long)Math.Round(uvs[k + 1] * 1048576.0) & 0xFFFFFFFFL; }
-            foreach (int t in receivers)
-                for (int c = 0; c < 3; c++)
+            /// <summary>三角形ごとの色。Low は焼き込む三角形の分だけ意味がある。頂点カラーの無いメッシュは null（白）。</summary>
+            public readonly int[] Low, High;
+            /// <summary>色を振った部品の数（低ポリと高ポリの和。頂点カラーでは 0）。</summary>
+            public readonly int Parts;
+
+            public static long EstimateBytes(long triangles, MeshIdSource source)
+                => triangles * (4 + 4) + (source == MeshIdSource.MeshPart || source == MeshIdSource.UvIsland ? MeshRegions.EstimateBytes(triangles) : 0);
+
+            public IdTable(MeshBakeInput low, MeshBakeInput high, MeshIdSource source, List<int> receivers)
+            {
+                if (source == MeshIdSource.VertexColor) { Low = TriangleColors(low); High = high != null ? TriangleColors(high) : null; return; }
+                var lowKeys = Keys(low, source);
+                var lowRanks = Ranks(lowKeys, receivers);
+                int[] highKeys = null; Dictionary<int, int> highRanks = null;
+                if (high != null && source != MeshIdSource.UvIsland)
                 {
-                    long a = Key(t, c), b = Key(t, (c + 1) % 3);
-                    var key = a < b ? (a, b) : (b, a);
-                    if (edges.TryGetValue(key, out int other)) { int x = Find(t), y = Find(other); if (x != y) { if (x < y) parent[y] = x; else parent[x] = y; } }
-                    else edges.Add(key, t);
+                    highKeys = Keys(high, source);
+                    var all = new List<int>(high.TriangleCount); for (int t = 0; t < high.TriangleCount; t++) all.Add(t);
+                    highRanks = Ranks(highKeys, all);
                 }
-            var island = new int[input.TriangleCount];
-            for (int i = 0; i < island.Length; i++) island[i] = Find(i);
-            return island;
+                Parts = lowRanks.Count + (highRanks?.Count ?? 0);
+                var colors = IdPalette.Colors(Parts);
+                Low = new int[low.TriangleCount];
+                foreach (int t in receivers) Low[t] = colors[lowRanks[lowKeys[t]]];
+                if (highKeys == null) return;
+                High = new int[high.TriangleCount];
+                for (int t = 0; t < High.Length; t++) High[t] = colors[lowRanks.Count + highRanks[highKeys[t]]];
+            }
+
+            /// <summary>三角形ごとの部品の鍵（スロット・レンダラー・成分の番号）。</summary>
+            static int[] Keys(MeshBakeInput input, MeshIdSource source)
+            {
+                switch (source)
+                {
+                    case MeshIdSource.MaterialSlot: return input.Slots;
+                    case MeshIdSource.Mesh: return input.Renderers;
+                    case MeshIdSource.MeshPart: return MeshRegions.MeshParts(input.Corners, input.Slots, out _);
+                    default: return MeshRegions.UvIslands(input.Uvs, input.Slots, out _);
+                }
+            }
+            /// <summary>triangles の三角形が持つ鍵を小さい順に 0, 1, 2… にする。</summary>
+            static Dictionary<int, int> Ranks(int[] keys, List<int> triangles)
+            {
+                var distinct = new SortedSet<int>(); foreach (int t in triangles) distinct.Add(keys[t]);
+                var ranks = new Dictionary<int, int>(distinct.Count);
+                foreach (int k in distinct) ranks.Add(k, ranks.Count);
+                return ranks;
+            }
+            static int[] TriangleColors(MeshBakeInput input)
+            {
+                var colors = input.Colors; if (colors == null) return null;
+                var result = new int[input.TriangleCount];
+                for (int t = 0; t < result.Length; t++)
+                {
+                    int a = Rgb(colors, t * 12), b = Rgb(colors, t * 12 + 4), c = Rgb(colors, t * 12 + 8);
+                    result[t] = a == b || a == c ? a : b == c ? b : Math.Min(a, Math.Min(b, c));
+                }
+                return result;
+            }
+            static int Rgb(float[] colors, int at)
+            {
+                int rgb = 0;
+                for (int c = 0; c < 3; c++) { float v = colors[at + c]; rgb = rgb << 8 | (v <= 0 ? 0 : v >= 1 ? 255 : (int)(v * 255 + 0.5)); }
+                return rgb;
+            }
         }
 
         /// <summary>1 つのメッシュ（低ポリか高ポリ）の、焼くときに引く形: 面の法線、頂点法線、レイの BVH、曲率。</summary>
@@ -508,7 +578,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             const int SNormal = 0, SPosition = 3, SAo = 6, SCurvature = 7, SThickness = 8, STangent = 9, SHeight = 12, SBent = 13, SOpacity = 16;
             public const int SumSize = 17;
             readonly MeshBakeInput input; readonly MeshBakeSettings settings; readonly UvRaster raster;
-            readonly SurfaceData low, high; readonly Projection projection; readonly LowFrames frames; readonly int[] islands;
+            readonly SurfaceData low, high; readonly Projection projection; readonly LowFrames frames; readonly IdTable ids;
             readonly Control control;
             readonly int width, height, samples;
             public readonly byte[] Coverage;
@@ -526,9 +596,9 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             double[] batchSums; int[] batchIds, batchIdCount, batchCovered; bool[] batchOverlap; MeshBakeRayJob[] batchJobs; bool[] batchJobValid;
             MeshBakeRayJob[] compactJobs; MeshBakeRayResult[] compactResults; int[] compactSlot; readonly double[] writeSum = new double[SumSize];
 
-            public Job(MeshBakeInput input, MeshBakeSettings settings, UvRaster raster, SurfaceData low, SurfaceData high, Projection projection, LowFrames frames, int[] islands, Control control)
+            public Job(MeshBakeInput input, MeshBakeSettings settings, UvRaster raster, SurfaceData low, SurfaceData high, Projection projection, LowFrames frames, IdTable ids, Control control)
             {
-                this.input = input; this.settings = settings; this.raster = raster; this.low = low; this.high = high; this.projection = projection; this.frames = frames; this.islands = islands; this.control = control;
+                this.input = input; this.settings = settings; this.raster = raster; this.low = low; this.high = high; this.projection = projection; this.frames = frames; this.ids = ids; this.control = control;
                 width = settings.Width; height = settings.Height; samples = settings.Antialiasing;
                 long texels = (long)width * height;
                 Coverage = new byte[texels];
@@ -738,7 +808,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                     if (deferred) { s.Pending = job; s.HasPending = true; }
                     else { TraceJob(ref job, s.Stack, s.StackT, out var result); s.Rays += result.Rays; AddRays(sum, 0, ref result); }
                 }
-                return wantId ? IdColor(surface, st, sb1, sb2, t) : 0;
+                return wantId ? IdColor(surface, st, t) : 0;
             }
 
             /// <summary>1 サンプル分の AO・ベントノーマル・厚みのレイ（CPU の基準。GPU の計算シェーダーは同じ式を float で行う）。</summary>
@@ -819,43 +889,13 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                 else sum[STangent + 2] += 1;
             }
 
-            /// <summary>ID の色（0xRRGGBB）。スロット・メッシュは面のある方（高ポリに当たれば高ポリ）の番号、頂点カラーはその面の補間した色、
-            /// UV アイランドは低ポリの島。</summary>
-            int IdColor(SurfaceData surface, int st, double b1, double b2, int t)
+            /// <summary>ID の色（0xRRGGBB）。スロット・メッシュ・塊・頂点カラーは面のある方（高ポリに当たれば高ポリ）の三角形の色、UV アイランドは
+            /// 低ポリの島（<see cref="IdTable"/>）。頂点カラーの無いメッシュは白。</summary>
+            int IdColor(SurfaceData surface, int st, int t)
             {
-                bool onHigh = surface != low;
-                switch (settings.IdSource)
-                {
-                    case MeshIdSource.MaterialSlot: return Palette(0x51u, (uint)surface.Input.Slots[st] + 1u, onHigh);
-                    case MeshIdSource.Mesh: return Palette(0xA7u, (uint)surface.Input.Renderers[st], onHigh);
-                    case MeshIdSource.UvIsland: return Palette(0x3Du, (uint)islands[t], false);
-                    default:
-                    {
-                        var colors = surface.Input.Colors;
-                        return colors == null ? 0xFFFFFF : InterpolatedColor(colors, st, b1, b2);
-                    }
-                }
-            }
-            static int InterpolatedColor(float[] colors, int t, double b1, double b2)
-            {
-                double b0 = 1 - b1 - b2; int k = t * 12; int result = 0;
-                for (int c = 0; c < 3; c++)
-                {
-                    double v = b0 * colors[k + c] + b1 * colors[k + 4 + c] + b2 * colors[k + 8 + c];
-                    int byteValue = v <= 0 ? 0 : v >= 1 ? 255 : (int)(v * 255 + 0.5);
-                    result = result << 8 | byteValue;
-                }
-                return result;
-            }
-            /// <summary>番号から決まった色（色相を散らし、彩度 0.7・明度 0.95）。</summary>
-            static int Palette(uint salt, uint id, bool onHigh)
-            {
-                uint h = Hash(id * 0x9E3779B1u ^ Hash(salt + (onHigh ? 0x1000u : 0u)));
-                double hue = (h >> 8) * (6.0 / 16777216), s = 0.7, v = 0.95;
-                int sector = (int)hue; double f = hue - sector, p = v * (1 - s), q = v * (1 - s * f), r = v * (1 - s * (1 - f));
-                double R, G, B;
-                switch (sector % 6) { case 0: R = v; G = r; B = p; break; case 1: R = q; G = v; B = p; break; case 2: R = p; G = v; B = r; break; case 3: R = p; G = q; B = v; break; case 4: R = r; G = p; B = v; break; default: R = v; G = p; B = q; break; }
-                return (int)(R * 255 + 0.5) << 16 | (int)(G * 255 + 0.5) << 8 | (int)(B * 255 + 0.5);
+                if (settings.IdSource == MeshIdSource.UvIsland) return ids.Low[t];
+                var table = surface == low ? ids.Low : ids.High;
+                return table == null ? 0xFFFFFF : table[st];
             }
 
             void Write(int i, int covered, double[] sumArray, int at, int[] idArray, int idAt, int ids, bool overlap)

@@ -62,6 +62,7 @@ tools/move fluent arrow_move
 tools/path fluent pen
 tools/eyedropper fluent eyedropper
 tools/polygon-fill fluent triangle
+tools/id-select phosphor swatches
 
 # ── プロパティの欄のレイヤー・チャンネル側（レイヤーマスク・フィルター・メッシュマップ・ポーズ）で足したもの ──
 close fluent dismiss

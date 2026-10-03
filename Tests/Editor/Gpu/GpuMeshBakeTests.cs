@@ -103,6 +103,21 @@ namespace Yozolab.YoluPainter.Tests
             AssertParity(pair, "high poly, 2×2");
         }
 
+        /// <summary>ID マップはレイを使わないが、GPU の経路ではテクセルの書き込みがまとまりの後になる（ID の多数決の材料も持ち越す）。
+        /// どの元でも、高ポリとアンチエイリアスでも、CPU の結果とバイト一致。</summary>
+        [Test] public void IdMapsAreTheSameBytesOnTheGpuPathForEverySource()
+        {
+            var settings = new MeshBakeSettings { Width = 64, Height = 64, Antialiasing = 2, AoMaxDistance = 0.5, AoSamples = 8, Maps = new[] { MeshMapKind.AmbientOcclusion, MeshMapKind.Id } };
+            foreach (var source in (MeshIdSource[])Enum.GetValues(typeof(MeshIdSource)))
+            {
+                settings.IdSource = source;
+                AssertParity(Both(Step(), settings), "ID from " + source);
+                settings.ReferenceFrontal = settings.ReferenceRear = 0.02;
+                AssertParity(Both(Step(), settings, Step()), "ID from " + source + " with a high poly");
+                settings.ReferenceFrontal = settings.ReferenceRear = 0.01;
+            }
+        }
+
         [Test] public void GpuBakesAreDeterministic()
         {
             var settings = new MeshBakeSettings { Width = 64, Height = 64, Maps = new[] { MeshMapKind.AmbientOcclusion, MeshMapKind.Thickness }, AoMaxDistance = 0.5, AoSamples = 32 };
