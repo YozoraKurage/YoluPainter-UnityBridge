@@ -59,8 +59,9 @@ namespace Yozolab.YoluPainter.Editor
             if(!EditingMask&&layer.Kind!=LayerKind.Raster)throw new InvalidOperationException("Fill paints pixels: select a paint layer, or edit the layer's mask.");
             var b=GetBrush();
             if(!EditingMask)document.EnsurePixelsEditable(selectedLayer,b.Erase); // ロックで断るなら、チャンネルを有効にする前に
-            if(!EditingMask&&!layer.IsChannelEnabled(channel))document.SetChannelEnabled(selectedLayer,channel,true);
-            bool changed=EditingMask?document.FillMask(selectedLayer,b.Opacity,region,reveal:b.Erase):document.Fill(selectedLayer,channel,b.Color,b.Opacity,region,b.Erase);
+            if(!EditingMask&&!brush.material&&!layer.IsChannelEnabled(channel))document.SetChannelEnabled(selectedLayer,channel,true);
+            bool changed=EditingMask?document.FillMask(selectedLayer,b.Opacity,region,reveal:b.Erase):
+                brush.material?document.FillMaterial(selectedLayer,StrokeChannels(),b.Opacity,region,b.Erase):document.Fill(selectedLayer,channel,b.Color,b.Opacity,region,b.Erase);
             message=changed?"Filled the "+what+".":"Nothing to fill there.";repaintPixels=true;
         }
     }

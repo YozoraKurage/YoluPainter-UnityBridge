@@ -103,9 +103,10 @@ namespace Yozolab.YoluPainter.Editor
             if(!EditingMask&&layer.Kind!=LayerKind.Raster)throw new InvalidOperationException("Fill paints pixels: select a paint layer, or edit the layer's mask.");
             var b=GetBrush();
             if(!EditingMask)document.EnsurePixelsEditable(selectedLayer,b.Erase); // ロックで断るなら、チャンネルを有効にする前に
-            if(!EditingMask&&!layer.IsChannelEnabled(channel))document.SetChannelEnabled(selectedLayer,channel,true);
+            if(!EditingMask&&!brush.material&&!layer.IsChannelEnabled(channel))document.SetChannelEnabled(selectedLayer,channel,true);
             var region=Wand(p);
-            bool changed=EditingMask?document.FillMask(selectedLayer,b.Opacity,region,reveal:b.Erase):document.Fill(selectedLayer,channel,b.Color,b.Opacity,region,b.Erase);
+            bool changed=EditingMask?document.FillMask(selectedLayer,b.Opacity,region,reveal:b.Erase):
+                brush.material?document.FillMaterial(selectedLayer,StrokeChannels(),b.Opacity,region,b.Erase):document.Fill(selectedLayer,channel,b.Color,b.Opacity,region,b.Erase);
             message=changed?"Filled.":"Nothing to fill there.";repaintPixels=true;
         }
         void FinishToolDrag(SelectionCombine mode)
@@ -117,11 +118,21 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     if(click)return;
                     var layer=document.GetLayer(selectedLayer);
-                    if(layer.Kind!=LayerKind.Raster)throw new InvalidOperationException("A gradient paints pixels: select a paint layer.");
-                    document.EnsurePixelsEditable(selectedLayer);
-                    if(!layer.IsChannelEnabled(channel))document.SetChannelEnabled(selectedLayer,channel,true);
-                    var c=GetBrush().Color; var to=(Color32)gradientTo;
-                    document.Gradient(selectedLayer,channel,new GradientSettings{Shape=gradientShape,X0=a.x,Y0=a.y,X1=b.x,Y1=b.y,From=c,To=new Rgba32(to.r,to.g,to.b,to.a),Opacity=brush.opacity});
+                    if(!EditingMask&&layer.Kind!=LayerKind.Raster)throw new InvalidOperationException("A gradient paints pixels: select a paint layer.");
+                    var c=GetBrush(); var to=(Color32)gradientTo;
+                    var g=new GradientSettings{Shape=gradientShape,X0=a.x,Y0=a.y,X1=b.x,Y1=b.y,From=c.Color,To=new Rgba32(to.r,to.g,to.b,to.a),Opacity=brush.opacity};
+                    if(EditingMask)
+                    {
+                        g.From=new Rgba32(0,0,0); g.To=Rgba32.Transparent;
+                        document.GradientMask(selectedLayer,g,reveal:c.Erase);
+                    }
+                    else if(brush.material)document.GradientMaterial(selectedLayer,StrokeChannels(),g,erase:c.Erase);
+                    else
+                    {
+                        document.EnsurePixelsEditable(selectedLayer);
+                        if(!layer.IsChannelEnabled(channel))document.SetChannelEnabled(selectedLayer,channel,true);
+                        document.Gradient(selectedLayer,channel,g);
+                    }
                     message="Gradient applied.";repaintPixels=true;break;
                 }
                 case PaintTool.SelectRectangle:

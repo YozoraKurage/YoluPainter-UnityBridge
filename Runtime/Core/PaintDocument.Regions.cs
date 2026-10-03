@@ -112,12 +112,15 @@ namespace Yozolab.YoluPainter.Core
 
         /// <summary>Lays a gradient over a layer's channel inside region (else the selection, else everything).</summary>
         public bool Gradient(Guid layerId, PaintChannel channel, GradientSettings gradient, SelectionMask region = null)
+            => Gradient(layerId, channel, gradient, region, false);
+
+        /// <summary>グラデーションの消去。消去量は補間後のアルファ×不透明度×選択量。既存の四引数の入口は保つ。</summary>
+        public bool Gradient(Guid layerId, PaintChannel channel, GradientSettings gradient, SelectionMask region, bool erase)
         {
             if (gradient == null) throw new ArgumentNullException(nameof(gradient)); gradient.Validate();
             var g = new GradientSettings { Shape = gradient.Shape, X0 = gradient.X0, Y0 = gradient.Y0, X1 = gradient.X1, Y1 = gradient.Y1, From = gradient.From, To = gradient.To, Opacity = gradient.Opacity };
-            var surface = PaintableSurface(layerId, channel, false, out bool keepAlpha);
-            if (keepAlpha) return EditRegion(surface, region, (x, y, start, amount) => PaintKeepingAlpha(start, g.ColorAt(x + .5, y + .5), g.Opacity * amount));
-            return EditRegion(surface, region, (x, y, start, amount) => CpuCompositor.BlendUnchecked(start, g.ColorAt(x + .5, y + .5), g.Opacity * amount, LayerBlendMode.Normal)); // 0..1 (Validate)
+            var surface = PaintableSurface(layerId, channel, erase, out bool keepAlpha);
+            return EditRegion(surface, region, GradientRule(g, erase, keepAlpha));
         }
 
         /// <summary>Replaces a layer's channel with an image (straight RGBA8, bottom-left origin, the document's size) inside the
@@ -176,9 +179,20 @@ namespace Yozolab.YoluPainter.Core
         bool EditRegion(SparseTileSurface surface, SelectionMask region, bool withinSelection, Func<int, int, Rgba32, double, Rgba32> pixel)
         {
             var effective = withinSelection ? EffectiveRegion(region) : region;
-            int tile = TileSize, n = tile * tile;
             var coords = new List<TileCoord>(effective != null ? effective.Tiles : EnumerateCanvasTiles());
-            var changes = new List<TileChange>(); long rollback = 0;
+            long rollback = 0;
+            var changes = EditRegionTiles(surface, effective, coords, pixel, ref rollback);
+            if (changes.Count == 0) return false;
+            Revision++; Push(new TileStrokeCommand(surface, changes, Guid.NewGuid()));
+            return true;
+        }
+
+        // 単チャンネルとマテリアルで同じ画素計算を使う。マテリアルでは rollback を全チャンネルで足し続ける。
+        List<TileChange> EditRegionTiles(SparseTileSurface surface, SelectionMask effective, List<TileCoord> coords,
+            Func<int, int, Rgba32, double, Rgba32> pixel, ref long rollback)
+        {
+            int tile = TileSize, n = tile * tile;
+            var changes = new List<TileChange>();
             // 新しいタイルの計算はタイルごとに独立（pixel は純粋な関数、面とマスクは読むだけ）なので、まとめて並列に計算し、
             // 予算の確認と書き込みはタイルの順にこのスレッドで行う（予算で止まる所も、止まったときに戻すものも逐次と同じ）。
             int degree = CoreParallelism.Degree, batch = degree > 1 ? Math.Min(coords.Count, degree * 4) : 1;
@@ -229,9 +243,7 @@ namespace Yozolab.YoluPainter.Core
                 for (int i = changes.Count - 1; i >= 0; i--) surface.Restore(changes[i].Coord, changes[i].Before);
                 throw;
             }
-            if (changes.Count == 0) return false;
-            Revision++; Push(new TileStrokeCommand(surface, changes, Guid.NewGuid()));
-            return true;
+            return changes;
         }
     }
 }

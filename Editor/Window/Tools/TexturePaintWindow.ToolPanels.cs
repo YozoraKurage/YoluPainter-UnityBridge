@@ -19,7 +19,11 @@ namespace Yozolab.YoluPainter.Editor
             switch (tool)
             {
                 case PaintTool.Brush: BrushSections(rows); break;
-                case PaintTool.Fill: SurfacePickSection(rows); break;
+                case PaintTool.Fill: MaterialSection(rows); SurfacePickSection(rows); break;
+                case PaintTool.Gradient:
+                    MaterialSection(rows);
+                    if (brush.material && !EditingMask) NoteRow(rows, L.Tr("Each material value fades to transparent; the end color is used only with material painting off."), NoteKind.Info);
+                    break;
                 case PaintTool.SelectRectangle: case PaintTool.SelectEllipse: case PaintTool.Lasso: case PaintTool.MagicWand:
                     SurfacePickSection(rows);
                     SelectionModifySection(rows); break;

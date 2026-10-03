@@ -172,10 +172,15 @@ namespace Yozolab.YoluPainter.Editor
                     break;
                 case PaintTool.Gradient:
                     PaintGui.EnumDropdown(Next(170), L.Tr("Shape"), gradientShape, (GradientShape[])Enum.GetValues(typeof(GradientShape)), s => L.Tr(s.ToString()), s => gradientShape = s);
-                    PaintGui.Text(Next(36), L.Tr("From"), PaintTheme.Label);
-                    PaintGui.ColorSwatch(Next(36), brush.color, c => brush.color = c, true, L.Tr("Start color (the brush color)"));
-                    PaintGui.Text(Next(22), L.Tr("To"), PaintTheme.Label);
-                    PaintGui.ColorSwatch(Next(36), gradientTo, c => gradientTo = c, true, L.Tr("End color"));
+                    if (brush.material || EditingMask)
+                        PaintGui.Text(Next(210), EditingMask ? L.Tr("Mask amount → Transparent") : L.Tr("Material values → Transparent"), PaintTheme.Label);
+                    else
+                    {
+                        PaintGui.Text(Next(36), L.Tr("From"), PaintTheme.Label);
+                        PaintGui.ColorSwatch(Next(36), brush.color, c => brush.color = c, true, L.Tr("Start color (the brush color)"));
+                        PaintGui.Text(Next(22), L.Tr("To"), PaintTheme.Label);
+                        PaintGui.ColorSwatch(Next(36), gradientTo, c => gradientTo = c, true, L.Tr("End color"));
+                    }
                     brush.opacity = PaintGui.Slider(Next(130), L.Tr("Opacity"), brush.opacity * 100, 0, 100, "0", "%") / 100;
                     break;
                 case PaintTool.SelectRectangle:

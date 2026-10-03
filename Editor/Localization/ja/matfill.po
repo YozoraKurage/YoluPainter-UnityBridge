@@ -1,0 +1,8 @@
+msgid "Each material value fades to transparent; the end color is used only with material painting off."
+msgstr "マテリアルの各値から透明へ薄くします。終点色はマテリアルがオフのときだけ使います。"
+
+msgid "Material values → Transparent"
+msgstr "マテリアルの各値 → 透明"
+
+msgid "Mask amount → Transparent"
+msgstr "マスクの量 → 透明"

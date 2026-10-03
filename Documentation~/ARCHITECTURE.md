@@ -25,6 +25,22 @@ The window chrome is custom-drawn IMGUI (`Editor/UI`: `PaintTheme` colors and te
 
 `TexturePaintWindow` (`Editor/Window`) uses one IMGUI event route with `Event.pressure`, explicit mouse capture, pressure curve, and fallback semantics provided by Unity. A stroke freezes its brush. A stroke paints the selected channel with the foreground colour, or, with the brush's material on (Properties ▸ Brush ▸ Brush Material), every checked channel with its own value through `PaintDocument.BeginMaterialStroke`: the dabs, dual brush and per-pixel coverage are computed once and applied to each channel's surface with the one-channel arithmetic (each channel ends with the bytes a stroke of it alone gives), the rollback of all of them counts against one budget, channels the layer has switched off are switched on inside the stroke's single undo step, and a cancel restores every channel and switches them off again. Escape, focus loss, reload and play transition roll back the active stroke. Structural controls and camera navigation are disabled during painting. Rendering can skip frames; committed dab samples are not discarded. The 2D reference sampler is arc-distance based. The surface adapter resamples screen motion, rerays visible triangles and rasterizes surface coverage in UV, never draws a line between distant UV islands. With symmetry on, each 3D dab is joined with its mirror image across a plane in the model root's local axes (`SurfaceSymmetry`, see `Editor/Preview/README.md`; the settings are window state, not brush settings); 2D canvas strokes are not mirrored.
 
+マテリアルの範囲編集（`PaintDocument.MaterialRegions.cs`）: `FillMaterial` は各 `ChannelPaint` の値を同じ範囲に塗り、
+`GradientMaterial` は各値から透明へ薄くする（形・端点・不透明度だけを `GradientSettings` から使い、From/To は各値/透明に置き換える）。
+単チャンネルの `Fill` / `Gradient` と同じ `EditRegionTiles` と画素の式を通るので、各チャンネルの結果は単独で塗った場合とバイト一致する。
+範囲は指定した範囲と選択範囲の交差を一回求め、全チャンネルで共有する。画像・すべてのロックと型を変更前に検証し、透明部分のロックは
+各チャンネルの各画素のアルファを保つ。消去は組の全部。巻き戻しの予算は全チャンネルで足し続け、途中の失敗で画素と有効化をすべて戻す。
+有効化と画素は一回の履歴に入り、Undo/Redo は全チャンネルの伸びを合計で予算と比べてから何もかも戻す。単チャンネルの処理を Batch で
+並べるだけでは、この予算と履歴の原子性を保証できない。新しい保存形式やブラシのストローク内部の変更は要らない。
+窓ではバケツ（2D のワンドで求めた範囲・3D Pick の範囲）と 2D のグラデーションがこの入口を使う。マスク編集中は `FillMask` / `GradientMask`
+だけ（隠す・消去なら見せる。グラデーションは量から透明へ）で、画像のチャンネルは有効にもしない。
+マテリアルがオフなら従来の単チャンネルと二色のグラデーション。マテリアルがオンの終点は固定の透明なので、Roughness・Height・Normal などを
+共通の背景 RGB に近付けず、組の比率を保った濃度を作れる。二つのマテリアル間の補間、ポリゴン塗りつぶしとパスの組のチャンネルは未対応。
+この選択は Photoshop の色と透明度の独立したグラデーション、および Substance のチャンネルごとの値と共通マスクを参考にした本ツールの判断であり、
+両ソフトの操作や出力との一致を主張するものではない。
+参考: [Photoshop のグラデーション編集](https://helpx.adobe.com/photoshop/desktop/adjust-color/color-effects-techniques/edit-a-gradient.html)、
+[Substance のチャンネルとマスク](https://experienceleague.adobe.com/en/docs/substance-3d-painter/using/getting-started/glossary)。
+
 ## 2D canvas view
 
 The 2D canvas view (zoom, pan, rotation, horizontal flip) is display-only. `CanvasView` (`Editor/Window/Canvas`) maps canvas pixel coordinates (bottom-left origin) to GUI coordinates: fit-to-view times zoom, centred on the view centre plus pan, mirrored and then rotated about the image centre. Without rotation or flip it is the earlier float formula, so the display and the pixel coordinates of input are unchanged. Every input (brush samples, tool drags, move-tool handle hits, eyedropper, path points) goes through its inverse, so source, stabilizer, taper and curve work in pixel coordinates whatever the view; the brush tip angle stays in pixel space (Photoshop's behaviour, not CLIP STUDIO's screen-relative angle) and pen tilt is turned from screen to canvas axes. The image and the selection and mesh-map overlays are rotated by multiplying `GL.modelview`, not `GUI.matrix`: IMGUI clips in pre-`GUI.matrix` coordinates, so a rotated `GUI.matrix` let the image spill out of the view (checked offscreen in batch-gl). Lines, handles and markers are drawn at mapped points. Rotation and flip pivot on the view centre, are refused during a stroke or drag, and are window state serialized across domain reloads, not stored in the `.ylp`. The 3D view is unaffected.
