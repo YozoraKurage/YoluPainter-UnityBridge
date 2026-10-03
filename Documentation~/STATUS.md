@@ -91,7 +91,7 @@
   今はバケツの 3D ビューのクリックと「3D Pick」の範囲として入っている
 - [x] ~~書き出しのパディング（UV の外へ色を塗り広げる。Unity のミップマップで UV の境目に線が出ないように）~~（済。2026-10-03。Export Images・
   Export PNG・lilToon への割り当て。量はプロジェクト設定、既定は届くかぎり全部）
-- [ ] 書き出しのテンプレート（Unity の Standard の Metallic と Smoothness・URP・HDRP の MaskMap・lilToon の詰め合わせ）
+- [x] ~~書き出しのテンプレート（Unity の Standard の Metallic と Smoothness・URP・HDRP の MaskMap・lilToon の詰め合わせ）~~（済。2026-10-03。ファイル ▸ 書き出し。マテリアルへの割り当ては lilToon だけ）
 
 段階 2: アセット（Substance のシェルフ）
 

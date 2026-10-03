@@ -59,6 +59,8 @@ namespace Yozolab.YoluPainter.Editor
             m.AddItem(new GUIContent(L.Tr("Export") + "/" + L.Tr("Channel as PNG…")), false, () => TryAction(ExportPng));
             m.AddItem(new GUIContent(L.Tr("Export") + "/" + L.Tr("All Channels as Images…")), false, () => TryAction(ExportImages));
             m.AddItem(new GUIContent(L.Tr("Export") + "/" + L.Tr("Channel as PSD…")), false, () => TryAction(ExportPsd));
+            m.AddSeparator(L.Tr("Export") + "/");
+            ExportTemplateMenuItems(m); // Unity Standard / URP・HDRP・lilToon 向けの詰め合わせ（Project/TexturePaintWindow.ExportTemplates.cs）
             Item(m, "Assign to lilToon Material…", AssignToLilToon);
             m.AddSeparator("");
             Item(m, "Project Configuration…", ProjectConfigurationDialog);
