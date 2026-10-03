@@ -4,6 +4,7 @@
 #   codex-run.sh <名前> [--model M] [--effort E] [--bypass]       # /workspace/.worktrees/<名前>/.agent/task.md の依頼で始める
 #   codex-run.sh <名前> --status                                    # 動いているか・最後の返答
 #   codex-run.sh <名前> --stop                                      # 止める（途中の変更は worktree に残る）
+#   codex-run.sh <名前> --resume "<伝えること>"                     # 前のセッション（codex.log の session id）を文脈ごと続ける
 #
 # - 依頼文は worktree の .agent/task.md（Claude の担当と同じ形）。Codex にはそれを読んで従うようにだけ言う。
 # - 出力は .agent/codex.log、最後の返答（報告）は .agent/codex-last.md、PID は .agent/codex.pid。
@@ -17,7 +18,7 @@ name="${1:?担当の名前（/workspace/.worktrees/<名前>）が要る}"; shift
 WT="/workspace/.worktrees/$name"
 [[ -d "$WT" ]] || { echo "worktree が無い: $WT" >&2; exit 2; }
 A="$WT/.agent"; mkdir -p "$A"
-MODEL="${CODEX_MODEL:-gpt-6.1-sol}"; EFFORT="${CODEX_EFFORT:-xhigh}"; SANDBOX=(--approve-for-me); action=start
+MODEL="${CODEX_MODEL:-gpt-6.1-sol}"; EFFORT="${CODEX_EFFORT:-xhigh}"; SANDBOX=(--approve-for-me); action=start; RESUME=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --model) MODEL="${2:?}"; shift 2 ;;
@@ -25,6 +26,7 @@ while [[ $# -gt 0 ]]; do
     --bypass) SANDBOX=(--dangerously-bypass-approvals-and-sandbox); shift ;;
     --status) action=status; shift ;;
     --stop) action=stop; shift ;;
+    --resume) RESUME="${2:?--resume に伝えることが要る}"; shift 2 ;;
     *) echo "知らない引数: $1" >&2; exit 2 ;;
   esac
 done
@@ -52,7 +54,22 @@ mkdir -p "$HOME/.cache/yolupainter-tests"
 scrub=(env -u REMOTE_CONTAINERS_IPC -u GIT_ASKPASS -u VSCODE_GIT_ASKPASS_NODE -u VSCODE_GIT_ASKPASS_EXTRA_ARGS -u VSCODE_GIT_ASKPASS_MAIN
   -u VSCODE_GIT_IPC_HANDLE -u SSH_AUTH_SOCK -u GH_TOKEN -u GITHUB_TOKEN GIT_TERMINAL_PROMPT=0
   GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0= GIT_CONFIG_KEY_1=remote.origin.pushurl GIT_CONFIG_VALUE_1=/nonexistent/push-is-for-the-coordinator)
-nohup setsid "${scrub[@]}" codex exec -C "$WT" ${model_args[@]+"${model_args[@]}"} -c "model_reasoning_effort=\"$EFFORT\"" "${SANDBOX[@]}" \
+resume_args=()
+if [[ -n "$RESUME" ]]; then
+  sid=$(grep -m1 "^session id:" "$A/codex.log" 2>/dev/null | awk '{print $3}')
+  [[ -n "$sid" ]] || { echo "前のセッションの ID が $A/codex.log に無い（--resume なしで始め直す）" >&2; exit 2; }
+  n=1; while [[ -f "$A/codex.log.$n" ]]; do n=$((n + 1)); done; mv "$A/codex.log" "$A/codex.log.$n"
+  # exec resume には -C と --approve-for-me が無いので、作業フォルダへ移り、自動の審査は設定で渡す（--approve-for-me と同じ中身）
+  resume_args=(resume "$sid"); prompt="$RESUME"
+  if [[ "${SANDBOX[0]}" == --approve-for-me ]]; then
+    SANDBOX=(-c 'approval_policy="on-request"' -c 'approvals_reviewer="auto_review"' -c 'sandbox_mode="workspace-write"')
+  fi
+  cd "$WT"
+  cd_args=()
+else
+  cd_args=(-C "$WT")
+fi
+nohup setsid "${scrub[@]}" codex exec ${resume_args[@]+"${resume_args[@]}"} ${cd_args[@]+"${cd_args[@]}"} ${model_args[@]+"${model_args[@]}"} -c "model_reasoning_effort=\"$EFFORT\"" "${SANDBOX[@]}" \
   -o "$A/codex-last.md" "$prompt" > "$A/codex.log" 2>&1 < /dev/null &
 echo $! > "$A/codex.pid"
 echo "始めた（PID $!、ログ $A/codex.log、モデル ${MODEL:-既定}・推論 $EFFORT）"

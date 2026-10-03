@@ -47,12 +47,29 @@ Unity Editor 内の専用ウィンドウで、同じレイヤーへ 2D と 3D �
 
 ## 導入（対象: Unity 2022.3）
 
-1. Package Manager → `+` → Add package from disk で、このリポジトリの `package.json` を選ぶ（または Add package from git URL）
+1. 入れ方は次のどれか
+   - **VCC（VRChat Creator Companion）**: Settings ▸ Packages ▸ Add Repository で `https://vpm.yozolab.net/index.json` を足し、プロジェクトの
+     Manage Project で YoluPainter を追加する
+   - **Release の .zip / .unitypackage**: GitHub の Releases から取り、.zip は Packages の下に展開、.unitypackage は取り込む
+   - **Package Manager**: `+` → Add package from git URL で `https://github.com/YozoraKurage/YoluPainter.git`（または Add package from
+     disk でこのリポジトリの `package.json`）
 2. メニュー `YozoLab → YoluPainter (Prototype)` を開く
 3. ファイル ▸ 新規プロジェクト… でモデル（readable なメッシュの Prefab かモデル）とテクスチャセットにするマテリアルのスロットを選ぶ。モデル無しでも 2D だけで描ける。3D ▸ デモのキューブ で検証用の 6 つの UV 島を持つキューブも読める
 4. 描いて、ファイル ▸ 保存（.ylp）。画像は ファイル ▸ 書き出し で PNG に
 
 モデルの Read/Write 設定を自動で変えたり、シーンのマテリアルへ勝手にテクスチャを割り当てたりはしません。プレビューは自分で作ったメッシュとマテリアルの複製だけを使います。元のマテリアルへ書くのは「マテリアルに反映…」と lilToon への割り当てで、どちらも確かめてから行います。
+
+## 検証の範囲と分かっている制限（0.1.0）
+
+- 試験（EditMode の 1,400 件あまり）は、Linux の devcontainer の Unity 2022.3.22f1（GPU はホストの実 GPU を WSL2 の d3d12 経由の
+  OpenGL 4.6 で）で回している。**Windows の D3D11・Mac の Metal では、ほとんど確かめていない**。描画・GPU の合成・3D ビューの見え方は、
+  Windows で違う所があり得る（見つけたら知らせてください）。
+- 実機のペンタブ・液タブは、作者の Windows 以外では確かめていない。筆圧・傾きは Unity のエディタの窓のイベント（Windows Ink）で読む。
+- PSD の読み書きは psd-tools で確かめた範囲で、Photoshop・CLIP STUDIO の実機での往復は確かめていない。未対応の情報は黙って捨てずに知らせる。
+- `.ylp` の正本は機能を足すたびに版が上がり、**新しい版で保存したファイルは古い YoluPainter では開けない**（開くのを断るだけで、ファイルは
+  壊さない）。保存の前に退避（バックアップ）を残す設定は Project Settings ▸ YoluPainter。
+- プロトタイプなので、操作・保存の形・API は 0.x のあいだに変わり得る。大事なテクスチャは PNG にも書き出しておく。
+- 詳しい現状は `Documentation~/STATUS.md`、実際に回した検証は `Documentation~/VALIDATION.md`。
 
 ## 保存（.ylp）
 
