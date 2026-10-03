@@ -56,7 +56,8 @@ namespace Yozolab.YoluPainter.Editor
     /// 再帰的に）を覚えておく。前回と最初に違う項目より下の合成結果を「下の写し」として GPU に残し、次からはそこから合成する。
     /// 違う項目以上で使うレイヤー・マスクのブロックは GPU に残す。署名がすべて同じブロックは合成し直さない（結果は同じ）。
     /// 写しはすべて <see cref="ResidentBudgetBytes"/> の内側で、足りなければ古いものから捨て、それでも足りなければ写さずに毎回アップロードする
-    /// （結果は同じで、遅くなるだけ）。<see cref="ReleaseResidentCaches"/> で全部捨てられ、しばらく使われない写しは自動で捨てる。</para>
+    /// （結果は同じで、遅くなるだけ）。<see cref="ReleaseResidentCaches"/> で全部捨てられ、しばらく使われない写しは自動で捨てる。
+    /// グループの中身の並びにも同じ写しを持つ（グループの写し。TileGpuCompositor.Nested.cs）。</para>
     /// <para>グループは CpuCompositor.EvaluateSpan と同じ順・同じ式で GPU 上で合成する。分離グループ（とクリッピングのあるグループ、
     /// クリッピングされたグループ）は 1 つ深い段の作業ブロックで透明から中身を合成し、レイヤーと同じように重ねる。通過グループは下の結果を
     /// 1 つ深い段へ写して中身を重ね、不透明度×マスクでフェードする（不透明度 1 でマスクが無ければ同じ段でそのまま重ねる）。
@@ -76,7 +77,7 @@ namespace Yozolab.YoluPainter.Editor
     /// から表示へ写すので、表示のブロックは前の絵か新しい絵のどちらか（途中の合成は出ない）。別の文書・チャンネルに替わったら予定・署名・
     /// 写しを捨て、表示を透明にしてから合成し直す。<see cref="CompositePath.CpuFrame"/>（全面を載せ直す）は分けずに全部をする。</para>
     /// </remarks>
-    internal sealed class TileGpuCompositor : IDisposable
+    internal sealed partial class TileGpuCompositor : IDisposable
     {
         /// <summary>最上段の下に作ってよい段の数（グループの入れ子の深さ。不透明度 1・マスク無しの通過グループは段を使わない）。</summary>
         internal const int MaxNestedLevels = 8;
@@ -91,8 +92,8 @@ namespace Yozolab.YoluPainter.Editor
 
         /// <summary>1 段の作業ブロック。A/B は段の合成結果のピンポン、ClipA/ClipB はその段のクリッピングのまとまり用。</summary>
         sealed class Level { public RenderTexture A, B, ClipA, ClipB; }
-        /// <summary>ブロックの記憶: 前回の最上段の署名、下の写し（Sigs の先頭 BelowIndex 項目を合成した結果）。</summary>
-        sealed class BlockState { public string[] Sigs; public RenderTexture Below; public int BelowIndex; public int LastUsed; }
+        /// <summary>ブロックの記憶: 前回の署名の木、下の写し（Sigs の先頭 BelowIndex 項目を合成した結果）、グループの写し（グループの ID ごと）。</summary>
+        sealed class BlockState { public SigNode[] Sigs; public RenderTexture Below; public int BelowIndex; public int LastUsed; public readonly Dictionary<Guid, GroupCopy> Groups = new Dictionary<Guid, GroupCopy>(); }
         /// <summary>GPU に残したレイヤー・マスクのブロック。Stamp（ブロック内のタイルの最後の書き換え番号）が今と同じなら有効。</summary>
         sealed class Resident { public Texture2D Texture; public FilterStamp Stamp; public int LastUsed; }
         /// <summary>層の入力: テクスチャか、塗りつぶしの一定の色。</summary>
@@ -220,8 +221,8 @@ namespace Yozolab.YoluPainter.Editor
         {
             foreach (var r in residents.Values) DestroyTexture(r.Texture);
             residents.Clear();
-            foreach (var b in blocks.Values) { Release(b.Below); b.Below = null; b.BelowIndex = 0; }
-            foreach (var b in cpuBlocks.Values) { b.Below = null; b.BelowIndex = 0; b.BelowVersion++; b.Sampled = null; }
+            foreach (var b in blocks.Values) { Release(b.Below); b.Below = null; b.BelowIndex = 0; ReleaseGroupCopies(b.Groups); }
+            foreach (var b in cpuBlocks.Values) { b.Below = null; b.BelowIndex = 0; b.BelowVersion++; b.Sampled = null; ReleaseGroupCopies(b.Groups); }
             cpuPool.Clear();
             ResidentBytes = 0;
         }
@@ -274,6 +275,7 @@ namespace Yozolab.YoluPainter.Editor
             LastUpdatedTileCount = LastCpuTileCount = 0;
             LastBlockCount = LastSkippedBlockCount = LastBelowReuseCount = LastResidentHitCount = LastUploadCount = 0;
             LastSentTileCount = LastCpuCompositeCalls = LastCpuJobCount = 0; lastProcessed.Clear();
+            LastNestedReuseCount = LastNestedCaptureCount = 0;
 
             var dirty = new HashSet<TileCoord>();
             bool frameLost = Path == CompositePath.CpuFrame && (cpuPixels == null || cpuPixels.Length != width * height * 4);
@@ -435,7 +437,7 @@ namespace Yozolab.YoluPainter.Editor
                     // 下の写しは、その下の項目の署名がどれも前と同じなら今も正しい（PlanCpuBlock の usable と同じ規則）
                     int k = state.BelowIndex, same = 0;
                     if (k <= Math.Min(state.Sigs.Length, plan.Count))
-                        while (same < k && string.Equals(state.Sigs[same], Signature(plan[same], channel, p.Bx, p.By), StringComparison.Ordinal)) same++;
+                        while (same < k && string.Equals(state.Sigs[same].Sig, Signature(plan[same], channel, p.Bx, p.By), StringComparison.Ordinal)) same++;
                     if (same == k) { start = k; below = SampledBelow(state, bw, bh, step); state.LastUsed = updateIndex; }
                 }
                 long key = BlockKey(p.Bx, p.By);
@@ -545,7 +547,9 @@ namespace Yozolab.YoluPainter.Editor
         /// 使い回す）。</summary>
         sealed class CpuBlock
         {
-            public string[] Sigs; public byte[] Below; public int BelowIndex; public int LastUsed;
+            public SigNode[] Sigs; public byte[] Below; public int BelowIndex; public int LastUsed;
+            /// <summary>グループの写し（グループの ID ごと。Pixels は Below と同じ並び）。</summary>
+            public readonly Dictionary<Guid, GroupCopy> Groups = new Dictionary<Guid, GroupCopy>();
             /// <summary>下の写しの中身が変わるたびに増える（間引いた写し Sampled が古いかを見る）。</summary>
             public int BelowVersion;
             /// <summary>間引いた合成の下地: Below を SampledStep で間引いたもの（SampledVersion の写しの）。</summary>
@@ -569,6 +573,9 @@ namespace Yozolab.YoluPainter.Editor
             public int CaptureAt = -1; public byte[] Capture;
             /// <summary>表示へ送るタイル（ブロックの変わったタイル。null なら領域の全部）。</summary>
             public HashSet<TileCoord> Send;
+            /// <summary>中身を写しから始めるグループと、写しを取るグループ（取った写しは合成の後にブロックへ入れる）。</summary>
+            public List<(GroupCopy Copy, int[] Address)> Resume;
+            public List<(GroupCopy Copy, int[] Address, int Index)> Captures;
         }
 
         /// <summary>CPU の正本の式（Core の CompositeRegions）で、予定のブロックを合成して表示へ送る。GPU の経路と同じく、ブロックごとに
@@ -633,8 +640,7 @@ namespace Yozolab.YoluPainter.Editor
             long key = BlockKey(bx, by);
             if (!cpuBlocks.TryGetValue(key, out var state)) cpuBlocks.Add(key, state = new CpuBlock());
             state.LastUsed = updateIndex;
-            var sigs = new string[plan.Count];
-            for (int i = 0; i < plan.Count; i++) sigs[i] = Signature(plan[i], channel, bx, by);
+            var sigs = BuildSigs(plan, channel, bx, by);
             int n = sigs.Length, first = state.Sigs == null ? 0 : FirstDifference(state.Sigs, sigs);
             bool known = !full && state.Sigs != null;
             // 合成は前と同じ（ただし間引いた合成を見せているタイルがあれば、全解像度で送り直す）
@@ -645,36 +651,87 @@ namespace Yozolab.YoluPainter.Editor
             bool usable = known && k > 0 && k <= first;
             int tx0 = bx * blockTiles, ty0 = by * blockTiles, tx1 = Math.Min(tx0 + blockTiles, TilesX), ty1 = Math.Min(ty0 + blockTiles, TilesY);
             var whole = new TileRect(tx0, ty0, tx1, ty1);
+            // グループの写し: 今も正しいものだけ残し（前回と比べられなければ全部捨てる）、違う道に沿って取るものを決める
+            var nest = PlanNested(state.Groups, known ? Diff(state.Sigs, sigs) : null, ResidentBudgetBytes > 0, usable ? k : 0);
             if (!known)
             {
                 // 初めて・全部を合成し直す: 透明から。写しは次に違いが出たときに取る（GPU と同じ）
                 InvalidateBelow(state);
                 jobs.Add(NewJob(state, bx, by, whole, 0));
             }
-            else if (usable && k == first)
-            {
-                // 写しのすぐ上から変わった: 変わったタイルだけを写しから
-                foreach (var r in CoverTiles(tiles, TilesX, TilesY)) jobs.Add(NewJob(state, bx, by, r, k));
-                LastBelowReuseCount++;
-            }
-            else if (first > 0 && first < n && ReserveBelow(state, whole))
-            {
-                // 写しを最初に違う項目の下へ取り直す: ブロック全体を（使える写しがあればそこから）合成する
-                var job = NewJob(state, bx, by, whole, usable ? k : 0);
-                job.CaptureAt = first; job.Capture = state.Below; state.BelowIndex = 0; state.BelowVersion++; // 取り終えるまで使えない
-                jobs.Add(job);
-                if (usable) LastBelowReuseCount++;
-            }
             else
             {
-                // 写しより下が変わった（一番下の層に描くなど）か、写しを取れない: 変わったタイルだけを（使えれば写しから）合成する。
-                // 古くなった写しは捨てる（変わっていないタイルでも、項目の並びが変われば下の部分の合成は変わり得る）
-                if (!usable) InvalidateBelow(state);
-                foreach (var r in CoverTiles(tiles, TilesX, TilesY)) jobs.Add(NewJob(state, bx, by, r, usable ? k : 0));
+                int start = usable ? k : 0;
+                var resume = ReachableCopies(nest, start);
+                // 最上段の写しを最初に違う項目の下へ取り直すか（すぐ上から変わったなら今の写しのまま）、グループの中で写しを取るか
+                bool rootCapture = first > 0 && first < n && !(usable && k == first) && ReserveBelow(state, whole);
+                var captures = ReserveGroupCopies(state, nest, whole, false);
+                // ブロック全体を合成するとき（写しを取る、変わったタイルがブロックの全部）は、先回りの写しも（空いた予算で）取る
+                if (rootCapture || captures.Count > 0 || tiles.Count >= whole.Count) captures.AddRange(ReserveGroupCopies(state, nest, whole, true));
+                if (rootCapture || captures.Count > 0)
+                {
+                    // 写しを取る: ブロック全体を（使える写しがあればそこから）合成する
+                    var job = NewJob(state, bx, by, whole, start);
+                    if (rootCapture) { job.CaptureAt = first; job.Capture = state.Below; state.BelowIndex = 0; state.BelowVersion++; } // 取り終えるまで使えない
+                    else if (!usable) InvalidateBelow(state);
+                    job.Resume = resume; job.Captures = captures;
+                    jobs.Add(job);
+                }
+                else
+                {
+                    // 写しのすぐ上から変わった、写しより下が変わった（一番下の層に描くなど）、写しを取れない: 変わったタイルだけを（使えれば写しから）
+                    // 合成する。古くなった写しは捨てる（変わっていないタイルでも、項目の並びが変われば下の部分の合成は変わり得る）
+                    if (!usable) InvalidateBelow(state);
+                    foreach (var r in CoverTiles(tiles, TilesX, TilesY)) { var job = NewJob(state, bx, by, r, start); job.Resume = resume; jobs.Add(job); }
+                }
                 if (usable) LastBelowReuseCount++;
+                LastNestedReuseCount += resume.Count;
             }
             state.Sigs = sigs;
             for (int i = first0; i < jobs.Count; i++) jobs[i].Send = full ? null : tiles;
+        }
+        /// <summary>写しのうち、この合成が中身を始めから合成するはずのグループのもの（最上段の start 以上で、中身を写しから始める外側のグループの
+        /// 写しより上）。浅いグループから決める。</summary>
+        static List<(GroupCopy Copy, int[] Address)> ReachableCopies(NestPlan nest, int start)
+        {
+            var list = new List<(GroupCopy Copy, int[] Address)>();
+            if (nest == null) return list;
+            foreach (var c in nest.Resume.Values) list.Add((c, nest.Diff.Groups[c.Group].Address));
+            list.Sort((a, b) => a.Address.Length.CompareTo(b.Address.Length));
+            var reached = new List<(GroupCopy Copy, int[] Address)>();
+            foreach (var item in list)
+            {
+                if (item.Address[0] < start) continue;
+                bool inside = false;
+                foreach (var outer in reached)
+                    if (outer.Address.Length < item.Address.Length && IsPrefix(outer.Address, item.Address) && item.Address[outer.Address.Length] < outer.Copy.Index) { inside = true; break; }
+                if (!inside) reached.Add(item);
+            }
+            return reached;
+        }
+        static bool IsPrefix(int[] prefix, int[] path) { for (int i = 0; i < prefix.Length; i++) if (prefix[i] != path[i]) return false; return true; }
+        /// <summary>違う道に沿って取るグループの写しの配列を、浅い段から予算の内側で用意する（同じグループの写しがあればそれへ取り直す。足りなければ
+        /// その段は取らない）。</summary>
+        /// <param name="spare">先回りの写し（空いた予算だけで）を用意する。false なら違う道の写し。</param>
+        List<(GroupCopy Copy, int[] Address, int Index)> ReserveGroupCopies(CpuBlock state, NestPlan nest, TileRect whole, bool spare)
+        {
+            var list = new List<(GroupCopy Copy, int[] Address, int Index)>();
+            if (nest == null) return list;
+            IEnumerable<Guid> order = spare ? (IEnumerable<Guid>)nest.Spare : nest.Diff.Path.ConvertAll(p => p.Group);
+            foreach (var group in order)
+            {
+                if (!nest.Capture.TryGetValue(group, out int index)) continue;
+                var d = nest.Diff.Groups[group];
+                if (!nest.Resume.TryGetValue(group, out var copy))
+                {
+                    long bytes = BelowBytes(whole);
+                    if (spare ? !SpareRoom(bytes) : !MakeRoomCpu(bytes)) continue;
+                    copy = new GroupCopy { Group = group, Pixels = new byte[bytes] }; ResidentBytes += bytes;
+                }
+                copy.Isolated = d.Node.Isolated; copy.Depth = d.Address.Length;
+                list.Add((copy, d.Address, index));
+            }
+            return list;
         }
         CpuJob NewJob(CpuBlock state, int bx, int by, TileRect r, int start)
         {
@@ -711,6 +768,23 @@ namespace Yozolab.YoluPainter.Editor
                     core.Add(new CpuCompositor.CompositeJob(j.X, j.Y, j.W, j.H, j.Pixels, j.Start, j.State.Below, ((j.Y - by0) * bw + (j.X - bx0)) * 4, bw * 4, j.CaptureAt, j.Capture));
                 }
             }
+            for (int i = from; i < to; i++)
+            {
+                var j = jobs[i];
+                int bx0 = j.Bx * blockSize, by0 = j.By * blockSize, bw = Math.Min(blockSize, width - bx0), offset = ((j.Y - by0) * bw + (j.X - bx0)) * 4;
+                if (j.Resume != null && j.Resume.Count > 0)
+                {
+                    var resume = new List<CpuCompositor.NestedCopy>(j.Resume.Count);
+                    foreach (var (copy, address) in j.Resume) resume.Add(new CpuCompositor.NestedCopy(address, copy.Index, copy.Pixels, offset, bw * 4));
+                    core[i - from].Resume = resume;
+                }
+                if (j.Captures != null && j.Captures.Count > 0)
+                {
+                    var captures = new List<CpuCompositor.NestedCopy>(j.Captures.Count);
+                    foreach (var (copy, address, index) in j.Captures) captures.Add(new CpuCompositor.NestedCopy(address, index, copy.Pixels, offset, bw * 4));
+                    core[i - from].Captures = captures;
+                }
+            }
             CpuCompositor.CompositeRegions(doc, channel, core);
             LastCpuCompositeCalls++; LastCpuJobCount += to - from;
             if (BlockCompositedForTests != null)
@@ -723,6 +797,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 var j = jobs[i];
                 if (j.CaptureAt >= 0) { j.State.BelowIndex = j.CaptureAt; j.State.BelowVersion++; }
+                if (j.Captures != null) foreach (var (copy, _, index) in j.Captures) { copy.Index = index; j.State.Groups[copy.Group] = copy; LastNestedCaptureCount++; }
                 if (Path == CompositePath.CpuTiles) SendRegion(j.Pixels, j.X, j.Y, j.W, j.Rect, j.Send);
                 else for (int row = 0; row < j.H; row++) Buffer.BlockCopy(j.Pixels, row * j.W * 4, cpuPixels, ((j.Y + row) * width + j.X) * 4, j.W * 4);
                 ReturnCpu(j.Pixels); j.Pixels = null;
@@ -751,9 +826,12 @@ namespace Yozolab.YoluPainter.Editor
             while (ResidentBytes + bytes > ResidentBudgetBytes)
             {
                 CpuBlock victim = null; int oldest = int.MaxValue;
-                foreach (var b in cpuBlocks.Values) if (b.Below != null && b.LastUsed < updateIndex && b.LastUsed < oldest) { oldest = b.LastUsed; victim = b; }
+                foreach (var b in cpuBlocks.Values) if ((b.Below != null || b.Groups.Count > 0) && b.LastUsed < updateIndex && b.LastUsed < oldest) { oldest = b.LastUsed; victim = b; }
                 if (victim == null) return false;
-                ReleaseBelow(victim);
+                // ブロックの写しは深いグループの写しから捨て、最上段の下の写しは最後に
+                var deepest = DeepestCopy(victim.Groups);
+                if (deepest != null) { ReleaseGroupCopy(deepest); victim.Groups.Remove(deepest.Group); }
+                else ReleaseBelow(victim);
             }
             return true;
         }
@@ -762,11 +840,11 @@ namespace Yozolab.YoluPainter.Editor
         void TrimIdleCpu()
         {
             int limit = updateIndex - IdleUpdatesBeforeRelease;
-            foreach (var b in cpuBlocks.Values) if (b.Below != null && b.LastUsed < limit) ReleaseBelow(b);
+            foreach (var b in cpuBlocks.Values) if (b.LastUsed < limit) { if (b.Below != null) ReleaseBelow(b); ReleaseGroupCopies(b.Groups); }
         }
         void ClearCpuBlocks()
         {
-            foreach (var b in cpuBlocks.Values) ReleaseBelow(b);
+            foreach (var b in cpuBlocks.Values) { ReleaseBelow(b); ReleaseGroupCopies(b.Groups); }
             cpuBlocks.Clear();
         }
         void UploadFrame()
@@ -883,8 +961,7 @@ namespace Yozolab.YoluPainter.Editor
             long key = BlockKey(bx, by);
             if (!blocks.TryGetValue(key, out var state)) blocks.Add(key, state = new BlockState());
             state.LastUsed = updateIndex;
-            var sigs = new string[plan.Count];
-            for (int i = 0; i < plan.Count; i++) sigs[i] = Signature(plan[i], channel, bx, by);
+            var sigs = BuildSigs(plan, channel, bx, by);
             int first = state.Sigs == null ? 0 : FirstDifference(state.Sigs, sigs);
             if (state.Sigs != null && first == sigs.Length && state.Sigs.Length == sigs.Length) { LastSkippedBlockCount++; return; }
             LastBlockCount++;
@@ -897,29 +974,31 @@ namespace Yozolab.YoluPainter.Editor
             }
             else Clear(top.A);
             bool remember = state.Sigs != null && ResidentBudgetBytes > 0;
+            // グループの写し: 今も正しいものから中身を始め、違う道に沿って取る
+            var nest = PlanNested(state.Groups, state.Sigs == null ? null : Diff(state.Sigs, sigs), remember, start);
             int capture = remember && first < plan.Count ? first : -1;
             bool captured = false;
             for (int i = start; i < plan.Count; i++)
             {
                 if (i == capture && i > start) { CaptureBelow(state, current, i); captured = true; }
-                current = CompositeEntry(plan[i], top, current, 0, channel, bx, by, remember && i >= first, false);
+                current = CompositeEntry(plan[i], top, current, 0, channel, bx, by, remember && i >= first, false, nest);
             }
             // 下の写しは「新しい署名の先頭 BelowIndex 項目」の合成でなければならない。取り直さず、先頭が変わっていたら無効にする
             if (!captured && state.BelowIndex > first) state.BelowIndex = 0;
+            if (nest != null) foreach (var pair in nest.Taken) state.Groups[pair.Key] = pair.Value;
             CopyBlockToComposite(current, bx, by);
             state.Sigs = sigs;
         }
-
         /// <summary>入れ子が深すぎる（または <see cref="CompositeGroupsOnCpu"/>）とき: グループを飛ばして GPU でブロックを合成し、グループが
         /// 触れるタイルだけ CPU の正本の式で上書きする。触れないタイルではグループの寄与は無い（分離は透明、通過は下のまま）ので正しい。</summary>
         void CompositeBlockWithCpuGroups(PaintDocument doc, IReadOnlyList<CpuCompositor.StackEntry> plan, PaintChannel channel, int bx, int by)
         {
-            if (blocks.TryGetValue(BlockKey(bx, by), out var state)) { Release(state.Below); ResidentBytesRemove(state.Below); blocks.Remove(BlockKey(bx, by)); }
+            if (blocks.TryGetValue(BlockKey(bx, by), out var state)) { Release(state.Below); ResidentBytesRemove(state.Below); ReleaseGroupCopies(state.Groups); blocks.Remove(BlockKey(bx, by)); }
             LastBlockCount++;
             var top = LevelAt(0);
             Clear(top.A);
             RenderTexture current = top.A;
-            foreach (var entry in plan) current = CompositeEntry(entry, top, current, 0, channel, bx, by, false, true);
+            foreach (var entry in plan) current = CompositeEntry(entry, top, current, 0, channel, bx, by, false, true, null);
             CopyBlockToComposite(current, bx, by);
             for (int ty = by * blockTiles; ty < Math.Min((by + 1) * blockTiles, TilesY); ty++)
                 for (int tx = bx * blockTiles; tx < Math.Min((bx + 1) * blockTiles, TilesX); tx++)
@@ -930,13 +1009,6 @@ namespace Yozolab.YoluPainter.Editor
         }
         int TilesX => (width + tileSize - 1) / tileSize;
         int TilesY => (height + tileSize - 1) / tileSize;
-
-        static int FirstDifference(string[] before, string[] now)
-        {
-            int n = Math.Min(before.Length, now.Length);
-            for (int i = 0; i < n; i++) if (!string.Equals(before[i], now[i], StringComparison.Ordinal)) return i;
-            return n;
-        }
 
         void CaptureBelow(BlockState state, RenderTexture current, int index)
         {
@@ -962,10 +1034,11 @@ namespace Yozolab.YoluPainter.Editor
         string Signature(CpuCompositor.StackEntry entry, PaintChannel channel, int bx, int by)
         {
             var sb = new StringBuilder(96);
-            AppendSignature(sb, entry, channel, bx, by);
+            AppendSignature(sb, entry, channel, bx, by, null);
             return sb.ToString();
         }
-        void AppendSignature(StringBuilder sb, CpuCompositor.StackEntry entry, PaintChannel channel, int bx, int by)
+        /// <param name="children">null, or the signatures of a group's contents made before (the same strings, not made again).</param>
+        void AppendSignature(StringBuilder sb, CpuCompositor.StackEntry entry, PaintChannel channel, int bx, int by, SigNode[] children)
         {
             var layer = entry.Base;
             // 不透明度と合成モードは、このチャンネルでのもの（層のチャンネルごとの設定があればそれ）
@@ -1001,14 +1074,15 @@ namespace Yozolab.YoluPainter.Editor
                     break;
                 case LayerKind.Group:
                     sb.Append("|g[");
-                    foreach (var child in entry.Children) { AppendSignature(sb, child, channel, bx, by); sb.Append(';'); }
+                    if (children != null) foreach (var child in children) sb.Append(child.Sig).Append(';');
+                    else foreach (var child in entry.Children) { AppendSignature(sb, child, channel, bx, by, null); sb.Append(';'); }
                     sb.Append(']');
                     break;
             }
             if (entry.ClipEntries.Count > 0)
             {
                 sb.Append("|c[");
-                foreach (var clip in entry.ClipEntries) { AppendSignature(sb, clip, channel, bx, by); sb.Append(';'); }
+                foreach (var clip in entry.ClipEntries) { AppendSignature(sb, clip, channel, bx, by, null); sb.Append(';'); }
                 sb.Append(']');
             }
         }
@@ -1074,13 +1148,13 @@ namespace Yozolab.YoluPainter.Editor
 
         RenderTexture CompositeLevel(IReadOnlyList<CpuCompositor.StackEntry> plan, Level level, RenderTexture current, int depth, PaintChannel channel, int bx, int by, bool keep, bool skipGroups)
         {
-            foreach (var entry in plan) current = CompositeEntry(entry, level, current, depth, channel, bx, by, keep, skipGroups);
+            foreach (var entry in plan) current = CompositeEntry(entry, level, current, depth, channel, bx, by, keep, skipGroups, null);
             return current;
         }
-        /// <summary>計画の 1 項目を current（level の A か B。下の結果が入っている）の上に重ね、結果の入った作業ブロック（level の A か B）を
-        /// 返す。keep: 使う入力を GPU に残す。skipGroups: グループを飛ばす（CPU で上書きするタイル用）。マテリアルの値は、入れ子の合成が
-        /// 書き換えるので、各 Blit の直前に設定する。</summary>
-        RenderTexture CompositeEntry(CpuCompositor.StackEntry entry, Level level, RenderTexture current, int depth, PaintChannel channel, int bx, int by, bool keep, bool skipGroups)
+        /// <summary>計画の項目を 1 つ current（level の A か B。下の結果が入っている）の上に重ね、結果の入った作業ブロック（level の A か B）を
+        /// 返す。keep: 使う入力を GPU に残す。skipGroups: グループを飛ばす（CPU で上書きするタイル用）。nest: グループの写し（null なら使わない）。
+        /// マテリアルの値は、入れ子の合成が書き換えるので、各 Blit の直前に設定する。</summary>
+        RenderTexture CompositeEntry(CpuCompositor.StackEntry entry, Level level, RenderTexture current, int depth, PaintChannel channel, int bx, int by, bool keep, bool skipGroups, NestPlan nest)
         {
             var layer = entry.Base;
             if (layer.Kind == LayerKind.Adjustment)
@@ -1090,23 +1164,66 @@ namespace Yozolab.YoluPainter.Editor
                 return Step(current, level, 2, null);
             }
             if (layer.IsGroup && (skipGroups || !TouchesBlock(entry, channel, bx, by))) return current;
+            // グループの写し: 中身をそこから始める（通過は下の結果を含む）、中身の途中で取る
+            GroupCopy resume = null; int captureAt = -1;
+            if (nest != null && layer.IsGroup) { nest.Resume.TryGetValue(layer.Id, out resume); if (!nest.Capture.TryGetValue(layer.Id, out captureAt)) captureAt = -1; }
+            int from = resume?.Index ?? 0;
+            if (resume != null) LastNestedReuseCount++;
             if (entry.PassesThrough)
             {
-                if (PassesThroughWhole(entry)) return CompositeLevel(entry.Children, level, current, depth, channel, bx, by, keep, skipGroups);
+                if (PassesThroughWhole(entry))
+                {
+                    if (resume != null) { var next = current == level.A ? level.B : level.A; Blit(resume.Texture, next, 1, null); current = next; }
+                    return CompositeChildren(entry, level, current, depth, from, captureAt, channel, bx, by, keep, skipGroups, nest);
+                }
                 // 下の結果を 1 つ深い段へ写し、そこへ中身を重ね、下と中身を不透明度×マスクでフェードする
                 var inner = LevelAt(depth + 1);
-                Blit(current, inner.A, 1, null);
-                var innerResult = CompositeLevel(entry.Children, inner, inner.A, depth + 1, channel, bx, by, keep, skipGroups);
+                Blit(resume != null ? resume.Texture : (Texture)current, inner.A, 1, null);
+                var innerResult = CompositeChildren(entry, inner, inner.A, depth + 1, from, captureAt, channel, bx, by, keep, skipGroups, nest);
                 SetLayer(entry.Opacity, LayerBlendMode.Normal, layer.Mask, bx, by, keep);
                 return Step(current, level, 4, innerResult);
             }
             Source source;
-            if (layer.IsGroup) source = new Source { Texture = Isolated(entry.Children, depth + 1, channel, bx, by, keep, skipGroups) };
+            if (layer.IsGroup)
+            {
+                // 分離合成: 1 つ深い段の作業ブロックで、透明（か写し）から中身を合成する
+                var inner = LevelAt(depth + 1);
+                if (resume != null) Blit(resume.Texture, inner.A, 1, null); else Clear(inner.A);
+                source = new Source { Texture = CompositeChildren(entry, inner, inner.A, depth + 1, from, captureAt, channel, bx, by, keep, skipGroups, nest) };
+            }
             else if (!TryGetSource(layer, channel, bx, by, keep, out source)) return current; // このブロックに画素が無い（クリッピングのまとまりも透明）
             if (entry.ClipEntries.Count > 0) source = new Source { Texture = BuildClippingGroup(entry, source, level, depth, channel, bx, by, keep, skipGroups) };
             SetLayer(entry.Opacity, ModeOf(entry), layer.Mask, bx, by, keep);
             SetSource(source);
             return Step(current, level, 0, source.Texture);
+        }
+        /// <summary>グループの中身の項目 [from, 数) を current（level の A か B）の上に重ねる。captureAt（−1 でなければ from 以上）の項目の前で、
+        /// 内側の結果をグループの写しに取る（中身の数なら最後に）。</summary>
+        RenderTexture CompositeChildren(CpuCompositor.StackEntry group, Level level, RenderTexture current, int depth, int from, int captureAt, PaintChannel channel, int bx, int by, bool keep, bool skipGroups, NestPlan nest)
+        {
+            var children = group.Children;
+            for (int i = from; i < children.Count; i++)
+            {
+                if (i == captureAt) TakeGroupCopy(nest, group, i, current);
+                current = CompositeEntry(children[i], level, current, depth, channel, bx, by, keep, skipGroups, nest);
+            }
+            if (captureAt == children.Count) TakeGroupCopy(nest, group, captureAt, current);
+            return current;
+        }
+        /// <summary>グループの内側の結果（中身の先頭 index 項目）を写しに取る。同じグループの写しを読んだ後ならその RenderTexture へ（読みはグループの
+        /// 始めで済んでいる）、無ければ予算の内側で作る（足りなければ取らない）。</summary>
+        void TakeGroupCopy(NestPlan nest, CpuCompositor.StackEntry group, int index, RenderTexture current)
+        {
+            var id = group.Base.Id;
+            if (!nest.Resume.TryGetValue(id, out var copy))
+            {
+                // 先回りの写しは空いた予算だけで（違う道の写しの分の余りを残す）。違う道の写しは古い写しを捨ててでも取る
+                if (nest.Spare.Contains(id) ? !SpareRoom(BlockBytes) : !MakeRoom(BlockBytes)) return;
+                copy = new GroupCopy { Group = id, Texture = MakeRt(blockSize, blockSize, FilterMode.Point) }; ResidentBytes += BlockBytes;
+            }
+            Blit(current, copy.Texture, 1, null);
+            copy.Index = index; copy.Isolated = !group.PassesThrough; copy.Depth = nest.Diff.Groups[id].Address.Length;
+            nest.Taken[id] = copy; LastNestedCaptureCount++;
         }
         /// <summary>分離合成: depth 段の作業ブロックで、透明から中身を合成する。結果はその段の A か B（次にその段を使うまで有効）。</summary>
         RenderTexture Isolated(IReadOnlyList<CpuCompositor.StackEntry> children, int depth, PaintChannel channel, int bx, int by, bool keep, bool skipGroups)
@@ -1292,8 +1409,14 @@ namespace Yozolab.YoluPainter.Editor
             {
                 (long, long) victimKey = default; Resident victim = null; BlockState victimBlock = null; int oldest = int.MaxValue;
                 foreach (var pair in residents) if (pair.Value.LastUsed < updateIndex && pair.Value.LastUsed < oldest) { oldest = pair.Value.LastUsed; victim = pair.Value; victimKey = pair.Key; }
-                foreach (var b in blocks.Values) if (b.Below != null && b.LastUsed < updateIndex && b.LastUsed < oldest) { oldest = b.LastUsed; victimBlock = b; victim = null; }
-                if (victimBlock != null) { Release(victimBlock.Below); victimBlock.Below = null; victimBlock.BelowIndex = 0; ResidentBytes -= BlockBytes; }
+                foreach (var b in blocks.Values) if ((b.Below != null || b.Groups.Count > 0) && b.LastUsed < updateIndex && b.LastUsed < oldest) { oldest = b.LastUsed; victimBlock = b; victim = null; }
+                if (victimBlock != null)
+                {
+                    // ブロックの写しは深いグループの写しから捨て、最上段の下の写しは最後に
+                    var deepest = DeepestCopy(victimBlock.Groups);
+                    if (deepest != null) { ReleaseGroupCopy(deepest); victimBlock.Groups.Remove(deepest.Group); }
+                    else { Release(victimBlock.Below); victimBlock.Below = null; victimBlock.BelowIndex = 0; ResidentBytes -= BlockBytes; }
+                }
                 else if (victim != null) { DestroyTexture(victim.Texture); residents.Remove(victimKey); ResidentBytes -= BlockBytes; }
                 else return false;
             }
@@ -1307,11 +1430,16 @@ namespace Yozolab.YoluPainter.Editor
             List<(long, long)> stale = null;
             foreach (var pair in residents) if (pair.Value.LastUsed < limit) (stale ?? (stale = new List<(long, long)>())).Add(pair.Key);
             if (stale != null) foreach (var key in stale) { DestroyTexture(residents[key].Texture); residents.Remove(key); ResidentBytes -= BlockBytes; }
-            foreach (var b in blocks.Values) if (b.Below != null && b.LastUsed < limit) { Release(b.Below); b.Below = null; b.BelowIndex = 0; ResidentBytes -= BlockBytes; }
+            foreach (var b in blocks.Values)
+                if (b.LastUsed < limit)
+                {
+                    if (b.Below != null) { Release(b.Below); b.Below = null; b.BelowIndex = 0; ResidentBytes -= BlockBytes; }
+                    ReleaseGroupCopies(b.Groups);
+                }
         }
         void ClearBlockStates()
         {
-            foreach (var b in blocks.Values) if (b.Below != null) { Release(b.Below); ResidentBytes -= BlockBytes; }
+            foreach (var b in blocks.Values) { if (b.Below != null) { Release(b.Below); ResidentBytes -= BlockBytes; } ReleaseGroupCopies(b.Groups); }
             blocks.Clear();
         }
 
