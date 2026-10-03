@@ -135,17 +135,19 @@ namespace Yozolab.YoluPainter.Editor
 
         // ───────── 足す ─────────
 
-        static readonly GeneratorType[] GeneratorMenu = { GeneratorType.EdgeWear, GeneratorType.Dirt, GeneratorType.PositionGradient, GeneratorType.ShapeGradient, GeneratorType.Thickness, GeneratorType.Direction, GeneratorType.IdColor };
+        static readonly GeneratorType[] GeneratorMenu = { GeneratorType.EdgeWear, GeneratorType.Dirt, GeneratorType.PositionGradient, GeneratorType.ShapeGradient, GeneratorType.Thickness, GeneratorType.Direction, GeneratorType.IdColor, GeneratorType.Anchor };
 
         /// <summary>選んだ層のスタックに Generator を足す（画素なら今のチャンネルだけ）。足せたら知らせに、読むマップが無ければその理由も添える。</summary>
         internal FilterEffect AddGenerator(FilterTarget target, GeneratorType type)
         {
-            var added = AddFilter(target, FilterSettings.FromGenerator(NewGeneratorSettings(type)));
+            var settings = NewGeneratorSettings(type);
+            if (type == GeneratorType.Anchor) settings = settings.WithAnchor(NearestAnchorBelow(selectedLayer), settings.AnchorChannel, settings.AnchorRead); // すぐ下の Anchor を読む（TexturePaintWindow.Anchors.cs）
+            var added = AddFilter(target, FilterSettings.FromGenerator(settings));
             if (added == null) return null;
             ConnectGeneratorInputs();
             if (type == GeneratorType.ShapeGradient) ShapeEditFilter = added.Id; // 足したらすぐ 3D ビューで形を動かせるように
-            var status = document.GetGeneratorStatus(added.Settings.Generator);
-            if (!status.Active) message += " " + L.Tr("It has no effect until its mesh maps are baked: {0}", status.Reason);
+            var status = StageStatus(added);
+            if (!status.Active) message += " " + (type == GeneratorType.Anchor ? L.Tr("It has no effect until it reads an anchor below this layer: {0}", status.Reason) : L.Tr("It has no effect until its mesh maps are baked: {0}", status.Reason));
             return added;
         }
 
@@ -156,7 +158,11 @@ namespace Yozolab.YoluPainter.Editor
             foreach (var type in GeneratorMenu)
             {
                 string why;
-                try { why = document.FilterRefusal(layerId, target, FilterSettings.FromGenerator(GeneratorSettings.Default(type)), channel); }
+                try
+                {
+                    why = document.FilterRefusal(layerId, target, FilterSettings.FromGenerator(GeneratorSettings.Default(type)), channel);
+                    if (why == null && type == GeneratorType.Anchor && document.AnchorsReadableFrom(layerId).Count == 0) why = L.Tr("no anchor below this layer (Layer ▸ Add Anchor on a lower layer)");
+                }
                 catch (KeyNotFoundException) { why = L.Tr("no layer"); }
                 choices.Add((GeneratorName(type), type, why));
             }
@@ -185,6 +191,7 @@ namespace Yozolab.YoluPainter.Editor
                 case GeneratorType.ShapeGradient: return L.Tr("Shape gradient");
                 case GeneratorType.Thickness: return L.TrIn("generator", "Thickness");
                 case GeneratorType.IdColor: return L.Tr("ID color");
+                case GeneratorType.Anchor: return L.TrIn("generator", "Anchor");
                 default: return L.TrIn("generator", "Direction");
             }
         }
@@ -216,6 +223,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             var g = e.Settings.Generator;
             string text = "  " + GeneratorBlendName(g.Blend);
+            if (g.Type == GeneratorType.Anchor) return text + AnchorSummary(e); // 読む Anchor の名前（TexturePaintWindow.Anchors.cs）
             if (e.IsActive && !document.GetGeneratorStatus(g).Active) text += "  · " + L.Tr("no maps");
             return text;
         }
@@ -236,8 +244,10 @@ namespace Yozolab.YoluPainter.Editor
         void DrawGeneratorParameters(UiRows rows, FilterEffect e, float indent)
         {
             var g = e.Settings.Generator; GeneratorSettings next = g;
-            var status = document.GetGeneratorStatus(g);
-            PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.Tr("Reads"), L.Tr("The texture set's baked mesh maps this generator reads. They come from the model; painting (Height too) does not change them."));
+            var status = StageStatus(e); // Anchor の Generator は参照も見る
+            if (g.Type == GeneratorType.Anchor) AnchorRows(rows, e, indent); // 読む Anchor・チャンネル・読み方（TexturePaintWindow.Anchors.cs）
+            if (status.Maps.Count > 0 || g.Type != GeneratorType.Anchor)
+                PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.Tr("Reads"), L.Tr("The texture set's baked mesh maps this generator reads. They come from the model; painting (Height too) does not change them."));
             foreach (var use in status.Maps)
             {
                 var row = Indent(rows.Row(20, 2), indent);
@@ -254,14 +264,16 @@ namespace Yozolab.YoluPainter.Editor
             if (!status.Active)
             {
                 NoteRow(rows, L.Tr("No effect now: the input passes through unchanged. {0}", status.Reason), NoteKind.Warning, indent);
-                if (meshBakeJob == null && PaintGui.Button(Spot("generator.bake", Indent(rows.Row(24), indent)), L.Tr("Bake Mesh Maps…"), false, GUI.enabled && stroke == null,
+                if (meshBakeJob == null && status.Maps.Any(m => !m.Usable) && PaintGui.Button(Spot("generator.bake", Indent(rows.Row(24), indent)), L.Tr("Bake Mesh Maps…"), false, GUI.enabled && stroke == null,
                         L.Tr("Open the bake window: check the maps, set them up and bake them from the loaded model"), "local_fire_department"))
                     TryAction(() => OpenMeshBakeWindow());
             }
             bool pinned = g.Pins.Count > 0;
-            bool pin = PaintGui.FitToggle(Spot("generator.pin", Indent(rows.Row(), indent)), L.Tr("Only this bake"), pinned,
-                L.Tr("On: keep reading exactly the bake shown above. A rebake under other conditions is then not used (the generator has no effect until you turn this on again). Off: follow the latest bake."),
-                pinned || status.Maps.All(m => m.Usable));
+            bool pin = pinned;
+            if (status.Maps.Count > 0) // マップを読まない Generator（崩しを UV に置いた Anchor）にはピンが無い
+                pin = PaintGui.FitToggle(Spot("generator.pin", Indent(rows.Row(), indent)), L.Tr("Only this bake"), pinned,
+                    L.Tr("On: keep reading exactly the bake shown above. A rebake under other conditions is then not used (the generator has no effect until you turn this on again). Off: follow the latest bake."),
+                    pinned || status.Maps.All(m => m.Usable));
             try
             {
                 if (pin != pinned)

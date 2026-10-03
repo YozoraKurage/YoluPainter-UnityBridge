@@ -104,6 +104,7 @@ namespace Yozolab.YoluPainter.Editor
                 Item(m, "Edit Layer Mask", () => editMask = !editMask, true, editMask);
                 Item(m, "Delete Layer Mask", () => { document.RemoveLayerMask(selectedLayer); editMask = false; });
             }
+            AnchorMenuItems(m); // Anchor を置く・外す（Layers/TexturePaintWindow.Anchors.cs）
             Item(m, "Clip to Layer Below", () => document.SetLayerClipping(selectedLayer, !active.Clipping), active != null, active != null && active.Clipping, "Ctrl+Alt+G");
             m.AddSeparator("");
             Item(m, "Rasterize Path", () => document.Rasterize(selectedLayer), active?.Path != null);

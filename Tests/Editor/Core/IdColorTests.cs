@@ -234,7 +234,7 @@ namespace Yozolab.YoluPainter.Tests
             Refused(ids, 256, "Invalid generator parameters"); Refused(ids, -1, "Invalid generator parameters");
             Refused(ids + 4, GeneratorSettings.MaxIdColors + 1, "Invalid ID colour count"); Refused(ids + 4, -1, "Invalid ID colour count");
             Refused(ids + 8, 0x1000000, "Invalid generator parameters"); Refused(ids + 12, Red, "Invalid generator parameters"); // 範囲の外・重複
-            Refused(gen, 7, "Unknown generator type 7");
+            int unknown = Enum.GetValues(typeof(GeneratorType)).Cast<int>().Max() + 1; Refused(gen, unknown, "Unknown generator type " + unknown); // 種類 7 は Anchor（版 17）
             for (int cut = 1; cut <= 4 + 4 + 8 + 1; cut += 3)
                 Assert.That(() => DocumentBinary.Read(ob.Take(ob.Length - cut).ToArray()), Throws.InstanceOf<InvalidDataException>(), "cut " + cut);
             Assert.That(DocumentBinary.Read(ob).GetLayer(ol.Id).Mask.Filters.Single().Settings, Is.EqualTo(og.Settings));

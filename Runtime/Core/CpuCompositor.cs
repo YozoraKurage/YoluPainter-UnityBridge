@@ -199,6 +199,87 @@ namespace Yozolab.YoluPainter.Core
             }
             return Active(layer, channel) ? new StackEntry { Base = layer, Opacity = layer.OpacityIn(channel), BlendMode = layer.BlendModeIn(channel) } : null;
         }
+        /// <summary>
+        /// The plan of what an anchor on <paramref name="layer"/> holds in a channel (<see cref="AnchorPoint"/>): the layers at or below it at its
+        /// level, as if nothing above it existed. Walking down from the top level to the layer, each group on the way either continues the
+        /// result below it (pass through: its children below the layer are appended to the entries below the group) or starts from transparent
+        /// (any other blend mode in the channel, or a group clipped to the layer below; then only its children below the layer remain). The
+        /// groups on the way add no opacity, mask or blend of their own; their visibility does not matter. At the layer's own level the entries
+        /// below it are planned as <see cref="Plan"/> plans them (clipped layers with their base, hidden ones dropped), with the clipped
+        /// layers above it left out: the layer itself is a plain entry, or, when it is clipped, the last clip of its base's entry.
+        /// </summary>
+        internal static List<StackEntry> AnchorPlan(PaintDocument document, PaintChannel channel, PaintLayer layer)
+        {
+            var path = new List<PaintLayer>();
+            for (var l = layer; ; l = document.GetLayer(l.ParentId)) { path.Insert(0, l); if (l.ParentId == Guid.Empty) break; }
+            var result = new List<StackEntry>(); Guid parent = Guid.Empty;
+            for (int d = 0; d < path.Count; d++)
+            {
+                var node = path[d]; bool last = d == path.Count - 1;
+                var level = PlanLevelBelow(document, channel, parent, node, last, out bool clipped);
+                if (!last && (clipped || node.BlendModeIn(channel) != LayerBlendMode.PassThrough)) result.Clear(); // 分離のグループ: 中は透明から
+                else result.AddRange(level);
+                parent = node.Id;
+            }
+            return result;
+        }
+        /// <summary>The entries of a level below one of its layers (and, when include, the layer itself without the clipped layers above it).
+        /// clipped: whether the layer is clipped to a sibling below it.</summary>
+        static List<StackEntry> PlanLevelBelow(PaintDocument document, PaintChannel channel, Guid parent, PaintLayer node, bool include, out bool clipped)
+        {
+            var plan = new List<StackEntry>(); var layers = document.Layers;
+            var siblings = new List<int>();
+            for (int i = 0; i < layers.Count; i++) if (layers[i].ParentId == parent) siblings.Add(i);
+            int at = siblings.IndexOf(document.IndexOfLayer(node));
+            clipped = at > 0 && node.Clipping;
+            StackEntry baseEntry = null; bool baseTakesClips = false;
+            for (int k = 0; k < at; k++)
+            {
+                int i = siblings[k];
+                if (k > 0 && layers[i].Clipping)
+                {
+                    if (baseEntry != null && baseTakesClips) { var clip = MakeEntry(document, channel, layers[i]); if (clip != null) baseEntry.AddClip(clip); }
+                    continue;
+                }
+                baseEntry = MakeEntry(document, channel, layers[i]); baseTakesClips = layers[i].Kind != LayerKind.Adjustment;
+                if (baseEntry != null) plan.Add(baseEntry);
+            }
+            if (!include) return plan;
+            if (clipped) { if (baseEntry != null && baseTakesClips) { var clip = MakeEntry(document, channel, node); if (clip != null) baseEntry.AddClip(clip); } }
+            else { var entry = MakeEntry(document, channel, node); if (entry != null) plan.Add(entry); }
+            return plan;
+        }
+        /// <summary>The composite of an anchor's plan (<see cref="AnchorPlan"/>) for whole tiles: per coordinate, the tile (TileSize² RGBA,
+        /// padding zero), or null where it is transparent. Calls into filtered layers on this thread (the caller is not a worker).</summary>
+        internal static byte[][] CompositeAnchorTiles(PaintDocument document, PaintChannel channel, PaintLayer layer, IReadOnlyList<TileCoord> coords)
+        {
+            var plan = AnchorPlan(document, channel, layer);
+            int ts = document.TileSize, tileBytes = ts * ts * 4;
+            var jobs = new CompositeJob[coords.Count];
+            for (int i = 0; i < coords.Count; i++)
+            {
+                int x = coords[i].X * ts, y = coords[i].Y * ts, w = Math.Min(ts, document.Width - x), h = Math.Min(ts, document.Height - y);
+                jobs[i] = new CompositeJob(x, y, w, h, new byte[w * h * 4]);
+            }
+            Run(document, channel, plan, jobs, true, 1);
+            var tiles = new byte[coords.Count][];
+            for (int i = 0; i < jobs.Length; i++)
+            {
+                var job = jobs[i]; bool any = false;
+                for (int o = 3; o < job.Pixels.Length && !any; o += 4) any = job.Pixels[o] != 0 || job.Pixels[o - 1] != 0 || job.Pixels[o - 2] != 0 || job.Pixels[o - 3] != 0;
+                if (!any) continue;
+                if (job.Width == ts) { tiles[i] = job.Pixels.Length == tileBytes ? job.Pixels : Pad(job, ts, tileBytes); continue; }
+                tiles[i] = Pad(job, ts, tileBytes);
+            }
+            return tiles;
+        }
+        static byte[] Pad(CompositeJob job, int ts, int tileBytes)
+        {
+            var t = new byte[tileBytes];
+            for (int y = 0; y < job.Height; y++) Buffer.BlockCopy(job.Pixels, y * job.Width * 4, t, y * ts * 4, job.Width * 4);
+            return t;
+        }
+
         /// <summary>The mode an entry blends with: its mode in the planned channel, Normal for pass through (a pass-through group with clipped
         /// layers composites isolated).</summary>
         static LayerBlendMode ModeOf(StackEntry entry) { return entry.BlendMode == LayerBlendMode.PassThrough ? LayerBlendMode.Normal : entry.BlendMode; }

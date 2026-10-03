@@ -14,6 +14,8 @@ namespace Yozolab.YoluPainter.Core
         public bool Inverted { get; internal set; }
         public double Density { get; internal set; }
         internal RasterMask(SparseTileSurface surface) { Surface = surface; Enabled = true; Density = 1; }
+        /// <summary>The anchor point on this mask (<see cref="AnchorPlacement.Mask"/>), or null. It goes with the mask (removing the mask removes it).</summary>
+        public AnchorPoint Anchor { get; internal set; }
         /// <summary>Multiplier applied to the layer's source alpha for a stored hide amount (0..255).</summary>
         public double Factor(byte hide)
         {
@@ -63,6 +65,8 @@ namespace Yozolab.YoluPainter.Core
         public RasterMask Mask { get; internal set; }
         /// <summary>The editable path (on the model or on the canvas) the layer's pixels are drawn from (one channel), or null for ordinary pixels.</summary>
         public Paths.EditablePath Path { get; internal set; }
+        /// <summary>The anchor point on this layer (<see cref="AnchorPlacement.Layer"/>: the stack's result through this layer), or null.</summary>
+        public AnchorPoint Anchor { get; internal set; }
         public IReadOnlyList<PaintChannel> EnabledChannels
         {
             get { var values = new List<PaintChannel>(enabled); values.Sort(); return values.AsReadOnly(); }
@@ -224,7 +228,12 @@ namespace Yozolab.YoluPainter.Core
         public int Width { get; private set; }
         public int Height { get; private set; }
         public int TileSize { get; private set; }
-        public long Revision { get; private set; }
+        long revision;
+        /// <summary>Changes on every edit (history entries, undo, redo).</summary>
+        public long Revision { get { return revision; } private set { revision = value; editSerial++; } }
+        /// <summary>Counts every assignment of <see cref="Revision"/> and the loaders' direct changes; never goes back (the anchors look at
+        /// the document again when it changes, PaintDocument.Anchors.cs).</summary>
+        long editSerial;
         public IReadOnlyList<PaintLayer> Layers { get; private set; }
         public int UndoCount { get { return undo.Count; } }
         public int RedoCount { get { return redo.Count; } }
@@ -543,7 +552,7 @@ namespace Yozolab.YoluPainter.Core
             }
         }
         /// <summary>For loaders: sets a layer's group without history. Call ValidateStructure afterwards.</summary>
-        internal void SetParentForLoad(PaintLayer layer, Guid parentId) { layer.ParentId = parentId; }
+        internal void SetParentForLoad(PaintLayer layer, Guid parentId) { layer.ParentId = parentId; editSerial++; }
         public void SetLayerName(Guid id, string name)
         {
             EnsureNoStroke(); if (name == null) throw new ArgumentNullException(nameof(name)); var layer = GetLayer(id);
@@ -711,12 +720,18 @@ namespace Yozolab.YoluPainter.Core
             PaintLayer.ValidateChannel(channel);
             if (changed == null) throw new ArgumentNullException(nameof(changed));
             if (since < 0 || since > changeSerial) return false;
-            PollGeneratorInputs(); // 焼き直したマップなどで Generator の層が変われば、ここで「変わった」に入る
+            PollGeneratorInputs(); // 焼き直したマップなどで Generator の層が変われば、ここで「変わった」に入る（Anchor の見直しも）
+            if (HasAnchorReaders) { AddAnchorClosure(channel, since, changed); return true; } // Anchor を読む層: 読む元の変化も（PaintDocument.Anchors.cs）
+            AddRawChanges(channel, since, changed);
+            return true;
+        }
+        /// <summary>The tiles of the channel whose own pixels or layers changed after since, and the halos of filtered layers.</summary>
+        void AddRawChanges(PaintChannel channel, long since, ICollection<TileCoord> changed)
+        {
             Dictionary<TileCoord, long> serials;
             if (tileSerials.TryGetValue(channel, out serials))
                 foreach (var entry in serials) if (entry.Value > since) changed.Add(entry.Key);
             AddFilterInfluence(channel, since, changed);
-            return true;
         }
         internal void MarkTileChanged(PaintChannel channel, TileCoord coord)
         {
@@ -726,7 +741,7 @@ namespace Yozolab.YoluPainter.Core
         }
         /// <summary>A mask tile can change the composite of every channel the layer has.</summary>
         internal void MarkMaskTileChanged(PaintLayer layer, TileCoord coord)
-        { foreach (var channel in layer.CoveredChannels) MarkTileChanged(channel, coord); RecordMaskHalo(layer, coord); }
+        { foreach (var channel in layer.CoveredChannels) MarkTileChanged(channel, coord); RecordMaskHalo(layer, coord); RecordMaskAnchorTile(layer, coord); }
         /// <summary>Marks every tile the layer holds (in one channel, or all when channel is null) as changed.</summary>
         private void MarkLayerChanged(PaintLayer layer, PaintChannel? channel)
         {

@@ -181,6 +181,7 @@ namespace Yozolab.YoluPainter.Editor
         void OnGUI()
         {
             if(document==null) return;
+            NoteNewAnchorIssues(); // キーの Undo・ドラッグの並べ替えなど TryAction を通らない編集の後も（文書が変わったときだけ見る）
             var e=Event.current; var pointerAtStart=e.mousePosition; // 途中のクリップや 3D の描画の後でも同じ位置を使う
             // 診断がオフなら bool の判定だけ。オンのときはイベントが Use/座標変換される前に読み、最後に計器を重ねる。
             if(penInputEnabled)
@@ -240,6 +241,7 @@ namespace Yozolab.YoluPainter.Editor
         void TryAction(Action action)
         {
             try{action();}catch(Exception ex){if(stroke!=null)FinishStroke(false);message=ex is LayerOpException refused?RefusalText(refused):ex.Message;Debug.LogWarning("Texture Painter: "+ex.Message);}
+            NoteNewAnchorIssues(); // 並べ替え・削除などで Anchor の参照が使えなくなったら、知らせに理由を添える（Layers/TexturePaintWindow.Anchors.cs）
         }
     }
 }

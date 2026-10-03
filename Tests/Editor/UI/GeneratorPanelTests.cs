@@ -12,8 +12,8 @@ using Object = UnityEngine.Object;
 namespace Yozolab.YoluPainter.Tests
 {
     /// <summary>
-    /// プロパティの欄のフィルターの区画の Generator（batch-gl でオフスクリーンに描く）: 5 種類それぞれの設定と、読むマップの状態（使える・
-    /// 無い・別のベイクにピン留め）を、英語でも日本語でも、最小（980×640）と大きい（1600×950）ウィンドウで例外なく描け、UI の文字が欄に
+    /// プロパティの欄のフィルターの区画の Generator（batch-gl でオフスクリーンに描く）: 種類それぞれの設定と、読むマップの状態（使える・
+    /// 無い・別のベイクにピン留め）、Anchor の Generator は読む Anchor が無い・有るを、英語でも日本語でも、最小（980×640）と大きい（1600×950）ウィンドウで例外なく描け、UI の文字が欄に
     /// 収まり（… で詰めた文字が 0）、部品が描かれていること。描いても文書は変わらない（触っていない値を書き戻さない）。描いた PNG は
     /// テストプロジェクトの Logs/YoluPainterSnapshots/Generators に残す（見て確かめる用）。
     /// </summary>
@@ -46,12 +46,20 @@ namespace Yozolab.YoluPainter.Tests
                     w.SelectedFilter = gen.Id;
                     var states = new List<string> { "maps" };
                     if (type == GeneratorType.EdgeWear) states.Add("pinned-other-bake");
+                    if (type == GeneratorType.Anchor) states = new List<string> { "no-anchor", "anchor" }; // 読むのはメッシュマップではなく下の層
+                    AnchorPoint anchor = null;
                     foreach (var state in states)
                     {
                         if (state == "pinned-other-bake")
                             d.SetFilterSettings(fill.Id, gen.Id, gen.Settings.WithGenerator(gen.Settings.Generator.WithPin(MeshMapKind.Curvature, new string('a', 64))));
+                        if (state == "anchor")
+                        {
+                            anchor = d.AddAnchor(d.Layers[0].Id, AnchorPlacement.Layer, "Painted height details");
+                            d.SetGeneratorAnchor(fill.Id, gen.Id, anchor.Id, PaintChannel.Height, AnchorRead.Value);
+                        }
                         var status = d.GetGeneratorStatus(fill.Id, gen.Id);
-                        Assert.That(status.Active, Is.EqualTo(state == "maps" && (type == GeneratorType.EdgeWear || type == GeneratorType.PositionGradient || type == GeneratorType.Direction || type == GeneratorType.ShapeGradient)), type + " " + state + ": " + status.Reason);
+                        Assert.That(status.Active, Is.EqualTo(state == "maps" && (type == GeneratorType.EdgeWear || type == GeneratorType.PositionGradient || type == GeneratorType.Direction || type == GeneratorType.ShapeGradient)
+                            || state == "anchor"), type + " " + state + ": " + status.Reason);
                         foreach (var language in new[] { PainterLanguage.English, PainterLanguage.Japanese })
                         {
                             L.OverrideLanguage(language);
@@ -63,11 +71,15 @@ namespace Yozolab.YoluPainter.Tests
                                 Render(w, width, height, name);
                                 Assert.That(PaintGui.ShortenedTexts, Is.Zero, name + ": a UI text did not fit and was shortened with …");
                                 Assert.That((d.Revision, d.UndoCount), Is.EqualTo((revision, undo)), name + ": drawing changed the document");
-                                Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.pin").And.Member("generator.invert").And.Member("generator.blend").And.Member("generator.add.Mask"), name);
+                                Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.invert").And.Member("generator.blend").And.Member("generator.add.Mask"), name);
+                                // Anchor はマップを読まない（崩しを UV に置くとき）: ピンの代わりに、読む Anchor・チャンネル・読み方
+                                if (type == GeneratorType.Anchor) Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.anchor").And.Member("generator.anchorChannel").And.Member("generator.anchorRead").And.No.Member("generator.pin"), name);
+                                else Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.pin"), name);
+                                if (state == "anchor") Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.anchorGo"), name);
                                 // ID の色は 0 か 1 なので範囲の行を出さず、色の一覧・スポイト・許容の幅を出す
                                 if (type == GeneratorType.IdColor) Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.id.pick").And.Member("generator.id.tolerance").And.No.Member("generator.low"), name);
                                 else Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.low"), name);
-                                if (!status.Active) Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.bake"), name + ": the way to the bake window");
+                                if (!status.Active && type != GeneratorType.Anchor) Assert.That(w.LayerControlPanelRects.Keys, Has.Member("generator.bake"), name + ": the way to the bake window");
                                 drawn++;
                             }
                             // 区画だけを欄の既定の幅（300）で描いた絵（見て確かめる用。同じ部品・同じ文字）
@@ -81,8 +93,9 @@ namespace Yozolab.YoluPainter.Tests
                         }
                     }
                     d.RemoveFilter(fill.Id, gen.Id);
+                    if (anchor != null) d.RemoveAnchor(anchor.Id);
                 }
-                Assert.That(drawn, Is.EqualTo((Enum.GetValues(typeof(GeneratorType)).Length + 1) * 2 * 2));
+                Assert.That(drawn, Is.EqualTo((Enum.GetValues(typeof(GeneratorType)).Length + 2) * 2 * 2));
             }
             finally { Object.DestroyImmediate(w); }
         }

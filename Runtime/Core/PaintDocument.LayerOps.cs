@@ -136,13 +136,15 @@ namespace Yozolab.YoluPainter.Core
             if (topId == Guid.Empty) throw new ArgumentException("Layer ID must not be empty.", nameof(newId));
             foreach (var existing in layers) if (existing.Id == topId) throw new ArgumentException("Duplicate layer ID.", nameof(newId));
             var block = Block(layer); var ids = new Dictionary<Guid, Guid>(); var copies = new List<PaintLayer>(); long bytes = 0;
+            var anchors = new Dictionary<Guid, Guid>();
             foreach (var l in block) ids[l.Id] = l == layer ? topId : Guid.NewGuid();
             foreach (var l in block)
             {
-                var copy = CloneLayer(l, ids[l.Id], l == layer ? (name ?? l.Name) : l.Name);
+                var copy = CloneLayer(l, ids[l.Id], l == layer ? (name ?? l.Name) : l.Name, anchors);
                 copy.ParentId = ids.TryGetValue(l.ParentId, out var parent) ? parent : l.ParentId;
                 copies.Add(copy); bytes += copy.AllocatedBytes;
             }
+            RemapAnchorReferences(copies, anchors); // 写しの中の Anchor を読む段は、写しの Anchor を読む（外の Anchor はそのまま）
             var before = SnapshotStructure();
             layers.InsertRange(layers.IndexOf(layer) + 1, copies);
             var after = SnapshotStructure(); RestoreStructure(before);
@@ -152,8 +154,9 @@ namespace Yozolab.YoluPainter.Core
 
         /// <summary>A deep copy of a layer of this document under a new ID (not inserted; ParentId is the original's): attributes, channels
         /// (tiles shared copy-on-write), fill values, images and projection, adjustment, mask with its filters, content filters and the path, each effect and path
-        /// with a new ID.</summary>
-        PaintLayer CloneLayer(PaintLayer source, Guid id, string name)
+        /// with a new ID, and the anchors (layer and mask) with new IDs and the same names (old → new added to anchors when given; the
+        /// copies' references are pointed at them by <see cref="RemapAnchorReferences"/>).</summary>
+        PaintLayer CloneLayer(PaintLayer source, Guid id, string name, IDictionary<Guid, Guid> anchors = null)
         {
             var copy = new PaintLayer(this, name, id, source.Kind)
             { Visible = source.Visible, Opacity = source.Opacity, BlendMode = source.BlendMode, Clipping = source.Clipping, ParentId = source.ParentId, Adjustment = source.Adjustment, Locks = source.Locks };
@@ -168,20 +171,22 @@ namespace Yozolab.YoluPainter.Core
             foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel))) copy.Enable(c, source.IsChannelEnabled(c));
             foreach (var e in source.FilterList) copy.FilterList.Add(CloneEffect(e));
             if (source.FilterList.Count > 0) copy.FilterRevision = ++filterRevisionCounter;
-            if (source.Mask != null) copy.Mask = CloneMask(source.Mask, copy);
+            if (source.Mask != null) copy.Mask = CloneMask(source.Mask, copy, anchors);
+            if (source.Anchor != null) copy.Anchor = CloneAnchor(source.Anchor, anchors);
             if (source.Path is SurfacePath surfacePath) copy.Path = new SurfacePath(Guid.NewGuid(), surfacePath.Channel, surfacePath.ModelFingerprint, surfacePath.Brush, surfacePath.Points, surfacePath.Material);
             else if (source.Path is CanvasPath canvasPath) copy.Path = new CanvasPath(Guid.NewGuid(), canvasPath.Channel, canvasPath.Brush, canvasPath.Points, canvasPath.Material);
             return copy;
         }
         static FilterEffect CloneEffect(FilterEffect e) => new FilterEffect(Guid.NewGuid(), e.Settings, e.Enabled, e.Strength, e.Channels.Count == 0 ? null : e.Channels);
-        /// <summary>A copy of a mask (tiles shared copy-on-write, parameters, filters with new IDs) owned by another layer.</summary>
-        RasterMask CloneMask(RasterMask source, PaintLayer owner)
+        /// <summary>A copy of a mask (tiles shared copy-on-write, parameters, filters with new IDs, its anchor with a new ID) owned by another layer.</summary>
+        RasterMask CloneMask(RasterMask source, PaintLayer owner, IDictionary<Guid, Guid> anchors = null)
         {
             var mask = NewMask(owner);
             foreach (var coord in source.Surface.EnumerateTileCoordinates()) mask.Surface.Restore(coord, source.Surface.Capture(coord));
             mask.Enabled = source.Enabled; mask.Inverted = source.Inverted; mask.Density = source.Density;
             foreach (var e in source.FilterList) mask.FilterList.Add(CloneEffect(e));
             if (source.FilterList.Count > 0) mask.FilterRevision = ++filterRevisionCounter;
+            if (source.Anchor != null) mask.Anchor = CloneAnchor(source.Anchor, anchors);
             return mask;
         }
         /// <summary>An empty mask wired to this document like <see cref="AddLayerMask"/>'s (not attached to the owner yet).</summary>

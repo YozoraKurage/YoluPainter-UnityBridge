@@ -217,7 +217,7 @@ namespace Yozolab.YoluPainter.Core
         long BlockWorkingBytes(FilterEffect[] chain, int blockPixels)
         {
             int side = Math.Max(1, blockPixels / TileSize) * TileSize;
-            return FilterEngine.WorkingBytes(chain, chain.Length, Math.Min(side, Width), Math.Min(side, Height), Width, Height);
+            return FilterEngine.WorkingBytes(chain, chain.Length, Math.Min(side, Width), Math.Min(side, Height), Width, Height, TileSize);
         }
 
         // ───────────── editing ─────────────

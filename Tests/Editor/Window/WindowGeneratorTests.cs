@@ -114,7 +114,8 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.AddGenerator(FilterTarget.Content, GeneratorType.EdgeWear), Is.Null);
             Assert.That(window.StatusMessage, Does.Contain("unit vectors"));
             Assert.That(window.GeneratorChoices(fill.Id, FilterTarget.Content).All(c => c.refusal != null), Is.True, "every choice says why");
-            Assert.That(window.GeneratorChoices(fill.Id, FilterTarget.Mask).All(c => c.refusal == null), Is.True, "a mask takes every generator");
+            Assert.That(window.GeneratorChoices(fill.Id, FilterTarget.Mask).Where(c => c.type != GeneratorType.Anchor).All(c => c.refusal == null), Is.True, "a mask takes every generator");
+            Assert.That(window.GeneratorChoices(fill.Id, FilterTarget.Mask).Single(c => c.type == GeneratorType.Anchor).refusal, Does.Contain("no anchor below"), "the anchor generator needs an anchor below");
             Assert.That(d.UndoCount, Is.EqualTo(now));
             // 描いているあいだは変えない。Esc で何も残らない
             window.Channel = PaintChannel.Color; window.SelectedLayer = paint.Id; window.EditMask = false;

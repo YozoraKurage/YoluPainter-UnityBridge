@@ -219,6 +219,10 @@ namespace Yozolab.YoluPainter.Core
                 foreach (var coord in surface.EnumerateTileCoordinates()) target.Restore(coord, surface.Capture(coord));
                 result.Enable(c, lowerOn || upperOn);
             }
+            // Anchor: 結果までの合成は上の層までの合成と同じなので、上の層の Anchor を結果に移す（読む段はそのまま使える）。残したマスクの
+            // Anchor も同じもの。下の層の Anchor（上の層を含まない合成）は表せないので無くなり、読む段は理由を出して入力のまま通す
+            result.Anchor = upper.Anchor;
+            if (result.Mask != null) result.Mask.Anchor = lower.Mask.Anchor;
             var before = SnapshotStructure(); int at = layers.IndexOf(lower);
             result.ParentId = lower.ParentId;
             layers.Remove(upper); layers[at] = result;
@@ -281,6 +285,9 @@ namespace Yozolab.YoluPainter.Core
                 var target = result.GetChannel(c);
                 foreach (var coord in surface.EnumerateTileCoordinates()) target.Restore(coord, surface.Capture(coord));
             }
+            // Anchor: 結果までの合成はグループまでの合成と同じなので、グループの Anchor とマスクの Anchor を結果に移す。中の層の Anchor は無くなる
+            result.Anchor = group.Anchor;
+            if (result.Mask != null) result.Mask.Anchor = group.Mask.Anchor;
             var before = SnapshotStructure(); int start = layers.IndexOf(block[0]);
             result.ParentId = group.ParentId;
             layers.RemoveRange(start, block.Count); layers.Insert(start, result);

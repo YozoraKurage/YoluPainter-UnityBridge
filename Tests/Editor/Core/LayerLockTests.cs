@@ -357,8 +357,11 @@ namespace Yozolab.YoluPainter.Tests
             var d = NewDocument(); var l = d.AddLayer("L"); d.SetLayerLocks(l.Id, LayerLocks.Position);
             var bytes = DocumentBinary.Write(d); int at = AttributeByte(l);
             Assert.That(bytes[at], Is.EqualTo(2));
-            var unknownAttribute = (byte[])bytes.Clone(); unknownAttribute[at] = 2 | 16;
+            var unknownAttribute = (byte[])bytes.Clone(); unknownAttribute[at] = 2 | 32; // ビット 4 は Anchor
             Assert.That(() => DocumentBinary.Read(unknownAttribute), Throws.InstanceOf<InvalidDataException>().With.Message.Contains("Unknown layer attribute flags"));
+            // ビット 4（今の版で足した Anchor）は、1 つ前の版の正本では知らないビット
+            var noAnchors = (byte[])bytes.Clone(); noAnchors[at] = 2 | 16; BitConverter.GetBytes(DocumentBinary.CurrentVersion - 1).CopyTo(noAnchors, 8);
+            Assert.That(() => DocumentBinary.Read(noAnchors), Throws.InstanceOf<InvalidDataException>().With.Message.Contains("Unknown layer attribute flags"));
             // ビット 3（版 16 の塗りつぶしの画像と投影）は、版 15 までの正本では知らないビット
             foreach (int older in new[] { 15, 14 })
             {

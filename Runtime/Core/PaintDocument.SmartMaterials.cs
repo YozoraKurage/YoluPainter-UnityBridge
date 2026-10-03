@@ -32,18 +32,19 @@ namespace Yozolab.YoluPainter.Core
             if (members.Count == 0) throw new SmartRefusedException(SmartRefusal.NothingToSave, "Choose the layers to save as a smart material.");
             var fragment = NewFragment();
             var notes = new List<string>(); var repin = new List<Guid>(); var used = new List<Guid>();
-            var ids = new Dictionary<Guid, Guid>(); var clones = new List<PaintLayer>();
+            var ids = new Dictionary<Guid, Guid>(); var clones = new List<PaintLayer>(); var anchors = new Dictionary<Guid, Guid>();
             foreach (var m in members) foreach (var l in Block(m)) ids[l.Id] = Guid.NewGuid();
             foreach (var m in members)
                 foreach (var l in Block(m))
                 {
-                    var copy = fragment.CloneLayer(l, ids[l.Id], l.Name);
+                    var copy = fragment.CloneLayer(l, ids[l.Id], l.Name, anchors);
                     copy.ParentId = l == m ? Guid.Empty : ids[l.ParentId];
                     if (copy.Path is SurfacePath) { copy.Path = null; notes.Add("The path on the model of '" + l.Name + "' became plain pixels (a path on a model belongs to that model's triangles)."); }
                     StripPins(copy.FilterList, repin); if (copy.Mask != null) StripPins(copy.Mask.FilterList, repin);
                     foreach (var id in (references ?? ResourcesOf)(l)) if (!used.Contains(id)) used.Add(id);
                     clones.Add(copy);
                 }
+            fragment.RemapAnchorReferences(clones, anchors); // 選んだ層の中の Anchor を読む段は、断片の Anchor を読む
             fragment.layers.AddRange(clones);
             fragment.ValidateStructure(); fragment.ClearHistory();
             return new SmartMaterial(SmartKind.Material, name, fragment, repin, CollectImages(used, images, notes), notes);
@@ -58,7 +59,9 @@ namespace Yozolab.YoluPainter.Core
             if (layer.Mask == null) throw new SmartRefusedException(SmartRefusal.NoMask, "'" + layer.Name + "' has no mask to save as a smart mask.");
             var fragment = NewFragment();
             var holder = new PaintLayer(fragment, name, Guid.NewGuid(), LayerKind.Fill);
-            holder.Mask = fragment.CloneMask(layer.Mask, holder);
+            var anchors = new Dictionary<Guid, Guid>();
+            holder.Mask = fragment.CloneMask(layer.Mask, holder, anchors);
+            fragment.RemapAnchorReferences(new[] { holder }, anchors);
             var repin = new List<Guid>(); StripPins(holder.Mask.FilterList, repin);
             fragment.layers.Add(holder); fragment.ClearHistory();
             return new SmartMaterial(SmartKind.Mask, name, fragment, repin, null);
@@ -146,10 +149,10 @@ namespace Yozolab.YoluPainter.Core
             }
             var keep = placement.Channels == null ? null : new HashSet<PaintChannel>(placement.Channels);
             var switchedOff = new SortedSet<PaintChannel>(); var unpinned = new List<string>(); int pinned = 0;
-            var clones = new List<PaintLayer>();
+            var clones = new List<PaintLayer>(); var anchors = new Dictionary<Guid, Guid>();
             foreach (var l in fragment.Layers)
             {
-                var copy = CloneLayer(l, ids[l.Id], l.Name);
+                var copy = CloneLayer(l, ids[l.Id], l.Name, anchors);
                 copy.ParentId = l.ParentId != Guid.Empty ? ids[l.ParentId] : wrap ? group.Id : parentId;
                 if (keep != null)
                     foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel)))
@@ -160,6 +163,7 @@ namespace Yozolab.YoluPainter.Core
                 clones.Add(copy);
             }
             if (wrap) clones.Add(group); // グループの記録は中身の上
+            RemapAnchorReferences(clones, anchors); // スマートマテリアルの中の Anchor を読む段は、置いた Anchor を読む
             CheckFilters(clones, material.Name);
             long bytes = 0; foreach (var c in clones) bytes += c.AllocatedBytes;
             long room = sourceBudgetBytes - AllocatedBytes;
@@ -267,7 +271,7 @@ namespace Yozolab.YoluPainter.Core
                 foreach (var e in l.FilterList.Concat(l.Mask == null ? Enumerable.Empty<FilterEffect>() : l.Mask.FilterList))
                 {
                     if (!e.Settings.IsGenerator || !e.IsActive) continue;
-                    var status = GetGeneratorStatus(e.Settings.Generator);
+                    var status = StatusOfStage(e);
                     if (!status.Active && !reasons.Contains(status.Reason)) reasons.Add(status.Reason);
                 }
             return reasons.AsReadOnly();

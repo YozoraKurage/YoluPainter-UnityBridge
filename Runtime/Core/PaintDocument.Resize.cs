@@ -127,6 +127,7 @@ namespace Yozolab.YoluPainter.Core
                 }
                 else if (layer.Path is SurfacePath) { target.Path = layer.Path; surfacePaths.Add(layer.Id); }
                 CopyFilters(copy, layer, target, scale, size, notes);
+                CopyAnchors(copy, layer, target); // Anchor は同じ ID・名前のまま（読む段の参照もそのまま通じる）
             }
             copy.ValidateStructure();
             // ロックは最後に写す（写しの層へのフィルターなどの追加をロックが断らないように）。大きさの変更はロックに関わらず全部の層に効く（Photoshop の画像解像度と同じ）

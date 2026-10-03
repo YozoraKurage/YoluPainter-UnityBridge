@@ -113,6 +113,7 @@ namespace Yozolab.YoluPainter.Editor
             DrawChannelBlends(rows, active);
             if (active.Kind == LayerKind.Fill) DrawFill(rows, active);
             if (active.Kind == LayerKind.Adjustment) DrawAdjustment(rows, active);
+            DrawAnchorRow(rows, active, AnchorPlacement.Layer); // Anchor（TexturePaintWindow.Anchors.cs）
         }
 
         /// <summary>チャンネルごとの合成モードと不透明度の一覧（自分の値を持つチャンネルだけ。× で層の値に戻す）。今のチャンネルの値は
@@ -252,6 +253,7 @@ namespace Yozolab.YoluPainter.Editor
             if (inverted != mask.Inverted) TryAction(() => document.SetLayerMaskInverted(active.Id, inverted));
             if (PaintGui.IconButton(Spot("mask.delete", new Rect(row.xMax - 24, row.y, 24, row.height)), "delete", L.Tr("Delete Layer Mask"), false, GUI.enabled, 16))
                 TryAction(() => { document.RemoveLayerMask(active.Id); editMask = false; });
+            if (active.Mask != null) DrawAnchorRow(rows, active, AnchorPlacement.Mask);
             NoteRow(rows, L.Tr("One mask for all channels."));
         }
     }

@@ -1,0 +1,125 @@
+# Japanese translation for YoluPainter: anchor points (putting one on a layer or its mask, renaming and removing it, the anchor
+# generator's rows: which anchor, channel and way to read, going to its layer, and the notes when a reference stops working).
+# 一般的な語（None・Value・Coverage）は msgctxt "anchor" で場面を分ける。
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# ── 置く・外す（レイヤーのメニュー・プロパティ） ──
+
+msgid "Add Anchor"
+msgstr "アンカーを置く"
+
+msgid "Add Anchor to Mask"
+msgstr "マスクにアンカーを置く"
+
+msgid "Remove Anchor"
+msgstr "アンカーを外す"
+
+msgid "Remove Mask Anchor"
+msgstr "マスクのアンカーを外す"
+
+msgid "Anchor"
+msgstr "アンカー"
+
+msgid "{0} (mask)"
+msgstr "{0}（マスク）"
+
+msgid "mask"
+msgstr "マスク"
+
+msgid "Name the stack's result up to this layer, so generators on the layers above can read it (a lower layer's Height can drive an upper layer's wear, for example)"
+msgstr "この層までの合成の結果に名前を付けて、上の層の Generator が読めるようにします（下の層の Height で上の層の摩耗を決める、など）"
+
+msgid "Name this mask, so generators on the layers above can read how much this layer shows"
+msgstr "このマスクに名前を付けて、上の層の Generator が「この層がどれだけ見えるか」を読めるようにします"
+
+msgid "Put the anchor \"{0}\" on the layer: generators on the layers above can read the stack up to here (Generator ▸ Anchor)."
+msgstr "層にアンカー「{0}」を置きました。上の層の Generator（Generator ▸ アンカー）が、ここまでの合成を読めます。"
+
+msgid "Put the anchor \"{0}\" on the mask: generators on the layers above can read how much this layer shows (Generator ▸ Anchor)."
+msgstr "マスクにアンカー「{0}」を置きました。上の層の Generator（Generator ▸ アンカー）が、この層の見える度合いを読めます。"
+
+msgid "Removed the anchor \"{0}\" (undo brings it back)."
+msgstr "アンカー「{0}」を外しました（取り消すと戻ります）。"
+
+msgid "The anchor's name: generators above list it by this name"
+msgstr "アンカーの名前（上の層の Generator はこの名前で選びます）"
+
+msgid "read by {0}"
+msgstr "{0} 段が読む"
+
+msgid "Read by:"
+msgstr "読んでいる段:"
+
+msgid "No generator reads this anchor yet: add Generator ▸ Anchor on a layer above."
+msgstr "このアンカーを読む Generator はまだありません。上の層に Generator ▸ アンカー を足してください。"
+
+msgid "Remove the anchor (generators that read it pass their input through until you undo)"
+msgstr "アンカーを外す（読んでいる Generator は、取り消すまで入力をそのまま通します）"
+
+msgid "Anchor \"{0}\""
+msgstr "アンカー「{0}」"
+
+msgid "On the layer \"{0}\""
+msgstr "層「{0}」にあります"
+
+# ── 読む側（Generator の欄） ──
+
+msgctxt "generator"
+msgid "Anchor"
+msgstr "アンカー"
+
+msgid "no anchor below this layer (Layer ▸ Add Anchor on a lower layer)"
+msgstr "この層より下にアンカーがありません（下の層で レイヤー ▸ アンカーを置く）"
+
+msgid "It has no effect until it reads an anchor below this layer: {0}"
+msgstr "この層より下のアンカーを読むまで効きません: {0}"
+
+msgid "The anchor point this generator reads: one on a layer below this one (the stack up to there) or on a lower layer's mask"
+msgstr "この Generator が読むアンカー: この層より下の層のもの（そこまでの合成）か、下の層のマスクのもの"
+
+msgctxt "anchor"
+msgid "None"
+msgstr "なし"
+
+msgid "(missing anchor)"
+msgstr "（無いアンカー）"
+
+msgid "A mask anchor has one value: how much its layer shows"
+msgstr "マスクのアンカーの値は 1 つ（その層の見える度合い）です"
+
+msgid "Which channel of the stack to read (Height: the painted relief)"
+msgstr "合成のどのチャンネルを読むか（Height: 描いた凹凸）"
+
+msgid "Read"
+msgstr "読み方"
+
+msgctxt "anchor"
+msgid "Value"
+msgstr "値"
+
+msgctxt "anchor"
+msgid "Coverage"
+msgstr "覆い"
+
+msgid "Value: the channel's value where something is painted (0 where nothing is; colours by brightness). Coverage: how opaque the stack is there."
+msgstr "値: 描いてある所のチャンネルの値（何も無い所は 0。色は明るさ）。覆い: その所の合成の不透明さ。"
+
+msgid "Select the Anchor's Layer"
+msgstr "アンカーの層を選ぶ"
+
+msgid "Select the layer the anchor is on"
+msgstr "アンカーを置いた層を選びます"
+
+msgid "no anchor"
+msgstr "アンカー無し"
+
+msgid "not usable"
+msgstr "使えない"
+
+# ── 使えなくなった参照 ──
+
+msgid "{0} anchor generator(s) now pass their input through: {1}"
+msgstr "アンカーを読む Generator {0} 段が、入力をそのまま通すようになりました: {1}"

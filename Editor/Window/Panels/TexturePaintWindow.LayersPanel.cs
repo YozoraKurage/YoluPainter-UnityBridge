@@ -125,12 +125,14 @@ namespace Yozolab.YoluPainter.Editor
                 PaintGui.Icon(thumb, layer.IsGroup ? "folder" : layer.Kind == LayerKind.Fill ? "format_color_fill" : "tune", PaintTheme.TextDim, 15);
             }
             if (layer.Path != null) PaintGui.Icon(new Rect(thumb.xMax - 11, thumb.yMax - 11, 12, 12), "conversion_path", Color.white, 11); // パスで描かれた層の印
+            if (layer.Anchor != null) AnchorBadge(new Rect(thumb.x - 2, thumb.y - 2, 12, 12), layer.Anchor); // Anchor の印
             x = thumb.xMax + 6;
             if (layer.Mask != null)
             {
                 var maskBox = new Rect(x, r.y + 4, r.height - 8, r.height - 8);
                 bool editing = selected && editMask;
                 DrawThumbnail(maskBox, MaskThumbnail(layer));
+                if (layer.Mask.Anchor != null) AnchorBadge(new Rect(maskBox.x - 2, maskBox.y - 2, 12, 12), layer.Mask.Anchor);
                 if (editing) PaintGui.Outline(new Rect(maskBox.x - 2, maskBox.y - 2, maskBox.width + 4, maskBox.height + 4), PaintTheme.Accent, 2, 2);
                 PaintGui.Tooltip(maskBox, L.Tr("Layer mask (click to paint on it)"));
                 if (e.type == EventType.MouseDown && e.button == 0 && maskBox.Contains(e.mousePosition) && GUI.enabled) { selectedLayer = layer.Id; editMask = !editing; e.Use(); }

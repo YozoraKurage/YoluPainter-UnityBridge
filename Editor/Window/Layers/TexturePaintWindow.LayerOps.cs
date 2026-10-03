@@ -70,6 +70,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             catch (LayerOpException ex) { message = RefusalText(ex); }
             catch (Exception ex) { message = L.Tr(ex.Message); Debug.LogWarning("Texture Painter: " + ex.Message); }
+            NoteNewAnchorIssues(); // 並べ替え・結合・複製で Anchor の参照が使えなくなったら知らせる
             Repaint();
         }
 

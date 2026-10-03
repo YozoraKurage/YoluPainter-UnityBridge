@@ -51,7 +51,15 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// channel, otherwise 1..6), followed by the channel (int) and straight RGBA8 value for each entry. Unknown or repeated channels
     /// and counts above 6 are refused. Version 19 may end the document, after all layers, with an optional manual ID colour block
     /// ("YLID", the count, the binding fingerprint, then sorted part numbers and RGB); an empty assignment is not written, and an unknown
-    /// tag, count, fingerprint, RGB or a repeated part is refused. Older archives read as no manual colours. Older archives still load.</summary>
+    /// tag, count, fingerprint, RGB or a repeated part is refused. Older archives read as no manual colours.
+    /// Version 20 adds anchor points (<see cref="AnchorPoint"/>) and the anchor generator (type 7): bit 4 of the attribute byte
+    /// says that the layer record ends (after the canvas path block) with a byte of anchor flags (bit 0 an anchor on the layer, bit 1 one on its
+    /// mask; never 0) and, per anchor in that order, its 16-byte ID (not empty, unique in the document) and its name (1–128 characters); the
+    /// anchor generator's block is followed by the anchor ID it reads (16 bytes, empty when none is chosen), the channel (int, not Normal) and
+    /// how it reads it (int <see cref="AnchorRead"/>). A reference to an anchor that is gone or not below its layer loads as it was saved (it
+    /// passes its input through and says why); one to the anchor on its own layer, an unknown flag, channel or read, a mask anchor without a mask,
+    /// two anchors with one ID, bit 4 or type 7 in an older archive are refused. A document without anchors is laid out as version 19, only the
+    /// version number differs. Older archives still load.</summary>
     public static class DocumentBinary
     {
         /// <summary>The version that added per-channel blend modes and opacities (attribute bit 2).</summary>
@@ -66,7 +74,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
         internal const int MaterialPathVersion = 18;
         /// <summary>The version that added the optional manual ID colour block after the layers.</summary>
         internal const int ManualIdColorsVersion = 19;
-        const int Version = ManualIdColorsVersion;
+        /// <summary>The version that added anchor points (attribute bit 4 and the block at the end of the layer) and the anchor generator (type 7).</summary>
+        internal const int AnchorVersion = 20;
+        const int Version = AnchorVersion;
         /// <summary>The version <see cref="Write"/> produces.</summary>
         public const int CurrentVersion = Version;
         /// <summary>The version that added the shape gradient (generator type 5 and its volume after the generator block).</summary>
@@ -76,8 +86,10 @@ namespace Yozolab.YoluPainter.Core.Persistence
         /// <summary>The most layers a native document holds (the reader refuses more).</summary>
         public const int MaxLayers = 2048;
         /// <summary>Version 12 layer attribute byte: bit 0 clipping, bit 1 an int of layer locks follows; version 14 bit 2 the per-channel
-        /// blend settings follow; version 16 bit 3 the fill images and projection follow the fill values.</summary>
-        const int AttributeClipping = 1, AttributeLocks = 2, AttributeChannelBlends = 4, AttributeFillImages = 8;
+        /// blend settings follow; version 16 bit 3 the fill images and projection follow the fill values; version 20 bit 4 the anchors end the layer.</summary>
+        const int AttributeClipping = 1, AttributeLocks = 2, AttributeChannelBlends = 4, AttributeFillImages = 8, AttributeAnchors = 16;
+        /// <summary>Version 20 anchor flags: an anchor on the layer, one on its mask.</summary>
+        const int AnchorOnLayer = 1, AnchorOnMask = 2;
         /// <summary>Parts of a per-channel blend entry.</summary>
         const int BlendPartMode = 1, BlendPartOpacity = 2;
         static readonly byte[] Magic = Encoding.ASCII.GetBytes("DOTPAINT");
@@ -102,7 +114,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     writer.Write(layer.Visible); writer.Write(layer.Opacity); writer.Write((int)layer.BlendMode);
                     // 版 12: 属性の印（ビット 0 クリッピング、ビット 1 ロックが続く）。ロックの無い層は版 11 と同じ 0 か 1。版 14: ビット 2 チャンネルごとの合成。版 16: ビット 3 塗りつぶしの画像と投影が続く
                     bool fillImages = layer.Kind == LayerKind.Fill && (layer.FillImages.Count > 0 || !layer.Projection.Equals(FillProjection.Default));
-                    writer.Write((byte)((layer.Clipping ? AttributeClipping : 0) | (layer.Locks != LayerLocks.None ? AttributeLocks : 0) | (layer.HasChannelBlends ? AttributeChannelBlends : 0) | (fillImages ? AttributeFillImages : 0)));
+                    var maskAnchor = layer.Mask?.Anchor; bool anchors = layer.Anchor != null || maskAnchor != null;
+                    writer.Write((byte)((layer.Clipping ? AttributeClipping : 0) | (layer.Locks != LayerLocks.None ? AttributeLocks : 0) | (layer.HasChannelBlends ? AttributeChannelBlends : 0) | (fillImages ? AttributeFillImages : 0)
+                        | (anchors ? AttributeAnchors : 0)));
                     if (layer.Locks != LayerLocks.None) writer.Write((int)layer.Locks);
                     if (layer.HasChannelBlends) WriteChannelBlends(writer, layer); // 版 14
                     writer.Write((int)layer.Kind);
@@ -152,6 +166,12 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     var canvasPath = layer.Path as Paths.CanvasPath;
                     writer.Write(canvasPath != null);
                     if (canvasPath != null) WriteCanvasPath(writer, canvasPath);
+                    if (anchors)
+                    {
+                        // 版 20: 層の終わりに Anchor（層・マスクの順）
+                        writer.Write((byte)((layer.Anchor != null ? AnchorOnLayer : 0) | (maskAnchor != null ? AnchorOnMask : 0)));
+                        foreach (var a in new[] { layer.Anchor, maskAnchor }) if (a != null) { writer.Write(a.Id.ToByteArray()); WriteString(writer, a.Name); }
+                    }
                 }
                 if (document.IdColors.Colors.Count > 0) WriteIdColors(writer, document.IdColors);
                 writer.Flush(); return stream.ToArray();
@@ -205,13 +225,14 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         bool visible = reader.ReadBoolean(); double opacity = reader.ReadDouble(); int blend = reader.ReadInt32();
                         if (double.IsNaN(opacity) || double.IsInfinity(opacity) || opacity < 0 || opacity > 1 || !Enum.IsDefined(typeof(LayerBlendMode), blend))
                             throw new InvalidDataException("Invalid layer attributes.");
-                        bool clipping = false, fillImages = false; var locks = LayerLocks.None; System.Collections.Generic.List<(PaintChannel, ChannelBlend)> channelBlends = null;
+                        bool clipping = false, fillImages = false, anchors = false; var locks = LayerLocks.None; System.Collections.Generic.List<(PaintChannel, ChannelBlend)> channelBlends = null;
                         if (version >= 12)
                         {
                             int attributes = reader.ReadByte();
-                            int known = AttributeClipping | AttributeLocks | (version >= ChannelBlendsVersion ? AttributeChannelBlends : 0) | (version >= FillImageVersion ? AttributeFillImages : 0);
+                            int known = AttributeClipping | AttributeLocks | (version >= ChannelBlendsVersion ? AttributeChannelBlends : 0) | (version >= FillImageVersion ? AttributeFillImages : 0)
+                                | (version >= AnchorVersion ? AttributeAnchors : 0);
                             if ((attributes & ~known) != 0) throw new InvalidDataException("Unknown layer attribute flags " + attributes + "; a newer reader is required (source retained unchanged).");
-                            clipping = (attributes & AttributeClipping) != 0; fillImages = (attributes & AttributeFillImages) != 0;
+                            clipping = (attributes & AttributeClipping) != 0; fillImages = (attributes & AttributeFillImages) != 0; anchors = (attributes & AttributeAnchors) != 0;
                             if ((attributes & AttributeLocks) != 0)
                             {
                                 int value = reader.ReadInt32();
@@ -329,17 +350,35 @@ namespace Yozolab.YoluPainter.Core.Persistence
                             if (layer.Kind != LayerKind.Raster || !PathChannelsPresent(layer, path)) throw new InvalidDataException("A canvas path needs a paint layer with its channel enabled.");
                             layer.Path = path;
                         }
+                        if (anchors) ReadAnchors(reader, doc, layer);
                         if (locks != LayerLocks.None) lockedLayers.Add((layer, locks));
                     }
                     if (version >= ManualIdColorsVersion && stream.Position != stream.Length) doc.SetIdColors(ReadIdColors(reader));
                     if (stream.Position != stream.Length) throw new InvalidDataException("Trailing native data requires a newer reader.");
                     try { doc.ValidateStructure(); }
                     catch (InvalidOperationException ex) { throw new InvalidDataException("Invalid layer groups: " + ex.Message, ex); }
+                    try { doc.CheckAnchorReferencesForLoad(); }
+                    catch (InvalidOperationException ex) { throw new InvalidDataException("Invalid anchor reference: " + ex.Message, ex); }
                     // ロックは全部を読んでから付ける（読み手自身の設定をロックが断らないように）
                     foreach (var (layer, locks) in lockedLayers) doc.SetLocksForLoad(layer, locks);
                     doc.ClearHistory(); return doc;
                 }
                 catch (EndOfStreamException ex) { throw new InvalidDataException("Native archive is truncated.", ex); }
+            }
+        }
+        /// <summary>The version 20 anchors of a layer (after its canvas path). Unknown flags, empty IDs, bad names and a mask anchor without a
+        /// mask are refused.</summary>
+        static void ReadAnchors(BinaryReader reader, PaintDocument doc, PaintLayer layer)
+        {
+            int flags = reader.ReadByte();
+            if (flags == 0 || (flags & ~(AnchorOnLayer | AnchorOnMask)) != 0) throw new InvalidDataException("Unknown anchor flags " + flags + " on layer '" + layer.Name + "'; a newer reader is required (source retained unchanged).");
+            foreach (var placement in new[] { AnchorPlacement.Layer, AnchorPlacement.Mask })
+            {
+                if ((flags & (placement == AnchorPlacement.Layer ? AnchorOnLayer : AnchorOnMask)) == 0) continue;
+                var id = new Guid(ReadExact(reader, 16)); string name = ReadString(reader);
+                if (id == Guid.Empty) throw new InvalidDataException("An anchor on layer '" + layer.Name + "' has no ID.");
+                try { doc.SetAnchorForLoad(layer, new AnchorPoint(id, name, placement)); }
+                catch (ArgumentException ex) { throw new InvalidDataException("Invalid anchor on layer '" + layer.Name + "': " + ex.Message, ex); }
             }
         }
         static void WriteIdColors(BinaryWriter writer, MeshMaps.IdColorAssignments colors)
@@ -485,6 +524,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 writer.Write(g.IdTolerance); writer.Write(g.IdColors.Count);
                 foreach (int c in g.IdColors) writer.Write(c);
             }
+            if (g.Type == GeneratorType.Anchor) { writer.Write(g.AnchorId.ToByteArray()); writer.Write((int)g.AnchorChannel); writer.Write((int)g.AnchorRead); } // 版 20
         }
         const int MaxGeneratorPins = 8;
         /// <summary>The generator block (version 11; the shape gradient's volume from version 13; the ID colours from
@@ -492,7 +532,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
         static GeneratorSettings ReadGenerator(BinaryReader reader, int version)
         {
             int type = reader.ReadInt32(), algorithm = reader.ReadInt32();
-            if (!Enum.IsDefined(typeof(GeneratorType), type) || type == (int)GeneratorType.ShapeGradient && version < ShapeGradientVersion || type == (int)GeneratorType.IdColor && version < IdColorVersion)
+            if (!Enum.IsDefined(typeof(GeneratorType), type) || type == (int)GeneratorType.ShapeGradient && version < ShapeGradientVersion || type == (int)GeneratorType.IdColor && version < IdColorVersion
+                || type == (int)GeneratorType.Anchor && version < AnchorVersion)
                 throw new InvalidDataException("Unknown generator type " + type + "; a newer reader is required (source retained unchanged).");
             if (algorithm != GeneratorSettings.AlgorithmVersionOf((GeneratorType)type)) throw new InvalidDataException("Generator algorithm version " + algorithm + " of " + (GeneratorType)type + " is not supported by this reader; source retained unchanged.");
             double low = reader.ReadDouble(), high = reader.ReadDouble(), softness = reader.ReadDouble(); bool invert = reader.ReadBoolean();
@@ -524,10 +565,17 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 colors = new int[ReadCount(reader, GeneratorSettings.MaxIdColors, "ID colour")];
                 for (int k = 0; k < colors.Length; k++) colors[k] = reader.ReadInt32();
             }
+            Guid anchorId = Guid.Empty; int anchorChannel = (int)PaintChannel.Color, anchorRead = (int)AnchorRead.Value;
+            if (type == (int)GeneratorType.Anchor)
+            {
+                anchorId = new Guid(ReadExact(reader, 16)); anchorChannel = reader.ReadInt32(); anchorRead = reader.ReadInt32();
+                if (!Enum.IsDefined(typeof(PaintChannel), anchorChannel)) throw new InvalidDataException("Unknown channel " + anchorChannel + " in an anchor generator; a newer reader is required (source retained unchanged).");
+                if (!Enum.IsDefined(typeof(AnchorRead), anchorRead)) throw new InvalidDataException("Unknown anchor read " + anchorRead + "; a newer reader is required (source retained unchanged).");
+            }
             try
             {
                 return GeneratorSettings.FromValues((GeneratorType)type, low, high, softness, invert, noiseAmount, noiseScale, noiseSeed, (GeneratorNoiseSpace)noiseSpace,
-                    (GeneratorBlend)blend, balance, axis, dx, dy, dz, bent, pins, volume, colors, tolerance);
+                    (GeneratorBlend)blend, balance, axis, dx, dy, dz, bent, pins, volume, colors, tolerance, anchorId, (PaintChannel)anchorChannel, (AnchorRead)anchorRead);
             }
             catch (ArgumentException ex) { throw new InvalidDataException("Invalid generator parameters: " + ex.Message, ex); }
         }
