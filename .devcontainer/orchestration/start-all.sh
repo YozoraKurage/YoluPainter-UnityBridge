@@ -4,6 +4,9 @@
 # runners.sh setup で作る）は裏で 1 台ずつ起動する（数分。ログは ~/unity-runners/start-all.log）。どれかに失敗しても起動は止めない。
 set -u
 bash /workspace/.devcontainer/agent-board-start.sh
+if [[ -e /dev/dxg && -x /workspace/.devcontainer/unity/gpu-memory-daemon.sh ]]; then
+  /workspace/.devcontainer/unity/gpu-memory-daemon.sh start || echo 'GPU メモリの記録を起動できなかった' >&2
+fi
 mkdir -p "$HOME/unity-runners"
 nohup bash -c '
   set -u; u=/workspace/.devcontainer/unity

@@ -37,6 +37,8 @@ if [[ "${1:-}" == --inner ]]; then
   cd "mesa-${MESA_VERSION}"
   # D3D12_BUFFER_CACHE_MB でキャッシュだけを制限する。既定の寿命・上限は上流のまま。
   patch -p1 < "$PATCH_DIR/d3d12-buffer-cache.patch"
+  # デバイスの消失時に HRESULT と DRED を残す。/opt への反映はコンテナの作り直しから。
+  patch -p1 < "$PATCH_DIR/d3d12-device-diagnostics.patch"
   # 24.2 では swrast が softpipe + llvmpipe を意味し、llvmpipe は LLVM を要求する。LLVM は
   # 入れない（llvmpipe はシステムの Mesa が持っている）ので softpipe を明示する。
   # libGLX_mesa は libgallium を直接リンクするので、DRI ドライバ（*_dri.so）は作られない。
@@ -56,7 +58,7 @@ if [[ "${1:-}" == --inner ]]; then
   find "$PREFIX/lib" -name '*.a' -delete
   test -f "$PREFIX/lib/libGLX_mesa.so.0"
   echo "$MESA_VERSION" > "$PREFIX/VERSION"
-  echo d3d12-buffer-cache > "$PREFIX/PATCHES"
+  printf '%s\n' d3d12-buffer-cache d3d12-device-diagnostics > "$PREFIX/PATCHES"
   exit 0
 fi
 

@@ -88,7 +88,11 @@ start_one() {
   mode="$(runner_conf_mode "$n")"; [[ -n "$mode" ]] || die "runners.conf に台 $n が無い"
   [[ -f "$(runner_project "$n")/Packages/manifest.json" ]] || die "台 $n はまだ無い。先に runners.sh setup $n"
   local flag=""; [[ "$mode" == batch-gl ]] && flag=--batch-gl; [[ "$mode" == batch ]] && flag=--batch
-  YOLUPAINTER_RUNNER="$n" "$SCRIPT_DIR/test-daemon.sh" start $flag
+  YOLUPAINTER_RUNNER="$n" "$SCRIPT_DIR/test-daemon.sh" start $flag || return $?
+  # 全台で 1 つの記録常駐。二重起動は flock が防ぐ。Unity の生死には触れない。
+  if [[ -e /dev/dxg && -x "$SCRIPT_DIR/gpu-memory-daemon.sh" ]]; then
+    "$SCRIPT_DIR/gpu-memory-daemon.sh" start || warn "GPU メモリの記録を起動できなかった"
+  fi
 }
 
 stop_one() { YOLUPAINTER_RUNNER="$1" "$SCRIPT_DIR/test-daemon.sh" stop; }
