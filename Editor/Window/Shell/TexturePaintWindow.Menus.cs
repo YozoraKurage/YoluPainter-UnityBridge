@@ -95,6 +95,8 @@ namespace Yozolab.YoluPainter.Editor
             Item(m, "Ungroup", UngroupSelected, active != null && active.IsGroup, keys: "Ctrl+Shift+G");
             m.AddSeparator("");
             LayerOpMenuItems(m);
+            Item(m, "Save Brush to Assets", () => SaveShelfBrush(), stroke == null && !toolDragging);
+            Item(m, "Save Material to Assets", () => SaveShelfMaterial(), stroke == null && !toolDragging);
             Item(m, "Save as Smart Material", () => SaveSmartMaterial(), active != null && stroke == null && !toolDragging);
             Item(m, "Save Mask as Smart Mask", () => SaveSmartMask(), active?.Mask != null && stroke == null && !toolDragging);
             m.AddSeparator("");

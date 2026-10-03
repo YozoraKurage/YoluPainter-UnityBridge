@@ -65,7 +65,7 @@ namespace Yozolab.YoluPainter.Editor
             float listTop = LayerListOffsetFor(r.width);
             var list = PanelSpot("list", new Rect(r.x, r.y + listTop, r.width, r.height - listTop - LayerToolbarHeight));
             PaintGui.Fill(list, PaintTheme.ControlBg);
-            float content = document.Layers.Count * LayerRowHeight;
+            float content = document.Layers.Count * LayerRowHeight + 4;
             var view = new Rect(0, 0, list.width - (content > list.height ? 10 : 0), content);
             layerScroll.y = Mathf.Clamp(layerScroll.y, 0, Mathf.Max(0, content - list.height));
             bool overList = list.Contains(Event.current.mousePosition);

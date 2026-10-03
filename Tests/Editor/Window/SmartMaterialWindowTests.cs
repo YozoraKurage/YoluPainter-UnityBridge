@@ -126,7 +126,7 @@ namespace Yozolab.YoluPainter.Tests
             dialogs.File = Temp(".ylp"); window.SaveProject(true);
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
             var saved = YlpFormat.Open(YlpStore.Load(dialogs.File).Files);
-            Assert.That(saved.Info.Format, Is.EqualTo(5));
+            Assert.That(saved.Info.Format, Is.EqualTo(YlpFormat.Current));
             Assert.That(saved.Resources.Select(e => e.Kind), Is.EqualTo(new[] { ResourceKind.SmartMaterial, ResourceKind.SmartMask, ResourceKind.SmartMaterial }));
             var other = NewWindow(); other.OpenProjectAt(dialogs.File);
             Assert.That(other.ImageResources.Smart.Select(s => (s.Id, s.Name, s.Hash, s.Kind, s.Origin.Kind)), Is.EqualTo(window.ImageResources.Smart.Select(s => (s.Id, s.Name, s.Hash, s.Kind, s.Origin.Kind))));

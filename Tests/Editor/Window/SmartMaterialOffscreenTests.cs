@@ -152,6 +152,8 @@ namespace Yozolab.YoluPainter.Tests
                         w.AssetPanelKind = TexturePaintWindow.AssetKind.SmartMaterials; w.AssetPanelSource = TexturePaintWindow.AssetSource.Project;
                         w.SelectedAsset = "p:" + w.ImageResources.Smart[0].Id.ToString("D");
                     }),
+                    ("project-brushes", () => { w.SaveShelfBrush("Example brush"); w.AssetPanelKind = TexturePaintWindow.AssetKind.Brushes; w.AssetPanelSource = TexturePaintWindow.AssetSource.Project; w.SelectedAsset = "p:" + w.ImageResources.Brushes[0].Id; }),
+                    ("project-materials", () => { var held = w.SaveShelfMaterial("Example material"); w.AssetPanelKind = TexturePaintWindow.AssetKind.Materials; w.SelectedAsset = "p:" + held.Id; }),
                     ("project-all-kinds", () => { w.ImportBuiltInImage("uv-checker"); w.AssetPanelKind = TexturePaintWindow.AssetKind.All; }),
                     ("library", () =>
                     {
@@ -164,6 +166,7 @@ namespace Yozolab.YoluPainter.Tests
                 foreach (var (state, setup) in states)
                 {
                     setup();
+                    var resourcesBefore=(w.ImageResources.Count,w.ImageResources.Revision);int undoBefore=d.UndoCount;
                     for (int i = 0; i < 4; i++) Draw(w, PanelWidths[0], 520, "warm-up"); // サムネイルは 1 回の描画で 3 つずつ作る
                     foreach (var language in new[] { PainterLanguage.English, PainterLanguage.Japanese })
                     {
@@ -177,17 +180,20 @@ namespace Yozolab.YoluPainter.Tests
                         }
                         Draw(w, NarrowestPanel, 360, "panel-" + state + "-" + lang + "-narrowest");
                     }
+                    Assert.That((w.ImageResources.Count,w.ImageResources.Revision),Is.EqualTo(resourcesBefore),state+": drawing changes no resources");
+                    Assert.That(d.UndoCount,Is.EqualTo(undoBefore),state+": drawing adds no history");
                 }
                 // パネルを開いた窓全体
                 w.AssetPanelSearch = ""; w.AssetPanelSource = TexturePaintWindow.AssetSource.BuiltIn; w.AssetPanelKind = TexturePaintWindow.AssetKind.SmartMaterials;
                 var layout = w.DockLayoutForTests; foreach (var id in new[] { "properties", "material" }) layout.GroupOf(id).collapsed = true;
                 layout.SetActive("assets");
+                var windowResourcesBefore=(w.ImageResources.Count,w.ImageResources.Revision);
                 foreach (var language in new[] { PainterLanguage.English, PainterLanguage.Japanese })
                 {
                     L.OverrideLanguage(language);
                     Object.DestroyImmediate(Render(w, "window-smart-" + language));
                 }
-                Assert.That(w.ImageResources.Smart.Count, Is.EqualTo(3), "drawing changes nothing");
+                Assert.That((w.ImageResources.Count,w.ImageResources.Revision),Is.EqualTo(windowResourcesBefore),"drawing changes nothing");
             }
             finally
             {

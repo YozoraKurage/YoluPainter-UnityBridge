@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using Yozolab.YoluPainter.Core.Shelf;
 
 namespace Yozolab.YoluPainter.Core.Persistence
@@ -21,6 +22,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
         public YlpWriterInfo SavedBy { get; internal set; }
         /// <summary>The thumbnail PNG (derived; null when the file has none).</summary>
         public byte[] Thumbnail { get; internal set; }
+        public bool SphereThumbnail { get; internal set; }
     }
 
     /// <summary>
@@ -81,25 +83,27 @@ namespace Yozolab.YoluPainter.Core.Persistence
         // ───────── 書く ─────────
 
         /// <summary>The file of a smart material (thumbnail optional).</summary>
-        public static byte[] Write(SmartMaterial material, YlpWriterInfo savedBy, byte[] thumbnailPng = null)
+        public static byte[] Write(SmartMaterial material, YlpWriterInfo savedBy, byte[] thumbnailPng = null, CancellationToken cancellationToken = default, bool sphereThumbnail = false)
         {
             if (material == null) throw new ArgumentNullException(nameof(material));
             if (savedBy == null) throw new ArgumentNullException(nameof(savedBy));
+            cancellationToken.ThrowIfCancellationRequested();
             var files = new Dictionary<string, byte[]>(StringComparer.Ordinal)
             {
-                { InfoName, WriteInfo(material, savedBy) },
+                { InfoName, WriteInfo(material, savedBy, sphereThumbnail && thumbnailPng != null) },
                 { LayersName, material.FragmentBytes() },
             };
             if (thumbnailPng != null) files.Add(ThumbnailName, thumbnailPng);
             if (material.Images.Count > 0)
             {
                 files.Add(ResourceIndex.EntryName, ResourceIndex.Write(material.Images.Select(i => new YlpResourceEntry(i.Id, ResourceKind.Image, i.Name, i.Content.Hash, i.Content.Width, i.Content.Height, i.ColorSpace, ResourceOrigin.None))));
-                foreach (var image in material.Images) files[ResourceIndex.ContentEntry(image.Content.Hash)] = image.Content.EncodePng();
+                foreach (var image in material.Images) { cancellationToken.ThrowIfCancellationRequested(); files[ResourceIndex.ContentEntry(image.Content.Hash)] = image.Content.EncodePng(); }
             }
+            cancellationToken.ThrowIfCancellationRequested();
             return WriteArchive(files);
         }
 
-        static byte[] WriteInfo(SmartMaterial m, YlpWriterInfo w)
+        static byte[] WriteInfo(SmartMaterial m, YlpWriterInfo w, bool sphereThumbnail)
         {
             var s = new StringBuilder("{\n  \"format\": ").Append(Format.ToString(CultureInfo.InvariantCulture))
                 .Append(",\n  \"kind\": \"").Append(KindName(m.Kind)).Append('"')
@@ -109,7 +113,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 .Append(",\n  \"channels\": [").Append(string.Join(", ", m.Channels.Select(c => "\"" + c + "\""))).Append(']')
                 .Append(",\n  \"repin\": [").Append(string.Join(", ", m.Repin.Select(g => "\"" + g.ToString("D") + "\""))).Append(']')
                 .Append(",\n  \"savedBy\": { \"app\": ").Append(YlpFormat.Quote(w.App)).Append(", \"version\": ").Append(YlpFormat.Quote(w.Version)).Append(", \"unity\": ").Append(YlpFormat.Quote(w.Unity)).Append(" }")
-                .Append("\n}\n");
+                .Append(sphereThumbnail ? ",\n  \"thumbnailShape\": \"sphere\"" : "").Append("\n}\n");
             return Encoding.UTF8.GetBytes(s.ToString());
         }
 
@@ -199,7 +203,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     repin.Add(id);
                 }
             }
-            return new SmartFileInfo { Format = (int)format, Kind = kind, Name = name, Width = width, Height = height, LayerCount = layers, Channels = channels.AsReadOnly(), SavedBy = savedBy };
+            return new SmartFileInfo { Format = (int)format, Kind = kind, Name = name, Width = width, Height = height, LayerCount = layers, Channels = channels.AsReadOnly(), SavedBy = savedBy, SphereThumbnail = root.TryGetValue("thumbnailShape", out var shape) && shape as string == "sphere" };
         }
 
         static YlpWriterInfo Writer(object value)

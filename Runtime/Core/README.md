@@ -88,7 +88,7 @@ ID colours (`IdColorSelection.cs`): `IdMapColors` reads an ID map's texel as 8-b
 
 `DependencyGraph` stores typed declarations: connections enforce same texture set, input type, optional semantic channel, one source per input, acyclicity, and lower-layer/earlier-effect order. Invalid node/layer-order changes are atomic. Referenced deletion is rejected. Invalidation increments source and downstream revisions, including hidden consumers. The anchors use it to check their references (below); it is not a material-graph editor, and the filter stacks are still evaluated in their stored order rather than scheduled through it.
 
-ID 色の指定（`MeshMaps.IdColorAssignments`、`PaintDocument.IdColors`）は低ポリのメッシュの塊ごとの 8 bit RGB を保持する文書メタデータ。`SetIdColors` は 1 回の Undo で、レイヤーや画素を変えず、`Resampled` も保持する。`IdPartIndex` が UV・スロット・レンダラーと塊の対応の指紋を作り、違うモデルへ適用するベイクを断る。4096 件を上限とし、値や件数の不正は何も変えずに断る。正本は版 21 の任意の末尾 `YLID` ブロック、指定が無いときは以前と同じ並び。色の重複は許し、同じ色でまとめて選べる。
+ID 色の指定（`MeshMaps.IdColorAssignments`、`PaintDocument.IdColors`）は低ポリのメッシュの塊ごとの 8 bit RGB を保持する文書メタデータ。`SetIdColors` は 1 回の Undo で、レイヤーや画素を変えず、`Resampled` も保持する。`IdPartIndex` が UV・スロット・レンダラーと塊の対応の指紋を作り、違うモデルへ適用するベイクを断る。4096 件を上限とし、値や件数の不正は何も変えずに断る。正本は版 19 の任意の末尾 `YLID` ブロック、指定が無いときは以前と同じ並び。色の重複は許し、同じ色でまとめて選べる。
 
 `MeshIdSource.MaterialAsset` は `MeshBakeInput` の三角形ごとのマテリアル識別を使う（コアは Unity のアセットを読まない）。低ポリ全体と高ポリの同じ識別を同じパレットにまとめるので、対象スロットが違っても同じアセットの色が変わらない。識別が無い面はスロットごとに分ける。識別の変化は ID マップの設定の鍵に入り、ほかのマップのジオメトリの指紋は変えない。手動色は低ポリの塊の色を生成元や高ポリより優先させ、ベイクの作業予算に塊の索引を含める。
 
@@ -106,3 +106,11 @@ An anchor point (`AnchorPoint`, `PaintDocument.Anchors.cs`; Substance Painter's 
 Not yet: an anchor in the middle of a layer's effect stack (Substance places one between effects; here it is always the layer's whole result or the mask's), reading an anchor in a fill layer's channel or as a filter's input other than the generator, neighbourhood generators on an anchor (curvature or slope from painted Height), anchors across texture sets (refused by design, as in Substance), and the per-layer (rather than per-channel) raw change journal that would stop changes above an anchor from re-evaluating its tiles.
 
 Halo-aware dependency scheduling beyond this, graphs in native persistence and graph evaluation remain later work.
+
+## アセットの種類と保存予算
+
+`ResourceKind` は画像・ブラシ・マテリアル・スマートマテリアル・スマートマスクを区別する。`BrushResourceFile` はブラシ設定と筆先の携帯形式で、
+`ProjectResources.Brushes` がプロジェクトの写しを保持する。`SmartResource.ResourceKind` がマテリアルとスマートマテリアルを区別し、配置は同じ層の複製経路を使う。
+`ArchiveBudgetBytes` はメモリ予算とは別の保存予算。異なる PNG・ブラシファイル・スマートファイルの長さを数え、エディタは現在の文書などの予約量を引いた残りを設定する。
+`DocumentBinary.Measure` は正本の書き手を、配列を保持しないストリームへ通してサイズを数える。旧ファイルの読み込みは予算を一時的に外し、内容を捨てない。
+`ResourceOrigin.LocalFileId` が Unity のサブアセットを指し、置き場は検証した相対パスを使う。`SmartPreview` のプレビューは球の見本を使う。

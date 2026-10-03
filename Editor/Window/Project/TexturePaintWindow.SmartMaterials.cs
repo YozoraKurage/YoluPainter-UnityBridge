@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using Yozolab.YoluPainter.Core;
@@ -54,13 +56,54 @@ namespace Yozolab.YoluPainter.Editor
         /// プロジェクトの予算を先に確かめ、断るなら置き場にも書かない。置き場に書けなければ、プロジェクトのものだけにして知らせる。</summary>
         SmartResource KeepSmart(SmartMaterial material)
         {
-            byte[] bytes;
-            // 画素の多いものは書くのに数秒かかる（2048² の画素の層 4 枚で約 5 秒）ので、その間は進み具合を出す
-            Dialogs.Progress("YoluPainter", L.Tr("Saving the smart material {0}…", material.Name), .5f);
-            try { bytes = SmartMaterialFile.Write(material, YlpContent.Writer, RgbaPng.Encode(SmartPreview.Render(material, SmartThumbnailSize), SmartThumbnailSize, SmartThumbnailSize)); }
-            finally { Dialogs.ClearProgress(); }
-            string refusal = ImageResources.FindSmartByHash(GenerationStore.Hash(bytes)) == null ? ImageResources.AddSmartRefusal(bytes.LongLength + material.PixelBytes, out _) : null;
+            if (smartSaveTask != null) { message = L.Tr("A smart material is already being saved."); return null; }
+            var writer = YlpContent.Writer;
+            if (material.PixelBytes + material.Images.Sum(i => i.Content.ByteSize) >= 8L * 1024 * 1024)
+            {
+                savingSmart = material; smartSaveCancellation = new CancellationTokenSource();
+                var token = smartSaveCancellation.Token;
+                smartSaveTask = Task.Run(() => EncodeSmart(material, writer, token), token);
+                message = L.Tr("Saving the smart material {0}…", material.Name); Repaint(); return null;
+            }
+            return KeepSmartBytes(material, EncodeSmart(material, writer, CancellationToken.None));
+        }
+
+        static byte[] EncodeSmart(SmartMaterial material, YlpWriterInfo writer, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            var preview = SmartPreview.Render(material, SmartThumbnailSize);
+            token.ThrowIfCancellationRequested();
+            return SmartMaterialFile.Write(material, writer, RgbaPng.Encode(preview, SmartThumbnailSize, SmartThumbnailSize), token, sphereThumbnail: true);
+        }
+
+        Task<byte[]> smartSaveTask; SmartMaterial savingSmart; CancellationTokenSource smartSaveCancellation;
+        internal bool SmartSavePending => smartSaveTask != null;
+        internal void CancelSmartSave()
+        {
+            if (smartSaveTask == null) return;
+            smartSaveCancellation.Cancel();
+            // 完了しても取消済みの結果をプロジェクトや置き場へ反映しない。
+            var abandoned = smartSaveTask; var cancellation = smartSaveCancellation;
+            abandoned.ContinueWith(t => { var ignored = t.Exception; cancellation.Dispose(); }, TaskScheduler.Default);
+            smartSaveTask = null; savingSmart = null; smartSaveCancellation = null;
+            message = L.Tr("Saving the smart material was cancelled."); Repaint();
+        }
+        internal void TickSmartSave()
+        {
+            if (smartSaveTask == null || !smartSaveTask.IsCompleted || stroke != null) return;
+            var task = smartSaveTask; var material = savingSmart;
+            smartSaveTask = null; savingSmart = null; smartSaveCancellation.Dispose(); smartSaveCancellation = null;
+            if (task.IsCanceled) return;
+            if (task.IsFaulted) { message = task.Exception.GetBaseException().Message; Repaint(); return; }
+            TryAction(() => KeepSmartBytes(material, task.Result));
+        }
+
+        SmartResource KeepSmartBytes(SmartMaterial material, byte[] bytes)
+        {
+            RefreshArchiveRoom();
+            string refusal = ImageResources.FindSmartByHash(GenerationStore.Hash(bytes)) == null ? ImageResources.AddSmartRefusal(SmartResource.EstimateBytes(bytes.LongLength, material), out _) : null;
             if (refusal != null) { message = L.Tr("{0} was not saved: {1}", material.Name, refusal); return null; }
+            ImageResources.CheckSmartArchiveRoom(bytes);
             string file = null, libraryNote = null;
             try { file = ResourceLibraryFolder.AddSmart(PainterSettings.LibraryFolder, material.Name, bytes, out _); }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { libraryNote = L.Tr("It could not be put into My Library ({0}).", ex.Message); }
@@ -93,10 +136,14 @@ namespace Yozolab.YoluPainter.Editor
             {
                 case AssetSource.Project: if (Guid.TryParse(id, out var guid) && ImageResources.TryGetSmart(guid, out var held)) { kind = held.Kind; return true; } return false;
                 case AssetSource.Library:
+                    if (id.EndsWith(ResourceLibraryFolder.MaterialExtension, StringComparison.OrdinalIgnoreCase)) { kind = SmartKind.Material; return true; }
                     if (!id.EndsWith(SmartMaterialFile.Extension, StringComparison.OrdinalIgnoreCase)) return false;
                     var item = SmartLibraryItems().FirstOrDefault(i => string.Equals(i.FileName, id, StringComparison.OrdinalIgnoreCase));
                     if (item?.Info != null) kind = item.Info.Kind;
                     return true;
+                case AssetSource.Unity:
+                    var info = AssetDatabase.LoadAssetAtPath<SmartMaterialImportInfo>(AssetDatabase.GUIDToAssetPath(id));
+                    if (info == null) return false; kind = info.mask ? SmartKind.Mask : SmartKind.Material; return true;
                 case AssetSource.BuiltIn: if (BuiltInSmartMaterials.TryGet(id, out var entry)) { kind = entry.Kind; return true; } return false;
                 default: return false;
             }
@@ -110,19 +157,21 @@ namespace Yozolab.YoluPainter.Editor
             {
                 case AssetSource.Project:
                     var held = ImageResources.GetSmart(Guid.Parse(id)); name = held.Name; return held.Material;
+                case AssetSource.Unity:
+                    var unity = SmartMaterialFile.Read(ResourceLibraryFolder.ReadFile(FileUtil.GetPhysicalPath(AssetDatabase.GUIDToAssetPath(id)))); name = unity.Name; return unity;
                 case AssetSource.Library:
                 {
-                    string path = Path.Combine(PainterSettings.LibraryFolder, id);
+                    string path = ResourceLibraryFolder.Resolve(PainterSettings.LibraryFolder, id);
                     if (!File.Exists(path)) throw new ResourceRefusedException(ResourceRefusal.Unknown, L.Tr("{0} is no longer in your library.", id));
                     var info = new FileInfo(path);
                     if (!librarySmart.TryGetValue(path, out var cached) || cached.length != info.Length || cached.time != info.LastWriteTimeUtc)
                     {
                         SmartMaterial read;
-                        try { read = SmartMaterialFile.Read(File.ReadAllBytes(path)); }
+                        try { read = SmartMaterialFile.Read(ResourceLibraryFolder.ReadFile(path)); }
                         catch (InvalidDataException ex) { throw new InvalidDataException(L.Tr("{0} cannot be used: {1}", id, ex.Message), ex); }
                         librarySmart[path] = cached = (info.Length, info.LastWriteTimeUtc, read);
                     }
-                    name = cached.material.Name; return cached.material;
+                    name = Path.GetFileNameWithoutExtension(id); return cached.material;
                 }
                 case AssetSource.BuiltIn:
                 {
@@ -157,6 +206,7 @@ namespace Yozolab.YoluPainter.Editor
             var before = new HashSet<Guid>(ImageResources.Images.Select(i => i.Id));
             try
             {
+                RefreshArchiveRoom();
                 var ids = SmartImages.AddTo(ImageResources, material);
                 var used = YlpContent.UsedChannels(document);
                 where.Channels = used.Count > 0 ? used : null; where.GroupName = name; where.ResourceIds = ids;
@@ -308,20 +358,29 @@ namespace Yozolab.YoluPainter.Editor
             if (source == AssetSource.Project) return ImageResources.GetSmart(Guid.Parse(id));
             var material = SmartAsset(key, out string name);
             byte[] bytes; ResourceOrigin origin;
-            if (source == AssetSource.Library)
+            if (source == AssetSource.Library || source == AssetSource.Unity)
             {
-                bytes = File.ReadAllBytes(Path.Combine(PainterSettings.LibraryFolder, id));
+                if (source == AssetSource.Unity)
+                {
+                    string path = AssetDatabase.GUIDToAssetPath(id); bytes = ResourceLibraryFolder.ReadFile(FileUtil.GetPhysicalPath(path));
+                    origin = ResourceOrigin.UnityAsset(id, path, AssetDatabase.GetAssetDependencyHash(path).ToString(), false);
+                }
+                else
+                {
+                bytes = ResourceLibraryFolder.ReadFile(ResourceLibraryFolder.Resolve(PainterSettings.LibraryFolder, id));
                 origin = ResourceOrigin.Library(id, GenerationStore.Hash(bytes), bytes.LongLength);
+                }
             }
             else
             {
                 BuiltInSmartMaterials.TryGet(id, out var entry);
                 var existing = ImageResources.Smart.FirstOrDefault(s => s.Origin.Kind == ResourceOriginKind.BuiltIn && s.Origin.BuiltInKey == id && s.Origin.BuiltInVersion == entry.Version);
                 if (existing != null) { message = L.Tr("{0} is already in this project as \"{1}\"; nothing was added.", name, existing.Name); return existing; }
-                bytes = SmartMaterialFile.Write(material, YlpContent.Writer, RgbaPng.Encode(SmartPreview.Render(material, SmartThumbnailSize), SmartThumbnailSize, SmartThumbnailSize));
+                bytes = SmartMaterialFile.Write(material, YlpContent.Writer, RgbaPng.Encode(SmartPreview.Render(material, SmartThumbnailSize), SmartThumbnailSize, SmartThumbnailSize), sphereThumbnail: true);
                 origin = ResourceOrigin.BuiltIn(id, entry.Version);
             }
-            var held = ImageResources.AddSmart(name, bytes, material, origin, out bool added);
+            RefreshArchiveRoom();
+            var held = ImageResources.AddSmart(name, bytes, material, origin, out bool added, resourceKind: source == AssetSource.Library && id.EndsWith(ResourceLibraryFolder.MaterialExtension, StringComparison.OrdinalIgnoreCase) ? ResourceKind.Material : (ResourceKind?)null);
             message = added ? L.Tr("Imported {0} into this project.", name) : L.Tr("{0} is already in this project as \"{1}\"; nothing was added.", name, held.Name);
             Repaint();
             return held;
@@ -331,7 +390,7 @@ namespace Yozolab.YoluPainter.Editor
         internal string AddSmartToLibrary(Guid id)
         {
             var held = ImageResources.GetSmart(id);
-            string file = ResourceLibraryFolder.AddSmart(PainterSettings.LibraryFolder, held.Name, held.FileBytes(), out bool existed);
+            string file = ResourceLibraryFolder.AddSmart(PainterSettings.LibraryFolder, held.Name, held.FileBytes(), out bool existed, held.ResourceKind == ResourceKind.Material ? ResourceLibraryFolder.MaterialExtension : SmartMaterialFile.Extension);
             smartListing = null;
             message = existed ? L.Tr("{0} is already in your library as {1}.", held.Name, file) : L.Tr("Put {0} into your library as {1} ({2}).", held.Name, file, PainterSettings.LibraryFolder);
             Repaint();
@@ -369,7 +428,7 @@ namespace Yozolab.YoluPainter.Editor
             foreach (var file in ResourceLibraryFolder.ListSmart(folder))
             {
                 var item = new SmartLibraryItem { FileName = file.FileName, Path = file.Path, Length = file.Length, Modified = file.Modified };
-                try { item.Info = SmartMaterialFile.ReadInfo(File.ReadAllBytes(file.Path)); }
+                try { item.Info = SmartMaterialFile.ReadInfo(ResourceLibraryFolder.ReadFile(file.Path)); }
                 catch (Exception ex) when (ex is InvalidDataException || ex is IOException || ex is UnauthorizedAccessException) { item.Problem = ex.Message; }
                 items.Add(item);
             }
@@ -377,7 +436,9 @@ namespace Yozolab.YoluPainter.Editor
             return items;
         }
 
-        /// <summary>サムネイル: ファイルの thumbnail.png（読めなければ見本のタイルに置いて描く）。</summary>
+        /// <summary>球のサムネイル。古いファイルのタイルの見本は使わず、保持する元データから球を作る。</summary>
+        static (byte[] rgba, int width, int height) SmartThumbnail(SmartFileInfo info, Func<SmartMaterial> material)
+            => SmartThumbnail(info?.SphereThumbnail == true ? info.Thumbnail : null, material);
         static (byte[] rgba, int width, int height) SmartThumbnail(byte[] png, Func<SmartMaterial> material)
         {
             if (png != null)

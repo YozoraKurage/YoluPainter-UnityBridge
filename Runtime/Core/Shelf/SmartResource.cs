@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 
 namespace Yozolab.YoluPainter.Core.Shelf
 {
@@ -11,6 +12,7 @@ namespace Yozolab.YoluPainter.Core.Shelf
     public sealed class SmartResource
     {
         public Guid Id { get; }
+        public ResourceKind ResourceKind { get; }
         public string Name { get; internal set; }
         public SmartMaterial Material { get; }
         public SmartKind Kind => Material.Kind;
@@ -19,16 +21,20 @@ namespace Yozolab.YoluPainter.Core.Shelf
         public string Hash { get; }
         public long Length => bytes.LongLength;
         /// <summary>Memory the budget counts: the file and the fragment's layer pixels.</summary>
-        public long ByteSize => bytes.LongLength + Material.PixelBytes;
+        public long ByteSize => EstimateBytes(bytes.LongLength, Material);
+        public static long EstimateBytes(long fileLength, SmartMaterial material) => fileLength + material.PixelBytes + material.Images.GroupBy(i => i.Content.Hash).Sum(g => g.First().Content.ByteSize);
         readonly byte[] bytes;
 
-        internal SmartResource(Guid id, string name, byte[] fileBytes, SmartMaterial material, ResourceOrigin origin)
+        internal SmartResource(Guid id, string name, byte[] fileBytes, SmartMaterial material, ResourceOrigin origin, ResourceKind? resourceKind = null)
         {
             if (id == Guid.Empty) throw new ArgumentException("A resource needs an ID.", nameof(id));
             ImageResource.CheckName(name);
             if (fileBytes == null) throw new ArgumentNullException(nameof(fileBytes));
             bytes = (byte[])fileBytes.Clone(); // 保存用の写しで共有するため、呼び出し元の配列から切り離す。
             Material = material ?? throw new ArgumentNullException(nameof(material));
+            ResourceKind = resourceKind ?? (material.Kind == SmartKind.Mask ? global::Yozolab.YoluPainter.Core.Shelf.ResourceKind.SmartMask : global::Yozolab.YoluPainter.Core.Shelf.ResourceKind.SmartMaterial);
+            if (ResourceKind != global::Yozolab.YoluPainter.Core.Shelf.ResourceKind.SmartMaterial && ResourceKind != global::Yozolab.YoluPainter.Core.Shelf.ResourceKind.SmartMask && ResourceKind != global::Yozolab.YoluPainter.Core.Shelf.ResourceKind.Material || (ResourceKind == global::Yozolab.YoluPainter.Core.Shelf.ResourceKind.SmartMask) != (material.Kind == SmartKind.Mask))
+                throw new ArgumentException("Wrong material resource kind.");
             Id = id; Name = name; Origin = origin ?? ResourceOrigin.None;
             Hash = Persistence.GenerationStore.Hash(bytes);
         }

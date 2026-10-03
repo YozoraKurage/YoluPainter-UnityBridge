@@ -7,7 +7,7 @@ namespace Yozolab.YoluPainter.Core.Shelf
 {
     /// <summary>
     /// The preview of a smart material or smart mask (the Assets panel's thumbnail and the .ylsmart's thumbnail.png): it is placed on a
-    /// small swatch — a tile with rounded, bevelled edges and a cross-shaped groove, seen from the front — whose mesh maps are made by
+    /// small swatch — a sphere with a shallow cross-shaped groove, seen from the front — whose mesh maps are made by
     /// formulas (normal, position, curvature from the normals' divergence, ambient occlusion deeper in the groove, constant thickness),
     /// so generators show what they do (edge wear on the bevels, dirt in the groove, a direction on the faces that look up). The colour
     /// (or, without one, the first channel it uses) is lit from the upper left with a simple diffuse and specular term from roughness
@@ -87,7 +87,7 @@ namespace Yozolab.YoluPainter.Core.Shelf
                 return map != null;
             }
 
-            const double Margin = .06, Corner = .14, Bevel = .09, Groove = .035;
+            const double Margin = .06, Bevel = .09, Groove = .035;
 
             internal static Swatch Make(int n)
             {
@@ -97,22 +97,23 @@ namespace Yozolab.YoluPainter.Core.Shelf
                     for (int x = 0; x < m; x++)
                     {
                         double u = (x - 1 + .5) / n, v = (y - 1 + .5) / n;
-                        double d = -RoundedBox(u - .5, v - .5, .5 - Margin, Corner);
+                        double radius = .5 - Margin, r2 = (u - .5) * (u - .5) + (v - .5) * (v - .5);
+                        double d = radius - Math.Sqrt(r2);
                         int k = y * m + x;
                         if (d <= 0) { inside[k] = false; height[k] = 0; continue; }
                         inside[k] = true;
-                        double t = Math.Min(1, d / Bevel), h = Bevel * Math.Sqrt(Math.Max(0, 1 - (1 - t) * (1 - t)));
+                        double h = Math.Sqrt(Math.Max(0, radius * radius - r2));
                         double g = Math.Min(Math.Abs(u - .5), Math.Abs(v - .5));
                         if (d > Bevel && g < Groove) { double gd = Math.Sqrt(Groove * Groove - g * g); h -= gd; depth[k] = gd / Groove; }
                         height[k] = h;
                     }
                 var nx = new double[m * m]; var ny = new double[m * m]; var nz = new double[m * m];
-                double step = 2.0 / n;
+                double step = 1.0 / n;
                 for (int y = 1; y <= n; y++)
                     for (int x = 1; x <= n; x++)
                     {
                         int k = y * m + x;
-                        double du = (height[k + 1] - height[k - 1]) / step, dv = (height[k + m] - height[k - m]) / step;
+                        double du = (height[k + 1] - height[k - 1]) / (2 * step), dv = (height[k + m] - height[k - m]) / (2 * step);
                         double l = Math.Sqrt(du * du + dv * dv + 1);
                         nx[k] = -du / l; ny[k] = -dv / l; nz[k] = 1 / l;
                     }
@@ -126,14 +127,14 @@ namespace Yozolab.YoluPainter.Core.Shelf
                         s.Inside[i] = true; s.Nx[i] = nx[k]; s.Ny[i] = ny[k]; s.Nz[i] = nz[k];
                         coverage[i] = (byte)MeshTexelCoverage.Covered;
                         normal[i * 3] = U16(nx[k] * .5 + .5); normal[i * 3 + 1] = U16(ny[k] * .5 + .5); normal[i * 3 + 2] = U16(nz[k] * .5 + .5);
-                        position[i * 3] = U16((x + .5) / n); position[i * 3 + 1] = U16((y + .5) / n); position[i * 3 + 2] = U16((height[k] + Groove) / (Bevel + Groove));
+                        position[i * 3] = U16((x + .5) / n); position[i * 3 + 1] = U16((y + .5) / n); position[i * 3 + 2] = U16((height[k] + Groove) / (.5 - Margin + Groove));
                         // 法線の xy の発散（凸で正）を曲率の 0〜1 に。端の 1 画素は内側の値を使う
                         double div = (Get(nx, inside, k + 1, k) - Get(nx, inside, k - 1, k)) / step + (Get(ny, inside, k + m, k) - Get(ny, inside, k - m, k)) / step;
                         curvature[i] = U16(.5 + Math.Max(-.5, Math.Min(.5, div * .035)));
                         ao[i] = U16(1 - .75 * depth[k]);
                         thickness[i] = U16(.5);
                     }
-                double[] min = { 0, 0, -Groove }, max = { 1, 1, Bevel };
+                double[] min = { 0, 0, -Groove }, max = { 1, 1, .5 - Margin };
                 s.Put(MeshMapKind.WorldNormal, n, normal, coverage, min, max);
                 s.Put(MeshMapKind.BentNormal, n, (ushort[])normal.Clone(), coverage, min, max);
                 s.Put(MeshMapKind.Position, n, position, coverage, min, max);
@@ -144,13 +145,6 @@ namespace Yozolab.YoluPainter.Core.Shelf
             }
             static double Get(double[] values, bool[] inside, int k, int fallback) => inside[k] ? values[k] : values[fallback];
             static ushort U16(double v) => (ushort)Math.Round(Math.Max(0, Math.Min(1, v)) * 65535);
-            /// <summary>Signed distance to a rounded box centred at 0 (negative inside).</summary>
-            static double RoundedBox(double px, double py, double half, double radius)
-            {
-                double qx = Math.Abs(px) - (half - radius), qy = Math.Abs(py) - (half - radius);
-                double ox = Math.Max(qx, 0), oy = Math.Max(qy, 0);
-                return Math.Sqrt(ox * ox + oy * oy) + Math.Min(Math.Max(qx, qy), 0) - radius;
-            }
             void Put(MeshMapKind kind, int n, ushort[] data, byte[] coverage, double[] min, double[] max)
             {
                 var provenance = new MeshMapProvenance(kind, MeshBaker.EngineVersion, "preview-swatch", "preview-swatch", 0, n, n, 0, 0, 1, "preview-swatch", MeshBaker.Space, MeshBaker.Pose, MeshBaker.Source, min, max);

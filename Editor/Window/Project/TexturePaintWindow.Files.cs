@@ -160,7 +160,7 @@ namespace Yozolab.YoluPainter.Editor
                 if(files.TryGetValue(YlpContent.BrushName,out var preset))
                 {
                     // 状態のエントリ: 読めなければ今のブラシのまま開いて知らせる（正本は読めているので開くのを止めない）
-                    try{brush=ReadBrushState(System.Text.Encoding.UTF8.GetString(preset));var missing=MissingTipNote();if(missing!=null)notes.Add(missing);}
+                    try{brush=ReadBrushState(System.Text.Encoding.UTF8.GetString(preset));}
                     catch(Exception ex) when(ex is InvalidDataException||ex is ArgumentException){notes.Add("The saved brush settings could not be read ("+ex.Message+"); the brush keeps its current settings.");}
                 }
                 if(files.TryGetValue(YlpContent.ViewName,out var view))
@@ -182,6 +182,7 @@ namespace Yozolab.YoluPainter.Editor
                     set.SavedRevision=set.Document.Revision;
                 }
                 var resourceNote=AdoptResources(loadedResources); if(resourceNote!=null)notes.Add(resourceNote);
+                var missingBrush=MissingTipNote(); if(missingBrush!=null)notes.Add(missingBrush);
                 var missingImages=MissingFillImageNote(); if(missingImages!=null)notes.Add(missingImages); // 無い画像を読む層は値のまま（参照は残す）
                 ResetSetsBaseline(true);
                 var sourceNote=AskAboutChangedResources(); if(sourceNote!=null)notes.Add(sourceNote); // 出どころが変わっていれば尋ねる（更新すると未保存になる）

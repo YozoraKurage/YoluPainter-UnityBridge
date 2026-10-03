@@ -126,7 +126,7 @@ namespace Yozolab.YoluPainter.Editor
         bool DroppedImageSource(out string key, out Texture2D texture)
         {
             key = DragAndDrop.GetGenericData(ResourceDragKey) as string; texture = null;
-            if (key != null) return TryParseAssetKey(key, out _, out _);
+            if (key != null) return IsImageAsset(key);
             texture = DragAndDrop.objectReferences.OfType<Texture2D>().FirstOrDefault(t => !string.IsNullOrEmpty(AssetDatabase.GetAssetPath(t)));
             return texture != null;
         }

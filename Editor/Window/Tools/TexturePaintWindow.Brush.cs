@@ -45,7 +45,7 @@ namespace Yozolab.YoluPainter.Editor
             return b;
         }
         internal BrushSettings GetBrush() { var s = NewBrushSettings(); BrushTips.Apply(s, brush.tipId);
-            ApplyBrushDynamics(s);
+            ApplyBrushDynamics(s); ApplyShelfBrushImages(s);
             return s; }
         BrushSettings NewBrushSettings() => new BrushSettings { Radius=brush.radius, Hardness=brush.hardness, Spacing=brush.spacing, Opacity=brush.opacity, Flow=brush.flow,
             Color=new Rgba32((byte)Mathf.RoundToInt(brush.color.r*255),(byte)Mathf.RoundToInt(brush.color.g*255),(byte)Mathf.RoundToInt(brush.color.b*255),(byte)Mathf.RoundToInt(brush.color.a*255)),
@@ -104,6 +104,7 @@ namespace Yozolab.YoluPainter.Editor
         /// UserSettings にあるので、別のプロジェクトや別の人の環境では見つからない）。見つからない筆先は丸い筆先で描き、ID は残す。</summary>
         string MissingTipNote()
         {
+            if ((brush.tipId ?? "").StartsWith("shelf:", StringComparison.Ordinal) && Guid.TryParse(brush.tipId.Substring(6), out var shelf) && ImageResources.TryGetBrush(shelf, out _)) return null;
             var missing=new List<string>();
             if(!String.IsNullOrEmpty(brush.tipId)&&BrushTips.ResolveRef(brush.tipId)==null)missing.Add("tip "+brush.tipId);
             if(!String.IsNullOrEmpty(brush.textureId)&&BrushTips.ResolveRef(brush.textureId)==null)missing.Add("texture "+brush.textureId);

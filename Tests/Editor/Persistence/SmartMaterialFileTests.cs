@@ -63,6 +63,10 @@ namespace Yozolab.YoluPainter.Tests
             var summary = SmartMaterialFile.ReadInfo(file);
             Assert.That((summary.Format, summary.Kind, summary.Name, summary.Width, summary.Height, summary.LayerCount), Is.EqualTo((1, SmartKind.Material, "Test material", 32, 24, 2)));
             Assert.That(summary.Channels, Is.EqualTo(new[] { PaintChannel.Color, PaintChannel.Roughness }));
+            Assert.That(summary.SphereThumbnail, Is.False);
+            var sphere=SmartMaterialFile.Write(m,App,thumbnail,sphereThumbnail:true);
+            Assert.That(SmartMaterialFile.ReadInfo(sphere).SphereThumbnail,Is.True);
+            Assert.That(SmartMaterialFile.ReadArchive(sphere)[SmartMaterialFile.LayersName],Is.EqualTo(entries[SmartMaterialFile.LayersName]));
             Assert.That(summary.Thumbnail, Is.EqualTo(thumbnail)); Assert.That(summary.SavedBy.Version, Is.EqualTo("0.0.0-test"));
             // 並びだけを読むときは層を読まない（層が壊れていても並びは読める）
             var brokenLayers = Edited(file, f => f[SmartMaterialFile.LayersName] = new byte[] { 1, 2, 3 });
@@ -191,7 +195,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(YlpFormat.KindOf("resources/" + new string('a', 63) + ".ylsmart"), Is.Null);
             var bytes = YlpArchive.Write(files);
             var opened = YlpFormat.Open(YlpArchive.Read(bytes));
-            Assert.That(opened.Info.Format, Is.EqualTo(5)); Assert.That(opened.UnknownEntries, Is.Empty);
+            Assert.That(opened.Info.Format, Is.EqualTo(YlpFormat.Current)); Assert.That(opened.UnknownEntries, Is.Empty);
             Assert.That(opened.Resources.Select(r => (r.Kind, r.Name)), Is.EqualTo(new[] { (ResourceKind.Image, "Image"), (ResourceKind.SmartMaterial, "Mine"), (ResourceKind.SmartMask, "Edges"), (ResourceKind.SmartMaterial, "From library") }));
             var loaded = ResourceIndex.Load(opened.Files, opened.Resources);
             Assert.That(loaded.Smart.Select(s => (s.Id, s.Name, s.Hash, s.Kind, s.Origin.Kind)), Is.EqualTo(resources.Smart.Select(s => (s.Id, s.Name, s.Hash, s.Kind, s.Origin.Kind))));
@@ -233,13 +237,13 @@ namespace Yozolab.YoluPainter.Tests
                 f[ResourceIndex.EntryName] = Utf8(Text(f[ResourceIndex.EntryName]).Replace(held.Hash, brokenHash).Replace("\"length\": " + file.Length, "\"length\": " + broken.Length));
             })).Message, Does.Contain("is broken"));
             foreach (var origin in new[] { "{ \"type\": \"file\", \"path\": \"/x.ylsmart\", \"sha256\": \"" + new string('a', 64) + "\", \"length\": 1 }", "{ \"type\": \"unityAsset\", \"guid\": \"" + new string('a', 32) + "\", \"path\": \"Assets/x\" }" })
-                Assert.That(Opening(With(f => f[ResourceIndex.EntryName] = Utf8(Text(f[ResourceIndex.EntryName]).Replace("{ \"type\": \"none\" }", origin)))).Message, Does.Contain("does not have"));
+                Assert.That(YlpFormat.Open(YlpArchive.Read(With(f => f[ResourceIndex.EntryName] = Utf8(Text(f[ResourceIndex.EntryName]).Replace("{ \"type\": \"none\" }", origin))))).Resources[0].Origin.Kind, Is.Not.EqualTo(ResourceOriginKind.None));
             Assert.That(Opening(With(f => f[ResourceIndex.EntryName] = Utf8(Text(f[ResourceIndex.EntryName]).Replace("\"length\": " + file.Length, "\"length\": 0")))).Message, Does.Contain("length"));
             // 並びに無い .ylsmart は知らないエントリ
             var opened = YlpFormat.Open(YlpArchive.Read(With(f => f[ResourceIndex.SmartEntry(maskHash)] = mask)));
             Assert.That(opened.UnknownEntries, Is.EqualTo(new[] { ResourceIndex.SmartEntry(maskHash) }));
             // 形式 4 の読み手は形式 5 を「新しい」と断る（ここでは形式の数で確かめる）
-            Assert.That(YlpFormat.ReadInfo(good[YlpFormat.InfoName]).Format, Is.EqualTo(5));
+            Assert.That(YlpFormat.ReadInfo(good[YlpFormat.InfoName]).Format, Is.EqualTo(YlpFormat.Current));
         }
 
         // ───────── 形式 4 のフィクスチャ ─────────

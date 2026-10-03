@@ -124,7 +124,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
     public static class YlpFormat
     {
         /// <summary>今の形式。</summary>
-        public const int Current = 5;
+        public const int Current = 6;
         /// <summary>形式と書いたアプリの記録（形式 2 から）。</summary>
         public const string InfoName = "ylp.json";
         /// <summary>テクスチャセットの並び（形式 3 から）。</summary>
@@ -145,6 +145,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             ToTextureSets,         // 2 → 3: 1 つのテクスチャセットにする
             (files, notes) => { }, // 3 → 4: 並びは同じ（形式 3 のファイルにはリソースが無い。resources.json の無いファイルはリソース無し）
             (files, notes) => { }, // 4 → 5: 並びは同じ（形式 4 のリソースは画像だけ。スマートマテリアルの種類が増えただけ）
+            (files, notes) => { }, // 5 → 6: ブラシ・マテリアルと localFileID、下位階層の置き場（画像とスマートの旧リソースはそのまま）
         };
 
         /// <summary>エントリの種類。</summary>
@@ -178,7 +179,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
         public static EntryKind? KindOf(string name)
         {
             if (name == InfoName) return EntryKind.Info;
-            if (name == ProjectName || name == ResourceIndex.EntryName || ResourceIndex.TryParseContentEntry(name, out _) || ResourceIndex.TryParseSmartEntry(name, out _)) return EntryKind.Source;
+            if (name == ProjectName || name == ResourceIndex.EntryName || ResourceIndex.TryParseContentEntry(name, out _) || ResourceIndex.TryParseSmartEntry(name, out _) || ResourceIndex.TryParseBrushEntry(name, out _)) return EntryKind.Source;
             if (name == ViewName || name == BrushName) return EntryKind.State;
             if (name == ThumbnailName) return EntryKind.Derived;
             return TrySplitSetEntry(name, out _, out var leaf) ? SetEntryKind(leaf) : null;
@@ -268,17 +269,18 @@ namespace Yozolab.YoluPainter.Core.Persistence
             var resources = upgraded.TryGetValue(ResourceIndex.EntryName, out var resourceBytes) ? ResourceIndex.Read(resourceBytes) : (IReadOnlyList<YlpResourceEntry>)new YlpResourceEntry[0];
             foreach (var resource in resources)
             {
-                if (resource.IsSmart)
+                if (resource.IsFile)
                 {
-                    if (!upgraded.ContainsKey(ResourceIndex.SmartEntry(resource.Content))) throw new InvalidDataException("Smart material \"" + resource.Name + "\" has no file (" + ResourceIndex.SmartEntry(resource.Content) + ").");
+                    if (!upgraded.ContainsKey(ResourceIndex.FileEntry(resource))) throw new InvalidDataException("Smart material \"" + resource.Name + "\" has no file (" + ResourceIndex.FileEntry(resource) + ").");
                 }
                 else if (!upgraded.ContainsKey(ResourceIndex.ContentEntry(resource.Content)))
                     throw new InvalidDataException("Resource \"" + resource.Name + "\" has no pixels (" + ResourceIndex.ContentEntry(resource.Content) + ").");
             }
-            var contents = new HashSet<string>(resources.Where(r => !r.IsSmart).Select(r => r.Content), StringComparer.Ordinal);
+            var contents = new HashSet<string>(resources.Where(r => !r.IsFile).Select(r => r.Content), StringComparer.Ordinal);
             var smartFiles = new HashSet<string>(resources.Where(r => r.IsSmart).Select(r => r.Content), StringComparer.Ordinal);
             var unknown = upgraded.Keys.Where(k => KindOf(k) == null || TrySplitSetEntry(k, out var set, out _) && !listed.Contains(set) || ResourceIndex.TryParseContentEntry(k, out var hash) && !contents.Contains(hash)
-                    || ResourceIndex.TryParseSmartEntry(k, out var smartHash) && !smartFiles.Contains(smartHash))
+                    || ResourceIndex.TryParseSmartEntry(k, out var smartHash) && !smartFiles.Contains(smartHash)
+                    || ResourceIndex.TryParseBrushEntry(k, out var brushHash) && !resources.Any(r => r.Kind == Shelf.ResourceKind.Brush && r.Content == brushHash))
                 .OrderBy(k => k, StringComparer.Ordinal).ToList();
             return new YlpOpened { Files = upgraded, Info = info, Project = project, UnknownEntries = unknown, Notes = notes, Resources = resources };
         }

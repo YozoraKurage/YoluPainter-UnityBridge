@@ -96,9 +96,26 @@ namespace Yozolab.YoluPainter.Core.Persistence
 
         public static byte[] Write(PaintDocument document)
         {
+            using (var stream = new MemoryStream()) { WriteTo(document, stream); return stream.ToArray(); }
+        }
+
+        /// <summary>同じ書き手で正本のバイト数だけを数える。正本全体の配列を確保しない。</summary>
+        public static long Measure(PaintDocument document)
+        {
+            using (var stream = new SizeStream()) { WriteTo(document, stream); return stream.Length; }
+        }
+        sealed class SizeStream : MemoryStream
+        {
+            long position, length;
+            public override long Length => length;
+            public override long Position { get => position; set { if (value < 0) throw new ArgumentOutOfRangeException(); position = value; } }
+            public override void Write(byte[] buffer, int offset, int count) { position = checked(position + count); length = Math.Max(length, position); }
+            public override void WriteByte(byte value) { position++; length = Math.Max(length, position); }
+        }
+        static void WriteTo(PaintDocument document, MemoryStream stream)
+        {
             if (document == null) throw new ArgumentNullException(nameof(document));
             if (document.HasActiveStroke) throw new InvalidOperationException("Commit or cancel the active stroke before taking a save snapshot.");
-            using (var stream = new MemoryStream())
             using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
             {
                 writer.Write(Magic); writer.Write(Version);
@@ -174,7 +191,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     }
                 }
                 if (document.IdColors.Colors.Count > 0) WriteIdColors(writer, document.IdColors);
-                writer.Flush(); return stream.ToArray();
+                writer.Flush();
             }
         }
 

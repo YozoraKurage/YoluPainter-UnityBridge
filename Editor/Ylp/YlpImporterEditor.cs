@@ -37,6 +37,7 @@ namespace Yozolab.YoluPainter.Editor
                             + (set.channels.Length == 0 ? "(none painted)" : string.Join(", ", set.channels.Select(c => c.ToString()))));
                     EditorGUI.indentLevel--;
                 }
+                EditorGUILayout.LabelField(L.Tr("Resources"), L.Tr("{0} images, {1} brushes, {2} materials, {3} smart materials, {4} smart masks", info.imageCount, info.brushCount, info.materialCount, info.smartMaterialCount, info.smartMaskCount));
                 EditorGUILayout.LabelField("File Format", info.format <= 1 ? "1 (before the format was recorded)" : info.format.ToString());
                 if (!string.IsNullOrEmpty(info.savedBy)) EditorGUILayout.LabelField("Saved By", info.savedBy);
                 if (!string.IsNullOrEmpty(info.createdBy)) EditorGUILayout.LabelField("Created By", info.createdBy);

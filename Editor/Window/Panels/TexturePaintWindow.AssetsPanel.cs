@@ -20,7 +20,7 @@ namespace Yozolab.YoluPainter.Editor
     public sealed partial class TexturePaintWindow
     {
         internal enum AssetSource { Project, Unity, Library, BuiltIn }
-        internal enum AssetKind { All, Images, SmartMaterials, SmartMasks }
+        internal enum AssetKind { All, Images, SmartMaterials, SmartMasks, Brushes, Materials }
         static readonly AssetSource[] AssetSources = { AssetSource.Project, AssetSource.Unity, AssetSource.Library, AssetSource.BuiltIn };
 
         [SerializeField] AssetSource assetSource = AssetSource.Project;
@@ -48,6 +48,18 @@ namespace Yozolab.YoluPainter.Editor
             id = key.Substring(2); return true;
         }
 
+        bool IsImageAsset(string key)
+        {
+            if (!TryParseAssetKey(key, out var source, out string id)) return false;
+            switch (source)
+            {
+                case AssetSource.Project: return Guid.TryParse(id, out var guid) && ImageResources.TryGetImage(guid, out _);
+                case AssetSource.Unity: return UnityResourceObject.LoadKey<Texture2D>(id) != null;
+                case AssetSource.Library: return ImageFiles.IsImageFile(id);
+                default: return BuiltInImages.TryGet(id, out _);
+            }
+        }
+
         static string AssetSourceName(AssetSource s)
         {
             switch (s)
@@ -64,12 +76,12 @@ namespace Yozolab.YoluPainter.Editor
             switch (s)
             {
                 case AssetSource.Project: return "The resources this project holds (copied into the .ylp, shared by all texture sets)";
-                case AssetSource.Unity: return "Texture2D assets in this Unity project (Assets and Packages); importing copies them and keeps the reference";
+                case AssetSource.Unity: return "Images, verified materials and .ylsmart assets in this Unity project; importing keeps copies and references";
                 case AssetSource.Library: return "Your own library folder (Project Settings > YoluPainter), shared between projects that point at it";
-                default: return "Images that come with YoluPainter";
+                default: return "Images, brushes and smart materials that come with YoluPainter";
             }
         }
-        static string AssetKindName(AssetKind k) => k == AssetKind.Images ? "Images" : k == AssetKind.SmartMaterials ? "Smart Materials" : k == AssetKind.SmartMasks ? "Smart Masks" : "All Kinds";
+        static string AssetKindName(AssetKind k) => k == AssetKind.Brushes ? "Brushes" : k == AssetKind.Materials ? "Materials" : k == AssetKind.Images ? "Images" : k == AssetKind.SmartMaterials ? "Smart Materials" : k == AssetKind.SmartMasks ? "Smart Masks" : "All Kinds";
 
         /// <summary>格子に並べる 1 つ。</summary>
         sealed class AssetItem
@@ -113,6 +125,12 @@ namespace Yozolab.YoluPainter.Editor
             float kindWidth = Mathf.Min(Mathf.Max(row.width * .45f, row.width - 128), PaintGui.TextWidth(kindText, PaintTheme.Label) + 34);
             assetSearch = PaintGui.SearchField(AssetSpot("search", new Rect(row.x, row.y, row.width - kindWidth - 4, row.height)), assetSearch, L.Tr("Search by name"));
             PaintGui.FitDropdown(AssetSpot("kind", new Rect(row.xMax - kindWidth, row.y, kindWidth, row.height)), null, kindText, OpenAssetKindMenu, L.Tr("Show only one kind of asset"));
+            if (SmartSavePending)
+            {
+                var saving = rows.Row(24, 6);
+                PaintGui.Text(new Rect(saving.x, saving.y, saving.width - 76, saving.height), L.Tr("Saving smart material…"), PaintTheme.LabelDim);
+                if (PaintGui.FitButton(AssetSpot("cancelSave", new Rect(saving.xMax - 72, saving.y, 72, saving.height)), L.Tr("Cancel"))) CancelSmartSave();
+            }
             // 出どころが変わったリソースの知らせ
             if (assetSource == AssetSource.Project) DrawChangedResourcesNotice(rows);
             var items = AssetItems();
@@ -193,6 +211,8 @@ namespace Yozolab.YoluPainter.Editor
                 PaintGui.Text(label, PaintGui.Fit(item.Name, label.width, PaintTheme.LabelSmall, false), new GUIStyle(PaintTheme.LabelSmall) { alignment = TextAnchor.UpperCenter }, selected ? Color.white : PaintTheme.Text);
                 PaintGui.Tooltip(cell, item.Name + (string.IsNullOrEmpty(item.Detail) ? "" : "\n" + item.Detail) + (item.BadgeTip != null ? "\n" + item.BadgeTip : ""));
                 if (e.type == EventType.Repaint) AssetScreenRects["cell." + item.Key] = GUIUtility.GUIToScreenRect(cell);
+                if (e.type == EventType.ContextClick && cell.Contains(e.mousePosition) && view.Contains(e.mousePosition))
+                { selectedAsset = item.Key; AssetContextMenu(item.Key, item.Name); e.Use(); }
                 if (e.type == EventType.MouseDown && e.button == 0 && hover)
                 {
                     selectedAsset = item.Key; assetDragKey = item.Key; assetDragStart = e.mousePosition;
@@ -218,7 +238,7 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     case AssetSource.Project: return masks ? L.Tr("This project has no smart masks yet. Save a layer's mask with Layer ▸ Save Mask as Smart Mask, or import one from your library or the built-ins.")
                         : L.Tr("This project has no smart materials yet. Save layers with Layer ▸ Save as Smart Material, or import one from your library or the built-ins.");
-                    case AssetSource.Unity: return L.Tr("Smart materials and smart masks are not Unity assets. Look in This Project, My Library or Built-in.");
+                    case AssetSource.Unity: return L.Tr("No .ylsmart asset matches the selected kind and search.");
                     case AssetSource.Library: return masks ? L.Tr("Your library has no smart masks yet ({0}). Saving one puts it there.", PainterSettings.LibraryFolder) : L.Tr("Your library has no smart materials yet ({0}). Saving one puts it there.", PainterSettings.LibraryFolder);
                     default: return masks ? L.Tr("No smart mask here matches the search.") : L.Tr("No smart material here matches the search.");
                 }
@@ -247,6 +267,8 @@ namespace Yozolab.YoluPainter.Editor
             bool any = item != null && stroke == null;
             TryParseAssetKey(item?.Key, out var source, out string id);
             bool smartKinds = assetKind == AssetKind.SmartMaterials || assetKind == AssetKind.SmartMasks;
+            if (item?.Kind == ResourceKind.Brush) { DrawBrushFooter(buttons, item, id); return; }
+            if (item?.Kind == ResourceKind.Material && assetSource == AssetSource.Unity) { if (PaintGui.FitButton(AssetSpot("import", buttons), L.Tr("Import into Project"), true, any)) TryAction(() => ImportUnityMaterial(UnityResourceObject.LoadKey<Material>(id))); return; }
             if (item != null ? item.Kind != ResourceKind.Image : smartKinds) { DrawSmartFooter(buttons, item, assetSource, id); return; }
             if (assetSource == AssetSource.Project)
             {
@@ -277,7 +299,7 @@ namespace Yozolab.YoluPainter.Editor
                 TryAction(() => PrimaryAssetAction(item.Key));
             if (extraIcon != null && PaintGui.IconButton(AssetSpot("reveal", new Rect(import.xMax + 4, buttons.y, 26, buttons.height)), extraIcon, extraTip, false, assetSource == AssetSource.Library || item != null, 16))
             {
-                if (assetSource == AssetSource.Unity) { var o = AssetDatabase.LoadAssetAtPath<Texture2D>(AssetDatabase.GUIDToAssetPath(id)); if (o != null) EditorGUIUtility.PingObject(o); }
+                if (assetSource == AssetSource.Unity) { var o = UnityResourceObject.LoadKey<Texture2D>(id); if (o != null) EditorGUIUtility.PingObject(o); }
                 else { Directory.CreateDirectory(PainterSettings.LibraryFolder); EditorUtility.RevealInFinder(PainterSettings.LibraryFolder); }
             }
         }
@@ -297,6 +319,8 @@ namespace Yozolab.YoluPainter.Editor
                     default: all = BuiltInAssetItems(); break;
                 }
             }
+            if (assetKind == AssetKind.All || assetKind == AssetKind.Brushes) all = all.Concat(ShelfBrushItems());
+            if (assetKind == AssetKind.All || assetKind == AssetKind.Materials) all = all.Concat(MaterialAssetItems());
             // 画像の後にスマートマテリアル、スマートマスク
             if (assetKind == AssetKind.All || assetKind == AssetKind.SmartMaterials) all = all.Concat(SmartAssetItems(SmartKind.Material));
             if (assetKind == AssetKind.All || assetKind == AssetKind.SmartMasks) all = all.Concat(SmartAssetItems(SmartKind.Mask));
@@ -333,20 +357,22 @@ namespace Yozolab.YoluPainter.Editor
                     .OrderBy(t => t.path, StringComparer.OrdinalIgnoreCase).Select(t => t.g).ToList();
                 unityListingTotal = guids.Count; unityTextureGuids = guids; unityListingStale = false;
             }
-            var imported = new HashSet<string>(resources.Images.Where(r => r.Origin.Kind == ResourceOriginKind.UnityAsset).Select(r => r.Origin.AssetGuid));
+            var imported = new HashSet<string>(resources.Images.Where(r => r.Origin.Kind == ResourceOriginKind.UnityAsset).Select(r => { var texture = UnityResourceObject.Load<Texture2D>(r.Origin.AssetGuid, r.Origin.LocalFileId); return texture != null ? UnityResourceObject.Key(texture) : r.Origin.AssetGuid + ":" + r.Origin.LocalFileId; }));
             int shown = 0; string search = (assetSearch ?? "").Trim();
             foreach (var guid in unityTextureGuids)
             {
                 string path = AssetDatabase.GUIDToAssetPath(guid);
                 if (string.IsNullOrEmpty(path)) continue;
-                string name = Path.GetFileNameWithoutExtension(path);
-                if (search.Length > 0 && name.IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0) continue;
-                if (++shown > MaxUnityListing) yield break;
-                var item = new AssetItem { Key = AssetKey(AssetSource.Unity, guid), Name = name, Detail = path };
-                string p = path;
-                item.Thumbnail = () => { var t = AssetDatabase.LoadAssetAtPath<Texture2D>(p); return t == null ? null : (Texture)AssetPreview.GetAssetPreview(t) ?? AssetPreview.GetMiniThumbnail(t); };
-                if (imported.Contains(guid)) { item.Badge = "check"; item.BadgeColor = PaintTheme.Accent; item.BadgeTip = L.Tr("Already in this project."); }
-                yield return item;
+                foreach (var texture in AssetDatabase.LoadAllAssetsAtPath(path).OfType<Texture2D>())
+                {
+                    var t = texture; string name = t.name, objectKey = UnityResourceObject.Key(t);
+                    if (search.Length > 0 && name.IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    if (++shown > MaxUnityListing) yield break;
+                    var item = new AssetItem { Key = AssetKey(AssetSource.Unity, objectKey), Name = name, Detail = path };
+                    item.Thumbnail = () => (Texture)AssetPreview.GetAssetPreview(t) ?? AssetPreview.GetMiniThumbnail(t);
+                    if (imported.Contains(objectKey)) { item.Badge = "check"; item.BadgeColor = PaintTheme.Accent; item.BadgeTip = L.Tr("Already in this project."); }
+                    yield return item;
+                }
             }
         }
 
@@ -380,18 +406,30 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>スマートマテリアル（またはスマートマスク）の項目: このプロジェクトのもの・自分の置き場の .ylsmart（読めないものも理由を付けて）・内蔵。
-        /// Unity のアセットには無い。</summary>
+        /// Unity の .ylsmart もインポーターの要約と球の見本で並べる。</summary>
         IEnumerable<AssetItem> SmartAssetItems(SmartKind kind)
         {
             var resourceKind = ResourceIndex.KindOf(kind);
+            if (assetSource == AssetSource.Unity)
+            {
+                foreach (string guid in AssetDatabase.FindAssets("t:SmartMaterialImportInfo"))
+                {
+                    string path = AssetDatabase.GUIDToAssetPath(guid);
+                    var info = AssetDatabase.LoadAssetAtPath<SmartMaterialImportInfo>(path);
+                    if (info == null || info.mask != (kind == SmartKind.Mask)) continue;
+                    yield return new AssetItem { Key = AssetKey(AssetSource.Unity, guid), Name = info.displayName ?? Path.GetFileNameWithoutExtension(path), Kind = resourceKind, Detail = path,
+                        Broken = !string.IsNullOrEmpty(info.error), Thumbnail = () => info.thumbnail };
+                }
+                yield break;
+            }
             switch (assetSource)
             {
                 case AssetSource.Project:
-                    foreach (var s in ImageResources.Smart.Where(s => s.Kind == kind))
+                    foreach (var s in ImageResources.Smart.Where(s => s.Kind == kind && s.ResourceKind != ResourceKind.Material))
                     {
                         var held = s;
                         var item = new AssetItem { Key = AssetKey(AssetSource.Project, held.Id.ToString("D")), Name = held.Name, Kind = resourceKind, Detail = SmartDetail(kind, held.Material.LayerCount, held.Material.Width, held.Material.Height, held.Material.Channels) + " · " + SmartSourceLabel(held) };
-                        item.Thumbnail = () => CachedThumbnail(item.Key + ":" + held.Hash, () => SmartThumbnail(SmartMaterialFile.ReadInfo(held.FileBytes()).Thumbnail, () => held.Material));
+                        item.Thumbnail = () => CachedThumbnail(item.Key + ":" + held.Hash, () => SmartThumbnail(SmartMaterialFile.ReadInfo(held.FileBytes()), () => held.Material));
                         yield return item;
                     }
                     break;
@@ -403,7 +441,7 @@ namespace Yozolab.YoluPainter.Editor
                         // 読めないファイルはスマートマテリアルの方に 1 度だけ並べる
                         if (f.Info != null ? f.Info.Kind != kind : kind != SmartKind.Material) continue;
                         var file = f;
-                        var item = new AssetItem { Key = AssetKey(AssetSource.Library, file.FileName), Name = file.Info?.Name ?? Path.GetFileNameWithoutExtension(file.FileName), Kind = resourceKind, Broken = file.Info == null };
+                        var item = new AssetItem { Key = AssetKey(AssetSource.Library, file.FileName), Name = Path.GetFileNameWithoutExtension(file.FileName), Kind = resourceKind, Broken = file.Info == null };
                         if (file.Info == null)
                         {
                             item.Detail = file.FileName; item.Badge = "warning"; item.BadgeColor = PaintTheme.Warning; item.BadgeTip = L.Tr("This file cannot be used: {0}", file.Problem);
@@ -411,7 +449,7 @@ namespace Yozolab.YoluPainter.Editor
                         else
                         {
                             item.Detail = SmartDetail(kind, file.Info.LayerCount, file.Info.Width, file.Info.Height, file.Info.Channels) + " · " + file.FileName;
-                            item.Thumbnail = () => CachedThumbnail(item.Key + ":" + file.Length + ":" + file.Modified.Ticks, () => SmartThumbnail(file.Info.Thumbnail, () => SmartAsset(item.Key, out _)));
+                            item.Thumbnail = () => CachedThumbnail(item.Key + ":" + file.Length + ":" + file.Modified.Ticks, () => SmartThumbnail(file.Info, () => SmartAsset(item.Key, out _)));
                             if (imported.Contains(file.FileName)) { item.Badge = "check"; item.BadgeColor = PaintTheme.Accent; item.BadgeTip = L.Tr("Already in this project."); }
                         }
                         yield return item;
@@ -425,7 +463,7 @@ namespace Yozolab.YoluPainter.Editor
                     {
                         var entry = e;
                         var item = new AssetItem { Key = AssetKey(AssetSource.BuiltIn, entry.Key), Name = L.Tr(entry.Name), Detail = L.Tr(entry.Description), Kind = resourceKind };
-                        item.Thumbnail = () => CachedThumbnail(item.Key + ":" + entry.Version, () => SmartThumbnail(null, () => SmartAsset(item.Key, out _)));
+                        item.Thumbnail = () => CachedThumbnail(item.Key + ":" + entry.Version, () => SmartThumbnail((byte[])null, () => SmartAsset(item.Key, out _)));
                         if (imported.Contains(entry.Key)) { item.Badge = "check"; item.BadgeColor = PaintTheme.Accent; item.BadgeTip = L.Tr("Already in this project."); }
                         yield return item;
                     }
@@ -485,6 +523,8 @@ namespace Yozolab.YoluPainter.Editor
         /// スマートマテリアル・スマートマスクはどの出どころでも置く（取り込まない。置いた層は写し）。</summary>
         internal void PrimaryAssetAction(string key)
         {
+            if (TryBrushAsset(key)) { UseBrushAsset(key); return; }
+            if (TryMaterialAsset(key)) { UseMaterialAsset(key); return; }
             if (TrySmartKind(key, out _)) { PlaceSmartAsset(key); return; }
             if (!TryParseAssetKey(key, out var source, out string id)) return;
             if (source == AssetSource.Project) { PlaceResourceAsLayer(Guid.Parse(id)); return; }
@@ -496,7 +536,7 @@ namespace Yozolab.YoluPainter.Editor
             switch (source)
             {
                 case AssetSource.Unity:
-                    var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(AssetDatabase.GUIDToAssetPath(id));
+                    var texture = UnityResourceObject.LoadKey<Texture2D>(id);
                     if (texture == null) throw new ResourceRefusedException(ResourceRefusal.Unknown, L.Tr("The texture is no longer in the Unity project."));
                     return ImportUnityTexture(texture);
                 case AssetSource.Library: return ImportLibraryImage(id);
@@ -537,68 +577,71 @@ namespace Yozolab.YoluPainter.Editor
             if (!TryParseAssetKey(key, out var source, out string id)) return;
             DragAndDrop.PrepareStartDrag();
             DragAndDrop.SetGenericData(ResourceDragKey, key);
-            if (source == AssetSource.Unity) { var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(AssetDatabase.GUIDToAssetPath(id)); DragAndDrop.objectReferences = texture != null ? new UnityEngine.Object[] { texture } : new UnityEngine.Object[0]; }
+            if (source == AssetSource.Unity) { var texture = UnityResourceObject.LoadKey<Texture2D>(id); DragAndDrop.objectReferences = texture != null ? new UnityEngine.Object[] { texture } : new UnityEngine.Object[0]; }
             else DragAndDrop.objectReferences = new UnityEngine.Object[0];
             DragAndDrop.StartDrag(key);
         }
 
-        /// <summary>Unity の Project ウィンドウからパネルへ落としたテクスチャを取り込む。</summary>
+        internal static IReadOnlyList<string> UnityDropKeys(IEnumerable<UnityEngine.Object> objects)
+            => objects.Where(o => o is Texture2D || o is Material || o is SmartMaterialImportInfo)
+                .Where(o => !string.IsNullOrEmpty(AssetDatabase.GetAssetPath(o)))
+                .Select(o => AssetKey(AssetSource.Unity, o is SmartMaterialImportInfo ? AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(o)) : UnityResourceObject.Key(o)))
+                .Distinct().ToArray();
+
+        void ImportDroppedAsset(string key)
+        {
+            if (TryMaterialAsset(key)) { TryParseAssetKey(key,out _,out string material); ImportUnityMaterial(UnityResourceObject.LoadKey<Material>(material)); return; }
+            if (TrySmartKind(key,out _)) { ImportSmartAsset(key); return; }
+            TryParseAssetKey(key,out var source,out string id);var image=ImportAsset(source,id);
+            selectedAsset=AssetKey(AssetSource.Project,image.Id.ToString("D"));
+        }
+
+        /// <summary>Unity のプロジェクトウィンドウから画像・マテリアル・.ylsmart をパネルへ取り込む。</summary>
         void HandleAssetPanelDrop(Rect r)
         {
-            var e = Event.current;
-            if ((e.type != EventType.DragUpdated && e.type != EventType.DragPerform) || !r.Contains(e.mousePosition) || DragAndDrop.GetGenericData(ResourceDragKey) != null) return;
-            var textures = DragAndDrop.objectReferences.OfType<Texture2D>().Where(t => !string.IsNullOrEmpty(AssetDatabase.GetAssetPath(t))).ToList();
-            if (textures.Count == 0) return;
-            DragAndDrop.visualMode = stroke == null ? DragAndDropVisualMode.Copy : DragAndDropVisualMode.Rejected;
-            if (e.type == EventType.DragPerform && stroke == null)
+            var e=Event.current;
+            if((e.type!=EventType.DragUpdated&&e.type!=EventType.DragPerform)||!r.Contains(e.mousePosition)||DragAndDrop.GetGenericData(ResourceDragKey)!=null)return;
+            var keys=UnityDropKeys(DragAndDrop.objectReferences);if(keys.Count==0)return;
+            bool ready=stroke==null&&!toolDragging;
+            DragAndDrop.visualMode=ready?DragAndDropVisualMode.Copy:DragAndDropVisualMode.Rejected;
+            if(e.type==EventType.DragPerform&&ready)
             {
-                DragAndDrop.AcceptDrag();
-                TryAction(() => { ImageResource last = null; foreach (var t in textures) last = ImportUnityTexture(t); assetSource = AssetSource.Project; if (last != null) selectedAsset = AssetKey(AssetSource.Project, last.Id.ToString("D")); });
+                DragAndDrop.AcceptDrag();TryAction(()=>{foreach(var key in keys)ImportDroppedAsset(key);assetSource=AssetSource.Project;});
             }
             e.Use();
         }
 
-        /// <summary>キャンバス（2D・3D の表示域）へ落としたもの: パネルの格子からのアセットは置く（このプロジェクトに無ければ取り込んでから）、
-        /// Unity の Project ウィンドウからのテクスチャは取り込んで置く。画像を 3D ビューのモデルへ落とすと、その面にデカールとして置く
-        /// （Layers/TexturePaintWindow.Decals.cs。モデルの外・ほかのテクスチャセットの面では受け取らない）。</summary>
+        /// <summary>キャンバスへのアセットのドロップ。画像は2Dで層、3Dの面でデカールにする。マテリアルは層の写し、ブラシは筆先にする。</summary>
         bool HandleResourceDrop(Event e)
         {
-            if (e.type != EventType.DragUpdated && e.type != EventType.DragPerform) return false;
-            bool over = canvasRect.Contains(e.mousePosition) || surfaceRect.Contains(e.mousePosition);
-            if (!over) return false;
-            string key = DragAndDrop.GetGenericData(ResourceDragKey) as string;
-            var textures = key == null ? DragAndDrop.objectReferences.OfType<Texture2D>().Where(t => !string.IsNullOrEmpty(AssetDatabase.GetAssetPath(t))).ToList() : null;
-            if (key == null && (textures == null || textures.Count == 0)) return false;
-            bool decal = surfaceRect.Contains(e.mousePosition) && !canvasRect.Contains(e.mousePosition) && !(key != null && TrySmartKind(key, out _));
-            string decalRefusal = null;
-            if (decal && !DecalTarget(e.mousePosition, out _, out decalRefusal) && e.type == EventType.DragUpdated) message = decalRefusal;
-            DragAndDrop.visualMode = stroke == null && decalRefusal == null ? DragAndDropVisualMode.Copy : DragAndDropVisualMode.Rejected;
-            if (e.type == EventType.DragPerform && stroke == null && decalRefusal == null)
+            if(e.type!=EventType.DragUpdated&&e.type!=EventType.DragPerform)return false;
+            if(!canvasRect.Contains(e.mousePosition)&&!surfaceRect.Contains(e.mousePosition))return false;
+            string generic=DragAndDrop.GetGenericData(ResourceDragKey) as string;
+            var keys=generic!=null?new[]{generic}:UnityDropKeys(DragAndDrop.objectReferences);if(keys.Count==0)return false;
+            bool decal=surfaceRect.Contains(e.mousePosition)&&!canvasRect.Contains(e.mousePosition)&&keys.Any(IsImageAsset);
+            string refusal=null;
+            if(decal&&!DecalTarget(e.mousePosition,out _,out refusal)&&e.type==EventType.DragUpdated)message=refusal;
+            bool ready=stroke==null&&!toolDragging&&refusal==null;
+            DragAndDrop.visualMode=ready?DragAndDropVisualMode.Copy:DragAndDropVisualMode.Rejected;
+            if(e.type==EventType.DragPerform&&ready)
             {
-                DragAndDrop.AcceptDrag();
-                var at = e.mousePosition;
-                TryAction(() =>
+                DragAndDrop.AcceptDrag();var at=e.mousePosition;TryAction(()=>
                 {
-                    if (key != null && TrySmartKind(key, out _)) { PlaceSmartAsset(key); return; } // スマートマテリアルは選んだ層の上、スマートマスクは選んだ層のマスクへ
-                    if (decal)
+                    foreach(var key in keys)
                     {
-                        // 3D ビュー: 落とした所の面にデカール（画像はこのプロジェクトに無ければ取り込む）
-                        var image = key != null && TryParseAssetKey(key, out var from, out string fromId) ? ImportAsset(from, fromId) : ImportUnityTexture(textures[0]);
-                        PlaceDecal(image.Id, at);
-                        selectedAsset = AssetKey(AssetSource.Project, image.Id.ToString("D"));
-                        return;
+                        if(TryBrushAsset(key)){UseBrushAsset(key);continue;}
+                        if(TryMaterialAsset(key)){UseMaterialAsset(key);continue;}
+                        if(TrySmartKind(key,out _)){PlaceSmartAsset(key);continue;}
+                        if(TryParseAssetKey(key,out var source,out string id))
+                        {
+                            var image=ImportAsset(source,id);
+                            if(decal)PlaceDecal(image.Id,at);else PlaceResourceAsLayer(image.Id);
+                            selectedAsset=AssetKey(AssetSource.Project,image.Id.ToString("D"));
+                        }
                     }
-                    if (key != null && TryParseAssetKey(key, out var source, out string id))
-                    {
-                        var image = ImportAsset(source, id);
-                        PlaceResourceAsLayer(image.Id);
-                        selectedAsset = AssetKey(AssetSource.Project, image.Id.ToString("D"));
-                    }
-                    else foreach (var t in textures) { var image = ImportUnityTexture(t); PlaceResourceAsLayer(image.Id); }
                 });
             }
-            e.Use();
-            return true;
+            e.Use();return true;
         }
 
         // ───────── サムネイル ─────────

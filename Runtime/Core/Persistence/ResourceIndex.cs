@@ -25,7 +25,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
         public long Length { get; }
         public ResourceColorSpace ColorSpace { get; }
         public ResourceOrigin Origin { get; }
-        public bool IsSmart => Kind == ResourceKind.SmartMaterial || Kind == ResourceKind.SmartMask;
+        public bool IsSmart => Kind == ResourceKind.SmartMaterial || Kind == ResourceKind.SmartMask || Kind == ResourceKind.Material;
+        public bool IsFile => IsSmart || Kind == ResourceKind.Brush;
         public YlpResourceEntry(Guid id, ResourceKind kind, string name, string content, int width, int height, ResourceColorSpace colorSpace, ResourceOrigin origin)
         {
             if (id == Guid.Empty) throw new ArgumentException("A resource needs an ID.", nameof(id));
@@ -40,7 +41,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
         public YlpResourceEntry(Guid id, ResourceKind kind, string name, string sha256, long length, ResourceOrigin origin)
         {
             if (id == Guid.Empty) throw new ArgumentException("A resource needs an ID.", nameof(id));
-            if (kind != ResourceKind.SmartMaterial && kind != ResourceKind.SmartMask) throw new ArgumentOutOfRangeException(nameof(kind), "Use the image constructor for images.");
+            if (kind != ResourceKind.SmartMaterial && kind != ResourceKind.SmartMask && kind != ResourceKind.Material && kind != ResourceKind.Brush) throw new ArgumentOutOfRangeException(nameof(kind), "Use the image constructor for images.");
             ImageResource.CheckName(name);
             if (!ImageContent.IsHash(sha256)) throw new ArgumentException("A file hash is 64 lower-case hex digits.", nameof(sha256));
             if (length < 1 || length > YlpArchive.MaxEntryBytes) throw new ArgumentOutOfRangeException(nameof(length), "A smart material file is 1–" + YlpArchive.MaxEntryBytes + " bytes.");
@@ -84,6 +85,14 @@ namespace Yozolab.YoluPainter.Core.Persistence
 
         public static string ContentEntry(string hash) => Folder + hash + ".png";
         /// <summary>A smart material's or smart mask's file in the .ylp (format 5): resources/&lt;SHA-256 of the file&gt;.ylsmart.</summary>
+        public static string FileEntry(YlpResourceEntry entry) => entry.Kind == ResourceKind.Brush ? BrushEntry(entry.Content) : SmartEntry(entry.Content);
+        public static string BrushEntry(string hash) => Folder + hash + BrushResourceFile.Extension;
+        public static bool TryParseBrushEntry(string name, out string hash)
+        {
+            hash = null; string suffix = BrushResourceFile.Extension;
+            if (name == null || !name.StartsWith(Folder, StringComparison.Ordinal) || !name.EndsWith(suffix, StringComparison.Ordinal) || name.Length != Folder.Length + 64 + suffix.Length) return false;
+            string h = name.Substring(Folder.Length, 64); if (!ImageContent.IsHash(h)) return false; hash = h; return true;
+        }
         public static string SmartEntry(string hash) => Folder + hash + SmartMaterialFile.Extension;
 
         /// <summary>resources/&lt;64 lower-case hex&gt;.ylsmart → the hash.</summary>
@@ -114,8 +123,10 @@ namespace Yozolab.YoluPainter.Core.Persistence
             if (files == null) throw new ArgumentNullException(nameof(files));
             if (resources == null || resources.Count == 0) return;
             files[EntryName] = Write(resources.Images.Select(r => new YlpResourceEntry(r.Id, r.Kind, r.Name, r.ContentHash, r.Width, r.Height, r.ColorSpace, r.Origin))
-                .Concat(resources.Smart.Select(r => new YlpResourceEntry(r.Id, KindOf(r.Kind), r.Name, r.Hash, r.Length, r.Origin))));
+                .Concat(resources.Smart.Select(r => new YlpResourceEntry(r.Id, r.ResourceKind, r.Name, r.Hash, r.Length, r.Origin)))
+                .Concat(resources.Brushes.Select(r => new YlpResourceEntry(r.Id, ResourceKind.Brush, r.Name, r.Hash, r.Bytes.LongLength, r.Origin))));
             foreach (var image in resources.Images) files[ContentEntry(image.ContentHash)] = image.Content.EncodePng();
+            foreach (var brush in resources.Brushes) files[BrushEntry(brush.Hash)] = brush.FileBytes();
             foreach (var smart in resources.Smart) files[SmartEntry(smart.Hash)] = smart.Bytes; // 読んだ・作ったバイト列をそのまま
         }
 
@@ -129,25 +140,26 @@ namespace Yozolab.YoluPainter.Core.Persistence
         public static ProjectResources Load(IReadOnlyDictionary<string, byte[]> files, IReadOnlyList<YlpResourceEntry> entries)
         {
             if (files == null) throw new ArgumentNullException(nameof(files));
-            var result = new ProjectResources { BudgetBytes = long.MaxValue };
+            var result = new ProjectResources { BudgetBytes = long.MaxValue, ArchiveBudgetBytes = long.MaxValue };
             if (entries == null) return result;
             var decoded = new Dictionary<string, ImageContent>(StringComparer.Ordinal);
             var smart = new Dictionary<string, SmartMaterial>(StringComparer.Ordinal);
             foreach (var entry in entries)
             {
-                if (entry.IsSmart)
+                if (entry.IsFile)
                 {
-                    string name = SmartEntry(entry.Content);
+                    string name = FileEntry(entry);
                     if (!files.TryGetValue(name, out var file)) throw new InvalidDataException("Smart material \"" + entry.Name + "\" has no file (" + name + ").");
                     if (file.LongLength != entry.Length || GenerationStore.Hash(file) != entry.Content) throw new InvalidDataException("Smart material \"" + entry.Name + "\" (" + name + ") is not the file resources.json lists (its length or SHA-256 differs).");
+                    if (entry.Kind == ResourceKind.Brush) { result.AddBrush(entry.Name, file, entry.Origin, out _, entry.Id, restore: true); continue; }
                     if (!smart.TryGetValue(entry.Content, out var material))
                     {
                         try { material = SmartMaterialFile.Read(file); }
                         catch (InvalidDataException ex) { throw new InvalidDataException("Smart material \"" + entry.Name + "\" (" + name + ") is broken: " + ex.Message, ex); }
                         smart.Add(entry.Content, material);
                     }
-                    if (KindOf(material.Kind) != entry.Kind) throw new InvalidDataException("Smart material \"" + entry.Name + "\" is listed as a " + Words(entry.Kind) + " but its file is a " + Words(KindOf(material.Kind)) + ".");
-                    result.RestoreSmart(entry.Id, entry.Name, file, material, entry.Origin);
+                    if (KindOf(material.Kind) != entry.Kind && !(entry.Kind == ResourceKind.Material && material.Kind == SmartKind.Material)) throw new InvalidDataException("Smart material \"" + entry.Name + "\" is listed as a " + Words(entry.Kind) + " but its file is a " + Words(KindOf(material.Kind)) + ".");
+                    result.RestoreSmart(entry.Id, entry.Name, file, material, entry.Origin, entry.Kind);
                     continue;
                 }
                 if (!decoded.TryGetValue(entry.Content, out var content))
@@ -178,7 +190,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 var e = list[i];
                 s.Append(i == 0 ? "\n" : ",\n").Append("    { \"id\": ").Append(YlpFormat.Quote(e.Id.ToString("D"))).Append(", \"kind\": \"").Append(KindName(e.Kind)).Append("\", \"name\": ").Append(YlpFormat.Quote(e.Name))
                  .Append(", \"content\": \"").Append(e.Content).Append('"');
-                if (e.IsSmart) s.Append(", \"length\": ").Append(e.Length.ToString(CultureInfo.InvariantCulture)).Append(",\n      \"origin\": ");
+                if (e.IsFile) s.Append(", \"length\": ").Append(e.Length.ToString(CultureInfo.InvariantCulture)).Append(",\n      \"origin\": ");
                 else s.Append(", \"width\": ").Append(e.Width.ToString(CultureInfo.InvariantCulture))
                       .Append(", \"height\": ").Append(e.Height.ToString(CultureInfo.InvariantCulture)).Append(", \"colorSpace\": \"").Append(ColorSpaceName(e.ColorSpace)).Append("\",\n      \"origin\": ");
                 AppendOrigin(s, e.Origin);
@@ -195,7 +207,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             switch (o.Kind)
             {
                 case ResourceOriginKind.UnityAsset:
-                    s.Append("{ \"type\": \"unityAsset\", \"guid\": \"").Append(o.AssetGuid).Append("\", \"path\": ").Append(YlpFormat.Quote(o.Path))
+                    s.Append("{ \"type\": \"unityAsset\", \"guid\": \"").Append(o.AssetGuid).Append("\", \"localFileID\": ").Append(o.LocalFileId.ToString(CultureInfo.InvariantCulture)).Append(", \"path\": ").Append(YlpFormat.Quote(o.Path))
                      .Append(", \"stamp\": ").Append(YlpFormat.Quote(o.SourceStamp ?? "")).Append(", \"readThroughGpu\": ").Append(o.ReadThroughGpu ? "true" : "false").Append(" }");
                     break;
                 case ResourceOriginKind.File:
@@ -211,7 +223,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
         }
 
         static string Words(ResourceKind k) => k == ResourceKind.SmartMaterial ? "smart material" : k == ResourceKind.SmartMask ? "smart mask" : "image";
-        static string KindName(ResourceKind k) => k == ResourceKind.SmartMaterial ? "smartMaterial" : k == ResourceKind.SmartMask ? "smartMask" : "image";
+        static string KindName(ResourceKind k) => k == ResourceKind.Brush ? "brush" : k == ResourceKind.Material ? "material" : k == ResourceKind.SmartMaterial ? "smartMaterial" : k == ResourceKind.SmartMask ? "smartMask" : "image";
 
         static string ColorSpaceName(ResourceColorSpace c) => c == ResourceColorSpace.Srgb ? "srgb" : c == ResourceColorSpace.Linear ? "linear" : "unspecified";
 
@@ -232,7 +244,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 InvalidDataException Bad(string what) => new InvalidDataException(EntryName + ": " + who + " " + what + ".");
                 if (!o.TryGetValue("id", out var idValue) || !(idValue is string idText) || !Guid.TryParseExact(idText, "D", out var id) || id.ToString("D") != idText || id == Guid.Empty) throw Bad("has no valid \"id\" (a lower-case GUID with hyphens)");
                 if (!o.TryGetValue("kind", out var kindValue) || !(kindValue is string kind)) throw Bad("has no \"kind\"");
-                if (kind != "image" && kind != "smartMaterial" && kind != "smartMask") throw Bad("is of kind \"" + kind + "\", which this YoluPainter does not know");
+                if (kind != "image" && kind != "smartMaterial" && kind != "smartMask" && kind != "brush" && kind != "material") throw Bad("is of kind \"" + kind + "\", which this YoluPainter does not know");
                 if (name == null) throw Bad("has no \"name\"");
                 if (!o.TryGetValue("content", out var contentValue) || !(contentValue is string content) || !ImageContent.IsHash(content)) throw Bad("has no valid \"content\" (64 lower-case hex digits)");
                 if (kind != "image")
@@ -241,8 +253,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                     ResourceOrigin smartOrigin;
                     try { smartOrigin = o.TryGetValue("origin", out var smartOriginValue) && smartOriginValue != null ? ReadOrigin(smartOriginValue, Bad) : ResourceOrigin.None; }
                     catch (ArgumentException ex) { throw Bad("has a broken \"origin\" (" + ex.Message.Split('\n')[0].Split(new[] { " (Parameter" }, StringSplitOptions.None)[0] + ")"); }
-                    if (smartOrigin.Kind == ResourceOriginKind.UnityAsset || smartOrigin.Kind == ResourceOriginKind.File) throw Bad("has an origin of type \"" + (smartOrigin.Kind == ResourceOriginKind.File ? "file" : "unityAsset") + "\", which a smart material does not have");
-                    try { result.Add(new YlpResourceEntry(id, kind == "smartMask" ? ResourceKind.SmartMask : ResourceKind.SmartMaterial, name, content, length, smartOrigin)); }
+                    try { result.Add(new YlpResourceEntry(id, kind == "brush" ? ResourceKind.Brush : kind == "material" ? ResourceKind.Material : kind == "smartMask" ? ResourceKind.SmartMask : ResourceKind.SmartMaterial, name, content, length, smartOrigin)); }
                     catch (ArgumentException ex) { throw Bad("is invalid (" + ex.Message.Split('\n')[0].Split(new[] { " (Parameter" }, StringSplitOptions.None)[0] + ")"); }
                     continue;
                 }
@@ -289,7 +300,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 case "none": return ResourceOrigin.None;
                 case "unityAsset":
                     bool gpu = o.TryGetValue("readThroughGpu", out var g) && g is bool b && b;
-                    return ResourceOrigin.UnityAsset(Text("guid"), Text("path"), Text("stamp", required: false), gpu);
+                    return ResourceOrigin.UnityAsset(Text("guid"), Text("path"), Text("stamp", required: false), gpu, o.ContainsKey("localFileID") ? Number("localFileID") : 0);
                 case "file": return ResourceOrigin.File(Text("path"), Text("sha256"), Number("length"));
                 case "library": return ResourceOrigin.Library(Text("file"), Text("sha256"), Number("length"));
                 case "builtIn":

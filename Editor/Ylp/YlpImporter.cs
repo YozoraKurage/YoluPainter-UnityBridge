@@ -64,10 +64,17 @@ namespace Yozolab.YoluPainter.Editor
         {
             // 形式を先に確かめる（新しすぎる形式は、中身の並びが違うかもしれないので読まずに断る）。合成の画像の置き場は形式で決まる
             // （形式 1・2 は根の composite/、形式 3 からはセットごとの sets/<ID>/composite/）。
-            var head = YlpArchive.Read(data, entry => entry == YlpFormat.InfoName || entry == YlpFormat.ProjectName || entry == YlpFormat.ViewName);
+            var head = YlpArchive.Read(data, entry => entry == YlpFormat.InfoName || entry == YlpFormat.ProjectName || entry == YlpFormat.ViewName || entry == ResourceIndex.EntryName);
             var format = head.TryGetValue(YlpFormat.InfoName, out var record) ? YlpFormat.ReadInfo(record) : new YlpFormatInfo(1, null, null);
             YlpFormat.CheckReadable(format);
             info.format = format.Format; info.savedBy = format.SavedBy?.ToString() ?? ""; info.createdBy = format.CreatedBy?.ToString() ?? "";
+            var resources = head.TryGetValue(ResourceIndex.EntryName, out var resourceIndex) ? ResourceIndex.Read(resourceIndex) : new YlpResourceEntry[0];
+            info.resourceCount = resources.Count;
+            info.brushCount = resources.Count(r => r.Kind == Core.Shelf.ResourceKind.Brush);
+            info.materialCount = resources.Count(r => r.Kind == Core.Shelf.ResourceKind.Material);
+            info.imageCount = resources.Count(r => r.Kind == Core.Shelf.ResourceKind.Image);
+            info.smartMaterialCount = resources.Count(r => r.Kind == Core.Shelf.ResourceKind.SmartMaterial);
+            info.smartMaskCount = resources.Count(r => r.Kind == Core.Shelf.ResourceKind.SmartMask);
             var sets = new List<YlpImportInfo.TextureSetSummary>();
             if (format.Format >= 3)
             {

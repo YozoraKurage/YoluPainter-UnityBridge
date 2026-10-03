@@ -103,6 +103,10 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.LastSmartDropPlacement.ParentId, Is.EqualTo(g.Id));
             d.Undo();
             Assert.That(Order(), Is.EqualTo("Layer 1,G/B,G/B2,G,C"));
+            // 一番下の線はスクロール領域の中に描かれ、一番下へ置ける。
+            DropAsset("b:worn-edges",LayerPanelPoint("row."+a.Id,.7f,1f)+Vector2.up);
+            placed=d.GetLayer(window.SelectedLayer);Assert.That(d.Layers.ToList().IndexOf(placed),Is.LessThan(d.Layers.ToList().IndexOf(a)));
+            Assert.That(window.LastSmartDropPlacement.ParentId,Is.EqualTo(Guid.Empty));d.Undo();
             // スマートマスクは落とした行の層のマスクへ（選んでいる層でなくても）
             DropAsset("b:cavities", LayerPanelPoint("row." + a.Id, .7f, .5f));
             Assert.That(d.GetLayer(a.Id).Mask, Is.Not.Null, window.StatusMessage); Assert.That(window.LastSmartDropLayer, Is.EqualTo(a.Id));

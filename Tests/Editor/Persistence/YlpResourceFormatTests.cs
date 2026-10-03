@@ -83,7 +83,7 @@ namespace Yozolab.YoluPainter.Tests
             {
                 { "empty", "" }, { "not an object", "[]" }, { "no list", "{}" }, { "an item that is not an object", "{ \"resources\": [ 1 ] }" },
                 { "no id", Good("\"id\": \"" + id + "\", ", "") }, { "upper-case id", Good(id, id.ToUpperInvariant()) }, { "empty id", Good(id, Guid.Empty.ToString("D")) },
-                { "an unknown kind", Good("\"image\"", "\"brush\"") }, { "no name", Good("\"name\": \"X\", ", "") }, { "a blank name", Good("\"X\"", "\"  \"") },
+                { "an unknown kind", Good("\"image\"", "\"futureKind\"") }, { "no name", Good("\"name\": \"X\", ", "") }, { "a blank name", Good("\"X\"", "\"  \"") },
                 { "a short hash", Good(hash, "abc") }, { "an upper-case hash", Good(hash, hash.ToUpperInvariant()) },
                 { "width 0", Good("\"width\": 2", "\"width\": 0") }, { "height 8193", Good("\"height\": 3", "\"height\": 8193") }, { "a text width", Good("\"width\": 2", "\"width\": \"2\"") },
                 { "an unknown colour space", Good("\"width\": 2", "\"colorSpace\": \"aces\", \"width\": 2") },
@@ -92,13 +92,13 @@ namespace Yozolab.YoluPainter.Tests
                 { "a unity asset without a guid", Good("{ \"type\": \"builtIn\", \"key\": \"grid\", \"version\": 1 }", "{ \"type\": \"unityAsset\", \"path\": \"Assets/x.png\" }") },
                 { "a unity guid with hyphens", Good("{ \"type\": \"builtIn\", \"key\": \"grid\", \"version\": 1 }", "{ \"type\": \"unityAsset\", \"guid\": \"" + id + "\", \"path\": \"Assets/x.png\" }") },
                 { "a file without a hash", Good("{ \"type\": \"builtIn\", \"key\": \"grid\", \"version\": 1 }", "{ \"type\": \"file\", \"path\": \"/x.png\", \"length\": 1 }") },
-                { "a library path", Good("{ \"type\": \"builtIn\", \"key\": \"grid\", \"version\": 1 }", "{ \"type\": \"library\", \"file\": \"sub/x.png\", \"sha256\": \"" + hash + "\", \"length\": 1 }") },
+                { "a library path", Good("{ \"type\": \"builtIn\", \"key\": \"grid\", \"version\": 1 }", "{ \"type\": \"library\", \"file\": \"../x.png\", \"sha256\": \"" + hash + "\", \"length\": 1 }") },
                 { "a negative length", Good("{ \"type\": \"builtIn\", \"key\": \"grid\", \"version\": 1 }", "{ \"type\": \"file\", \"path\": \"/x.png\", \"sha256\": \"" + hash + "\", \"length\": -1 }") },
                 { "the same id twice", "{ \"resources\": [ " + string.Join(",", Enumerable.Repeat("{ \"id\": \"" + id + "\", \"kind\": \"image\", \"name\": \"X\", \"content\": \"" + hash + "\", \"width\": 2, \"height\": 3 }", 2)) + " ] }" },
                 { "too many", "{ \"resources\": [ " + string.Join(",", Enumerable.Range(0, ProjectResources.MaxResources + 1).Select(i => "{ \"id\": \"" + new Guid(i + 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1).ToString("D") + "\", \"kind\": \"image\", \"name\": \"X\", \"content\": \"" + hash + "\", \"width\": 2, \"height\": 3 }")) + " ] }" },
             };
             foreach (var b in bad) Assert.That(() => ResourceIndex.Read(Json(b.Value)), Throws.TypeOf<InvalidDataException>(), b.Key);
-            Assert.That(() => ResourceIndex.Read(Json(Good("\"image\"", "\"brush\""))), Throws.TypeOf<InvalidDataException>().With.Message.Contains("does not know"), "a later kind is refused, not dropped");
+            Assert.That(() => ResourceIndex.Read(Json(Good("\"image\"", "\"futureKind\""))), Throws.TypeOf<InvalidDataException>().With.Message.Contains("does not know"), "a later kind is refused, not dropped");
         }
 
         // ───────── 形式 4 のファイル ─────────

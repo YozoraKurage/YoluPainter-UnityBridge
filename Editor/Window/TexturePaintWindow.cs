@@ -143,10 +143,11 @@ namespace Yozolab.YoluPainter.Editor
             ResetSetsBaseline(false);
         }
         void OnLostFocus() { ClearPolygonFillHover(); pickHoverPointer = new Vector2(-100, -100); FinishStroke(false); CancelShapeDrag(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); ReleaseStencilInput(); preview?.CancelNavigation(); SaveRecovery(); }
-        void BeforeReload() { FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); EndLightingDrag(true); preview?.CancelNavigation(); preview?.CancelPreparation(); CaptureMaterialInspector(); DisposeMaterialInspector(); SaveRecoveryBeforeLifecycleChange(); }
-        void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); SaveRecoveryBeforeLifecycleChange(); } }
+        void BeforeReload() { CancelSmartSave(); FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); EndLightingDrag(true); preview?.CancelNavigation(); preview?.CancelPreparation(); CaptureMaterialInspector(); DisposeMaterialInspector(); SaveRecoveryBeforeLifecycleChange(); }
+        void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ CancelSmartSave(); FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); SaveRecoveryBeforeLifecycleChange(); } }
         void OnDisable()
         {
+            CancelSmartSave();
             PaintMenuSession.CloseFor(this);
             CaptureMaterialInspector(); DisposeMaterialInspector();
             DisposePenInput();
@@ -159,6 +160,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             PollRecovery();
             if(document==null) return;
+            TickSmartSave();
             if(EditorApplication.timeSinceStartup-lastRecoveryStorageCheck>60) CheckRecoveryStorage();
             TickModelPreparation();
             TickAssetsPanel(); // アセットのパネルが出たら、リソースの出どころを確かめる（TexturePaintWindow.AssetsPanel.cs）
@@ -244,7 +246,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void TryAction(Action action)
         {
-            try{action();}catch(Exception ex){if(stroke!=null)FinishStroke(false);message=ex is LayerOpException refused?RefusalText(refused):ex.Message;Debug.LogWarning("Texture Painter: "+ex.Message);}
+            try{action();}catch(Exception ex){if(stroke!=null)FinishStroke(false);message=ex is LayerOpException refused?RefusalText(refused):L.Tr(ex.Message);Debug.LogWarning("Texture Painter: "+ex.Message);}
             NoteNewAnchorIssues(); // 並べ替え・削除などで Anchor の参照が使えなくなったら、知らせに理由を添える（Layers/TexturePaintWindow.Anchors.cs）
         }
     }

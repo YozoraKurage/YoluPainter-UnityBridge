@@ -15,6 +15,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>合成済みの画像が無いため、正本（document.utpaint）から読んだか。</summary>
         public bool fromNativeDocument;
         /// <summary>中身の形式（YlpFormat。ylp.json の無いものは 1）と、書いたアプリ（分からなければ空）。</summary>
+        public int resourceCount, imageCount, smartMaterialCount, smartMaskCount, brushCount, materialCount;
         public int format;
         public string savedBy = "", createdBy = "";
         /// <summary>テクスチャセットの一覧（project.json の並び。形式 2 までのファイルは 1 つ）。上の大きさ・チャンネルは今のセットのもの。</summary>
