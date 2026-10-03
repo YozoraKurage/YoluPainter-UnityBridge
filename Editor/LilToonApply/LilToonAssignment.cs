@@ -178,7 +178,8 @@ namespace Yozolab.YoluPainter.Editor.LilToonApply
         /// Unity の Undo に 1 つで記録する。書き出したファイルは Undo では消えない。変更後のマテリアルを調べ直した結果を返す。</summary>
         public static LilToonReport Apply(LilToonAssignmentPlan plan, PaintDocument document) => Apply(plan, document, null);
 
-        internal static LilToonReport Apply(LilToonAssignmentPlan plan, PaintDocument document, LilToonAdapter.Options options)
+        /// <param name="finish">書き出す画像の仕上げ（書き出しのパディングなど。チャンネルと画素を受けて画素を返す）。null なら合成のまま。</param>
+        internal static LilToonReport Apply(LilToonAssignmentPlan plan, PaintDocument document, LilToonAdapter.Options options, Func<PaintChannel, byte[], byte[]> finish = null)
         {
             if (plan == null) throw new ArgumentNullException(nameof(plan));
             if (!plan.CanApply) throw new InvalidOperationException(string.Join(" ", plan.Refusals.Count > 0 ? plan.Refusals : new[] { "Nothing to assign." }));
@@ -194,6 +195,7 @@ namespace Yozolab.YoluPainter.Editor.LilToonApply
                 bool isNew = !File.Exists(Path.GetFullPath(item.AssetPath));
                 // Normal は Unity 向けの出力（ベクトルで合成・正規化、Height → Normal 込み、不透明・OpenGL）をそのまま使う
                 var pixels = item.Channel == PaintChannel.Normal ? YlpContent.Image(document, PaintChannel.Normal) : Convert(item.Channel, document.Composite(item.Channel));
+                if (finish != null) pixels = finish(item.Channel, pixels);
                 File.WriteAllBytes(Path.GetFullPath(item.AssetPath), YlpContent.EncodePng(pixels, document.Width, document.Height));
                 AssetDatabase.ImportAsset(item.AssetPath, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
                 if (!isNew || !(AssetImporter.GetAtPath(item.AssetPath) is TextureImporter importer)) continue;

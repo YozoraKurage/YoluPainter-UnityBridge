@@ -31,9 +31,10 @@ namespace Yozolab.YoluPainter.Editor
             if(!plan.CanApply){message="lilToon: "+String.Join(" ",plan.Refusals);Dialogs.Inform("Cannot assign to lilToon",plan.Describe());return;}
             if(!ConfirmInactiveGenerators(new[]{(currentSet.Name,document)}))return; // マップの無い Generator を効きなしで書き出さない（確かめる）
             if(!Dialogs.Confirm("Assign to lilToon material?",plan.Describe(),"Assign","Cancel")){message="lilToon assignment cancelled; nothing was changed.";return;}
-            var after=LilToonAssignment.Apply(plan,document);
+            var paddingNotes=new System.Collections.Generic.List<string>();
+            var after=LilToonAssignment.Apply(plan,document,null,(c,pixels)=>PadForExport(currentSet,pixels,paddingNotes)); // 書き出しのパディング（Project/TexturePaintWindow.ExportPadding.cs）
             var ineffective=after.Channels.Where(c=>plan.Items.Any(i=>i.Channel==c.Channel)&&!c.IsEffective).Select(c=>c.Channel.ToString()).ToList();
-            message="Assigned "+plan.Items.Count+" map(s) to "+Path.GetFileName(plan.MaterialPath)+" (lilToon "+after.Version+")."+(ineffective.Count>0?" Not effective yet: "+String.Join(", ",ineffective)+" (see the notes).":"")+" Unity's Undo reverts the material.";
+            message="Assigned "+plan.Items.Count+" map(s) to "+Path.GetFileName(plan.MaterialPath)+" (lilToon "+after.Version+")."+(ineffective.Count>0?" Not effective yet: "+String.Join(", ",ineffective)+" (see the notes).":"")+(paddingNotes.Count>0?" "+String.Join(" ",paddingNotes):"")+" Unity's Undo reverts the material.";
         }
     }
 }

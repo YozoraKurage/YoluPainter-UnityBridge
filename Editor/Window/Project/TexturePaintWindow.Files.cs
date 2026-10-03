@@ -263,7 +263,7 @@ namespace Yozolab.YoluPainter.Editor
                 foreach(var t in targets)
                 {
                     bool isNew=!File.Exists(t.path); var d=t.set.Document;
-                    File.WriteAllBytes(t.path,YlpContent.EncodePng(YlpContent.FileImage(d,t.channel),d.Width,d.Height));
+                    File.WriteAllBytes(t.path,YlpContent.EncodePng(PadForExport(t.set,YlpContent.FileImage(d,t.channel),notes),d.Width,d.Height));
                     string asset=AssetPathOf(Path.GetFullPath(t.path));
                     if(asset==null)continue;
                     AssetDatabase.ImportAsset(asset,ImportAssetOptions.ForceUpdate);
@@ -283,7 +283,8 @@ namespace Yozolab.YoluPainter.Editor
             TryAction(()=>
             {
                 var texture=new Texture2D(document.Width,document.Height,TextureFormat.RGBA32,false,true);
-                try{texture.LoadRawTextureData(YlpContent.FileImage(document,channel));texture.Apply();File.WriteAllBytes(path,texture.EncodeToPNG());message="Exported "+channel+" PNG. No material was changed; ICC is not applied."+NormalExportNote(channel==PaintChannel.Normal);}
+                var notes=new List<string>();
+                try{texture.LoadRawTextureData(PadForExport(currentSet,YlpContent.FileImage(document,channel),notes));texture.Apply();File.WriteAllBytes(path,texture.EncodeToPNG());message="Exported "+channel+" PNG. No material was changed; ICC is not applied."+NormalExportNote(channel==PaintChannel.Normal)+(notes.Count>0?" "+String.Join(" ",notes):"");}
                 finally{DestroyImmediate(texture);}
             });
         }

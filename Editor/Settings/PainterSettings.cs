@@ -26,6 +26,10 @@ namespace Yozolab.YoluPainter.Editor
             public int defaultResolution = 1024;
             /// <summary>プロジェクトで共有するブラシ置き場（プロジェクトのフォルダからの相対パス）。空なら使わない。</summary>
             public string projectBrushFolder = "";
+            /// <summary>書き出し（Export Images・Export PNG・lilToon への割り当て）で、UV の外へ色を塗り広げるテクセルの数（Core の TexturePadding）。
+            /// -1 は届くかぎり全部（Substance Painter の Infinite）、0 は塗り広げない。<see cref="ExportPaddings"/> のどれか。この項目の無い以前の
+            /// ファイルは -1。</summary>
+            public int exportPadding = ExportPaddingFill;
         }
 
         [Serializable] internal sealed class Personal
@@ -58,6 +62,9 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         public static readonly int[] Resolutions = { 256, 512, 1024, 2048, 4096 };
+        /// <summary>書き出しのパディングに選べる値（テクセル）。-1 は届くかぎり全部。</summary>
+        public const int ExportPaddingFill = -1;
+        public static readonly int[] ExportPaddings = { 0, 2, 4, 8, 16, 32, 64, ExportPaddingFill };
         /// <summary>パスの比較（Windows と macOS の既定は大文字小文字を区別しないので、区切りが \ の環境では区別しない）。</summary>
         public static StringComparison PathComparison => Path.DirectorySeparatorChar == '\\' ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         public const int MinRecoverySeconds = 5, MaxRecoverySeconds = 600;
@@ -132,6 +139,7 @@ namespace Yozolab.YoluPainter.Editor
         }
         public static bool ShowBundledBrushes { get { Load(); return personal.showBundledBrushes; } }
         public static int DefaultResolution { get { Load(); return shared.defaultResolution; } }
+        public static int ExportPadding { get { Load(); return shared.exportPadding; } }
         public static int RecoveryIntervalSeconds { get { Load(); return personal.recoveryIntervalSeconds; } }
         public static long UndoBudgetBytes { get { Load(); return Bytes(personal.undoBudgetMiB, Budget.Undo); } }
         public static long SourceBudgetBytes { get { Load(); return Bytes(personal.sourceBudgetMiB, Budget.Source); } }
@@ -203,6 +211,8 @@ namespace Yozolab.YoluPainter.Editor
             var defaultsShared = new Shared(); var defaultsPersonal = new Personal();
             if (Array.IndexOf(Resolutions, s.defaultResolution) < 0)
             { problems.Add("Default resolution " + s.defaultResolution + " is not one of " + string.Join(", ", Resolutions) + "."); if (fix) s.defaultResolution = defaultsShared.defaultResolution; }
+            if (Array.IndexOf(ExportPaddings, s.exportPadding) < 0)
+            { problems.Add("Export padding " + s.exportPadding + " is not one of " + string.Join(", ", ExportPaddings) + "."); if (fix) s.exportPadding = defaultsShared.exportPadding; }
             string folderProblem = CheckProjectBrushFolder(s.projectBrushFolder);
             if (folderProblem != null) { problems.Add(folderProblem); if (fix) s.projectBrushFolder = ""; }
             string personalFolderProblem = CheckPersonalBrushFolder(p.brushFolder);

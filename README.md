@@ -34,7 +34,7 @@ Unity Editor 内の専用ウィンドウで、同じレイヤーへ 2D と 3D �
 
 **保存と連携**
 - 原画素を保持する独自形式 `.ylp`（形式の版と保存したアプリの版を記録し、古い形式は開くときに移す。`Documentation~/YLP_FORMAT.md`）、チェックサム付きの世代保存、保存途中の障害・外部改変の拒否、復旧の checkpoint
-- 制限を明確にした RGB8 ラスター PSD の読み書き（未対応の情報があれば編集を禁止して原本を守る）、チャンネルごとの PNG の書き出し、lilToon のマテリアルへの割り当て（確かめた版・バリアントだけ）
+- 制限を明確にした RGB8 ラスター PSD の読み書き（未対応の情報があれば編集を禁止して原本を守る）、チャンネルごとの PNG の書き出し、lilToon のマテリアルへの割り当て（確かめた版・バリアントだけ）。書き出しでは UV の外へ色を塗り広げる（パディング。既定は届くかぎり全部、プロジェクト設定で 0〜64 テクセルか全部。Unity のミップマップで UV の境目に背景がにじまない）
 - プラグインの受け口（試作 API 0.1）: `Yozolab.YoluPainter.Api` を参照するアセンブリでメニューのコマンドとツールのアイコンを足し、開いているプロジェクトを読んだり層を足したりできる。書き方は `Documentation~/PLUGIN_API.md`
 
 正本を作るのは **CPU のブラシ**です。GPU は表示の合成・メッシュマップのベイク・Normal の出力に使い、保存の唯一の正本にはしません。
@@ -69,7 +69,7 @@ YoluPainter のファイルは `.ylp` です（CLIP STUDIO の .clip、Photoshop
 
 ウィンドウのメニューの ファイル ▸ プロジェクト設定… / 編集 ▸ 環境設定…、または Project Settings > YoluPainter で開きます。
 
-- **プロジェクトで共有**（`ProjectSettings/Packages/net.yozolab.yolupainter/Settings.json`、バージョン管理に入る）: 新規ドキュメントの既定の大きさ、共有のブラシ置き場
+- **プロジェクトで共有**（`ProjectSettings/Packages/net.yozolab.yolupainter/Settings.json`、バージョン管理に入る）: 新規ドキュメントの既定の大きさ、書き出しのパディング、共有のブラシ置き場
 - **自分だけ**（`UserSettings/YoluPainter/Settings.json`）: 取り込んだブラシの置き場、同梱ブラシの表示、`.ylp` のバックアップを残す数、復旧 checkpoint の間隔、メモリの予算、Unity のショートカットを止めるか、表示の合成（自動 / GPU / CPU）と CPU のスレッド数
 
 ブラシ置き場は Unity に取り込まれないよう、Assets / Packages の下（名前が `~` で終わるフォルダの中を除く）は指定できません。

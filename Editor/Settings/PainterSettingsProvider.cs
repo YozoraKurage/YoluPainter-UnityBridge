@@ -43,6 +43,10 @@ namespace Yozolab.YoluPainter.Editor
                 shared.defaultResolution = EditorGUILayout.IntPopup("Default document size", shared.defaultResolution,
                     PainterSettings.Resolutions.Select(r => r + " × " + r).ToArray(), PainterSettings.Resolutions);
                 if (EditorGUI.EndChangeCheck()) SaveShared();
+                EditorGUI.BeginChangeCheck();
+                shared.exportPadding = EditorGUILayout.IntPopup(new GUIContent("Export padding", "When exporting (Export Images, Export PNG, assigning to lilToon), the colours at the UV edges are spread outward into the texels no UV triangle touches, so mipmaps and filtering in Unity do not pull in the background at UV seams. Needs the model loaded (its UVs). The painted texels are not changed."),
+                    shared.exportPadding, PainterSettings.ExportPaddings.Select(v => new GUIContent(v == 0 ? "Off" : v == PainterSettings.ExportPaddingFill ? "Fill (all the way)" : v + " texels")).ToArray(), PainterSettings.ExportPaddings);
+                if (EditorGUI.EndChangeCheck()) SaveShared();
 
                 EditorGUILayout.BeginHorizontal();
                 EditorGUI.BeginChangeCheck();
