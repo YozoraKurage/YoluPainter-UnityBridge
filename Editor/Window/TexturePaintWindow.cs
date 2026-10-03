@@ -93,7 +93,7 @@ namespace Yozolab.YoluPainter.Editor
             catch (Exception ex) { message="Recovery was not loaded: "+ex.Message; }
             resolution=PainterSettings.DefaultResolution;
             if (document==null) CreateDocument(resolution);
-            BindDocument();
+            BindDocument(); RestorePenInput();
             if (model!=null) TryAction(()=>preview.Load(model));
             EditorApplication.update+=Tick; PainterSettings.Changed+=SettingsChanged; EditorApplication.projectChanged+=OnUnityProjectChanged; HookResources();
             AssemblyReloadEvents.beforeAssemblyReload+=BeforeReload;
@@ -152,6 +152,7 @@ namespace Yozolab.YoluPainter.Editor
         void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ FinishStroke(false); CancelShapeDrag(); SaveRecovery(); } }
         void OnDisable()
         {
+            DisposePenInput();
             FinishStroke(false); CancelShapeDrag(); preview?.CancelNavigation(); SaveRecovery();
             EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; EditorApplication.projectChanged-=OnUnityProjectChanged; UnhookResources(); DisposeAssetThumbnails(); L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
             DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeThumbnails(); DisposeColorPanel(); DisposeTextureSetTextures(); DisposeMaterialChannelTextures(); DisposeModelShowTextures(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
@@ -184,12 +185,22 @@ namespace Yozolab.YoluPainter.Editor
         {
             if(document==null) return;
             var e=Event.current; var pointerAtStart=e.mousePosition; // 途中のクリップや 3D の描画の後でも同じ位置を使う
+            // 診断がオフなら bool の判定だけ。オンのときはイベントが Use/座標変換される前に読み、最後に計器を重ねる。
+            if(penInputEnabled)
+            {
+                CapturePenInput(e);
+                if(DrawPainterGui(e,pointerAtStart)){DrawPenInputPanel();HandleCanvasInput(e);}
+            }
+            else if(DrawPainterGui(e,pointerAtStart)) HandleCanvasInput(e);
+        }
+        bool DrawPainterGui(Event e, Vector2 pointerAtStart)
+        {
             if(e.type==EventType.MouseMove) Repaint(); // マウスの乗った部品の見た目
             // スライダーのドラッグ中の変更は 1 つの Undo にまとめる。離したところで区切る。
             if(e.rawType==EventType.MouseUp) document.EndCoalescing();
             HandleModelPicker(e); HandleEnvironmentPicker(e); // 環境のテクスチャを選ぶ窓（Model/TexturePaintWindow.Display3D.cs）
             HandleKeys(e);
-            if(e.type==EventType.KeyDown&&HandleToolKeys(e))return;
+            if(e.type==EventType.KeyDown&&HandleToolKeys(e))return false;
             // 合成（GPU への転送と合成、Normal の出力、3D のプレビューの更新）は描くときだけ。入力のイベント（ストローク中の MouseDrag
             // など）のたびに合成すると 1 回の処理が重くなり、OS がマウスの移動をまとめて届く点がまばらになる。表示の前には必ず
             // Repaint が来るので、その間の変更はまとめて 1 回で合成する。
@@ -207,7 +218,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             DrawShell();
             if(surfaceRect.width>0){DrawSurfaceBrushCursor(pointerAtStart);DrawMirroredBrushCursor(pointerAtStart);} // 3D の描画の後に GUI の状態を戻してから重ねる
-            HandleCanvasInput(e);
+            return true;
         }
 
         /// <summary>合成し直して、2D の表示と 3D のプレビュー（全部のテクスチャセットとその照明）に入れる（テストが呼ぶ。表示の合成を全部終える）。</summary>

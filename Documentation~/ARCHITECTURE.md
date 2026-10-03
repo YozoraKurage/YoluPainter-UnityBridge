@@ -40,6 +40,42 @@ The window chrome is custom-drawn IMGUI (`Editor/UI`: `PaintTheme` colors and te
 両ソフトの操作や出力との一致を主張するものではない。
 参考: [Photoshop のグラデーション編集](https://helpx.adobe.com/photoshop/desktop/adjust-color/color-effects-techniques/edit-a-gradient.html)、
 [Substance のチャンネルとマスク](https://experienceleague.adobe.com/en/docs/substance-3d-painter/using/getting-started/glossary)。
+## ペン入力の診断
+
+ヘルプ ▸ 開発者: ペン入力（英語では Developer: Pen Input）で、表示域の隅に計器を重ねる。
+`Window/Diagnostics/PenInputDiagnostics` は、OnGUI の入口の値だけを読む。オフの経路は bool の判定 1 回だけで、時計・集計・記録を呼ばない。
+表示の切り替えは窓のシリアライズされた状態であり、.ylp、正本、ブラシ、個人の設定の形式には入れない。集計と生の記録はセッション中だけ保持し、
+リロードや窓を閉じると消える。診断はストローク・Undo・入力の補間へ値を渡さない。
+
+集計は `(現在 − 1000 ms, 現在]` の移動する窓を最大 10 Hz で表示する。現在の値は最後の MouseDown/Move/Drag/Up のまま残り、
+筆圧の最小・最大・段階数は窓内の最新の pointerType と同じ種類だけを数える（生の float の相異なる値。機器の公称の段階数ではない）。
+MouseDrag は窓全体へ届いた数で、描いていないドラッグも含む。間隔と距離は同じ入力の種類・ボタンの Down→Drag / Drag→Drag で、
+両端が窓内にあるものだけ。離す・ホバー・入力の種類やボタンが変わると区切る。描画間の点数は同じ Repaint 番号のドラッグ数の最大で、
+現在の未描画の組も含み、窓の左端より前の点は数えない。到着時刻は Stopwatch、座標と距離は GUI の点、tilt と twist は Unity のラジアン。
+OS や Unity が捨てた点の数・機器本来の報告頻度・入力から画面までの遅延・Windows の間引きの原因は、この計器だけでは確定できない。
+
+記録を押すと最大 30 秒、Layout・Repaint・キーを含む OnGUI イベントの値をそのまま溜め、停止後に保存先を選ぶ。
+既定はプロジェクトの `Logs/YoluPainter/pen-input.csv`。ストロークや捕捉された操作の途中の自動停止は、離すまで保存を待つ。
+取消や書き込み失敗では記録を保持し、CSV を保存…で再試行できる。破棄すると次の記録を始められる。
+計器は直近 1 秒の 32,768 点、記録は 250,000 イベントに制限し、上限は計器で知らせる（記録はその場で停止、古い記録を上書きしない）。
+保存は同じフォルダの一時ファイルから最後に置き換え、書き込み失敗時は既存の CSV を保つ。外部改変検出や永続の記録復旧は提供しない。
+
+CSV は UTF-8、ヘッダー無し、カンマ区切り、改行 LF、InvariantCulture の 16 数値列。enum と flags は Unity 2022.3 の整数値。
+パス・名前・文書の ID・入力した文字・キーコードを記録しない。浮動小数は丸めず `R` 形式で書く（届いた非有限値も NaN/Infinity として保持）。
+
+| 列（1 から） | 値 |
+|---|---|
+| 1 | 記録開始から OnGUI 到着までの ms（Stopwatch） |
+| 2・3 | Event.type・rawType（EventType） |
+| 4 | pointerType（PointerType） |
+| 5・6 | GUI の位置 x・y（窓内、y は下向き） |
+| 7・8 | delta x・y |
+| 9 | pressure（筆圧カーブ・範囲補正前） |
+| 10・11 | tilt x・y（rad） |
+| 12 | twist（rad） |
+| 13・14 | penStatus（PenStatus）・modifiers（EventModifiers） |
+| 15 | button |
+| 16 | その時点の Repaint 番号（計器をオンにした後、1 から。最初の描画前は 0） |
 
 ## 2D canvas view
 
