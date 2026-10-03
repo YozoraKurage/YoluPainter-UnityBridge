@@ -7,7 +7,9 @@
 #   run-tests.sh --mode gui                        窓の操作の試験は GUI の台で（既定は batch-gl）
 #   run-tests.sh --sha HEAD                        作業ツリーではなく、このコミットの木で回す（台 1 以上だけ）
 #   run-tests.sh --source /path/to/worktree        このフォルダのパッケージで回す（台 1 以上だけ）
-#   run-tests.sh --both [--sha X]                  batch-gl と GUI の台で同時に回し、両方の結果を出す
+#   run-tests.sh --both [--sha X]                  batch-gl と GUI の台で同時に回し、両方の結果を出す（絞り込みが無ければ、GUI の台では
+#                                                  GUI でしか回らないテストだけ: Tests/Editor/Support/GuiOnlyFixtures.txt）
+#   run-tests.sh --mode gui --gui-only             GUI でしか回らないテストだけを GUI の台で
 #   run-tests.sh --runner 2                        台を決めて回す
 #   run-tests.sh --log                             失敗時に Unity ログの末尾も出す
 #
@@ -28,6 +30,7 @@ RUNNER_ARG=""
 SHA=""
 SOURCE_DIR=""
 BOTH=0
+GUI_ONLY=0
 original_args=("$@")
 
 while [[ $# -gt 0 ]]; do
@@ -40,12 +43,14 @@ while [[ $# -gt 0 ]]; do
     --sha)      SHA="${2:?--sha にコミットが要る}"; shift 2 ;;
     --source)   SOURCE_DIR="${2:?--source にフォルダが要る}"; shift 2 ;;
     --both)     BOTH=1; shift ;;
+    --gui-only) GUI_ONLY=1; shift ;;
     -h|--help)  sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)          die "不明な引数: $1" ;;
   esac
 done
 [[ -z "$MODE" || "$MODE" == gui || "$MODE" == batch-gl ]] || die "--mode は gui か batch-gl"
 [[ -z "$SHA" || -z "$SOURCE_DIR" ]] || die "--sha と --source は一緒に使えない"
+[[ $GUI_ONLY == 0 || ( -z "$FILTER" && -z "$CATEGORY" ) ]] || die "--gui-only は --filter・--category と一緒に使えない"
 [[ -z "$RUNNER_ARG" || "$RUNNER_ARG" =~ ^[0-9]+$ ]] || die "--runner は台の番号"
 if [[ -n "$SHA" ]]; then
   SHA="$(git -C "$PACKAGE_ROOT" rev-parse --verify "$SHA^{commit}" 2>/dev/null)" || die "コミットが無い: $SHA"
@@ -62,7 +67,9 @@ if [[ $BOTH == 1 ]]; then
   for a in "${original_args[@]}"; do [[ "$a" == --both ]] || rest+=("$a"); done
   out_dir="$(mktemp -d)"; trap 'rm -rf "$out_dir"' EXIT
   "$0" ${rest[@]+"${rest[@]}"} --mode batch-gl > "$out_dir/batch-gl" 2>&1 & p1=$!
-  "$0" ${rest[@]+"${rest[@]}"} --mode gui > "$out_dir/gui" 2>&1 & p2=$!
+  # 全件なら GUI の台では GUI でしか回らないテストだけ（ほかは batch-gl の台で回っている。2 回回すと GUI の全件だけで 14 分かかった）
+  gui_extra=(); [[ -z "$FILTER" && -z "$CATEGORY" ]] && gui_extra=(--gui-only)
+  "$0" ${rest[@]+"${rest[@]}"} --mode gui ${gui_extra[@]+"${gui_extra[@]}"} > "$out_dir/gui" 2>&1 & p2=$!
   # common.sh の set -e の下では、落ちた子の wait でここから抜けて結果を出さずに終わってしまう（全件で実際に起きた）
   c1=0; wait $p1 || c1=$?; c2=0; wait $p2 || c2=$?
   echo "──── batch-gl ────"; cat "$out_dir/batch-gl"
@@ -151,6 +158,17 @@ if [[ "$UNITY_RUNNER" != 0 ]]; then
     what="フォルダ $from"
   fi
   info "台 $UNITY_RUNNER（$(runner_live_mode "$UNITY_RUNNER")）で回す: $what"
+fi
+if [[ $GUI_ONLY == 1 ]]; then
+  # 一覧は回すソースの中のもの（台 1 以上は同期した写し、台 0 は /workspace）
+  list="$( [[ "$UNITY_RUNNER" != 0 ]] && runner_package "$UNITY_RUNNER" || echo "$PACKAGE_ROOT" )/Tests/Editor/Support/GuiOnlyFixtures.txt"
+  if [[ -f "$list" ]]; then
+    names="$(grep -v '^[[:space:]]*#' "$list" | sed 's/[[:space:]]//g' | grep -v '^$' | paste -sd'|')"
+    FILTER="Yozolab.YoluPainter.Tests.(${names})[.]"
+    info "GUI でしか回らないテストだけを回す（${names//|/、}）"
+  else
+    warn "GuiOnlyFixtures.txt が無いので全件を回す: $list"
+  fi
 fi
 if daemon_alive; then
   info "デーモンへ依頼 (台 $UNITY_RUNNER、PID $(cat "$DAEMON_DIR/daemon.pid"))"
