@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Yozolab.YoluPainter.Core;
 using UnityEditor;
@@ -6,7 +7,8 @@ using UnityEngine;
 
 namespace Yozolab.YoluPainter.Editor
 {
-    /// <summary>移動ツール（Move / Transform）: 整数画素の移動・自由変形のハンドル・数値での変形。</summary>
+    /// <summary>移動ツール（Move / Transform）: 整数画素の移動・自由変形のハンドル・数値での変形。複数の層を選んでいれば、その全部（グループの中の
+    /// ペイントの層も）を、範囲の和を枠にして一緒に動かす（1 回の Undo）。</summary>
     public sealed partial class TexturePaintWindow
     {
         // 移動ツール: ドラッグ開始時に動かすものの範囲（プレビューの枠）と、数値で変形する値
@@ -24,10 +26,37 @@ namespace Yozolab.YoluPainter.Editor
             if(layer.Kind!=LayerKind.Raster)throw new InvalidOperationException("Only paint layers can be moved or transformed ("+layer.Kind+" layers have no pixels).");
             return layer;
         }
+        /// <summary>移動・変形する層: 1 つならその層（ペイントの層でなければ断る）、複数選んでいれば、その中とグループの中のペイントの層の全部
+        /// （塗りつぶし・調整の層は画素が無いので動かさない）。</summary>
+        internal List<Guid> MoveTargets()
+        {
+            var ids=SelectedLayers;
+            if(ids.Count<=1){RequireMovableLayer();return new List<Guid>{selectedLayer};}
+            var members=document.TopmostOf(ids); var targets=new List<Guid>();
+            foreach(var l in document.Layers) if(l.Kind==LayerKind.Raster&&members.Any(m=>m==l||IsInside(l,m))) targets.Add(l.Id);
+            if(targets.Count==0)throw new InvalidOperationException("None of the selected layers has pixels to move (fill and adjustment layers have none).");
+            return targets;
+        }
+        /// <summary>動かすものの範囲（複数の層ならその和）。</summary>
+        (int x0,int y0,int x1,int y1)? MoveBoundsOf(List<Guid> targets)
+        {
+            (int x0,int y0,int x1,int y1)? all=null;
+            foreach(var id in targets)
+            {
+                var b=document.TransformBounds(id); if(b==null)continue;
+                all=all==null?b:(Math.Min(all.Value.x0,b.Value.x0),Math.Min(all.Value.y0,b.Value.y0),Math.Max(all.Value.x1,b.Value.x1),Math.Max(all.Value.y1,b.Value.y1));
+            }
+            return all;
+        }
+        /// <summary>選んでいる層（複数ならまとめて、1 回の Undo）を変形する。</summary>
+        bool TransformTargets(Affine2D t,Resampling resampling)
+        {
+            var targets=MoveTargets();
+            return targets.Count==1?document.Transform(targets[0],t,resampling:resampling):document.TransformLayers(targets,t,resampling);
+        }
         void BeginMove(Vector2 p,Vector2 pointer)
         {
-            RequireMovableLayer();
-            moveBounds=document.TransformBounds(selectedLayer);
+            moveBounds=MoveBoundsOf(MoveTargets());
             if(moveBounds==null){message=document.Selection!=null?"Nothing to move inside the selection on this layer.":"Nothing to move on this layer.";return;}
             moveMode=HitTransformHandle(moveBounds.Value,pointer,out moveAnchor,out moveHandle,out moveAxes);
             toolDragging=true;toolStart=toolCurrent=p;toolShift=false;GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive);
@@ -36,7 +65,7 @@ namespace Yozolab.YoluPainter.Editor
         internal enum MoveMode { Move, Scale, Rotate }
         MoveMode moveMode; Vector2 moveAnchor, moveHandle; int moveAxes; bool toolShift;
         internal const float HandleHitPoints=6, RotateReachPoints=26, MinHandleBoxPoints=36;
-        (int x0,int y0,int x1,int y1)? handleBounds; long handleRevision=-1; Guid handleLayer; SelectionMask handleSelection;
+        (int x0,int y0,int x1,int y1)? handleBounds; long handleRevision=-1; Guid handleLayer; int handleStamp; SelectionMask handleSelection;
         Vector2 CanvasToWindow(Vector2 p)=>CanvasViewNow().ToGui(p);
         /// <summary>ハンドルを出せる大きさか（小さい範囲では、どこを掴んでも移動にする）。画面の上の辺の長さで見る（回転では変わらない）。</summary>
         bool HandlesUsable((int x0,int y0,int x1,int y1) b)
@@ -114,11 +143,12 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>移動ツールで、動かすものの範囲と掴めるハンドルを見せる（範囲はドキュメントの版・層・選択範囲が変わったときだけ求め直す）。</summary>
         void DrawTransformHandles(CanvasView view)
         {
-            if(handleRevision!=document.Revision||handleLayer!=selectedLayer||!ReferenceEquals(handleSelection,document.Selection))
+            if(handleRevision!=document.Revision||handleLayer!=selectedLayer||handleStamp!=LayerSelectionStamp||!ReferenceEquals(handleSelection,document.Selection))
             {
-                handleRevision=document.Revision; handleLayer=selectedLayer; handleSelection=document.Selection;
+                handleRevision=document.Revision; handleLayer=selectedLayer; handleStamp=LayerSelectionStamp; handleSelection=document.Selection;
                 var layer=document.Layers.FirstOrDefault(l=>l.Id==selectedLayer);
-                handleBounds=layer!=null&&layer.Kind==LayerKind.Raster?document.TransformBounds(selectedLayer):null;
+                if(SelectedLayers.Count>1){try{handleBounds=MoveBoundsOf(MoveTargets());}catch(InvalidOperationException){handleBounds=null;}}
+                else handleBounds=layer!=null&&layer.Kind==LayerKind.Raster?document.TransformBounds(selectedLayer):null;
             }
             if(handleBounds==null)return;
             var b=handleBounds.Value;
@@ -131,20 +161,18 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>選んだ層（選択範囲があればその画素と選択範囲）を整数画素だけ動かす。全チャンネルとマスクが一緒に動く。1 回の Undo。</summary>
         internal void MoveBy(int dx,int dy)
         {
-            RequireMovableLayer();
-            bool changed=document.Transform(selectedLayer,Affine2D.Translation(dx,dy));
+            bool changed=TransformTargets(Affine2D.Translation(dx,dy),Resampling.Bilinear);
             message=changed?"Moved by ("+dx+", "+dy+") px.":"Nothing to move.";repaintPixels=true;
         }
         /// <summary>動かすもの（選択範囲があればその中）の中心を軸に、拡大縮小（負は反転）・回転してからずらす。1 回の Undo。
         /// 90° の倍数の回転では軸を画素の格子に合わせ、画素がそのまま写るようにする。</summary>
         internal void TransformSelected(double dx,double dy,double degrees,double sx,double sy,string done)
         {
-            RequireMovableLayer();
-            var bounds=document.TransformBounds(selectedLayer);
+            var bounds=MoveBoundsOf(MoveTargets());
             if(bounds==null){message=document.Selection!=null?"Nothing to transform inside the selection on this layer.":"Nothing to transform on this layer.";return;}
             var b=bounds.Value; double cx=(b.x0+b.x1)/2.0,cy=(b.y0+b.y1)/2.0;
             if(Math.Abs(Math.IEEERemainder(degrees,90))<1e-9&&Math.Abs(Math.IEEERemainder(degrees,180))>1e-9){cx=Math.Round(cx);cy=Math.Round(cy);}
-            bool changed=document.Transform(selectedLayer,Affine2D.FromParts(cx,cy,dx,dy,degrees,sx,sy),resampling:moveResampling);
+            bool changed=TransformTargets(Affine2D.FromParts(cx,cy,dx,dy,degrees,sx,sy),moveResampling);
             message=changed?done:"Nothing changed.";repaintPixels=true;
         }
         internal void ApplyNumericTransform()

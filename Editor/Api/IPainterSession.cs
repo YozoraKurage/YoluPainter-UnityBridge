@@ -32,7 +32,9 @@ namespace Yozolab.YoluPainter.Api
 
         /// <summary>選んでいるレイヤーの上に、画像を中身にした新しいペイントのレイヤーを足して選ぶ。返り値はその ID。</summary>
         Guid AddImageLayer(string name, PaintChannel channel, byte[] rgba);
-        /// <summary>ペイントのレイヤーのチャンネルを画像で置き換える（選択範囲があればその中だけ）。何も変わらなければ false。</summary>
+        /// <summary>ペイントのレイヤーのチャンネルを画像で置き換える（選択範囲があればその中だけ）。何も変わらなければ false。
+        /// 画像ピクセルのロック・すべてのロックのレイヤー（ロックしたグループの中も）は断る（LayerLockedException。何も変えない）。
+        /// 透明ピクセルのロックでは色だけを置き換え、各画素の透明度は変えない（透明な画素はそのまま）。</summary>
         bool ReplaceLayerPixels(Guid layerId, PaintChannel channel, byte[] rgba);
 
         /// <summary>ステータスバーに出す。</summary>

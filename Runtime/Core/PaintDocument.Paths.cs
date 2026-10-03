@@ -22,6 +22,7 @@ namespace Yozolab.YoluPainter.Core
             if (!layer.IsChannelEnabled(path.Channel)) throw new InvalidOperationException("Enable the path's channel on the layer first.");
             if (layer.Path != null && layer.Path.Channel != path.Channel) throw new InvalidOperationException("A layer's path keeps its channel; rasterize it before drawing another channel.");
             if (layer.Path != null && layer.Path.GetType() != path.GetType()) throw new InvalidOperationException("A layer keeps the kind of its path (on the model or on the canvas); rasterize it first.");
+            RefuseLockedPath(layer);
             var surface = layer.GetChannel(path.Channel);
             var coords = new SortedSet<TileCoord>(surface.EnumerateTileCoordinates()); foreach (var c in rendered.EnumerateTileCoordinates()) coords.Add(c);
             var changes = new List<TileChange>(); long rollback = 0;
@@ -58,6 +59,7 @@ namespace Yozolab.YoluPainter.Core
             var layer = GetLayer(layerId);
             if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException("Only paint layers can be drawn by a path.");
             if (!layer.IsChannelEnabled(path.Channel)) throw new InvalidOperationException("Enable the path's channel on the layer first.");
+            RefuseLockedPath(layer); // 描く前に断る
             SetPath(layerId, path, CanvasPathRenderer.Render(this, path));
         }
 
@@ -67,9 +69,13 @@ namespace Yozolab.YoluPainter.Core
             EnsureNoStroke();
             var layer = GetLayer(layerId);
             if (layer.Path == null) return;
+            RefuseLockedAttributes(layer);
             var old = layer.Path;
             Execute(new DelegateCommand(() => layer.Path = null, () => layer.Path = old, 64));
         }
+
+        /// <summary>パスは層の画素を描き直す: 画像のロック・すべてのロックで断り、透明部分のロックでも断る（描き直すとアルファが変わる）。</summary>
+        void RefuseLockedPath(PaintLayer layer) { RefuseLockedPixels(layer, erase: false); RefuseLockedTransparency(layer); }
 
         /// <summary>パスで描かれた層は、手で塗る・塗りつぶす・変形すると次の描き直しで消えるので断る。</summary>
         internal static void RefusePathLayer(PaintLayer layer)

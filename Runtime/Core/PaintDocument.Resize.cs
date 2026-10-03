@@ -119,6 +119,8 @@ namespace Yozolab.YoluPainter.Core
                 CopyFilters(copy, layer, target, scale, size, notes);
             }
             copy.ValidateStructure();
+            // ロックは最後に写す（写しの層へのフィルターなどの追加をロックが断らないように）。大きさの変更はロックに関わらず全部の層に効く（Photoshop の画像解像度と同じ）
+            foreach (var layer in layers) copy.SetLocksForLoad(copy.GetLayer(layer.Id), layer.Locks);
             if (selection != null)
             {
                 var resized = selection.ResampledTo(width, height, xs, ys, resampling);

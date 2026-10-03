@@ -100,8 +100,10 @@ namespace Yozolab.YoluPainter.Editor
             if(p.x<0||p.y<0||p.x>=document.Width||p.y>=document.Height)return;
             var layer=document.GetLayer(selectedLayer);
             if(!EditingMask&&layer.Kind!=LayerKind.Raster)throw new InvalidOperationException("Fill paints pixels: select a paint layer, or edit the layer's mask.");
+            var b=GetBrush();
+            if(!EditingMask)document.EnsurePixelsEditable(selectedLayer,b.Erase); // ロックで断るなら、チャンネルを有効にする前に
             if(!EditingMask&&!layer.IsChannelEnabled(channel))document.SetChannelEnabled(selectedLayer,channel,true);
-            var region=Wand(p); var b=GetBrush();
+            var region=Wand(p);
             bool changed=EditingMask?document.FillMask(selectedLayer,b.Opacity,region,reveal:b.Erase):document.Fill(selectedLayer,channel,b.Color,b.Opacity,region,b.Erase);
             message=changed?"Filled.":"Nothing to fill there.";repaintPixels=true;
         }
@@ -115,6 +117,7 @@ namespace Yozolab.YoluPainter.Editor
                     if(click)return;
                     var layer=document.GetLayer(selectedLayer);
                     if(layer.Kind!=LayerKind.Raster)throw new InvalidOperationException("A gradient paints pixels: select a paint layer.");
+                    document.EnsurePixelsEditable(selectedLayer);
                     if(!layer.IsChannelEnabled(channel))document.SetChannelEnabled(selectedLayer,channel,true);
                     var c=GetBrush().Color; var to=(Color32)gradientTo;
                     document.Gradient(selectedLayer,channel,new GradientSettings{Shape=gradientShape,X0=a.x,Y0=a.y,X1=b.x,Y1=b.y,From=c,To=new Rgba32(to.r,to.g,to.b,to.a),Opacity=brush.opacity});
@@ -131,8 +134,7 @@ namespace Yozolab.YoluPainter.Editor
                     if(moveMode==MoveMode.Move){var d=MoveDelta(); if(d!=Vector2Int.zero)MoveBy(d.x,d.y); break;}
                     var t=DragTransform(); if(t.IsIdentity)break;
                     if(Math.Abs(t.Determinant)<1e-6)throw new InvalidOperationException("That would scale to nothing; drag the handle less far.");
-                    RequireMovableLayer();
-                    bool changed=document.Transform(selectedLayer,t,resampling:moveResampling);
+                    bool changed=TransformTargets(t,moveResampling);
                     message=!changed?"Nothing changed.":moveMode==MoveMode.Rotate?"Rotated "+DragAngle().ToString("0.#",System.Globalization.CultureInfo.InvariantCulture)+"°.":"Scaled.";
                     repaintPixels=true;break;
                 }

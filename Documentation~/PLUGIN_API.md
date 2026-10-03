@@ -73,7 +73,7 @@ namespace Example
 | `ReadComposite(channel)` | チャンネルの全レイヤーの合成（Normal は Unity 向けの出力: OpenGL の向き、Height からの導出込み） |
 | `ReadLayer(layerId, channel)` | ペイントのレイヤーのチャンネルの画素 |
 | `AddImageLayer(name, channel, rgba)` | 選んでいるレイヤーの上に、画像を中身にした新しいペイントのレイヤーを足して選ぶ（選択範囲に関係なく全体。1 回の Undo） |
-| `ReplaceLayerPixels(layerId, channel, rgba)` | ペイントのレイヤーのチャンネルを画像で置き換える。選択範囲があればその中だけ（部分的な選択はプリマルチプライドで混ぜる）。チャンネルが無効なら同じ 1 回の Undo の中で有効にする |
+| `ReplaceLayerPixels(layerId, channel, rgba)` | ペイントのレイヤーのチャンネルを画像で置き換える。選択範囲があればその中だけ（部分的な選択はプリマルチプライドで混ぜる）。チャンネルが無効なら同じ 1 回の Undo の中で有効にする。レイヤーのロック: 画像ピクセル・すべてのロック（ロックしたグループの中も）は `LayerLockedException` で断り、透明ピクセルのロックでは色だけを置き換える（各画素の透明度と透明な画素はそのまま） |
 | `ShowMessage(text)` | ステータスバーに出す |
 
 変える口は、ストロークの最中なら `InvalidOperationException`、画像の大きさや層の種類が違えば例外で断り、文書は変わらない。

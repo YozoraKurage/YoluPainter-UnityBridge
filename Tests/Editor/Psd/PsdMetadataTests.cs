@@ -9,7 +9,7 @@ using Yozolab.YoluPainter.Core.Psd;
 
 namespace Yozolab.YoluPainter.Tests
 {
-    /// <summary>描画に関わらない情報（レイヤーのメタデータ・ロック・カラーラベル、ガイドやサムネイルや XMP などの画像リソース）は
+    /// <summary>描画に関わらない情報（レイヤーのメタデータ・ネイティブに無いロックのビット・カラーラベル、ガイドやサムネイルや XMP などの画像リソース）は
     /// 編集可能のまま受け入れ、NotCarriedIntoExport の診断で知らせる。描画や解釈を変えうるもの（sRGB 以外の ICC プロファイル、
     /// 1:1 でないピクセル縦横比、分類できないブロック）は PreserveOnly のまま。</summary>
     public sealed class PsdMetadataTests
@@ -68,9 +68,8 @@ namespace Yozolab.YoluPainter.Tests
                 case "shmd": Tag("shmd", new byte[4]); break;
                 case "fxrp": Tag("fxrp", new byte[16]); break;
                 case "lyvr": Tag("lyvr", new byte[] { 0, 0, 0, 70 }); break;
-                case "lspf": Tag("lspf", new byte[] { 0, 0, 0, 1 }); break;
+                case "lspf": Tag("lspf", new byte[] { 0, 0, 0, 8 }); break; // 透明・画像・位置・すべてのロックは取り込む（PsdLockTests）。ビット 3 にはネイティブのロックが無い
                 case "lclr": Tag("lclr", new byte[] { 0, 3, 0, 0, 0, 0, 0, 0 }); break;
-                case "lock": layers[0].Flags = 8 | 1; break;
                 case "1005": resources = Resource(1005, new byte[16]); break;
                 case "1032": resources = Resource(1032, new byte[16]); break;
                 case "1036": resources = Resource(1036, new byte[28]); break;
@@ -97,7 +96,7 @@ namespace Yozolab.YoluPainter.Tests
         }
 
         [TestCase("lnsr", "lnsr")] [TestCase("shmd", "shmd")] [TestCase("fxrp", "fxrp")] [TestCase("lyvr", "lyvr")] [TestCase("lspf", "lspf")]
-        [TestCase("lclr", "lclr")] [TestCase("lock", "Transparency lock")]
+        [TestCase("lclr", "lclr")]
         [TestCase("1005", "1005 (resolution")] [TestCase("1032", "1032 (grid and guides)")] [TestCase("1036", "1036 (thumbnail)")] [TestCase("1060", "1060 (XMP")]
         [TestCase("1057", "1057 (version info)")] [TestCase("1065", "1065 (layer comps)")] [TestCase("1050", "1050 (slices)")] [TestCase("2000", "2000 (saved path)")]
         [TestCase("1064", "pixel aspect ratio 1:1")] [TestCase("srgb", "sRGB IEC61966-2.1")] [TestCase("srgb-v4", "sRGB IEC61966-2.1")]

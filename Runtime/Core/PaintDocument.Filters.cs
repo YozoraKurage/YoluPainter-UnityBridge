@@ -363,6 +363,7 @@ namespace Yozolab.YoluPainter.Core
         /// marks everything the layer's output covers before and after.</summary>
         void ExecuteStack(PaintLayer layer, FilterTarget target, FilterEffect[] after, object coalesceKey)
         {
+            RefuseLockedAttributes(layer); // 非破壊の効果は画素を変えないので、画像のロックでは足せる。すべてのロックでだけ断る
             if (after.Length > MaxFiltersPerStack) throw new InvalidOperationException("A stack holds at most " + MaxFiltersPerStack + " filters.");
             var probe = new List<FilterEffect[]>();
             if (target == FilterTarget.Mask) { var chain = new List<FilterEffect>(); foreach (var e in after) if (e.IsActive) chain.Add(e); probe.Add(chain.ToArray()); }
@@ -398,10 +399,23 @@ namespace Yozolab.YoluPainter.Core
             if (ContainsGenerator(stack)) PollGeneratorInputs();
         }
 
+        /// <summary>Lock Transparent Pixels for a baked tile: each pixel takes the filtered colour with its own alpha (a transparent pixel,
+        /// or one the filter made transparent, stays as it was).</summary>
+        static void KeepAlphaOf(SparseTileSurface surface, TileCoord coord, byte[] filtered)
+        {
+            var original = new byte[filtered.Length]; surface.CopyTile(coord, original);
+            for (int o = 0; o < filtered.Length; o += 4)
+            {
+                var p = ReplaceKeepingAlpha(new Rgba32(original[o], original[o + 1], original[o + 2], original[o + 3]), new Rgba32(filtered[o], filtered[o + 1], filtered[o + 2], filtered[o + 3]), 1);
+                filtered[o] = p.R; filtered[o + 1] = p.G; filtered[o + 2] = p.B; filtered[o + 3] = p.A;
+            }
+        }
         /// <summary>Applies the layer's filters to its pixels and removes them, as one undo step: every channel's content stack
         /// into that channel's raster tiles and the mask stack into the mask. Fill layers (no pixels) and layers drawn by a path
         /// refuse a content bake. The undo data is checked against <see cref="ActiveStrokeBudgetBytes"/> before anything changes.
-        /// Returns false when the layer has no filters.</summary>
+        /// Returns false when the layer has no filters. A content bake is refused under Lock Image Pixels and Lock All (a mask-only bake
+        /// only under Lock All); under Lock Transparent Pixels the filtered colour is baked and every pixel keeps its own alpha (so what
+        /// a filter did to the alpha is dropped with the stack).</summary>
         public bool BakeFilters(Guid layerId)
         {
             EnsureNoStroke(); var layer = GetLayer(layerId); var mask = layer.Mask;
@@ -409,6 +423,8 @@ namespace Yozolab.YoluPainter.Core
             if (!content && !masked) return false;
             if (content && layer.Kind != LayerKind.Raster) throw new InvalidOperationException("A " + layer.Kind.ToString().ToLowerInvariant() + " layer has no pixels to bake its filters into. Remove the filters, or put the content on a paint layer.");
             if (content) RefusePathLayer(layer);
+            if (content) RefuseLockedPixels(layer, erase: false); else RefuseLockedAttributes(layer);
+            bool keepAlpha = content && KeepsAlpha(layer);
             RefuseInactiveGenerators(layer, content, masked);
             var engine = FilterEvaluator; int tileBytes = TileSize * TileSize * 4; long estimate = 0;
             var plans = new List<(SparseTileSurface surface, List<(TileCoord coord, byte[] bytes)> tiles)>();
@@ -419,7 +435,9 @@ namespace Yozolab.YoluPainter.Core
                     var tiles = new List<(TileCoord, byte[])>();
                     foreach (var coord in layer.EnumerateContentTiles(channel))
                     {
-                        var bytes = new byte[tileBytes]; engine.CopyTile(s, coord, bytes); tiles.Add((coord, bytes));
+                        var bytes = new byte[tileBytes]; engine.CopyTile(s, coord, bytes);
+                        if (keepAlpha) KeepAlphaOf(s.Surface, coord, bytes);
+                        tiles.Add((coord, bytes));
                         estimate += 64 + s.Surface.TileBytesAt(coord) + tileBytes;
                         if (estimate > ActiveStrokeBudgetBytes) throw BakeBudget(estimate);
                     }

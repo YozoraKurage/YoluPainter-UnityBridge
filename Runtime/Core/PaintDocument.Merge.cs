@@ -20,6 +20,10 @@ namespace Yozolab.YoluPainter.Core
         Group,
         /// <summary>Merge visible: the composite of the document, as a Normal layer at 100 % on the top level.</summary>
         Visible,
+        /// <summary>Merge layers (several chosen layers of one group): composited from transparent as if they were alone in an isolated
+        /// group, into a Normal layer at 100 % without a mask where the topmost of them was; clipped when every one of them is clipped to the
+        /// same base (then they are composited one over another, unclipped, and the result clips to that base).</summary>
+        Layers,
     }
 
     /// <summary>What a merge also did, besides combining pixels.</summary>
@@ -155,13 +159,17 @@ namespace Yozolab.YoluPainter.Core
             EnsureNoStroke(); CheckTolerance(tolerance);
             var refusal = MergeDownRefusal(upperId); if (refusal.HasValue) throw Refusal(refusal.Value);
             var upper = GetLayer(upperId); var lower = SiblingBelow(upper);
+            // ロック: 画像のロック・すべてのロックの層は結合しない（行き先の画素が変わり、上の層の画素は別の層に入って消える）
+            RefuseLockedPixels(upper, erase: false); RefuseLockedPixels(lower, erase: false);
             RefuseInactiveGenerators(upper, true, true); RefuseInactiveGenerators(lower, true, false);
             bool upperClipped = IsEffectivelyClipped(layers.IndexOf(upper)), lowerClipped = IsEffectivelyClipped(layers.IndexOf(lower));
             bool plain = lower.BlendMode == LayerBlendMode.Normal && lower.Opacity == 1 && (lower.Mask == null || lower.Mask.IsNeutral);
             MergeMethod method = upperClipped && !lowerClipped ? MergeMethod.IntoClippingBase
                 : !upperClipped && !lowerClipped && !plain && NothingShowsBelow(lower) ? MergeMethod.Isolated : MergeMethod.OntoLowerLayer;
+            // 透明部分のロックの下の層: クリッピングの基へ当てる結合は基のアルファを変えないので行う。ほかは下の層のアルファが変わるので断る
+            if (method != MergeMethod.IntoClippingBase) RefuseLockedTransparency(lower);
             Guid id = NewLayerId(resultId);
-            var result = new PaintLayer(this, lower.Name, id);
+            var result = new PaintLayer(this, lower.Name, id) { Locks = lower.Locks };
             MergeNotes notes = MergeNotes.None;
             if (upper.FilterList.Count > 0 || lower.FilterList.Count > 0 || upper.Mask != null && upper.Mask.FilterList.Count > 0 || method == MergeMethod.Isolated && lower.Mask != null && lower.Mask.FilterList.Count > 0) notes |= MergeNotes.EffectsBaked;
             if (upper.Path != null || lower.Path != null) notes |= MergeNotes.PathsRasterized;
@@ -238,6 +246,7 @@ namespace Yozolab.YoluPainter.Core
             EnsureNoStroke(); CheckTolerance(tolerance);
             var refusal = MergeGroupRefusal(groupId); if (refusal.HasValue) throw Refusal(refusal.Value);
             var group = GetLayer(groupId); var block = Block(group);
+            foreach (var l in block) RefuseLockedPixels(l, erase: false);
             MergeNotes notes = MergeNotes.None;
             foreach (var l in block)
             {
@@ -250,7 +259,7 @@ namespace Yozolab.YoluPainter.Core
             }
             Guid id = NewLayerId(resultId);
             var result = new PaintLayer(this, group.Name, id)
-            { Visible = group.Visible, Opacity = group.Opacity, Clipping = group.Clipping, BlendMode = group.BlendMode == LayerBlendMode.PassThrough ? LayerBlendMode.Normal : group.BlendMode };
+            { Visible = group.Visible, Opacity = group.Opacity, Clipping = group.Clipping, BlendMode = group.BlendMode == LayerBlendMode.PassThrough ? LayerBlendMode.Normal : group.BlendMode, Locks = group.Locks };
             if (group.Mask != null) result.Mask = CloneMask(group.Mask, result);
             long budget = 0;
             foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel)))
@@ -292,6 +301,7 @@ namespace Yozolab.YoluPainter.Core
             EnsureNoStroke(); CheckTolerance(tolerance);
             var merged = Contributing();
             if (merged.Count == 0) throw Refusal(LayerOpRefusal.NothingVisible);
+            foreach (var l in layers) if (merged.Contains(l) && !l.IsGroup) RefuseLockedPixels(l, erase: false);
             MergeNotes notes = MergeNotes.None;
             foreach (var l in merged)
             {
@@ -362,6 +372,103 @@ namespace Yozolab.YoluPainter.Core
             return CommitMerge(before, after, removed, result, MergeMethod.Visible, notes, tolerance, result);
         }
 
+        // ───────────── merge layers (several chosen) ─────────────
+
+        /// <summary>Merges several layers of one group into one paint layer (Photoshop's Merge Layers with several layers selected), as one
+        /// undo step. The chosen layers (a group with its contents; a layer inside a chosen group goes with the group) are composited from
+        /// transparent as if they were alone in an isolated group, into a Normal layer at 100 % without a mask that takes the place and the
+        /// name of the topmost of them and a new ID (<see cref="MergeMethod.Layers"/>). When every chosen layer is clipped to the same base,
+        /// they are composited one over another without their clipping and the result clips to that base. The look is compared like the
+        /// other merges (also where layers that were not chosen are drawn), and a change beyond tolerance is refused with
+        /// <see cref="LayerMergeException"/>; exact when the chosen layers are the whole stack of an isolated group with nothing below, and
+        /// otherwise within the rounding of compositing in another order unless a blend mode, opacity, mask or clipping of a chosen layer
+        /// acted on what is below the chosen ones (Photoshop changes the look there too). Refused for fewer than two layers, layers of
+        /// different groups (<see cref="LayerOpRefusal.DifferentGroups"/>), a hidden chosen layer, locked image pixels or Lock All on any of
+        /// them, generators without usable maps and a result beyond <see cref="ActiveStrokeBudgetBytes"/>. Effects are baked, paths
+        /// rasterized and hidden layers inside chosen groups dropped (<see cref="MergeNotes"/>).</summary>
+        public LayerMergeReport MergeLayers(IEnumerable<Guid> ids, int tolerance = MergeRoundingTolerance, Guid? resultId = null)
+        {
+            EnsureNoStroke(); CheckTolerance(tolerance); if (ids == null) throw new ArgumentNullException(nameof(ids));
+            var members = new List<PaintLayer>(TopmostOf(ids));
+            if (members.Count < 2) throw new ArgumentException("Choose at least two layers to merge them together (one layer merges down).", nameof(ids));
+            Guid parent = members[0].ParentId;
+            foreach (var m in members)
+                if (m.ParentId != parent) throw new LayerOpException(LayerOpRefusal.DifferentGroups, "Only layers in the same group can be merged together. Move them into one group first.");
+            foreach (var m in members) if (!m.Visible) throw Refusal(LayerOpRefusal.HiddenLayer);
+            var blocks = new List<PaintLayer>(); var owner = new Dictionary<PaintLayer, PaintLayer>();
+            foreach (var m in members) foreach (var l in Block(m)) { blocks.Add(l); owner[l] = m; }
+            foreach (var l in blocks) RefuseLockedPixels(l, erase: false);
+            MergeNotes notes = MergeNotes.None;
+            foreach (var l in blocks)
+            {
+                if (l.Mask != null && l.Mask.FilterList.Count > 0) notes |= MergeNotes.EffectsBaked; // 選んだグループのマスクも結果に焼かれる
+                if (l != owner[l] && !ShownWithin(l, owner[l])) notes |= MergeNotes.HiddenLayersDropped;
+                RefuseInactiveGenerators(l, !l.IsGroup, true);
+                if (l.IsGroup) continue;
+                if (l.FilterList.Count > 0) notes |= MergeNotes.EffectsBaked;
+                if (l.Path != null) notes |= MergeNotes.PathsRasterized;
+                foreach (var c in l.Channels.Keys) if (!l.IsChannelEnabled(c) && l.Channels[c].TileCount > 0) notes |= MergeNotes.DisabledChannelsDropped;
+            }
+            // どれも同じ基にクリッピングされているなら、クリッピングを外して重ね、結果をその基にクリッピングする
+            bool clipped = true; PaintLayer clipBase = null;
+            foreach (var m in members)
+            {
+                if (!IsEffectivelyClipped(layers.IndexOf(m))) { clipped = false; break; }
+                var b = ClippingBaseOf(m);
+                if (clipBase == null) clipBase = b; else if (b != clipBase) { clipped = false; break; }
+            }
+            var top = members[members.Count - 1];
+            Guid id = NewLayerId(resultId);
+            var result = new PaintLayer(this, top.Name, id) { Visible = true, Opacity = 1, BlendMode = LayerBlendMode.Normal, Clipping = clipped };
+            long budget = 0;
+            foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel)))
+            {
+                List<MergeNode> nodes;
+                if (clipped)
+                {
+                    nodes = new List<MergeNode>();
+                    foreach (var m in members)
+                    {
+                        var n = MakeNode(m, c); if (n == null) continue;
+                        n.PassesThrough = n.Group && m.BlendMode == LayerBlendMode.PassThrough;
+                        nodes.Add(n);
+                    }
+                }
+                else nodes = PlanNodes(members, c);
+                if (nodes.Count == 0) continue;
+                var tiles = new SortedSet<TileCoord>();
+                foreach (var l in blocks) if (!l.IsGroup) tiles.UnionWith(l.EnumerateContentTiles(c));
+                var surface = new SparseTileSurface(Width, Height, TileSize);
+                EvaluateTiles(c, tiles, nodes, surface, ref budget, null, (slot, i, normal, below) => EvaluateNodes(nodes, Rgba32.Transparent, slot, i, normal));
+                if (surface.TileCount == 0) continue;
+                var target = result.GetChannel(c);
+                foreach (var coord in surface.EnumerateTileCoordinates()) target.Restore(coord, surface.Capture(coord));
+            }
+            var removed = new HashSet<PaintLayer>(blocks);
+            var before = SnapshotStructure(); var order = new List<PaintLayer>();
+            foreach (var l in layers) { if (l == top) order.Add(result); else if (!removed.Contains(l)) order.Add(l); }
+            result.ParentId = parent;
+            layers.Clear(); layers.AddRange(order);
+            var after = SnapshotStructure(); RestoreStructure(before);
+            // 選ばなかった兄弟（とその中身）も比べる: 間にあったクリッピングの層の基が変わると、結合した層の外で見た目が変わりうる
+            var others = new List<PaintLayer>(); foreach (var l in layers) if (!removed.Contains(l) && IsWithinParent(l, parent)) others.Add(l);
+            return CommitMerge(before, after, blocks, result, MergeMethod.Layers, notes, tolerance, null, others);
+        }
+
+        /// <summary>The layer a clipped layer is clipped to: the nearest sibling below without the clipping mark, or the bottom sibling.</summary>
+        PaintLayer ClippingBaseOf(PaintLayer layer)
+        {
+            PaintLayer last = null;
+            for (int i = layers.IndexOf(layer) - 1; i >= 0; i--)
+            {
+                if (layers[i].ParentId != layer.ParentId) continue;
+                last = layers[i]; if (!last.Clipping) return last;
+            }
+            return last;
+        }
+        /// <summary>True when the layer is in parent (Guid.Empty: the document) at any depth.</summary>
+        bool IsWithinParent(PaintLayer layer, Guid parent) => parent == Guid.Empty || layer.ParentId == parent || IsDescendant(layer, GetLayer(parent));
+
         /// <summary>The layers that show in some channel: every layer the compositor's plan of any channel holds (a base, a clipped layer, a
         /// group or a layer inside one).</summary>
         HashSet<PaintLayer> Contributing()
@@ -381,7 +488,7 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>Applies the structural swap, compares the composite of every affected channel before and after (the swap is undone and
         /// redone around each chunk of tiles; with <paramref name="storedBefore"/> the "before" composite is that layer's pixels instead) and
         /// either records the swap as one undo step or undoes it and refuses.</summary>
-        LayerMergeReport CommitMerge(Structure before, Structure after, IList<PaintLayer> removed, PaintLayer result, MergeMethod method, MergeNotes notes, int tolerance, PaintLayer storedBefore)
+        LayerMergeReport CommitMerge(Structure before, Structure after, IList<PaintLayer> removed, PaintLayer result, MergeMethod method, MergeNotes notes, int tolerance, PaintLayer storedBefore, IEnumerable<PaintLayer> alsoCompared = null)
         {
             long cost = 128 + result.AllocatedBytes; foreach (var l in removed) cost += l.AllocatedBytes;
             var swap = SwapStructure(before, after, cost);
@@ -395,6 +502,7 @@ namespace Yozolab.YoluPainter.Core
                     foreach (var l in removed) if (!l.IsGroup) tiles.UnionWith(l.EnumerateContentTiles(c));
                     if (result.TryGetChannel(c, out var own)) tiles.UnionWith(own.EnumerateTileCoordinates());
                     if (storedBefore != null) foreach (var l in layers) if (!l.IsGroup) tiles.UnionWith(l.EnumerateContentTiles(c));
+                    if (alsoCompared != null) foreach (var l in alsoCompared) if (!l.IsGroup) tiles.UnionWith(l.EnumerateContentTiles(c));
                     long channelChanged = 0;
                     foreach (var chunk in Chunks(tiles))
                     {
@@ -496,8 +604,14 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>The plan of a group's contents (Guid.Empty: the top level) for a channel, as <see cref="CpuCompositor.Plan"/> builds it.</summary>
         List<MergeNode> PlanNodes(Guid parent, PaintChannel channel)
         {
-            var plan = new List<MergeNode>(); var siblings = new List<PaintLayer>();
+            var siblings = new List<PaintLayer>();
             foreach (var l in layers) if (l.ParentId == parent) siblings.Add(l);
+            return PlanNodes(siblings, channel);
+        }
+        /// <summary>The plan of these siblings (bottom to top) as if they were the only contents of a group.</summary>
+        List<MergeNode> PlanNodes(List<PaintLayer> siblings, PaintChannel channel)
+        {
+            var plan = new List<MergeNode>();
             for (int k = 0; k < siblings.Count; k++)
             {
                 if (k > 0 && siblings[k].Clipping) continue;

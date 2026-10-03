@@ -73,6 +73,9 @@ namespace Yozolab.YoluPainter.Core.Psd
         public AdjustmentSettings Adjustment;
         /// <summary>Solid colour fill layer (SoCo) colour, opaque; null for other layers. A fill layer has no pixels of its own.</summary>
         public Rgba32? FillColor;
+        /// <summary>Layers-panel locks: the protection flags of the layer's (or folder's) lspf block (bit 0 transparency, bit 1 image
+        /// pixels, bit 2 position, bit 31 all) and layer flag bit 0 (transparency). Editing state only; nothing renders differently.</summary>
+        public LayerLocks Locks;
         public bool IsFill { get { return FillColor.HasValue; } }
         public bool IsGroup { get { return Children != null; } }
         public bool IsAdjustment { get { return Adjustment != null; } }

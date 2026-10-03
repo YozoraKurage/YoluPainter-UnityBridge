@@ -89,8 +89,8 @@ namespace Yozolab.YoluPainter.Editor
             Item(m, "New Layer", AddPaintLayer, keys: "Ctrl+Shift+N");
             Item(m, "New Fill Layer", AddFillLayerHere);
             foreach (var (label, make) in AdjustmentMenu) { var mk = make; var lb = label; m.AddItem(new GUIContent(L.Tr("New Adjustment Layer") + "/" + L.Tr(lb)), false, () => TryAction(() => selectedLayer = document.AddAdjustmentLayer(L.Tr(lb), mk(), above: AboveSelected()).Id)); }
-            Item(m, "Group Layers", () => selectedLayer = document.GroupLayers(new[] { selectedLayer }, L.Tr("Group") + " " + (document.Layers.Count(l => l.IsGroup) + 1)).Id, active != null, keys: "Ctrl+G");
-            Item(m, "Ungroup", UngroupSelected, active != null && active.IsGroup);
+            Item(m, "Group Layers", GroupSelectedLayers, active != null, keys: "Ctrl+G");
+            Item(m, "Ungroup", UngroupSelected, active != null && active.IsGroup, keys: "Ctrl+Shift+G");
             m.AddSeparator("");
             LayerOpMenuItems(m);
             m.AddSeparator("");
@@ -107,7 +107,13 @@ namespace Yozolab.YoluPainter.Editor
             m.AddSeparator("");
             Item(m, "Move Layer Up", () => MoveSelectedLayer(+1), active != null, keys: "Ctrl+]");
             Item(m, "Move Layer Down", () => MoveSelectedLayer(-1), active != null, keys: "Ctrl+[");
-            Item(m, "Delete Layer", DeleteSelectedLayer, document.Layers.Count > 1);
+            var chosen = SelectedLayers;
+            if (chosen.Count > 0 && chosen.All(id => !document.GetLayer(id).Visible)) Item(m, "Show Layers", ToggleSelectedVisibility, true, keys: "Ctrl+,");
+            else Item(m, "Hide Layers", ToggleSelectedVisibility, chosen.Count > 0, keys: "Ctrl+,");
+            LockMenuItems(m);
+            m.AddSeparator("");
+            if (chosen.Count > 1) Item(m, "Delete Layers", DeleteSelectedLayer, document.Layers.Count > 1);
+            else Item(m, "Delete Layer", DeleteSelectedLayer, document.Layers.Count > 1);
         }
 
         void SelectMenu(GenericMenu m)
@@ -201,7 +207,7 @@ namespace Yozolab.YoluPainter.Editor
             Item(m, "Plugins…", ShowPluginList);
         }
 
-        const string ShortcutHelp = "Tools: B brush · E eraser · G fill · Shift+G gradient · M rectangle select · Shift+M ellipse select · L lasso · W magic wand · V move · P path · I eyedropper\n[ / ] brush size · X swap colors · D default colors\nCtrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo · Ctrl+S save · Ctrl+Shift+S save as · Ctrl+O open · Ctrl+N new\nCtrl+A select all · Ctrl+D deselect · Ctrl+Shift+I inverse\nCtrl+J duplicate layer · Ctrl+E merge down (a group: merge group) · Ctrl+Shift+E merge visible · Ctrl+C copy · Ctrl+Shift+C copy merged · Ctrl+X cut · Ctrl+V paste as a new layer\nF1 2D · F2 3D · F3 2D + 3D · Ctrl+0 fit · Ctrl++ / Ctrl+- zoom · wheel zoom · middle drag pan\n3D: Alt or right drag orbits, middle drag pans, wheel zooms\nEsc cancels a stroke or a drag\nBy default, Unity's own shortcuts do nothing while this window has focus (Project Settings ▸ YoluPainter ▸ Unity shortcuts while painting)";
+        const string ShortcutHelp = "Tools: B brush · E eraser · G fill · Shift+G gradient · M rectangle select · Shift+M ellipse select · L lasso · W magic wand · V move · P path · I eyedropper\n[ / ] brush size · X swap colors · D default colors\nCtrl+Z undo · Ctrl+Shift+Z or Ctrl+Y redo · Ctrl+S save · Ctrl+Shift+S save as · Ctrl+O open · Ctrl+N new\nCtrl+A select all · Ctrl+D deselect · Ctrl+Shift+I inverse\nCtrl+J duplicate layer · Ctrl+E merge down (a group: merge group; several layers: merge layers) · Ctrl+Shift+E merge visible · Ctrl+C copy · Ctrl+Shift+C copy merged · Ctrl+X cut · Ctrl+V paste as a new layer\nCtrl+Shift+N new layer · Ctrl+G group · Ctrl+Shift+G ungroup · Ctrl+Alt+G clip to the layer below · Ctrl+] / Ctrl+[ move up / down · Ctrl+, hide or show · in the Layers panel Ctrl+click adds or removes a layer, Shift+click selects a range\nF1 2D · F2 3D · F3 2D + 3D · Ctrl+0 fit · Ctrl++ / Ctrl+- zoom · wheel zoom · middle drag pan\n3D: Alt or right drag orbits, middle drag pans, wheel zooms\nEsc cancels a stroke or a drag\nBy default, Unity's own shortcuts do nothing while this window has focus (Project Settings ▸ YoluPainter ▸ Unity shortcuts while painting)";
         const string LimitsHelp = "Prototype: the CPU paints the source; tiles are composited on the GPU or the CPU (Project Settings ▸ YoluPainter). Readable static and skinned meshes (posed on a copy). One channel is painted at a time. .ylp saves; PSD with 8-bit RGB layers, groups, masks, fills and three adjustment types. Generators read baked mesh maps and are computed on the CPU; anchors are not implemented yet, and the 3D preview does not reproduce lilToon exactly. See Documentation~/STATUS.md in the package.";
     }
 }

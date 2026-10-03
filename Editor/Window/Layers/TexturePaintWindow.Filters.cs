@@ -40,7 +40,9 @@ namespace Yozolab.YoluPainter.Editor
         {
             TryAction(() =>
             {
-                if (document.BakeFilters(selectedLayer)) message = L.Tr("Baked the filters into the layer's pixels (one undo step); the filter stack is now empty.");
+                bool keepAlpha = (document.EffectiveLocks(selectedLayer) & LayerLocks.Transparency) != 0 && document.GetLayer(selectedLayer).Filters.Count > 0;
+                if (document.BakeFilters(selectedLayer)) message = L.Tr("Baked the filters into the layer's pixels (one undo step); the filter stack is now empty.")
+                    + (keepAlpha ? " " + L.Tr("The transparent pixels are locked, so only the colours were baked: each pixel kept its transparency.") : "");
                 else message = L.Tr("The layer has no filters to bake.");
                 repaintPixels = true;
             });

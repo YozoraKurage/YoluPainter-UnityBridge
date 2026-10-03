@@ -64,11 +64,13 @@ namespace Yozolab.YoluPainter.Core
         }
 
         /// <summary>Fills a layer's channel with a colour where region (else the selection, else everything) allows, by
-        /// opacity × the region's amount. Erase removes alpha instead. Returns false when no pixel changed.</summary>
+        /// opacity × the region's amount. Erase removes alpha instead. Returns false when no pixel changed. With the layer's
+        /// transparent pixels locked every pixel keeps its alpha (<see cref="LayerLocks.Transparency"/>; erasing is refused).</summary>
         public bool Fill(Guid layerId, PaintChannel channel, Rgba32 color, double opacity = 1, SelectionMask region = null, bool erase = false)
         {
             MathUtil.RequireFinite(opacity, nameof(opacity)); if (opacity < 0 || opacity > 1) throw new ArgumentOutOfRangeException(nameof(opacity));
-            var surface = PaintableSurface(layerId, channel);
+            var surface = PaintableSurface(layerId, channel, erase, out bool keepAlpha);
+            if (keepAlpha) return EditRegion(surface, region, (x, y, start, amount) => PaintKeepingAlpha(start, color, opacity * amount));
             return EditRegion(surface, region, (x, y, start, amount) =>
             {
                 double a = opacity * amount;
@@ -82,7 +84,8 @@ namespace Yozolab.YoluPainter.Core
         public bool FillMask(Guid layerId, double amount = 1, SelectionMask region = null, bool reveal = false)
         {
             MathUtil.RequireFinite(amount, nameof(amount)); if (amount < 0 || amount > 1) throw new ArgumentOutOfRangeException(nameof(amount));
-            EnsureNoStroke(); var mask = RequireMask(layerId, out _);
+            EnsureNoStroke(); var mask = RequireMask(layerId, out var owner);
+            RefuseLockedAttributes(owner);
             double target = reveal ? 0 : 255;
             return EditRegion(mask.Surface, region, (x, y, start, coverage) =>
             {
@@ -96,7 +99,8 @@ namespace Yozolab.YoluPainter.Core
         {
             if (gradient == null) throw new ArgumentNullException(nameof(gradient)); gradient.Validate();
             var g = new GradientSettings { Shape = gradient.Shape, X0 = gradient.X0, Y0 = gradient.Y0, X1 = gradient.X1, Y1 = gradient.Y1, From = gradient.From, To = gradient.To, Opacity = gradient.Opacity };
-            var surface = PaintableSurface(layerId, channel);
+            var surface = PaintableSurface(layerId, channel, false, out bool keepAlpha);
+            if (keepAlpha) return EditRegion(surface, region, (x, y, start, amount) => PaintKeepingAlpha(start, g.ColorAt(x + .5, y + .5), g.Opacity * amount));
             return EditRegion(surface, region, (x, y, start, amount) => CpuCompositor.BlendUnchecked(start, g.ColorAt(x + .5, y + .5), g.Opacity * amount, LayerBlendMode.Normal)); // 0..1 (Validate)
         }
 
@@ -104,14 +108,17 @@ namespace Yozolab.YoluPainter.Core
         /// selection (or everywhere without one, or when withinSelection is false), as one undo step. Where the selection is fully on, the image's pixels are copied
         /// exactly (the RGB of transparent pixels included); a partial selection amount interpolates between the old and the new
         /// pixel in premultiplied space. Returns false when no pixel changed.</summary>
+        /// <remarks>Refused when the layer's image pixels are locked; with its transparent pixels locked only the colour is replaced
+        /// (each pixel keeps its alpha, transparent pixels stay as they are).</remarks>
         public bool ReplacePixels(Guid layerId, PaintChannel channel, byte[] rgba, bool withinSelection = true)
         {
             if (rgba == null) throw new ArgumentNullException(nameof(rgba));
             if (rgba.LongLength != (long)Width * Height * 4) throw new ArgumentException("The image must be " + Width + " × " + Height + " RGBA8 (" + ((long)Width * Height * 4) + " bytes).", nameof(rgba));
-            var surface = PaintableSurface(layerId, channel);
+            var surface = PaintableSurface(layerId, channel, false, out bool keepAlpha);
             return EditRegion(surface, null, withinSelection, (x, y, start, amount) =>
             {
                 int o = (y * Width + x) * 4; var image = new Rgba32(rgba[o], rgba[o + 1], rgba[o + 2], rgba[o + 3]);
+                if (keepAlpha) return ReplaceKeepingAlpha(start, image, amount);
                 return amount >= 1 ? image : Interpolate(start, image, amount);
             });
         }
@@ -125,13 +132,17 @@ namespace Yozolab.YoluPainter.Core
             return new Rgba32(MathUtil.ToByte(Channel(a.R, b.R)), MathUtil.ToByte(Channel(a.G, b.G)), MathUtil.ToByte(Channel(a.B, b.B)), MathUtil.ToByte(alpha));
         }
 
-        SparseTileSurface PaintableSurface(Guid layerId, PaintChannel channel)
+        /// <summary>The surface a fill, gradient or image replacement changes, after the locks are checked (refused under Lock Image
+        /// Pixels and Lock All, and for an erase under Lock Transparent Pixels); keepAlpha tells whether each pixel must keep its alpha.</summary>
+        SparseTileSurface PaintableSurface(Guid layerId, PaintChannel channel, bool erase, out bool keepAlpha)
         {
             EnsureNoStroke(); PaintLayer.ValidateChannel(channel);
             var layer = GetLayer(layerId);
             if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException("Only paint layers have pixels to fill. Use the layer's mask for fill, adjustment and group layers.");
             if (!layer.IsChannelEnabled(channel)) throw new InvalidOperationException("Enable the target channel before filling.");
+            RefuseLockedPixels(layer, erase);
             RefusePathLayer(layer);
+            keepAlpha = KeepsAlpha(layer);
             return layer.GetChannel(channel);
         }
 

@@ -6,7 +6,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
 {
     /// <summary>Native document ⇔ PSD DTO. Raster layers, groups (nested to the codec's depth budget), solid colour fill layers
     /// (opaque values, as SoCo) and Invert / Levels / Hue/Saturation adjustment layers with any of the 26 PSD blend modes (pass-through or isolated for groups), clipping, a
-    /// raster mask (enabled, disabled, density), visibility and opacity map both ways. Anything without an exact PSD form here
+    /// raster mask (enabled, disabled, density), visibility, opacity and the layer locks (lspf) map both ways. Anything without an exact PSD form here
     /// (translucent fill values, adjustment settings between PSD's steps, inverted masks, clipped groups, layers or masks with filters) is
     /// refused instead of being flattened into pixels.</summary>
     public static class PsdBridge
@@ -79,7 +79,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 // An adjustment that does not apply to this channel (or is switched off in it) exports hidden, as raster layers do.
                 return new PsdRasterLayer { Id = UniqueId(guid, 0, usedIds), Name = layer.Name, Opacity = opacity,
                     Visible = layer.Visible && layer.IsChannelEnabled(channel) && layer.Adjustment.AppliesTo(channel),
-                    BlendMode = layer.BlendMode, Clipping = layer.Clipping, Mask = mask, Adjustment = layer.Adjustment, PixelsRgba = new byte[0] };
+                    BlendMode = layer.BlendMode, Clipping = layer.Clipping, Mask = mask, Adjustment = layer.Adjustment, PixelsRgba = new byte[0], Locks = layer.Locks };
             }
             if (layer.Kind == LayerKind.Fill)
             {
@@ -87,14 +87,14 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 // 塗りつぶしは単色の SoCo として書く（画素に焼かない）。このチャンネルに値が無ければ非表示で書く
                 bool covers = layer.FillValues.TryGetValue(channel, out var value) && layer.IsChannelEnabled(channel);
                 return new PsdRasterLayer { Id = UniqueId(guid, 0, usedIds), Name = layer.Name, Opacity = opacity, Visible = layer.Visible && covers,
-                    BlendMode = layer.BlendMode, Clipping = layer.Clipping, Mask = mask, FillColor = covers ? value : new Rgba32(0, 0, 0, 255), PixelsRgba = new byte[0] };
+                    BlendMode = layer.BlendMode, Clipping = layer.Clipping, Mask = mask, FillColor = covers ? value : new Rgba32(0, 0, 0, 255), PixelsRgba = new byte[0], Locks = layer.Locks };
             }
             if (layer.IsGroup)
             {
                 if (layer.BlendMode != LayerBlendMode.PassThrough && PsdCodec.BlendKey(layer.BlendMode) == null)
                     throw new InvalidOperationException("Blend mode " + layer.BlendMode + " has no PSD folder equivalent. Native project can still be saved losslessly.");
                 var group = new PsdRasterLayer { Id = UniqueId(guid, 0, usedIds), Name = layer.Name, Opacity = opacity, Visible = layer.Visible,
-                    BlendMode = layer.BlendMode, Clipping = layer.Clipping, Mask = mask, PixelsRgba = new byte[0] };
+                    BlendMode = layer.BlendMode, Clipping = layer.Clipping, Mask = mask, PixelsRgba = new byte[0], Locks = layer.Locks };
                 group.DividerId = UniqueId(guid, 4, usedIds);
                 group.Children = ExportLevel(source, channel, layer.Id, usedIds, ref byteBudget);
                 return group;
@@ -123,7 +123,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 }
             return new PsdRasterLayer { Id=UniqueId(guid, 0, usedIds), Name=layer.Name, Left=left, Top=source.Height-top,
                 Width=width, Height=height, Opacity=opacity, Visible=layer.Visible && layer.IsChannelEnabled(channel),
-                BlendMode=layer.BlendMode, Clipping=layer.Clipping, Mask=mask, PixelsRgba=pixels };
+                BlendMode=layer.BlendMode, Clipping=layer.Clipping, Mask=mask, PixelsRgba=pixels, Locks=layer.Locks };
         }
 
         /// <summary>Native mask (hide amount in alpha, bottom-left origin) → PSD mask (255 shows, top-down). The rectangle is the
@@ -210,6 +210,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
             foreach (var entry in order)
                 if (entry.Value != null) doc.SetParentForLoad(created[entry.Key], created[entry.Value].Id);
             doc.ValidateStructure();
+            // ロック（lspf・レイヤーの印のビット 0）は最後に付ける（取り込みの設定をロックが断らないように）
+            foreach (var entry in order) if (entry.Key.Locks != LayerLocks.None) doc.SetLocksForLoad(created[entry.Key], entry.Key.Locks);
             doc.ClearHistory(); return doc;
         }
 

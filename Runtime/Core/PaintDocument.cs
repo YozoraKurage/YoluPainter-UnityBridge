@@ -296,6 +296,8 @@ namespace Yozolab.YoluPainter.Core
             Rgba32? old = layer.FillValues.TryGetValue(channel, out var current) ? current : (Rgba32?)null;
             bool wasEnabled = layer.IsChannelEnabled(channel);
             if (Nullable.Equals(old, value) && (value == null || wasEnabled)) return;
+            RefuseLockedPixels(layer, erase: false); // 塗りつぶしの値は層の中身
+            if ((old?.A ?? 0) != (value?.A ?? 0)) RefuseLockedTransparency(layer);
             Execute(LayerScoped(layer, channel,
                 () => { layer.SetFillValueInternal(channel, value); if (value.HasValue) layer.Enable(channel, true); },
                 () => { layer.SetFillValueInternal(channel, old); layer.Enable(channel, wasEnabled); }, 64), coalesce ? (object)("fill", id, channel) : null);
@@ -325,6 +327,7 @@ namespace Yozolab.YoluPainter.Core
             foreach (var channel in layer.EnabledChannels)
                 if (!settings.AppliesTo(channel)) throw new InvalidOperationException(settings.Type + " cannot be applied to the enabled " + channel + " channel. Disable it first.");
             var old = layer.Adjustment; if (old.Equals(settings)) return;
+            RefuseLockedAttributes(layer);
             Execute(LayerScoped(layer, null, () => layer.Adjustment = settings, () => layer.Adjustment = old, 128), coalesce ? (object)("adjustment", id) : null);
         }
         /// <summary>Every tile coordinate of the canvas, Y then X.</summary>
@@ -532,6 +535,7 @@ namespace Yozolab.YoluPainter.Core
             EnsureNoStroke(); MathUtil.RequireFinite(opacity, nameof(opacity));
             if (opacity < 0 || opacity > 1) throw new ArgumentOutOfRangeException(nameof(opacity));
             var layer = GetLayer(id); double old = layer.Opacity; if (old == opacity) return;
+            RefuseLockedAttributes(layer);
             Execute(LayerScoped(layer, null, () => layer.Opacity = opacity, () => layer.Opacity = old, 64), coalesce ? (object)("opacity", id) : null);
         }
         public void SetLayerBlendMode(Guid id, LayerBlendMode mode)
@@ -540,12 +544,14 @@ namespace Yozolab.YoluPainter.Core
             var layer = GetLayer(id);
             if (mode == LayerBlendMode.PassThrough && !layer.IsGroup) throw new ArgumentException("Pass through applies to groups only.", nameof(mode));
             var old = layer.BlendMode; if (old == mode) return;
+            RefuseLockedAttributes(layer);
             Execute(LayerScoped(layer, null, () => layer.BlendMode = mode, () => layer.BlendMode = old, 64));
         }
         /// <summary>Clips the layer to the layer below (or releases it). Undoable.</summary>
         public void SetLayerClipping(Guid id, bool clipping)
         {
             EnsureNoStroke(); var layer = GetLayer(id); bool old = layer.Clipping; if (old == clipping) return;
+            RefuseLockedAttributes(layer);
             Execute(LayerScoped(layer, null, () => layer.Clipping = clipping, () => layer.Clipping = old, 64));
         }
         /// <summary>True when the layer at index is effectively clipped: the flag is set and it has a sibling below it in the
@@ -561,6 +567,7 @@ namespace Yozolab.YoluPainter.Core
         {
             EnsureNoStroke(); PaintLayer.ValidateChannel(channel); var layer = GetLayer(id);
             bool old = layer.IsChannelEnabled(channel); if (old == enabled) return;
+            RefuseLockedAttributes(layer);
             if (enabled && layer.Kind == LayerKind.Adjustment && !layer.Adjustment.AppliesTo(channel))
                 throw new InvalidOperationException(layer.Adjustment.Type + " cannot be applied to the " + channel + " channel.");
             // 有効にして初めて面ができたときは、取り消しで面も消す（空の面が残ると保存のバイト列が変わる）
@@ -572,6 +579,7 @@ namespace Yozolab.YoluPainter.Core
         {
             EnsureNoStroke(); var layer = GetLayer(id);
             if (layer.Mask != null) throw new InvalidOperationException("The layer already has a mask.");
+            RefuseLockedAttributes(layer);
             var surface = new SparseTileSurface(Width, Height, TileSize);
             surface.BeforeExternalMutation = BeforeExternalMutation;
             surface.AfterExternalMutation = AfterExternalMutation;
@@ -586,16 +594,19 @@ namespace Yozolab.YoluPainter.Core
         {
             EnsureNoStroke(); var layer = GetLayer(id); var mask = layer.Mask;
             if (mask == null) throw new InvalidOperationException("The layer has no mask.");
+            RefuseLockedAttributes(layer);
             Execute(LayerScoped(layer, null, () => layer.Mask = null, () => { EnsureSourceGrowth(mask.Surface.AllocatedBytes); layer.Mask = mask; }, 64 + mask.Surface.AllocatedBytes));
         }
         public void SetLayerMaskEnabled(Guid id, bool enabled)
         {
             EnsureNoStroke(); var mask = RequireMask(id, out var layer); bool old = mask.Enabled; if (old == enabled) return;
+            RefuseLockedAttributes(layer);
             Execute(LayerScoped(layer, null, () => mask.Enabled = enabled, () => mask.Enabled = old, 64));
         }
         public void SetLayerMaskInverted(Guid id, bool inverted)
         {
             EnsureNoStroke(); var mask = RequireMask(id, out var layer); bool old = mask.Inverted; if (old == inverted) return;
+            RefuseLockedAttributes(layer);
             Execute(LayerScoped(layer, null, () => mask.Inverted = inverted, () => mask.Inverted = old, 64));
         }
         public void SetLayerMaskDensity(Guid id, double density, bool coalesce = false)
@@ -603,6 +614,7 @@ namespace Yozolab.YoluPainter.Core
             EnsureNoStroke(); MathUtil.RequireFinite(density, nameof(density));
             if (density < 0 || density > 1) throw new ArgumentOutOfRangeException(nameof(density));
             var mask = RequireMask(id, out var layer); double old = mask.Density; if (old == density) return;
+            RefuseLockedAttributes(layer);
             Execute(LayerScoped(layer, null, () => mask.Density = density, () => mask.Density = old, 64), coalesce ? (object)("maskDensity", id) : null);
         }
         /// <summary>Starts a stroke on a layer's mask: painting hides, Erase reveals. The brush colour is ignored
@@ -610,7 +622,8 @@ namespace Yozolab.YoluPainter.Core
         public BrushStroke BeginMaskStroke(Guid layerId, BrushSettings settings)
         {
             EnsureNoStroke(); RefuseInBatch("A stroke"); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
-            var mask = RequireMask(layerId, out _);
+            var mask = RequireMask(layerId, out var owner);
+            RefuseLockedAttributes(owner); // マスクは画像のロックでは描ける（Photoshop と同じ）。すべてのロックでだけ断る
             var maskSettings = settings.ForChannel(null); maskSettings.Color = new Rgba32(0, 0, 0, 255);
             activeStroke = new BrushStroke(this, mask.Surface, maskSettings); return activeStroke;
         }
@@ -625,10 +638,11 @@ namespace Yozolab.YoluPainter.Core
             EnsureNoStroke(); RefuseInBatch("A stroke"); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
             var layer = GetLayer(layerId);
             if (layer.Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers are generated from their values and cannot be painted. Paint on the layer's mask, or add a paint layer.");
+            RefuseLockedPixels(layer, settings.Erase);
             RefusePathLayer(layer);
             var surface = layer.GetChannel(channel);
             if (!layer.IsChannelEnabled(channel)) throw new InvalidOperationException("Enable the target channel before painting.");
-            activeStroke = new BrushStroke(this, surface, settings.ForChannel(channel)); return activeStroke;
+            activeStroke = new BrushStroke(this, surface, settings.ForChannel(channel), KeepsAlpha(layer)); return activeStroke;
         }
         public byte[] Composite(PaintChannel channel) { return CpuCompositor.Composite(this, channel); }
         public Rgba32 CompositePixel(PaintChannel channel, int x, int y) { return CpuCompositor.CompositePixel(this, channel, x, y); }

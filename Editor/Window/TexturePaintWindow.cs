@@ -221,7 +221,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void TryAction(Action action)
         {
-            try{action();}catch(Exception ex){if(stroke!=null)FinishStroke(false);message=ex.Message;Debug.LogWarning("Texture Painter: "+ex.Message);}
+            try{action();}catch(Exception ex){if(stroke!=null)FinishStroke(false);message=ex is LayerOpException refused?RefusalText(refused):ex.Message;Debug.LogWarning("Texture Painter: "+ex.Message);}
         }
     }
 }

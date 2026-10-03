@@ -19,13 +19,15 @@ namespace Yozolab.YoluPainter.Editor
     /// 右クリックから呼ぶ。操作は Core（PaintDocument.LayerOps.cs / Merge.cs）にあり、ここは選ぶ層・確かめ・知らせだけ。</summary>
     public sealed partial class TexturePaintWindow
     {
-        internal enum LayerCommand { None, Duplicate, MergeDown, MergeVisible, Copy, CopyMerged, Cut, Paste }
+        internal enum LayerCommand { None, Duplicate, MergeDown, MergeVisible, Copy, CopyMerged, Cut, Paste, Group, Ungroup, NewLayer, MoveUp, MoveDown, ToggleVisibility, ToggleClipping }
 
-        /// <summary>Ctrl（Mac は Cmd）とのキー: J 複製、E 下と結合（グループならグループを結合）、Shift+E 表示を結合、C コピー、
-        /// Shift+C 結合してコピー、X カット、V 貼り付け。Alt との組は Photoshop で別の意味なので受けない。</summary>
+        /// <summary>Ctrl（Mac は Cmd）とのキー: J 複製、E 下と結合（グループならグループを結合、複数選んでいればレイヤーを結合）、Shift+E 表示を結合、
+        /// C コピー、Shift+C 結合してコピー、X カット、V 貼り付け、G グループ化、Shift+G グループ解除、Shift+N 新しいレイヤー、] / [ 上へ・下へ、
+        /// , 表示の切り替え、Alt+G 下のレイヤーでクリッピング（Photoshop と同じ）。Alt とのほかの組は Photoshop で別の意味なので受けない。</summary>
         static LayerCommand LayerCommandOf(Event e)
         {
-            if (!(e.control || e.command) || e.alt) return LayerCommand.None;
+            if (!(e.control || e.command)) return LayerCommand.None;
+            if (e.alt) return e.keyCode == KeyCode.G && !e.shift ? LayerCommand.ToggleClipping : LayerCommand.None;
             switch (e.keyCode)
             {
                 case KeyCode.J: return e.shift ? LayerCommand.None : LayerCommand.Duplicate;
@@ -33,6 +35,11 @@ namespace Yozolab.YoluPainter.Editor
                 case KeyCode.C: return e.shift ? LayerCommand.CopyMerged : LayerCommand.Copy;
                 case KeyCode.X: return e.shift ? LayerCommand.None : LayerCommand.Cut;
                 case KeyCode.V: return e.shift ? LayerCommand.None : LayerCommand.Paste;
+                case KeyCode.G: return e.shift ? LayerCommand.Ungroup : LayerCommand.Group;
+                case KeyCode.N: return e.shift ? LayerCommand.NewLayer : LayerCommand.None; // Ctrl+N は新規プロジェクト
+                case KeyCode.RightBracket: return e.shift ? LayerCommand.None : LayerCommand.MoveUp;
+                case KeyCode.LeftBracket: return e.shift ? LayerCommand.None : LayerCommand.MoveDown;
+                case KeyCode.Comma: return e.shift ? LayerCommand.None : LayerCommand.ToggleVisibility;
                 default: return LayerCommand.None;
             }
         }
@@ -52,6 +59,13 @@ namespace Yozolab.YoluPainter.Editor
                     case LayerCommand.CopyMerged: CopyPixels(true); break;
                     case LayerCommand.Cut: CutPixels(); break;
                     case LayerCommand.Paste: PasteClipboard(); break;
+                    case LayerCommand.Group: GroupSelectedLayers(); break;
+                    case LayerCommand.Ungroup: UngroupSelectedLayer(); break;
+                    case LayerCommand.NewLayer: AddPaintLayer(); break;
+                    case LayerCommand.MoveUp: MoveSelectedLayer(+1); break;
+                    case LayerCommand.MoveDown: MoveSelectedLayer(-1); break;
+                    case LayerCommand.ToggleVisibility: ToggleSelectedVisibility(); break;
+                    case LayerCommand.ToggleClipping: ToggleSelectedClipping(); break;
                 }
             }
             catch (LayerOpException ex) { message = RefusalText(ex); }
@@ -64,10 +78,18 @@ namespace Yozolab.YoluPainter.Editor
         // ───────── 複製 ─────────
 
         /// <summary>選んでいる層（グループなら中身ごと）を複製し、元のすぐ上に置いて選ぶ。選択範囲があっても層の全体（Photoshop の Ctrl+J は
-        /// 選択範囲があると「選択範囲をコピーしたレイヤー」になるが、ここではいつも複製。選んだ所だけなら Ctrl+C → Ctrl+V）。</summary>
+        /// 選択範囲があると「選択範囲をコピーしたレイヤー」になるが、ここではいつも複製。選んだ所だけなら Ctrl+C → Ctrl+V）。複数選んでいれば
+        /// それぞれを複製し（1 回の Undo）、複製を選ぶ。</summary>
         internal void DuplicateSelectedLayer()
         {
             var active = SelectedOrNull; if (active == null) { message = L.Tr("Select a layer first."); return; }
+            var ids = SelectedLayers;
+            if (ids.Count > 1)
+            {
+                var copies = document.DuplicateLayers(ids, name => L.Tr("{0} copy", name));
+                SelectLayers(copies.Select(c => c.Id), copies[copies.Count - 1].Id); editMask = false;
+                message = L.Tr("Duplicated {0} layers.", copies.Count); return;
+            }
             var copy = document.DuplicateLayer(active.Id, L.Tr("{0} copy", active.Name));
             selectedLayer = copy.Id; editMask = false;
             message = L.Tr("Duplicated {0}.", active.Name);
@@ -79,6 +101,8 @@ namespace Yozolab.YoluPainter.Editor
         internal void MergeDownSelected()
         {
             var active = SelectedOrNull; if (active == null) { message = L.Tr("Select a layer first."); return; }
+            var ids = SelectedLayers;
+            if (document.TopmostOf(ids).Count > 1) { RunMerge(tolerance => document.MergeLayers(ids, tolerance)); return; } // 複数選んでいればレイヤーを結合
             if (active.IsGroup) { MergeGroupSelected(); return; }
             RunMerge(tolerance => document.MergeDown(active.Id, tolerance));
         }
@@ -171,8 +195,22 @@ namespace Yozolab.YoluPainter.Editor
             if (result.ClippedPixels > 0) message += " " + L.Tr("{0} pixels outside the canvas were cut off.", result.ClippedPixels.ToString("N0"));
         }
 
+        /// <summary>ロックで断ったときの知らせ（ロックを持つのがグループならその名前も）。</summary>
+        static string LockedText(LayerLockedException ex)
+        {
+            string text;
+            switch (ex.Lock)
+            {
+                case LayerLocks.Transparency: text = L.Tr("{0} has its transparent pixels locked: this would change their transparency. Unlock transparent pixels to erase, cut, draw a path or move a selected part."); break;
+                case LayerLocks.Pixels: text = L.Tr("{0} has its image pixels locked. Unlock it to change its pixels."); break;
+                case LayerLocks.Position: text = L.Tr("{0} has its position locked. Unlock it to move or transform it."); break;
+                default: text = L.Tr("{0} is locked. Unlock it to change it."); break;
+            }
+            return string.Format(text, ex.LockedBy == ex.LayerId ? L.Tr("“{0}”", ex.LockedByName) : L.Tr("The group “{0}”", ex.LockedByName)) + " " + L.Tr("Nothing was changed.");
+        }
+
         /// <summary>Core が断った理由の、窓の言葉。</summary>
-        static string RefusalText(LayerOpException ex)
+        internal static string RefusalText(LayerOpException ex)
         {
             switch (ex.Reason)
             {
@@ -189,6 +227,8 @@ namespace Yozolab.YoluPainter.Editor
                 case LayerOpRefusal.OperationBudget: return L.Tr("The result needs more than the one-operation budget of {0} MiB (Project Settings ▸ YoluPainter). Nothing was changed.", ex.Limit >> 20);
                 case LayerOpRefusal.PathLayer: return L.Tr("This layer is drawn by a path. Rasterize it to cut from it.");
                 case LayerOpRefusal.NotPaintLayer: return L.Tr("A fill layer cannot be cut. Copy it, or paint on its mask.");
+                case LayerOpRefusal.DifferentGroups: return L.Tr("Only layers in the same group can be merged together. Move them into one group first.");
+                case LayerOpRefusal.Locked: return LockedText((LayerLockedException)ex);
                 default: return L.Tr(ex.Message);
             }
         }
@@ -212,8 +252,10 @@ namespace Yozolab.YoluPainter.Editor
         void LayerOpMenuItems(UnityEditor.GenericMenu m)
         {
             var active = SelectedOrNull; bool idle = stroke == null && !toolDragging;
-            Item(m, "Duplicate Layer", () => RunLayerCommand(LayerCommand.Duplicate), idle && active != null, keys: "Ctrl+J");
-            if (active != null && active.IsGroup) Item(m, "Merge Group", () => RunLayerCommand(LayerCommand.MergeDown), idle && document.MergeGroupRefusal(active.Id) == null, keys: "Ctrl+E");
+            var members = document.TopmostOf(SelectedLayers);
+            Item(m, members.Count > 1 ? "Duplicate Layers" : "Duplicate Layer", () => RunLayerCommand(LayerCommand.Duplicate), idle && active != null, keys: "Ctrl+J");
+            if (members.Count > 1) Item(m, "Merge Layers", () => RunLayerCommand(LayerCommand.MergeDown), idle && members.All(l => l.ParentId == members[0].ParentId), keys: "Ctrl+E");
+            else if (active != null && active.IsGroup) Item(m, "Merge Group", () => RunLayerCommand(LayerCommand.MergeDown), idle && document.MergeGroupRefusal(active.Id) == null, keys: "Ctrl+E");
             else Item(m, "Merge Down", () => RunLayerCommand(LayerCommand.MergeDown), idle && active != null && document.MergeDownRefusal(active.Id) == null, keys: "Ctrl+E");
             Item(m, "Merge Visible", () => RunLayerCommand(LayerCommand.MergeVisible), idle && document.MergeVisibleRefusal() == null, keys: "Ctrl+Shift+E");
         }

@@ -106,6 +106,7 @@ namespace Yozolab.YoluPainter.Editor
         void LoadSet(TextureSet set)
         {
             currentSet = set; document = set.Document; materialSlot = set.MaterialSlot; editMask = set.EditMask;
+            ClearLayerSelection(); // 複数選択はセットごとに持たない（切り替えたら空）
             selectedLayer = document.Layers.Any(l => l.Id == set.SelectedLayer) ? set.SelectedLayer : document.Layers.Count > 0 ? document.Layers[document.Layers.Count - 1].Id : Guid.Empty;
             if (editMask && document.Layers.FirstOrDefault(l => l.Id == selectedLayer)?.Mask == null) editMask = false;
             WatchHistory(set);

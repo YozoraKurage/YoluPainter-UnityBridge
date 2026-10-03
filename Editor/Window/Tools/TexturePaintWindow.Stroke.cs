@@ -43,6 +43,7 @@ namespace Yozolab.YoluPainter.Editor
                     else
                     {
                         if(document.GetLayer(selectedLayer).IsGroup) throw new InvalidOperationException("A group has no pixels. Select a layer inside it to paint, or paint the group's mask.");
+                        document.EnsurePixelsEditable(selectedLayer,brush.erase); // ロックで断るなら、チャンネルを有効にする前に（何も残さない）
                         if(!document.GetLayer(selectedLayer).IsChannelEnabled(channel)) document.SetChannelEnabled(selectedLayer,channel,true);
                         stroke=document.BeginStroke(selectedLayer,channel,GetBrush());
                     }

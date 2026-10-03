@@ -23,13 +23,18 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// invert, breakup amount, scale, seed and space, blend, balance, axis, direction x, y, z, bent normal, and the pins: a count and
     /// per pin the mesh-map kind and the 64-digit condition key); an unknown generator type, algorithm version, blend, space or map
     /// kind refuses the archive, and type 6 in an older archive is refused. The mesh maps themselves are not in this entry (they are
-    /// derived and live next to it in the .ylp). Older archives still load.</summary>
+    /// derived and live next to it in the .ylp). Version 12 turns the clipping byte (version 5) into a byte of attribute flags: bit 0
+    /// clipping, bit 1 "the layer's locks follow" (then an int of <see cref="LayerLocks"/>, never 0); any other bit, or an unknown lock
+    /// bit, refuses the archive. A document without locks is laid out exactly as version 11 (the byte is 0 or 1), only the version
+    /// number differs. Older archives still load.</summary>
     public static class DocumentBinary
     {
-        const int Version = 11;
+        const int Version = 12;
         /// <summary>The version <see cref="Write"/> produces.</summary>
         public const int CurrentVersion = Version;
         const long MaxArchiveBytes = 512L * 1024 * 1024;
+        /// <summary>Version 12 layer attribute byte: bit 0 clipping, bit 1 an int of layer locks follows.</summary>
+        const int AttributeClipping = 1, AttributeLocks = 2;
         static readonly byte[] Magic = Encoding.ASCII.GetBytes("DOTPAINT");
 
         public static byte[] Write(PaintDocument document)
@@ -50,7 +55,9 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 {
                     writer.Write(layer.Id.ToByteArray()); WriteString(writer, layer.Name);
                     writer.Write(layer.Visible); writer.Write(layer.Opacity); writer.Write((int)layer.BlendMode);
-                    writer.Write(layer.Clipping);
+                    // 版 12: 属性の印（ビット 0 クリッピング、ビット 1 ロックが続く）。ロックの無い層は版 11 と同じ 0 か 1
+                    writer.Write((byte)((layer.Clipping ? AttributeClipping : 0) | (layer.Locks != LayerLocks.None ? AttributeLocks : 0)));
+                    if (layer.Locks != LayerLocks.None) writer.Write((int)layer.Locks);
                     writer.Write((int)layer.Kind);
                     writer.Write(layer.ParentId.ToByteArray());
                     var fills = layer.FillValues.Keys.OrderBy(c => c).ToArray();
@@ -141,6 +148,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         catch (ArgumentException ex) { throw new InvalidDataException("Invalid Normal output settings.", ex); }
                     }
                     int layers = ReadCount(reader, 2048, "layers");
+                    var lockedLayers = new System.Collections.Generic.List<(PaintLayer layer, LayerLocks locks)>();
                     for (int l = 0; l < layers; l++)
                     {
                         var layerId = new Guid(ReadExact(reader, 16));
@@ -148,7 +156,20 @@ namespace Yozolab.YoluPainter.Core.Persistence
                         bool visible = reader.ReadBoolean(); double opacity = reader.ReadDouble(); int blend = reader.ReadInt32();
                         if (double.IsNaN(opacity) || double.IsInfinity(opacity) || opacity < 0 || opacity > 1 || !Enum.IsDefined(typeof(LayerBlendMode), blend))
                             throw new InvalidDataException("Invalid layer attributes.");
-                        bool clipping = version >= 5 && reader.ReadBoolean();
+                        bool clipping = false; var locks = LayerLocks.None;
+                        if (version >= 12)
+                        {
+                            int attributes = reader.ReadByte();
+                            if ((attributes & ~(AttributeClipping | AttributeLocks)) != 0) throw new InvalidDataException("Unknown layer attribute flags " + attributes + "; a newer reader is required (source retained unchanged).");
+                            clipping = (attributes & AttributeClipping) != 0;
+                            if ((attributes & AttributeLocks) != 0)
+                            {
+                                int value = reader.ReadInt32();
+                                if (value == 0 || (value & ~(int)PaintDocument.KnownLocks) != 0) throw new InvalidDataException("Unknown layer lock flags " + value + "; a newer reader is required (source retained unchanged).");
+                                locks = (LayerLocks)value;
+                            }
+                        }
+                        else clipping = version >= 5 && reader.ReadBoolean();
                         int kind = version >= 3 ? reader.ReadInt32() : (int)LayerKind.Raster;
                         if (!Enum.IsDefined(typeof(LayerKind), kind) || kind == (int)LayerKind.Group && version < 6) throw new InvalidDataException("Unknown layer kind; a newer reader is required.");
                         if (blend == (int)LayerBlendMode.PassThrough && kind != (int)LayerKind.Group) throw new InvalidDataException("Pass through applies to groups only.");
@@ -248,10 +269,13 @@ namespace Yozolab.YoluPainter.Core.Persistence
                             if (layer.Kind != LayerKind.Raster || !layer.IsChannelEnabled(path.Channel)) throw new InvalidDataException("A canvas path needs a paint layer with its channel enabled.");
                             layer.Path = path;
                         }
+                        if (locks != LayerLocks.None) lockedLayers.Add((layer, locks));
                     }
                     if (stream.Position != stream.Length) throw new InvalidDataException("Trailing native data requires a newer reader.");
                     try { doc.ValidateStructure(); }
                     catch (InvalidOperationException ex) { throw new InvalidDataException("Invalid layer groups: " + ex.Message, ex); }
+                    // ロックは全部を読んでから付ける（読み手自身の設定をロックが断らないように）
+                    foreach (var (layer, locks) in lockedLayers) doc.SetLocksForLoad(layer, locks);
                     doc.ClearHistory(); return doc;
                 }
                 catch (EndOfStreamException ex) { throw new InvalidDataException("Native archive is truncated.", ex); }

@@ -82,3 +82,9 @@ flip_vertical fluent flip_vertical
 rotate_90_degrees_ccw fluent arrow_rotate_counterclockwise
 import fluent arrow_import
 transform fluent resize
+
+# ---- レイヤーのロック（Window/Layers/TexturePaintWindow.LayerSelection.cs）。UI のアイコンも 4 列目で太さを選べる（既定は regular） ----
+lock fluent lock_closed
+lock_filled fluent lock_closed filled
+lock_transparency fluent transparency_square
+arrow_move fluent arrow_move

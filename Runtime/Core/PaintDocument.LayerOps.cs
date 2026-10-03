@@ -40,6 +40,10 @@ namespace Yozolab.YoluPainter.Core
         AppearanceChanges,
         /// <summary>The clipboard comes from a document of another tile layout or holds no pixels.</summary>
         InvalidClipboard,
+        /// <summary>A lock on the layer (or a group it is in) refuses the operation (<see cref="LayerLockedException"/>).</summary>
+        Locked,
+        /// <summary>An operation on several layers needs them in the same group (grouping, merging).</summary>
+        DifferentGroups,
     }
 
     /// <summary>A refused layer operation. Nothing was changed.</summary>
@@ -152,7 +156,7 @@ namespace Yozolab.YoluPainter.Core
         PaintLayer CloneLayer(PaintLayer source, Guid id, string name)
         {
             var copy = new PaintLayer(this, name, id, source.Kind)
-            { Visible = source.Visible, Opacity = source.Opacity, BlendMode = source.BlendMode, Clipping = source.Clipping, ParentId = source.ParentId, Adjustment = source.Adjustment };
+            { Visible = source.Visible, Opacity = source.Opacity, BlendMode = source.BlendMode, Clipping = source.Clipping, ParentId = source.ParentId, Adjustment = source.Adjustment, Locks = source.Locks };
             foreach (var entry in source.FillValues) copy.SetFillValueInternal(entry.Key, entry.Value);
             foreach (var entry in source.Channels)
             {
@@ -243,7 +247,7 @@ namespace Yozolab.YoluPainter.Core
 
         /// <summary>Copies like <see cref="CopyPixels"/> and then clears what was copied, as one undo step: a paint layer's channel loses
         /// alpha by the selection amount (fully selected pixels become transparent black), a mask reveals. Paths, fill, adjustment and group
-        /// layers are refused (nothing is copied either).</summary>
+        /// layers are refused (nothing is copied either), and so are a paint layer whose image or transparent pixels are locked and a mask under Lock All.</summary>
         public PixelClipboard CutPixels(Guid layerId, PaintChannel channel, bool fromMask = false, long maxBytes = long.MaxValue)
         {
             EnsureNoStroke(); PaintLayer.ValidateChannel(channel); var layer = GetLayer(layerId);
@@ -255,6 +259,7 @@ namespace Yozolab.YoluPainter.Core
                 if (layer.Path != null) throw new LayerOpException(LayerOpRefusal.PathLayer, "This layer is drawn by a path. Edit the path, or rasterize the layer to cut from it.");
             }
             if (!fromMask && !layer.IsChannelEnabled(channel)) throw new InvalidOperationException("Enable the channel before cutting from it.");
+            if (fromMask) RefuseLockedAttributes(layer); else RefuseLockedPixels(layer, erase: true); // 写す前に断る（クリップボードも変えない）
             var copied = CopyPixels(layerId, channel, fromMask, maxBytes);
             if (fromMask) FillMask(layerId, 1, null, reveal: true);
             else Fill(layerId, channel, new Rgba32(0, 0, 0, 255), 1, null, erase: true);

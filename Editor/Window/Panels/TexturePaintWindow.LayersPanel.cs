@@ -7,27 +7,47 @@ using Yozolab.YoluPainter.Core;
 
 namespace Yozolab.YoluPainter.Editor
 {
-    /// <summary>レイヤーのパネル: 合成モードと不透明度、行（サムネイル・マスク・名前の変更・右クリック）、ドラッグでの並べ替え、下のツールバー、レイヤーの操作（メニューと共有）。</summary>
+    /// <summary>レイヤーのパネル: 合成モードと不透明度、ロック、行（サムネイル・マスク・名前の変更・右クリック・Ctrl/Shift での複数選択）、
+    /// ドラッグでの並べ替え、下のツールバー、レイヤーの操作（メニューと共有）。</summary>
     public sealed partial class TexturePaintWindow
     {
         const float LayerRowHeight = 30, LayerToolbarHeight = 30;
+        /// <summary>ロックの切り替えを合成モードと不透明度の行の右に並べられる幅か（既定のドックの幅 300 では並べ、一覧の高さを減らさない。
+        /// 狭いドックでは 2 行目に出す）。</summary>
+        static bool LockRowInline(float panelWidth) => panelWidth - 2 * PaintTheme.Padding >= 270;
+        /// <summary>パネルの上の端から一覧の上の端まで（合成モードと不透明度の行と、狭いときのロックの行）。</summary>
+        internal static float LayerListOffsetFor(float panelWidth) => LockRowInline(panelWidth) ? 6 + 24 + 6 : 6 + 24 + 4 + LockRowHeight + 4;
+
+        /// <summary>試験用: 最後の描画での一覧（"list"）・行（"row." + ID）・目（"eye." + ID）・ロックの切り替え（"lock." + 種類）の画面の矩形。</summary>
+        internal readonly Dictionary<string, Rect> LayerPanelScreenRects = new Dictionary<string, Rect>();
+        Rect PanelSpot(string id, Rect r) { if (Event.current.type == EventType.Repaint) LayerPanelScreenRects[id] = GUIUtility.GUIToScreenRect(r); return r; }
 
         void DrawLayersPanel(Rect r)
         {
+            if (Event.current.type == EventType.Repaint) LayerPanelScreenRects.Clear();
             var active = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
             // 上: 合成モードと不透明度（Photoshop の配置）
             var top = new Rect(r.x + PaintTheme.Padding, r.y + 6, r.width - 2 * PaintTheme.Padding, 24);
-            var halves = UiRows.Split(top, 2, 6);
+            bool lockInline = LockRowInline(r.width);
+            var lockRect = lockInline ? new Rect(top.xMax - LockButtonsWidth, top.y, LockButtonsWidth, top.height) : new Rect(top.x, top.yMax + 4, top.width, LockRowHeight);
+            if (lockInline) top.width -= LockButtonsWidth + 6;
+            // ロックを並べるときは不透明度（名前と値を出す）に広く取る。合成モードの名前は前から長いものは詰めて出している
+            var halves = !lockInline ? UiRows.Split(top, 2, 6)
+                : new[] { new Rect(top.x, top.y, Mathf.Floor((top.width - 6) * .42f), top.height), new Rect(top.x + Mathf.Floor((top.width - 6) * .42f) + 6, top.y, top.width - Mathf.Floor((top.width - 6) * .42f) - 6, top.height) };
             if (active != null)
             {
                 var modes = ((LayerBlendMode[])Enum.GetValues(typeof(LayerBlendMode))).Where(m => active.IsGroup || m != LayerBlendMode.PassThrough).ToArray();
-                PaintGui.EnumDropdown(halves[0], null, active.BlendMode, modes, m => L.TrIn("blend mode", BlendName(m)), m => TryAction(() => document.SetLayerBlendMode(active.Id, m)));
-                float opacity = PaintGui.Slider(halves[1], L.Tr("Opacity"), (float)active.Opacity * 100, 0, 100, "0", "%") / 100;
-                if (Math.Abs(opacity - active.Opacity) > .00001) document.SetLayerOpacity(active.Id, opacity, coalesce: true);
+                bool settingsLocked = (document.EffectiveLocks(active.Id) & LayerLocks.All) != 0; // すべてのロックでは合成モードと不透明度も変えない
+                PaintGui.EnumDropdown(halves[0], null, active.BlendMode, modes, m => L.TrIn("blend mode", BlendName(m)), m => TryAction(() => document.SetLayerBlendMode(active.Id, m)), !settingsLocked);
+                float opacity = PaintGui.Slider(halves[1], L.Tr("Opacity"), (float)active.Opacity * 100, 0, 100, "0", "%", null, !settingsLocked) / 100;
+                if (Math.Abs(opacity - active.Opacity) > .00001) TryAction(() => document.SetLayerOpacity(active.Id, opacity, coalesce: true));
             }
+            // ロック（選んでいる層の全部に効く）
+            DrawLockRow(lockRect, !lockInline);
             // 一覧
             if (Event.current.type == EventType.Repaint) ForgetStaleThumbnails();
-            var list = new Rect(r.x, top.yMax + 6, r.width, r.height - (top.yMax + 6 - r.y) - LayerToolbarHeight);
+            float listTop = LayerListOffsetFor(r.width);
+            var list = PanelSpot("list", new Rect(r.x, r.y + listTop, r.width, r.height - listTop - LayerToolbarHeight));
             PaintGui.Fill(list, PaintTheme.ControlBg);
             float content = document.Layers.Count * LayerRowHeight;
             var view = new Rect(0, 0, list.width - (content > list.height ? 10 : 0), content);
@@ -52,7 +72,7 @@ namespace Yozolab.YoluPainter.Editor
                 foreach (var (label, make) in AdjustmentMenu) { var mk = make; var lb = label; menu.AddItem(new GUIContent(L.Tr(lb)), false, () => TryAction(() => selectedLayer = document.AddAdjustmentLayer(L.Tr(lb), mk(), above: AboveSelected()).Id)); }
                 menu.ShowAsContext();
             }
-            if (PaintGui.IconButton(B(), "folder", L.Tr("Group Layers"), false, active != null, 17)) TryAction(() => selectedLayer = document.GroupLayers(new[] { selectedLayer }, L.Tr("Group") + " " + (document.Layers.Count(l => l.IsGroup) + 1)).Id);
+            if (PaintGui.IconButton(B(), "folder", L.Tr("Group Layers"), false, active != null, 17)) TryAction(GroupSelectedLayers);
             bool hasMask = active?.Mask != null;
             if (PaintGui.IconButton(B(), "vignette", hasMask ? L.Tr("Edit Layer Mask") : L.Tr("Add Layer Mask"), hasMask && editMask, active != null, 17))
                 TryAction(() => { if (!hasMask) { document.AddLayerMask(selectedLayer); editMask = true; } else editMask = !editMask; });
@@ -60,17 +80,20 @@ namespace Yozolab.YoluPainter.Editor
             x = bar.xMax - 4 - 27 * 3;
             if (PaintGui.IconButton(B(), "expand_less", L.Tr("Move Layer Up"), false, active != null, 18)) TryAction(() => MoveSelectedLayer(+1));
             if (PaintGui.IconButton(B(), "expand_more", L.Tr("Move Layer Down"), false, active != null, 18)) TryAction(() => MoveSelectedLayer(-1));
-            if (PaintGui.IconButton(B(), "delete", L.Tr("Delete Layer"), false, document.Layers.Count > 1, 17)) TryAction(DeleteSelectedLayer);
+            if (PaintGui.IconButton(B(), "delete", L.Tr(SelectedLayers.Count > 1 ? "Delete Layers" : "Delete Layer"), false, document.Layers.Count > 1, 17)) TryAction(DeleteSelectedLayer);
         }
 
         void DrawLayerRow(Rect r, PaintLayer layer, int index)
         {
-            var e = Event.current; bool selected = layer.Id == selectedLayer, hover = r.Contains(e.mousePosition);
-            if (selected) { PaintGui.Fill(r, PaintTheme.AccentSoft); PaintGui.Fill(new Rect(r.x, r.y, 3, r.height), PaintTheme.Accent); }
-            else if (hover) PaintGui.Fill(r, PaintTheme.ControlHover);
+            var e = Event.current; bool selected = layer.Id == selectedLayer, inSelection = IsLayerSelected(layer.Id), hover = r.Contains(e.mousePosition);
+            PanelSpot("row." + layer.Id, r);
+            // 選んでいる層は薄い色、描く先はそれに左の帯
+            if (inSelection) PaintGui.Fill(r, PaintTheme.AccentSoft);
+            if (selected) PaintGui.Fill(new Rect(r.x, r.y, 3, r.height), PaintTheme.Accent);
+            else if (hover && !inSelection) PaintGui.Fill(r, PaintTheme.ControlHover);
             PaintGui.HLine(r.x, r.xMax, r.yMax - 1, PaintTheme.Border);
             // 目
-            var eye = new Rect(r.x + 4, r.y + 3, 24, r.height - 6);
+            var eye = PanelSpot("eye." + layer.Id, new Rect(r.x + 4, r.y + 3, 24, r.height - 6));
             if (PaintGui.IconButton(eye, layer.Visible ? "visibility" : "visibility_off", L.Tr(layer.Visible ? "Hide" : "Show"), false, true, 16)) TryAction(() => document.SetLayerVisibility(layer.Id, !layer.Visible));
             float x = eye.xMax + 4 + 14 * document.DepthOf(layer.Id);
             if (document.IsEffectivelyClipped(index)) { PaintGui.Icon(new Rect(x, r.y, 14, r.height), "keyboard_arrow_down", PaintTheme.TextDim, 14); x += 14; }
@@ -95,29 +118,45 @@ namespace Yozolab.YoluPainter.Editor
                 if (e.type == EventType.MouseDown && e.button == 0 && maskBox.Contains(e.mousePosition) && GUI.enabled) { selectedLayer = layer.Id; editMask = !editing; e.Use(); }
                 x = maskBox.xMax + 6;
             }
+            // 右端の印（効果・チャンネル無し、その左にロック）
+            bool mark = layer.Filters.Count > 0 || layer.Mask != null && layer.Mask.Filters.Count > 0 || !layer.IsGroup && layer.Kind == LayerKind.Raster && !layer.IsChannelEnabled(channel);
+            bool locked = DrawRowLock(new Rect(r.xMax - (mark ? 44 : 24), r.y, 20, r.height), layer);
             // 名前（ダブルクリックで変える）
-            var nameRect = new Rect(x, r.y + 4, r.xMax - x - 26, r.height - 8);
+            var nameRect = new Rect(x, r.y + 4, r.xMax - x - 26 - (locked ? 20 : 0), r.height - 8);
             if (renamingLayer == layer.Id)
             {
                 string next = PaintGui.TextField(nameRect, layer.Name);
                 if (next != layer.Name) { TryAction(() => document.SetLayerName(layer.Id, next)); renamingLayer = Guid.Empty; }
                 if (e.type == EventType.MouseDown && !nameRect.Contains(e.mousePosition)) renamingLayer = Guid.Empty;
             }
-            else PaintGui.Text(nameRect, layer.Name, PaintTheme.Label, layer.Visible ? (selected ? Color.white : PaintTheme.Text) : PaintTheme.TextDim);
+            else PaintGui.Text(nameRect, layer.Name, PaintTheme.Label, layer.Visible ? (inSelection ? Color.white : PaintTheme.Text) : PaintTheme.TextDim);
             // 右端の印
             if (layer.Filters.Count > 0 || layer.Mask != null && layer.Mask.Filters.Count > 0) PaintGui.Icon(new Rect(r.xMax - 24, r.y, 20, r.height), "auto_awesome", PaintTheme.TextDim, 13);
             else if (!layer.IsGroup && layer.Kind == LayerKind.Raster && !layer.IsChannelEnabled(channel)) { PaintGui.Icon(new Rect(r.xMax - 24, r.y, 20, r.height), "link_off", PaintTheme.TextDisabled, 13); PaintGui.Tooltip(new Rect(r.xMax - 24, r.y, 20, r.height), L.Tr("This layer has no pixels in the selected channel yet")); }
-            // 選ぶ・ダブルクリックで名前
+            // 選ぶ（Ctrl/Cmd で足し引き、Shift で範囲）・ダブルクリックで名前
             if (e.type == EventType.MouseDown && e.button == 0 && hover && GUI.enabled && renamingLayer != layer.Id)
             {
+                if (e.control || e.command || e.shift)
+                {
+                    if (e.shift) SelectLayerRange(layer.Id, e.control || e.command); else ToggleLayerSelected(layer.Id);
+                    lastLayerClicked = Guid.Empty; renamingLayer = Guid.Empty;
+                    e.Use(); Repaint(); return;
+                }
                 bool twice = lastLayerClicked == layer.Id && EditorApplication.timeSinceStartup - lastLayerClick < .4;
-                selectedLayer = layer.Id; lastLayerClicked = layer.Id; lastLayerClick = EditorApplication.timeSinceStartup;
-                if (twice && nameRect.Contains(e.mousePosition)) renamingLayer = layer.Id;
+                // 複数選択の中の行を押したら、ドラッグで全部を動かせるように選択を残し、ドラッグにならなければ離したところでその 1 つにする
+                if (inSelection && MultiSelectionValid) { if (!selected) SelectLayers(SelectedLayers, layer.Id); layerCollapsePending = layer.Id; }
+                else SelectSingleLayer(layer.Id);
+                lastLayerClicked = layer.Id; lastLayerClick = EditorApplication.timeSinceStartup;
+                if (twice && nameRect.Contains(e.mousePosition)) { renamingLayer = layer.Id; SelectSingleLayer(layer.Id); layerCollapsePending = Guid.Empty; }
                 if (!selected) editMask = false;
                 layerDragCandidate = layer.Id; layerDragStart = e.mousePosition; layerDragging = false;
                 e.Use(); Repaint();
             }
-            if (e.type == EventType.ContextClick && hover && GUI.enabled) { selectedLayer = layer.Id; var menu = new GenericMenu(); LayerMenu(menu); menu.ShowAsContext(); e.Use(); }
+            if (e.type == EventType.ContextClick && hover && GUI.enabled)
+            {
+                if (!inSelection) SelectSingleLayer(layer.Id); else if (!selected) SelectLayers(SelectedLayers, layer.Id);
+                var menu = new GenericMenu(); LayerMenu(menu); menu.ShowAsContext(); e.Use();
+            }
         }
 
         // ───────── ドラッグでの並べ替え ─────────
@@ -142,8 +181,14 @@ namespace Yozolab.YoluPainter.Editor
             if (layerDragCandidate == Guid.Empty) return;
             if (e.rawType == EventType.MouseUp)
             {
-                if (layerDragging) { var target = LayerDropTarget(e.mousePosition.y); var id = layerDragCandidate; TryAction(() => DropLayer(id, target.gap, target.into)); }
-                layerDragCandidate = Guid.Empty; layerDragging = false; Repaint();
+                if (layerDragging)
+                {
+                    var target = LayerDropTarget(e.mousePosition.y); var id = layerDragCandidate;
+                    var ids = IsLayerSelected(id) ? SelectedLayers : new[] { id };
+                    TryAction(() => DropLayers(ids, target.gap, target.into));
+                }
+                else if (layerCollapsePending != Guid.Empty && layerCollapsePending == selectedLayer) SelectSingleLayer(layerCollapsePending);
+                layerDragCandidate = Guid.Empty; layerDragging = false; layerCollapsePending = Guid.Empty; Repaint();
                 return;
             }
             if (e.type == EventType.MouseDrag && e.button == 0)
@@ -208,24 +253,11 @@ namespace Yozolab.YoluPainter.Editor
         void AddFillLayerHere() => selectedLayer = document.AddFillLayer(L.Tr("Fill") + " " + (document.Layers.Count + 1), new Dictionary<PaintChannel, Rgba32> { { channel, GetBrush().Color } }, above: AboveSelected()).Id;
         static readonly (string label, Func<AdjustmentSettings> make)[] AdjustmentMenu =
             { ("Invert", AdjustmentSettings.Invert), ("Levels", () => AdjustmentSettings.Levels()), ("Hue / Saturation", () => AdjustmentSettings.HueSaturation()) };
-        void DeleteSelectedLayer()
-        {
-            if (document.Layers.Count < 2) return;
-            document.RemoveLayer(selectedLayer);
-            selectedLayer = document.Layers.Count > 0 ? document.Layers[document.Layers.Count - 1].Id : Guid.Empty;
-        }
         void UngroupSelected()
         {
             var first = document.ChildrenOf(selectedLayer).LastOrDefault();
             document.Ungroup(selectedLayer);
             selectedLayer = first != null ? first.Id : (document.Layers.Count > 0 ? document.Layers[document.Layers.Count - 1].Id : Guid.Empty);
-        }
-        void MoveSelectedLayer(int delta)
-        {
-            var active = document.GetLayer(selectedLayer);
-            var siblings = document.ChildrenOf(active.ParentId).ToList(); int at = siblings.IndexOf(active) + delta;
-            if (at < 0 || at >= siblings.Count) return;
-            document.MoveLayer(active.Id, at);
         }
     }
 }

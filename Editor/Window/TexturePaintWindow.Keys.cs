@@ -30,7 +30,8 @@ namespace Yozolab.YoluPainter.Editor
             else if(stroke==null && !toolDragging && tool==PaintTool.Move && GUIUtility.keyboardControl==0 && !(e.control||e.command) && ArrowDelta(e.keyCode)!=Vector2Int.zero)
             {var d=ScreenArrowToCanvas(ArrowDelta(e.keyCode))*(e.shift?10:1);TryAction(()=>MoveBy(d.x,d.y));e.Use();Repaint();}
             else if(stroke==null && tool==PaintTool.Path && GUIUtility.keyboardControl==0 && (e.keyCode==KeyCode.Delete||e.keyCode==KeyCode.Backspace)){TryAction(RemoveLastPathPoint);e.Use();Repaint();}
-            // レイヤーの複製・結合・クリップボード（文字の欄で入力中は Unity の文字のコピー・貼り付けに任せる。ストロークの最中は断って知らせる）
+            // レイヤーの操作（複製・結合・クリップボード・グループ・新規・上へ下へ・表示・クリッピング。選んだ層の全部に効く。LayerOps.cs の
+            // LayerCommandOf）。文字の欄で入力中は Unity の文字のコピー・貼り付けに任せる。ストロークの最中は断って知らせる
             else if(GUIUtility.keyboardControl==0 && LayerCommandOf(e)!=LayerCommand.None){RunLayerCommand(LayerCommandOf(e));e.Use();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.A){document.SetSelection(SelectionMask.All(document));e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.D){document.ClearSelection();e.Use();Repaint();}
@@ -39,7 +40,7 @@ namespace Yozolab.YoluPainter.Editor
             else if(stroke==null && (e.control||e.command) && !e.shift && e.keyCode==KeyCode.Y){document.Redo();e.Use();Repaint();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.S){SaveProject(e.shift);e.Use();}
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.O){OpenProject();e.Use();}
-            else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.N){NewProjectDialog();e.Use();}
+            else if(stroke==null && (e.control||e.command) && !e.shift && e.keyCode==KeyCode.N){NewProjectDialog();e.Use();} // Ctrl+Shift+N は新しいレイヤー（文字の入力中は何もしない）
             else if(stroke==null && (e.control||e.command) && e.keyCode==KeyCode.Alpha0){FitCanvasView();e.Use();Repaint();}
             else if(stroke==null && !toolDragging && (e.control||e.command) && ZoomKey(e.keyCode)!=0){ZoomCanvasView(ZoomKey(e.keyCode)>0?canvasZoom*1.25f:canvasZoom/1.25f);e.Use();Repaint();}
             if(e.type==EventType.Used)NoteTookKey(e);

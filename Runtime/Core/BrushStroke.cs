@@ -84,14 +84,19 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>曲線の 1 区間を刻む数の上限（これを超える長い区間は刻みを粗くする。ダブの数の上限は別に確かめる）。</summary>
         public const int MaxCurvePieces = 65536;
         private long rollbackBytes;
+        /// <summary>Lock Transparent Pixels: every pixel keeps its alpha and only its colour moves towards the paint (source-atop);
+        /// fully transparent pixels are left as they are, RGB included. Never with Erase (refused when the stroke begins).</summary>
+        private readonly bool keepAlpha;
         public Guid TransactionId { get; private set; }
         public bool IsFinished { get { return finished; } }
         public long SampleCount { get; private set; }
         public long StampCount { get; private set; }
         public int ChangedTileCount { get { return before.Count; } }
         public long RollbackBytes { get { return rollbackBytes; } }
-        internal BrushStroke(PaintDocument document, SparseTileSurface surface, BrushSettings settings)
+        internal BrushStroke(PaintDocument document, SparseTileSurface surface, BrushSettings settings, bool keepAlpha = false)
         {
+            if (keepAlpha && settings.Erase) throw new InvalidOperationException("Erasing removes alpha, which a stroke that keeps alpha cannot do.");
+            this.keepAlpha = keepAlpha;
             selection = document.Selection; this.document = document; this.surface = surface; this.settings = settings; TransactionId = Guid.NewGuid(); random = new Random(settings.Seed);
             strokeColor = settings.Color;
             if (settings.HasColorDynamics && !settings.Erase)
@@ -558,6 +563,9 @@ namespace Yozolab.YoluPainter.Core
             if (flow <= 0 || ceiling <= 0) return false;
             var st = c.Stroke;
             if (st != null && st.Wash[local] >= ceiling && !tipColors) return false;
+            // アルファを守るストロークでは、透明な画素は変わらない（アルファは変わらないので、今の面の値が描く前の値と同じ）。
+            // 巻き戻しの写しを取る前に見るので、透明なタイルには何も割り当てない
+            if (keepAlpha && (c.Surface == null || c.Surface.Get(local * 4).A == 0)) return false;
             int tile = surface.TileSize;
             if (st == null)
             {
@@ -593,8 +601,9 @@ namespace Yozolab.YoluPainter.Core
                 byte alpha = MathUtil.ToByte(start.A / 255.0 * (1 - accumulated * settings.Color.A / 255.0));
                 next = alpha == 0 ? Rgba32.Transparent : new Rgba32(start.R, start.G, start.B, alpha);
             }
+            else if (keepAlpha) next = PaintDocument.PaintKeepingAlpha(start, paint, Math.Min(1, accumulated) * selected); // 選択の割合も色の寄せ方に入れる（丸めは 1 回）
             else next = CpuCompositor.BlendUnchecked(start, paint, Math.Min(1, accumulated), LayerBlendMode.Normal); // 0..1 なので Blend の検査は要らない
-            if (selected < 1) next = CpuCompositor.Fade(start, next, selected);
+            if (selected < 1 && !keepAlpha) next = CpuCompositor.Fade(start, next, selected);
             if (!surface.WritePixelQuiet(c.Coord, ref c.Surface, local * 4, next)) return false;
             if (st.ChangedInPass != passSerial) { st.ChangedInPass = passSerial; if (collect) passChanged.Add(c.Coord); }
             return true;

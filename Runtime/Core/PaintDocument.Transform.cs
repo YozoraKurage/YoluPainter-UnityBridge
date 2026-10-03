@@ -64,20 +64,66 @@ namespace Yozolab.YoluPainter.Core
         /// When the document's selection was used, the selection moves with the pixels in the same step. A pixel that lands
         /// exactly on one source pixel (whole-pixel moves, 90° turns, flips) is copied as is, including the colour of
         /// transparent pixels; others are resampled premultiplied (transparent pixels do not darken edges). Pixels moved off
-        /// the canvas are lost. Budgets are checked per tile; on failure nothing changes. Returns false when nothing changed.</summary>
+        /// the canvas are lost. Budgets are checked per tile; on failure nothing changes. Returns false when nothing changed.
+        /// Locks (<see cref="LayerLocks"/>): refused under Lock Position and Lock All; under Lock Image Pixels only a whole-pixel move
+        /// of the whole layer; under Lock Transparent Pixels only the whole layer.</summary>
         public bool Transform(Guid layerId, Affine2D transform, SelectionMask region = null, Resampling resampling = Resampling.Bilinear, bool includeMask = true)
         {
             EnsureNoStroke();
             var layer = GetLayer(layerId);
+            RequireTransformable(layer, resampling, transform);
+            if (transform.IsIdentity) return false;
+            var effective = EffectiveRegion(region);
+            RefuseLockedTransform(layer, transform, effective);
+            long used = 0;
+            var commands = TransformCommands(layer, transform, effective, resampling, includeMask, ref used);
+            if (commands.Count == 0) return false;
+            if (region == null && selection != null) commands.Add(MoveSelection(transform, resampling));
+            Revision++; Push(new CompositeCommand(commands));
+            return true;
+        }
+
+        /// <summary>Moves, rotates, scales or flips several layers together, as one undo step: every paint layer among ids and inside the
+        /// groups among them (other kinds have no pixels to move and are left alone), each as <see cref="Transform"/> moves one with the
+        /// document's selection, and the selection once. The locks of every layer are checked and the undo data of all of them together is
+        /// held to <see cref="ActiveStrokeBudgetBytes"/> before anything stays changed; a refusal or failure changes nothing. Returns false
+        /// when nothing changed.</summary>
+        public bool TransformLayers(IEnumerable<Guid> ids, Affine2D transform, Resampling resampling = Resampling.Bilinear)
+        {
+            EnsureNoStroke(); if (ids == null) throw new ArgumentNullException(nameof(ids));
+            var targets = new List<PaintLayer>();
+            foreach (var member in TopmostOf(ids))
+                foreach (var l in Block(member)) if (l.Kind == LayerKind.Raster && !targets.Contains(l)) targets.Add(l);
+            if (targets.Count == 0) throw new InvalidOperationException("None of the chosen layers has pixels to move (groups move the paint layers inside them).");
+            foreach (var l in targets) RequireTransformable(l, resampling, transform);
+            if (transform.IsIdentity) return false;
+            var effective = selection;
+            foreach (var l in targets) RefuseLockedTransform(l, transform, effective);
+            var commands = new List<IHistoryCommand>(); long used = 0;
+            try { foreach (var l in targets) commands.AddRange(TransformCommands(l, transform, effective, resampling, true, ref used)); }
+            catch { for (int i = commands.Count - 1; i >= 0; i--) commands[i].Revert(); throw; }
+            if (commands.Count == 0) return false;
+            if (selection != null) commands.Add(MoveSelection(transform, resampling));
+            Revision++; Push(new CompositeCommand(commands));
+            return true;
+        }
+
+        void RequireTransformable(PaintLayer layer, Resampling resampling, Affine2D transform)
+        {
             if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException(layer.IsGroup
                 ? "A group has no pixels to transform. Select a layer inside it."
                 : "Only paint layers have pixels to transform.");
             if (!Enum.IsDefined(typeof(Resampling), resampling)) throw new ArgumentOutOfRangeException(nameof(resampling));
             RefusePathLayer(layer);
             if (!transform.IsFinite) throw new ArgumentException("The transform must be finite.", nameof(transform));
-            if (transform.IsIdentity) return false;
+        }
+
+        /// <summary>Applies the transform to one layer's surfaces and returns the applied commands (empty when nothing changed). used
+        /// carries the undo data of the operation so far: the estimate is refused before anything of this layer changes when the total
+        /// would pass the one-operation budget; on failure this layer's surfaces are restored (the caller reverts earlier layers).</summary>
+        List<IHistoryCommand> TransformCommands(PaintLayer layer, Affine2D transform, SelectionMask effective, Resampling resampling, bool includeMask, ref long used)
+        {
             var inverse = transform.Inverse();
-            var effective = EffectiveRegion(region);
             var lifted = effective == null ? null : new SurfaceSnapshot(effective.Surface);
             // 変える前に、変わり得るタイルの巻き戻し分を見積もる。超えるなら何もせずに断る（4K の全面で 1 秒以上かけてから断らない）
             var plans = new List<(SparseTileSurface surface, SurfaceSnapshot source, List<TileCoord> targets)>(); long estimate = 0;
@@ -88,11 +134,13 @@ namespace Yozolab.YoluPainter.Core
                 foreach (var coord in targets) estimate += 64 + source.TileBytes(coord);
                 plans.Add((surface, source, targets));
             }
-            if (plans.Count == 0) return false;
-            if (estimate > ActiveStrokeBudgetBytes)
-                throw new InvalidOperationException("This transform would keep " + Mib(estimate) + " MiB of undo data, more than the one-operation budget (" + Mib(ActiveStrokeBudgetBytes)
+            var commands = new List<IHistoryCommand>();
+            if (plans.Count == 0) return commands;
+            if (used + estimate > ActiveStrokeBudgetBytes)
+                throw new InvalidOperationException("This transform would keep " + Mib(used + estimate) + " MiB of undo data, more than the one-operation budget (" + Mib(ActiveStrokeBudgetBytes)
                     + " MiB). Nothing was changed. Raise the budget (Project Settings > YoluPainter > One stroke, or ActiveStrokeBudgetBytes) or transform a smaller selection.");
-            var commands = new List<IHistoryCommand>(); long rollback = 0;
+            used += estimate;
+            long rollback = 0;
             try
             {
                 foreach (var plan in plans)
@@ -106,15 +154,15 @@ namespace Yozolab.YoluPainter.Core
                 for (int i = commands.Count - 1; i >= 0; i--) commands[i].Revert();
                 throw;
             }
-            if (commands.Count == 0) return false;
-            if (region == null && selection != null)
-            {
-                var old = selection; var moved = old.Transformed(transform, inverse, resampling); var next = moved.IsEmpty ? null : moved;
-                selection = next;
-                commands.Add(new DelegateCommand(() => selection = next, () => selection = old, 64 + moved.AllocatedBytes));
-            }
-            Revision++; Push(new CompositeCommand(commands));
-            return true;
+            return commands;
+        }
+
+        /// <summary>Moves the document's selection with the pixels (applied now; the command undoes it).</summary>
+        IHistoryCommand MoveSelection(Affine2D transform, Resampling resampling)
+        {
+            var old = selection; var moved = old.Transformed(transform, transform.Inverse(), resampling); var next = moved.IsEmpty ? null : moved;
+            selection = next;
+            return new DelegateCommand(() => selection = next, () => selection = old, 64 + moved.AllocatedBytes);
         }
 
         static string Mib(long bytes) => (bytes / (1024.0 * 1024)).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);

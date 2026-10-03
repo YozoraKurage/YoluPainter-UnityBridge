@@ -28,7 +28,7 @@ while read -r name set source selected; do
     id="${name#tools/}"
     render "$(url "$set" "$source" regular)" "$out/Tools/$id.png"
     render "$(url "$set" "$source" "${selected:-filled}")" "$out/Tools/${id}_selected.png"
-  else render "$(url "$set" "$source" regular)" "$out/$name.png"; fi
+  else render "$(url "$set" "$source" "${selected:-regular}")" "$out/$name.png"; fi
   count=$((count + 1))
 done < "$here/icons.txt"
 echo "ok: $count icons"

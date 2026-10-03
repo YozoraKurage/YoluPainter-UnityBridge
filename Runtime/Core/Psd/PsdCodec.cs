@@ -89,6 +89,8 @@ namespace Yozolab.YoluPainter.Core.Psd
             internal bool AdjustmentSeen;
             /// <summary>The record carries a solid colour fill block (SoCo), mapped or not.</summary>
             internal bool FillSeen;
+            /// <summary>The protection flags of the record's lspf block (0 without one) and where the block is.</summary>
+            internal uint Protection; internal int ProtectionOffset, ProtectionLength;
         }
         private sealed class ParseState
         {
@@ -482,8 +484,7 @@ namespace Yozolab.YoluPainter.Core.Psd
             record.Flags = r.U8();
             int flagsOffset = r.Position - 1;
             layer.Visible = (record.Flags & 2) == 0; // PSD bit 1 means hidden (despite ambiguous wording in published table).
-            // Bit 0 is the transparency lock: editing state, not rendering.
-            if ((record.Flags & 1) != 0) state.NotCarried("Transparency lock (layer flag bit 0)", flagsOffset, 1);
+            // Bit 0 is the transparency lock: editing state, not rendering (mapped by ApplyLocks once the record's kind is known).
             r.Zeros(1);
             var extra = r.Section();
             state.Metadata(extra.Remaining, extra.Position);
@@ -509,6 +510,7 @@ namespace Yozolab.YoluPainter.Core.Psd
                 state.Preserve("Adjustment", "A folder or divider record that also carries an adjustment is not represented.", start);
             if (record.FillSeen && record.Kind != RecordKind.Fill)
                 state.Preserve("FillLayer", "A fill block on a folder, divider or adjustment record is not represented.", start);
+            ApplyLocks(record, layer, state, flagsOffset);
             if (record.Kind == RecordKind.Divider)
             {
                 // The divider only marks where a folder's contents begin. Its blend mode, opacity, visibility, clipping
@@ -576,6 +578,38 @@ namespace Yozolab.YoluPainter.Core.Psd
             if ((record.Flags & ~(1 | 2 | 8)) != 0) state.Preserve("LayerFlags", "Irrelevant-pixel-data or unknown layer flags are not editable.", flagsOffset, 1);
             return record;
         }
+
+        /// <summary>lspf protection bits as Photoshop writes them: 0 transparency, 1 image pixels (composite), 2 position, 31 all; bit 3
+        /// (prevent auto-nesting into artboards) has no native lock.</summary>
+        internal const uint LockTransparencyBit = 1, LockPixelsBit = 2, LockPositionBit = 4, LockArtboardNestingBit = 8, LockAllBit = 0x80000000u;
+
+        /// <summary>The record's lspf and layer flag bit 0 as native locks. A folder's closing divider carries no layer of its own, so its
+        /// locks are reported (not carried) instead; so are lspf bits without a native lock.</summary>
+        private static void ApplyLocks(Record record, PsdRasterLayer layer, ParseState state, int flagsOffset)
+        {
+            bool flagBit = (record.Flags & 1) != 0; uint p = record.Protection;
+            if (record.Kind == RecordKind.Divider)
+            {
+                if (flagBit) state.NotCarried("Transparency lock on a folder's closing divider (layer flag bit 0)", flagsOffset, 1);
+                if (p != 0) state.NotCarried("Layer locks on a folder's closing divider (lspf)", record.ProtectionOffset, record.ProtectionLength);
+                return;
+            }
+            if (flagBit || (p & LockTransparencyBit) != 0) layer.Locks |= LayerLocks.Transparency;
+            if ((p & LockPixelsBit) != 0) layer.Locks |= LayerLocks.Pixels;
+            if ((p & LockPositionBit) != 0) layer.Locks |= LayerLocks.Position;
+            if ((p & LockAllBit) != 0) layer.Locks |= LayerLocks.All;
+            uint rest = p & ~(LockTransparencyBit | LockPixelsBit | LockPositionBit | LockAllBit);
+            if (rest == LockArtboardNestingBit) state.NotCarried("Prevent auto-nesting lock (lspf bit 3)", record.ProtectionOffset, record.ProtectionLength);
+            else if (rest != 0) state.NotCarried("Layer lock bits 0x" + rest.ToString("X8") + " without a native lock (lspf)", record.ProtectionOffset, record.ProtectionLength);
+        }
+
+        /// <summary>The lspf protection flags for native locks (0 for none). Lock all is written alone (0x80000000, what psd-tools calls
+        /// "complete"); the layer's own transparency, image and position locks under it are not written (they change nothing while it is on).</summary>
+        private static uint ProtectionOf(LayerLocks locks)
+            => (locks & LayerLocks.All) != 0 ? LockAllBit
+             : ((locks & LayerLocks.Transparency) != 0 ? LockTransparencyBit : 0) | ((locks & LayerLocks.Pixels) != 0 ? LockPixelsBit : 0) | ((locks & LayerLocks.Position) != 0 ? LockPositionBit : 0);
+        /// <summary>Layer flag bit 0 (transparency protected) for native locks: with a transparency lock that is not under lock all.</summary>
+        private static int TransparencyFlagOf(LayerLocks locks) => (locks & LayerLocks.Transparency) != 0 && (locks & LayerLocks.All) == 0 ? 1 : 0;
 
         /// <summary>Nests the records (bottom to top) into folders: a bounding divider opens a folder's contents, the folder
         /// record closes them. Returns the top level, top to bottom. Unbalanced dividers and folders, and nesting beyond the
@@ -737,11 +771,13 @@ namespace Yozolab.YoluPainter.Core.Psd
                         if (!seen.Add(key) || !DefaultByteSetting(body, 0))
                             state.Preserve("Knockout", "Knockout (knko) is not represented.", start, blockLength);
                         break;
-                    // Editing and Layers-panel state that does not render: accepted and reported, not carried.
+                    // Layer locks: editing state that does not render. Mapped to the native locks (ApplyLocks); bits without a native
+                    // lock are accepted and reported, not carried.
                     case "lspf":
-                        if (size != 4) state.Preserve("LayerLocks", "Nonstandard layer lock block (lspf).", start, blockLength);
-                        else if (body.U32() != 0) state.NotCarried("Layer locks (lspf)", start, blockLength);
+                        if (size != 4 || !seen.Add(key) || record == null) state.Preserve("LayerLocks", "Nonstandard or repeated layer lock block (lspf).", start, blockLength);
+                        else { record.Protection = body.U32(); record.ProtectionOffset = start; record.ProtectionLength = blockLength; }
                         break;
+                    // Editing and Layers-panel state that does not render: accepted and reported, not carried.
                     case "lclr":
                         if (size != 8) state.Preserve("SheetColor", "Nonstandard layer colour label block (lclr).", start, blockLength);
                         else if (body.U32() != 0 || body.U32() != 0) state.NotCarried("Layer colour label (lclr)", start, blockLength);
@@ -1122,7 +1158,8 @@ namespace Yozolab.YoluPainter.Core.Psd
                     // A pass-through folder has "norm" in its record and "pass" in its section divider setting, as Photoshop writes it.
                     w.Key(layer.BlendMode == LayerBlendMode.PassThrough ? "norm" : BlendKey(layer.BlendMode));
                     // Adjustment layers carry Photoshop's "pixel data irrelevant" flag (bit 4, with bit 3 saying it is meaningful).
-                    w.U8(layer.Opacity); w.U8(layer.Clipping ? 1 : 0); w.U8((layer.Visible ? 0 : 2) | (record.Kind == RecordKind.Adjustment || record.Kind == RecordKind.Fill ? 8 | 16 : 0));
+                    w.U8(layer.Opacity); w.U8(layer.Clipping ? 1 : 0);
+                    w.U8((layer.Visible ? 0 : 2) | TransparencyFlagOf(layer.Locks) | (record.Kind == RecordKind.Adjustment || record.Kind == RecordKind.Fill ? 8 | 16 : 0));
                 }
                 w.U8(0);
                 int extraLength = w.Position; w.U32(0);
@@ -1137,6 +1174,7 @@ namespace Yozolab.YoluPainter.Core.Psd
                 w.Key("8BIM"); w.Key("luni"); w.U32(4 + unicode.Length); w.U32(name.Length); w.Bytes(unicode);
                 int id = divider ? layer.DividerId : layer.Id;
                 if (id != 0) { w.Key("8BIM"); w.Key("lyid"); w.U32(4); w.U32(id); }
+                if (!divider && layer.Locks != LayerLocks.None) { w.Key("8BIM"); w.Key("lspf"); w.U32(4); w.U32(ProtectionOf(layer.Locks)); }
                 if (divider) { w.Key("8BIM"); w.Key("lsct"); w.U32(4); w.U32(3); }
                 else if (record.Kind == RecordKind.Adjustment)
                 {
@@ -1217,6 +1255,7 @@ namespace Yozolab.YoluPainter.Core.Psd
                 int pascal = Math.Min(255, name.Length) + 1;
                 pascal += (4 - pascal % 4) % 4;
                 long id = (divider ? layer.DividerId : layer.Id) != 0 ? 16 : 0;
+                if (!divider && layer.Locks != LayerLocks.None) id += 16; // lspf
                 long section = divider ? 16 : raster ? 0 : 24;
                 if (record.Kind == RecordKind.Adjustment) { string adjustmentKey; section = 12 + AdjustmentBlock(layer.Adjustment, out adjustmentKey).Length; }
                 if (record.Kind == RecordKind.Fill) section = 12 + SolidColorBlock(layer.FillColor.Value).Length;

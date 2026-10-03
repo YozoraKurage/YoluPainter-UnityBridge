@@ -137,7 +137,7 @@ namespace Yozolab.YoluPainter.Tests
             Repaint(window);
             var head = window.PanelHeaderRectForTests("layers");
             Assert.That(head.width, Is.GreaterThan(0), "the layers panel is docked");
-            var at = new Vector2(head.x + head.width * .55f, head.yMax + 6 + 24 + 6 + 15);
+            var at = new Vector2(head.x + head.width * .55f, head.yMax + TexturePaintWindow.LayerListOffsetFor(head.width) + 15);
             Mouse(window, EventType.MouseDown, at); Mouse(window, EventType.MouseUp, at);
             Mouse(window, EventType.MouseDown, at); Mouse(window, EventType.MouseUp, at);
             Repaint(window);

@@ -27,7 +27,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>ストロークや、持ち主のツールのドラッグ（選択範囲・変形など）の間は、パネルを触れない（ドックと同じく GUI.enabled で止める）。</summary>
         internal bool PanelsLocked => stroke != null || toolDragging;
         /// <summary>パネルが映す持ち主の状態の目印。持ち主が見えていない間に変わったら、別のウィンドウは自分で描き直す。</summary>
-        internal long PanelStamp => document == null ? 0 : unchecked(document.Revision * 31 + selectedLayer.GetHashCode() * 17 + (int)channel * 7 + (int)tool * 3 + (editMask ? 1 : 0));
+        internal long PanelStamp => document == null ? 0 : unchecked(document.Revision * 31 + selectedLayer.GetHashCode() * 17 + LayerSelectionStamp * 13L + (int)channel * 7 + (int)tool * 3 + (editMask ? 1 : 0));
         internal Vector2 DockScreenOriginForTests => dockScreenOrigin;
 
         /// <summary>持ち主の窓を閉じたら別のウィンドウも閉じる（配置には別のウィンドウのまま覚え、次に開いたときにまた出す）。</summary>
