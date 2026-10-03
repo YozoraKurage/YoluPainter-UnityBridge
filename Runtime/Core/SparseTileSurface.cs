@@ -232,6 +232,11 @@ namespace Yozolab.YoluPainter.Core
             for (int i = 4; i < bytes.Length; i += 4) if (bytes[i] != r || bytes[i + 1] != g || bytes[i + 2] != b || bytes[i + 3] != a) return false;
             return true;
         }
+        /// <summary>The tile's own pixels for reading in place (null for a uniform tile, see <see cref="UniformColor"/>). Readers must not
+        /// write to it or keep it after the call that read it (the next write may replace or change it).</summary>
+        internal byte[] PeekData { get { return data; } }
+        /// <summary>The colour of every pixel of a uniform tile.</summary>
+        internal Rgba32 UniformColor { get { return uniform; } }
         internal Rgba32 Get(int index) { return data == null ? uniform : new Rgba32(data[index], data[index + 1], data[index + 2], data[index + 3]); }
         internal void Set(int index, Rgba32 color, int byteLength)
         {

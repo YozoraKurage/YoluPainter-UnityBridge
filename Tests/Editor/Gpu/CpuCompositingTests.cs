@@ -11,9 +11,10 @@ namespace Yozolab.YoluPainter.Tests
 {
     /// <summary>表示の合成の CPU の経路（Project Settings ▸ YoluPainter ▸ Display compositing = CPU、または GPU が使えないとき）。
     /// 表示が CPU の正本（PaintDocument.Composite）とも、以前の CPU の代わりの経路（変わったタイルを 1 枚ずつ CompositeRegion で合成し、
-    /// 全面を毎回載せ直す）ともバイト単位で同じこと、変わったタイルだけを表示へ送ること、CompositeRegion をタイルごとではなく長方形ごとに
-    /// 呼ぶこと、GPU を選んでも使えなければ CPU に落ちてそう示すこと。表示の RenderTexture の経路はグラフィックスデバイスが要る
-    /// （シェーダーは要らない。CopyTexture が無い環境の描き込みの経路だけ TileComposite が要る）。</summary>
+    /// 全面を毎回載せ直す）ともバイト単位で同じこと、変わったタイルだけを表示へ送ること、変わったタイルを長方形にまとめて合成すること、
+    /// 下の合成結果の写し（ブロックごと、予算の内側）から変わった層より上だけを合成し直すこと、GPU を選んでも使えなければ CPU に落ちて
+    /// そう示すこと。表示の RenderTexture の経路はグラフィックスデバイスが要る（シェーダーは要らない。CopyTexture が無い環境の描き込みの
+    /// 経路だけ TileComposite が要る）。</summary>
     public sealed class CpuCompositingTests
     {
         [TearDown] public void StopSimulating() { TileGpuCompositor.SimulatedGpuUnavailable = null; }
@@ -134,7 +135,9 @@ namespace Yozolab.YoluPainter.Tests
                     Assert.That(frame.Path, Is.EqualTo(TileGpuCompositor.CompositePath.CpuFrame)); Assert.That(tiles.Path, Is.EqualTo(TileGpuCompositor.CompositePath.CpuTiles));
                     if (!tiles.LastCpuFullFrame)
                     {
-                        Assert.That(tiles.LastSentTileCount, Is.EqualTo(tiles.LastUpdatedTileCount), step + ": only the changed tiles are sent");
+                        // 署名が前と同じブロック（変更の記録には出たが合成は変わらない）は送らない
+                        if (tiles.LastSkippedBlockCount == 0) Assert.That(tiles.LastSentTileCount, Is.EqualTo(tiles.LastUpdatedTileCount), step + ": only the changed tiles are sent");
+                        else Assert.That(tiles.LastSentTileCount, Is.LessThan(tiles.LastUpdatedTileCount), step + ": nothing is sent for unchanged blocks");
                         if (tiles.LastUpdatedTileCount > 0) partial++;
                     }
                     if (tiles.LastSentTileCount > tiles.LastCpuCompositeCalls && tiles.LastUpdatedTileCount >= 64) blockSends++;
@@ -207,8 +210,8 @@ namespace Yozolab.YoluPainter.Tests
             return doc;
         }
 
-        /// <summary>タイルごとではなく、変わったタイルをまとめた長方形ごとに CompositeRegion を 1 回呼び、送るのは変わったタイルだけ。
-        /// 構造の変更で全部のタイルが変わったら全面を 1 回で合成する。デバイスを使わない Texture2D の経路でも呼び出しの数は同じ。</summary>
+        /// <summary>タイルごとではなく、変わったタイルをまとめた長方形ごとに 1 つの領域として（1 回の CompositeRegions で）合成し、送るのは
+        /// 変わったタイルだけ。最初の更新だけが全部のブロックを合成する。デバイスを使わない Texture2D の経路でも領域の数は同じ。</summary>
         [Test] public void ChangedTilesAreCompositedPerRectangleAndOnlyThoseAreSent()
         {
             var brush = new BrushSettings { Radius = 5, Hardness = 1, Color = new Rgba32(255, 0, 0), PressureSize = false, PressureOpacity = false };
@@ -222,7 +225,7 @@ namespace Yozolab.YoluPainter.Tests
                 using (var c = renderTexture ? CpuToRenderTexture(doc) : new TileGpuCompositor(allowGpu: false))
                 {
                     if (!renderTexture) c.Update(doc, PaintChannel.Color);
-                    Assert.That(c.LastCpuFullFrame, Is.True); Assert.That(c.LastCpuCompositeCalls, Is.EqualTo(1));
+                    Assert.That(c.LastCpuFullFrame, Is.True); Assert.That(c.LastCpuCompositeCalls, Is.EqualTo(1)); Assert.That(c.LastCpuJobCount, Is.EqualTo(1), "one block");
                     Assert.That(c.LastSentTileCount, Is.EqualTo(64), "the first update sends everything");
                     void Edit(string name, Action edit)
                     {
@@ -230,19 +233,21 @@ namespace Yozolab.YoluPainter.Tests
                         var changed = new HashSet<TileCoord>(); Assert.That(doc.TryGetChangedTiles(PaintChannel.Color, since, changed), Is.True);
                         c.Update(doc, PaintChannel.Color);
                         AssertSameBytes(doc.Composite(PaintChannel.Color), Read(c), name);
-                        if (changed.Count == 64) { Assert.That(c.LastCpuFullFrame, Is.True, name); Assert.That(c.LastCpuCompositeCalls, Is.EqualTo(1), name); return; }
                         Assert.That(c.LastCpuFullFrame, Is.False, name);
-                        Assert.That(c.LastCpuCompositeCalls, Is.EqualTo(TileGpuCompositor.CoverTiles(changed, 8, 8).Count), name + ": one call per rectangle");
+                        if (changed.Count == 0) return;
+                        Assert.That(c.LastCpuCompositeCalls, Is.EqualTo(1), name + ": one call");
+                        Assert.That(c.LastCpuJobCount, Is.EqualTo(TileGpuCompositor.CoverTiles(changed, 8, 8).Count), name + ": one region per rectangle");
                         if (renderTexture) Assert.That(c.LastSentTileCount, Is.EqualTo(changed.Count), name + ": only the changed tiles are sent");
                     }
                     void Line(double x0, double y0, double x1, double y1) { using (var s = doc.BeginStroke(layer.Id, PaintChannel.Color, brush)) { s.Add(new BrushSample(x0, y0)); s.Add(new BrushSample(x1, y1)); s.Commit(); } }
                     Edit("a line across three tiles", () => Line(80, 100, 240, 100));
-                    Assert.That(c.LastCpuCompositeCalls, Is.EqualTo(1), "three tiles, one call");
+                    Assert.That(c.LastCpuJobCount, Is.EqualTo(1), "three tiles, one region");
                     Edit("a diagonal", () => Line(20, 20, 490, 490));
-                    Assert.That(c.LastCpuCompositeCalls, Is.LessThan(c.LastUpdatedTileCount), "fewer calls than tiles");
+                    Assert.That(c.LastCpuJobCount, Is.LessThan(c.LastUpdatedTileCount), "fewer regions than tiles");
                     Edit("two far corners", () => { Line(10, 10, 12, 12); Line(500, 500, 502, 502); });
                     Edit("undo", () => doc.Undo());
                     Edit("opacity (every tile)", () => doc.SetLayerOpacity(layer.Id, .5));
+                    Assert.That(c.LastCpuJobCount, Is.EqualTo(1), "every tile, one region");
                     Edit("nothing", () => { });
                     Assert.That(c.LastCpuCompositeCalls, Is.Zero); Assert.That(c.LastSentTileCount, Is.Zero);
                 }
@@ -292,6 +297,91 @@ namespace Yozolab.YoluPainter.Tests
                 c.Update(doc, PaintChannel.Normal); view.Update(doc, c.Texture);
                 Assert.That(view.HeightCompositor.LastSentTileCount, Is.EqualTo(1), "only the changed Height tile is sent");
                 GpuTests.AssertMatches(NormalMaps.Output(doc), GpuTests.Read(view.Texture), "after a Height edit");
+            }
+        }
+
+        // ───────── 下の合成結果の写し ─────────
+
+        /// <summary>構造の変更（不透明度・合成モード・表示）や上の層への描き込みは、GPU の経路と同じく、ブロックごとに残した「最初に変わった
+        /// 項目より下の合成結果の写し」から上だけを合成し直す。最初の変更で写しを取り（ブロック全体を合成）、同じ層の 2 回目からは写しを
+        /// 使う。写しより下が変わったら写しは使わない。どの手順でも表示は CPU の正本とバイト単位で同じ。マスク・クリッピング・調整レイヤー・
+        /// 通過と分離のグループ・ぼかし（halo）・塗りつぶしの層のある文書で、RenderTexture と CPU 側の Texture2D の両方の経路を確かめる。</summary>
+        [Test] public void StructuralChangesRecompositeFromTheCopyBelowTheChangedLayer()
+        {
+            var doc = Scene(1100, 700, 64, out var layers); // 作業ブロック 512 = 8×8 タイル、3×2 ブロック（端で欠ける）
+            var blur = doc.AddLayer("Blurred"); layers.Add(blur);
+            using (var s = doc.BeginStroke(blur.Id, PaintChannel.Color, new BrushSettings { Radius = 90, Color = new Rgba32(250, 240, 10, 230), PressureSize = false, PressureOpacity = false }))
+            { s.Add(new BrushSample(300, 200)); s.Add(new BrushSample(900, 500)); s.Commit(); }
+            doc.AddFilter(blur.Id, FilterTarget.Content, FilterSettings.GaussianBlur(6));
+            var top = doc.AddLayer("Top paint"); layers.Add(top);
+            using (var s = doc.BeginStroke(top.Id, PaintChannel.Color, new BrushSettings { Radius = 120, Color = new Rgba32(10, 40, 250, 200), PressureSize = false, PressureOpacity = false }))
+            { s.Add(new BrushSample(50, 50)); s.Add(new BrushSample(1050, 650)); s.Add(new BrushSample(80, 640)); s.Commit(); }
+            doc.ClearHistory();
+            var middle = layers[2]; // Pass inner
+            using (var frame = new TileGpuCompositor(allowGpu: false) { ResidentBudgetBytes = 256L << 20 })
+            using (var tiles = CpuToRenderTexture(doc))
+            {
+                tiles.ResidentBudgetBytes = 256L << 20;
+                void Check(string step)
+                {
+                    tiles.Update(doc, PaintChannel.Color); frame.Update(doc, PaintChannel.Color);
+                    var expected = doc.Composite(PaintChannel.Color);
+                    AssertSameBytes(expected, GpuTests.Read(tiles.Texture), step + ": render texture");
+                    AssertSameBytes(expected, GpuTests.ReadCpu(frame.Texture), step + ": CPU-side Texture2D");
+                    Assert.That(tiles.ResidentBytes, Is.LessThanOrEqualTo(tiles.ResidentBudgetBytes), step);
+                    Assert.That(tiles.LastBelowReuseCount, Is.EqualTo(frame.LastBelowReuseCount), step + ": both paths decide the same");
+                }
+                Check("first");
+                Assert.That(tiles.ResidentBytes, Is.Zero, "the first update keeps no copy (it is taken at the first difference)");
+                doc.SetLayerOpacity(top.Id, .8, coalesce: true); Check("top opacity 1");
+                Assert.That(tiles.LastBelowReuseCount, Is.Zero, "the first change takes the copies");
+                Assert.That(tiles.ResidentBytes, Is.GreaterThan(0));
+                int blocks = tiles.LastBlockCount;
+                doc.SetLayerOpacity(top.Id, .6, coalesce: true); Check("top opacity 2");
+                Assert.That(tiles.LastBlockCount, Is.EqualTo(blocks)); Assert.That(tiles.LastBelowReuseCount, Is.EqualTo(blocks), "every block starts from its copy");
+                doc.SetLayerBlendMode(top.Id, LayerBlendMode.Multiply); Check("top blend mode");
+                Assert.That(tiles.LastBelowReuseCount, Is.EqualTo(tiles.LastBlockCount));
+                doc.SetLayerVisibility(top.Id, false); Check("top hidden");
+                doc.SetLayerVisibility(top.Id, true); Check("top shown");
+                using (var s = doc.BeginStroke(top.Id, PaintChannel.Color, new BrushSettings { Radius = 20, Color = new Rgba32(200, 0, 0, 255), PressureSize = false, PressureOpacity = false }))
+                {
+                    for (int i = 0; i < 6; i++) { s.Add(new BrushSample(400 + 30 * i, 300 + 7 * i)); Check("stroke on the top layer " + i); Assert.That(tiles.LastBelowReuseCount, Is.EqualTo(tiles.LastBlockCount), "strokes on the top layer start from the copies"); Assert.That(tiles.LastSentTileCount, Is.EqualTo(tiles.LastUpdatedTileCount)); }
+                    s.Commit();
+                }
+                Check("after the stroke");
+                doc.SetLayerOpacity(middle.Id, .5, coalesce: true); Check("middle opacity 1");
+                doc.SetLayerOpacity(middle.Id, .3, coalesce: true); Check("middle opacity 2");
+                Assert.That(tiles.LastBelowReuseCount, Is.GreaterThan(0), "the copies moved down to the middle layer");
+                doc.SetLayerOpacity(blur.Id, .7); Check("blurred layer opacity");
+                doc.SetFilterSettings(blur.Id, blur.Filters[0].Id, FilterSettings.GaussianBlur(9), coalesce: true); Check("blur radius");
+                doc.SetLayerMaskDensity(doc.Layers.First(l => l.Name == "Fill").Id, .4); Check("fill mask density"); // 下から 2 番目の項目: どの写しより下
+                Assert.That(tiles.LastBelowReuseCount, Is.Zero, "a change below every copy uses none");
+                using (var s = doc.BeginStroke(layers[0].Id, PaintChannel.Color, new BrushSettings { Radius = 30, Color = new Rgba32(0, 255, 0, 255), PressureSize = false, PressureOpacity = false }))
+                { s.Add(new BrushSample(600, 350)); s.Add(new BrushSample(640, 380)); s.Commit(); }
+                Check("stroke on the bottom layer");
+                doc.SetLayerOpacity(top.Id, .9); Check("top again 1"); doc.SetLayerOpacity(top.Id, .4); Check("top again 2");
+                doc.Undo(); Check("undo"); doc.Undo(); Check("undo 2"); doc.Redo(); Check("redo");
+                doc.SetLayerClipping(top.Id, true); Check("top clipped"); doc.SetLayerOpacity(top.Id, .7); Check("clipped top opacity");
+                doc.SetLayerClipping(top.Id, false); Check("top unclipped");
+
+                // 予算: 0 なら何も残さない（同じ画素で遅くなるだけ）、下げれば手放す、捨てても次の更新は正しい
+                tiles.ResidentBudgetBytes = 0; frame.ResidentBudgetBytes = 0;
+                Assert.That(tiles.ResidentBytes, Is.Zero, "lowering the budget releases the copies");
+                doc.SetLayerOpacity(top.Id, .5); Check("no budget 1"); doc.SetLayerOpacity(top.Id, .45); Check("no budget 2");
+                Assert.That(tiles.ResidentBytes, Is.Zero); Assert.That(tiles.LastBelowReuseCount, Is.Zero);
+                long oneBlock = 4L * 512 * 512;
+                tiles.ResidentBudgetBytes = oneBlock; frame.ResidentBudgetBytes = oneBlock;
+                doc.SetLayerOpacity(top.Id, .55); Check("one block of budget 1"); doc.SetLayerOpacity(top.Id, .65); Check("one block of budget 2");
+                Assert.That(tiles.ResidentBytes, Is.LessThanOrEqualTo(oneBlock)); Assert.That(tiles.LastBelowReuseCount, Is.LessThan(tiles.LastBlockCount), "not every block fits");
+                tiles.ResidentBudgetBytes = 256L << 20; frame.ResidentBudgetBytes = 256L << 20;
+                doc.SetLayerOpacity(top.Id, .75); Check("budget back 1"); doc.SetLayerOpacity(top.Id, .85); Check("budget back 2");
+                Assert.That(tiles.ResidentBytes, Is.GreaterThan(oneBlock));
+                tiles.ReleaseResidentCaches(); frame.ReleaseResidentCaches();
+                Assert.That(tiles.ResidentBytes, Is.Zero);
+                doc.SetLayerOpacity(top.Id, .95); Check("after releasing"); Assert.That(tiles.LastBelowReuseCount, Is.Zero);
+                // 別のチャンネルは写しを使わない（全部を合成し直す）
+                tiles.Update(doc, PaintChannel.Roughness); Assert.That(tiles.LastCpuFullFrame, Is.True);
+                AssertSameBytes(doc.Composite(PaintChannel.Roughness), GpuTests.Read(tiles.Texture), "Roughness");
             }
         }
 

@@ -41,11 +41,13 @@ namespace Yozolab.YoluPainter.Editor
     /// 1 つ深い段へ写して中身を重ね、不透明度×マスクでフェードする（不透明度 1 でマスクが無ければ同じ段でそのまま重ねる）。
     /// <see cref="MaxNestedLevels"/> 段と <see cref="NestedLevelBudgetBytes"/> を超える文書では、深いグループが触れるタイルだけ CPU の正本の
     /// 式で合成して上書きする（Backend に書く）。</para>
-    /// <para>CPU の経路（<see cref="CompositorBackend.Cpu"/> を選んだとき、GPU が使えないとき）は Core の CpuCompositor で合成する。変更記録の
-    /// タイルを長方形にまとめて（<see cref="CoverTiles"/>）1 つの長方形を 1 回の CompositeRegion で合成し、ほとんど全部なら全面を 1 回の
-    /// Composite で合成する。結果は表示の RenderTexture へ、変わったタイルだけ（ブロックが丸ごと変わっていればブロックで）小さな
-    /// Texture2D に載せて CopyTexture（無ければ描き込み）で写す。グラフィックスデバイスや RenderTexture が使えなければ、CPU 側の 1 枚の
-    /// Texture2D に全面を載せ直す（<see cref="CompositePath.CpuFrame"/>）。どの経路でも表示の画素は CPU の正本とバイト単位で同じ。</para>
+    /// <para>CPU の経路（<see cref="CompositorBackend.Cpu"/> を選んだとき、GPU が使えないとき）は Core の CpuCompositor.CompositeRegions で
+    /// 合成する。ブロックごとに GPU の経路と同じ署名を覚え、最初に違う項目より下の合成結果をメモリに「下の写し」として残す（予算は同じ
+    /// <see cref="ResidentBudgetBytes"/>）。写しのすぐ上から変わったブロックは、変わったタイルだけ（<see cref="CoverTiles"/> の長方形ごと）を
+    /// 写しから上だけ合成し、写しを取り直すときはブロック全体を合成する。結果は表示の RenderTexture へ、変わったタイルだけ（ブロックが
+    /// 丸ごと変わっていればブロックで）小さな Texture2D に載せて CopyTexture（無ければ描き込み）で写す。グラフィックスデバイスや
+    /// RenderTexture が使えなければ、CPU 側の 1 枚の Texture2D に全面を載せ直す（<see cref="CompositePath.CpuFrame"/>）。どの経路でも表示の
+    /// 画素は CPU の正本とバイト単位で同じ。</para>
     /// </remarks>
     internal sealed class TileGpuCompositor : IDisposable
     {
@@ -109,9 +111,9 @@ namespace Yozolab.YoluPainter.Editor
         internal CompositorBackend Preference => preference;
         /// <summary>直近の Update が表示のテクスチャへ送ったタイルの数（CPU の経路。<see cref="CompositePath.CpuFrame"/> は全面のタイルの数）。</summary>
         internal int LastSentTileCount { get; private set; }
-        /// <summary>直近の Update が呼んだ CPU の合成（CompositeRegion / Composite）の回数。</summary>
+        /// <summary>直近の Update が CPU の経路で呼んだ CompositeRegions の回数（置き場 <see cref="CpuWaveBlocks"/> 個ぶんごとに 1 回）。</summary>
         internal int LastCpuCompositeCalls { get; private set; }
-        /// <summary>直近の Update が CPU の経路で全面を合成し直したか。</summary>
+        /// <summary>直近の Update が CPU の経路で全部のブロックを透明から合成し直したか（変更記録が使えないとき）。</summary>
         internal bool LastCpuFullFrame { get; private set; }
         /// <summary>Tiles whose composite the last Update refreshed (the change journal's tiles), for diagnostics and tests.</summary>
         public int LastUpdatedTileCount { get; private set; }
@@ -124,15 +126,15 @@ namespace Yozolab.YoluPainter.Editor
         public int NestedLevelLimit => blockSize <= 0 ? MaxNestedLevels : (int)Math.Min(MaxNestedLevels, NestedLevelBudgetBytes / (4L * blockSize * blockSize * 4));
         /// <summary>計測・比較用: グループの中身があるタイルを、以前の方式（CPU の正本で合成して載せる）で処理する。</summary>
         internal bool CompositeGroupsOnCpu { get; set; }
-        /// <summary>GPU に残す写しの上限（バイト）。0 なら何も残さない（毎回アップロードし、下の写しも作らない）。</summary>
-        /// <summary>写しの上限。下げて今の写しが超えたら、すべて捨てる（次の更新で予算の内側に作り直す）。</summary>
+        /// <summary>残す写しの上限（バイト。GPU の経路は GPU のテクスチャ、CPU の経路はメモリの下の写し）。0 なら何も残さない（毎回
+        /// アップロードし、下の写しも作らない）。下げて今の写しが超えたら、すべて捨てる（次の更新で予算の内側に作り直す）。</summary>
         internal long ResidentBudgetBytes
         {
             get => residentBudgetBytes;
             set { if (value < 0) throw new ArgumentOutOfRangeException(nameof(value)); residentBudgetBytes = value; if (ResidentBytes > value) ReleaseResidentCaches(); }
         }
         long residentBudgetBytes = DefaultResidentBudgetBytes;
-        /// <summary>今 GPU に残している写しの合計（バイト）。常に <see cref="ResidentBudgetBytes"/> 以下。</summary>
+        /// <summary>今残している写しの合計（バイト）。常に <see cref="ResidentBudgetBytes"/> 以下。</summary>
         internal long ResidentBytes { get; private set; }
         /// <summary>作業ブロックの辺（画素）。</summary>
         internal int BlockSize => blockSize;
@@ -180,12 +182,15 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
 
-        /// <summary>GPU に残した写し（アップロードしたブロックと下の写し）をすべて捨てる。結果は変わらず、次の更新が遅くなるだけ。</summary>
+        /// <summary>残した写し（GPU の経路はアップロードしたブロックと下の写し、CPU の経路はメモリの下の写しと置き場）をすべて捨てる。
+        /// 結果は変わらず、次の更新が遅くなるだけ。</summary>
         public void ReleaseResidentCaches()
         {
             foreach (var r in residents.Values) DestroyTexture(r.Texture);
             residents.Clear();
             foreach (var b in blocks.Values) { Release(b.Below); b.Below = null; b.BelowIndex = 0; }
+            foreach (var b in cpuBlocks.Values) { b.Below = null; b.BelowIndex = 0; }
+            cpuPool.Clear();
             ResidentBytes = 0;
         }
 
@@ -205,7 +210,7 @@ namespace Yozolab.YoluPainter.Editor
             if (!incremental) { dirty.Clear(); dirty.UnionWith(previous); dirty.UnionWith(occupied); }
             LastUpdatedTileCount = dirty.Count; LastCpuTileCount = 0;
             LastBlockCount = LastSkippedBlockCount = LastBelowReuseCount = LastResidentHitCount = LastUploadCount = 0;
-            LastSentTileCount = LastCpuCompositeCalls = 0; LastCpuFullFrame = false;
+            LastSentTileCount = LastCpuCompositeCalls = LastCpuJobCount = 0; LastCpuFullFrame = false;
 
             if (Path != CompositePath.Gpu) UpdateCpu(doc, channel, dirty, incremental);
             else
@@ -241,38 +246,206 @@ namespace Yozolab.YoluPainter.Editor
         }
         // ───────────── CPU の経路 ─────────────
 
-        /// <summary>CPU の正本の式で、変わったタイルを合成して表示へ送る。変更記録が使えない（別の文書・チャンネル、構造の変更の一部）か、
-        /// 変わったタイルをまとめた長方形の手間が全面と変わらなければ、全面を 1 回の Composite で合成する。</summary>
+        /// <summary>CPU の経路のブロックの記憶（GPU の <see cref="BlockState"/> と同じ考え）: 前回の最上段の署名と、下の写し（最上段の項目
+        /// [0, BelowIndex) の合成。ブロックの画素の行を詰めて並べたもの）。Below があっても BelowIndex が 0 なら中身は使えない（配列だけ
+        /// 使い回す）。</summary>
+        sealed class CpuBlock { public string[] Sigs; public byte[] Below; public int BelowIndex; public int LastUsed; }
+        readonly Dictionary<long, CpuBlock> cpuBlocks = new Dictionary<long, CpuBlock>();
+        /// <summary>CPU の経路で 1 回の合成に渡す領域の置き場（ブロック 1 つ分の配列。<see cref="CpuWaveBlocks"/> 個まで使い回す）。</summary>
+        readonly List<byte[]> cpuPool = new List<byte[]>();
+        /// <summary>CPU の経路で 1 回の CompositeRegions に渡すブロックの数の上限（置き場の大きさ。512² のブロックで 16 MiB）。</summary>
+        internal const int CpuWaveBlocks = 16;
+        /// <summary>直近の Update が CPU の経路で合成した領域の数（CompositeRegions に渡したジョブ）。</summary>
+        internal int LastCpuJobCount { get; private set; }
+
+        /// <summary>1 つのブロックで合成する領域。</summary>
+        sealed class CpuJob
+        {
+            public CpuBlock State; public int Bx, By; public TileRect Rect; public int X, Y, W, H; public byte[] Pixels;
+            /// <summary>下の写しから始める（Pixels に写しを置いて渡す）。</summary>
+            public int Start;
+            /// <summary>下の写しを取り直す（ブロック全体を合成して State.Below へ）。</summary>
+            public int CaptureAt = -1; public byte[] Capture;
+        }
+
+        /// <summary>CPU の正本の式（Core の CompositeRegions）で、変わったタイルを合成して表示へ送る。GPU の経路と同じく、ブロックごとに
+        /// 最上段の項目の署名を覚え、前回と最初に違う項目より下の合成結果（下の写し）を予算の内側で残し、次からはそこから上だけを合成する
+        /// （レイヤーの不透明度・合成モード・表示を変える、上の層に描くなど）。GPU と違い、写しから始めるときは変わったタイルだけを合成する。
+        /// 変更記録が使えない（別の文書・チャンネル）ときは全部のブロックを合成し直す。表示の画素はどの場合も CPU の正本とバイト単位で同じ。</summary>
         void UpdateCpu(PaintDocument doc, PaintChannel channel, HashSet<TileCoord> dirty, bool incremental)
         {
             bool full = !incremental || !cpuValid;
-            List<TileRect> rects = null;
-            if (!full)
-            {
-                rects = CoverTiles(dirty, TilesX, TilesY);
-                if (rects.Count == 0) return;
-                long work = 0; foreach (var r in rects) work += r.Count;
-                // 全面は全部のタイル + 1 回、長方形は覆うタイル + 回数ぶん。全面のほうが安いか同じなら全面
-                if ((long)TilesX * TilesY <= work + (long)CallCostInTiles * (rects.Count - 1)) full = true;
-            }
+            updateIndex++;
+            if (!ReferenceEquals(doc, lastDocument) || channel != lastChannel) ClearCpuBlocks();
+            if (Path == CompositePath.CpuFrame && (cpuPixels == null || cpuPixels.Length != width * height * 4)) { cpuPixels = new byte[width * height * 4]; full = true; }
+            var plan = CpuCompositor.Plan(doc, channel);
+            // ブロックごとの変わったタイル（全部のときは null = ブロックの全タイル）
+            var byBlock = new SortedDictionary<long, List<TileCoord>>();
             if (full)
             {
-                var pixels = doc.Composite(channel);
-                LastCpuCompositeCalls = 1; LastCpuFullFrame = true;
-                if (Path == CompositePath.CpuTiles) SendRegion(pixels, 0, 0, width, new TileRect(0, 0, TilesX, TilesY), null);
-                else { cpuPixels = pixels; UploadFrame(); }
-                cpuValid = true;
-                return;
+                for (int by = 0; by * blockTiles < TilesY; by++) for (int bx = 0; bx * blockTiles < TilesX; bx++) byBlock.Add(BlockOrder(bx, by), null);
             }
-            foreach (var r in rects)
+            else
             {
-                int x = r.X0 * tileSize, y = r.Y0 * tileSize, w = Math.Min(r.X1 * tileSize, width) - x, h = Math.Min(r.Y1 * tileSize, height) - y;
-                var region = CpuCompositor.CompositeRegion(doc, channel, x, y, w, h);
-                LastCpuCompositeCalls++;
-                if (Path == CompositePath.CpuTiles) SendRegion(region, x, y, w, r, dirty);
-                else for (int row = 0; row < h; row++) Buffer.BlockCopy(region, row * w * 4, cpuPixels, ((y + row) * width + x) * 4, w * 4);
+                foreach (var t in dirty)
+                {
+                    if (t.X < 0 || t.Y < 0 || t.X >= TilesX || t.Y >= TilesY) continue;
+                    long key = BlockOrder(t.X / blockTiles, t.Y / blockTiles);
+                    if (!byBlock.TryGetValue(key, out var list)) byBlock.Add(key, list = new List<TileCoord>());
+                    list.Add(t);
+                }
+                if (byBlock.Count == 0) return;
+            }
+            var jobs = new List<CpuJob>();
+            foreach (var pair in byBlock)
+            {
+                int bx = (int)(pair.Key % BlockColumns), by = (int)(pair.Key / BlockColumns);
+                PlanCpuBlock(doc, plan, channel, bx, by, pair.Value, full, jobs);
+            }
+            // 置き場の大きさごとに分けて合成し、終わった分から表示へ送る
+            for (int i = 0; i < jobs.Count;)
+            {
+                int end = i; long bytes = 0;
+                while (end < jobs.Count && (end == i || bytes + (long)jobs[end].W * jobs[end].H * 4 <= (long)CpuWaveBlocks * BlockBytes)) { bytes += (long)jobs[end].W * jobs[end].H * 4; end++; }
+                RunCpuWave(doc, channel, jobs, i, end, full ? null : dirty);
+                i = end;
             }
             if (Path == CompositePath.CpuFrame) UploadFrame();
+            cpuValid = true; LastCpuFullFrame = full;
+            TrimIdleCpu();
+        }
+        int BlockColumns => (TilesX + blockTiles - 1) / blockTiles;
+        long BlockOrder(int bx, int by) => (long)by * BlockColumns + bx;
+
+        /// <summary>ブロック 1 つで何をどこから合成するかを決めて jobs に足す。</summary>
+        void PlanCpuBlock(PaintDocument doc, List<CpuCompositor.StackEntry> plan, PaintChannel channel, int bx, int by, List<TileCoord> tiles, bool full, List<CpuJob> jobs)
+        {
+            long key = BlockKey(bx, by);
+            if (!cpuBlocks.TryGetValue(key, out var state)) cpuBlocks.Add(key, state = new CpuBlock());
+            state.LastUsed = updateIndex;
+            var sigs = new string[plan.Count];
+            for (int i = 0; i < plan.Count; i++) sigs[i] = Signature(plan[i], channel, bx, by);
+            int n = sigs.Length, first = state.Sigs == null ? 0 : FirstDifference(state.Sigs, sigs);
+            bool known = !full && state.Sigs != null;
+            if (known && first == n && state.Sigs.Length == n) { LastSkippedBlockCount++; state.Sigs = sigs; return; } // 合成は前と同じ
+            LastBlockCount++;
+            int k = state.Below != null ? state.BelowIndex : 0;
+            bool usable = known && k > 0 && k <= first;
+            int tx0 = bx * blockTiles, ty0 = by * blockTiles, tx1 = Math.Min(tx0 + blockTiles, TilesX), ty1 = Math.Min(ty0 + blockTiles, TilesY);
+            var whole = new TileRect(tx0, ty0, tx1, ty1);
+            if (!known)
+            {
+                // 初めて・全部を合成し直す: 透明から。写しは次に違いが出たときに取る（GPU と同じ）
+                InvalidateBelow(state);
+                jobs.Add(NewJob(state, bx, by, whole, 0));
+            }
+            else if (usable && k == first)
+            {
+                // 写しのすぐ上から変わった: 変わったタイルだけを写しから
+                foreach (var r in CoverTiles(tiles, TilesX, TilesY)) jobs.Add(NewJob(state, bx, by, r, k));
+                LastBelowReuseCount++;
+            }
+            else if (first > 0 && first < n && ReserveBelow(state, whole))
+            {
+                // 写しを最初に違う項目の下へ取り直す: ブロック全体を（使える写しがあればそこから）合成する
+                var job = NewJob(state, bx, by, whole, usable ? k : 0);
+                job.CaptureAt = first; job.Capture = state.Below; state.BelowIndex = 0; // 取り終えるまで使えない
+                jobs.Add(job);
+                if (usable) LastBelowReuseCount++;
+            }
+            else
+            {
+                // 写しより下が変わった（一番下の層に描くなど）か、写しを取れない: 変わったタイルだけを（使えれば写しから）合成する。
+                // 古くなった写しは捨てる（変わっていないタイルでも、項目の並びが変われば下の部分の合成は変わり得る）
+                if (!usable) InvalidateBelow(state);
+                foreach (var r in CoverTiles(tiles, TilesX, TilesY)) jobs.Add(NewJob(state, bx, by, r, usable ? k : 0));
+                if (usable) LastBelowReuseCount++;
+            }
+            state.Sigs = sigs;
+        }
+        CpuJob NewJob(CpuBlock state, int bx, int by, TileRect r, int start)
+        {
+            int x = r.X0 * tileSize, y = r.Y0 * tileSize, w = Math.Min(r.X1 * tileSize, width) - x, h = Math.Min(r.Y1 * tileSize, height) - y;
+            return new CpuJob { State = state, Bx = bx, By = by, Rect = r, X = x, Y = y, W = w, H = h, Start = start };
+        }
+        /// <summary>下の写し（ブロックの画素を詰めた行）の領域 (x, y, w, h) を、詰めた配列 region へ写す。</summary>
+        void CopyBelow(CpuBlock state, int bx, int by, int x, int y, int w, int h, byte[] region)
+        {
+            int bx0 = bx * blockSize, by0 = by * blockSize, bw = Math.Min(blockSize, width - bx0);
+            for (int row = 0; row < h; row++) Buffer.BlockCopy(state.Below, ((y - by0 + row) * bw + (x - bx0)) * 4, region, row * w * 4, w * 4);
+        }
+        void RunCpuWave(PaintDocument doc, PaintChannel channel, List<CpuJob> jobs, int from, int to, HashSet<TileCoord> dirty)
+        {
+            var core = new List<CpuCompositor.CompositeJob>(to - from);
+            for (int i = from; i < to; i++)
+            {
+                var j = jobs[i];
+                // 置き場はここで借りる（ブロック全部の分を一度に持たない）
+                j.Pixels = RentCpu();
+                if (j.Start == 0) core.Add(new CpuCompositor.CompositeJob(j.X, j.Y, j.W, j.H, j.Pixels, 0, j.CaptureAt, j.Capture));
+                else if (ReferenceEquals(j.Capture, j.State.Below))
+                {
+                    // 写しを取り直すジョブは写しへ書くので、写しから始める分は先に置き場へ並べる（写しを動かすときだけ）
+                    CopyBelow(j.State, j.Bx, j.By, j.X, j.Y, j.W, j.H, j.Pixels);
+                    core.Add(new CpuCompositor.CompositeJob(j.X, j.Y, j.W, j.H, j.Pixels, j.Start, j.CaptureAt, j.Capture));
+                }
+                else
+                {
+                    // 写しの行はワーカーが読む（呼び出し側で 4K の写しを並べ直さない）
+                    int bx0 = j.Bx * blockSize, by0 = j.By * blockSize, bw = Math.Min(blockSize, width - bx0);
+                    core.Add(new CpuCompositor.CompositeJob(j.X, j.Y, j.W, j.H, j.Pixels, j.Start, j.State.Below, ((j.Y - by0) * bw + (j.X - bx0)) * 4, bw * 4, j.CaptureAt, j.Capture));
+                }
+            }
+            CpuCompositor.CompositeRegions(doc, channel, core);
+            LastCpuCompositeCalls++; LastCpuJobCount += to - from;
+            for (int i = from; i < to; i++)
+            {
+                var j = jobs[i];
+                if (j.CaptureAt >= 0) j.State.BelowIndex = j.CaptureAt;
+                if (Path == CompositePath.CpuTiles) SendRegion(j.Pixels, j.X, j.Y, j.W, j.Rect, dirty);
+                else for (int row = 0; row < j.H; row++) Buffer.BlockCopy(j.Pixels, row * j.W * 4, cpuPixels, ((j.Y + row) * width + j.X) * 4, j.W * 4);
+                ReturnCpu(j.Pixels); j.Pixels = null;
+            }
+        }
+        byte[] RentCpu()
+        {
+            if (cpuPool.Count == 0) return new byte[BlockBytes];
+            var a = cpuPool[cpuPool.Count - 1]; cpuPool.RemoveAt(cpuPool.Count - 1); return a;
+        }
+        void ReturnCpu(byte[] a) { if (cpuPool.Count < CpuWaveBlocks) cpuPool.Add(a); }
+        /// <summary>ブロックの下の写しの配列を用意する（予算の内側。足りなければこの更新で使っていない写しを古い順に捨てる）。</summary>
+        bool ReserveBelow(CpuBlock state, TileRect whole)
+        {
+            if (state.Below != null) return true;
+            long bytes = BelowBytes(whole);
+            if (!MakeRoomCpu(bytes)) return false;
+            state.Below = new byte[bytes]; ResidentBytes += bytes;
+            return true;
+        }
+        long BelowBytes(TileRect whole) => 4L * (Math.Min(whole.X1 * tileSize, width) - whole.X0 * tileSize) * (Math.Min(whole.Y1 * tileSize, height) - whole.Y0 * tileSize);
+        bool MakeRoomCpu(long bytes)
+        {
+            if (bytes > ResidentBudgetBytes) return false;
+            while (ResidentBytes + bytes > ResidentBudgetBytes)
+            {
+                CpuBlock victim = null; int oldest = int.MaxValue;
+                foreach (var b in cpuBlocks.Values) if (b.Below != null && b.LastUsed < updateIndex && b.LastUsed < oldest) { oldest = b.LastUsed; victim = b; }
+                if (victim == null) return false;
+                ReleaseBelow(victim);
+            }
+            return true;
+        }
+        void ReleaseBelow(CpuBlock b) { if (b.Below == null) return; ResidentBytes -= b.Below.Length; b.Below = null; b.BelowIndex = 0; }
+        static void InvalidateBelow(CpuBlock b) { b.BelowIndex = 0; }
+        void TrimIdleCpu()
+        {
+            int limit = updateIndex - IdleUpdatesBeforeRelease;
+            foreach (var b in cpuBlocks.Values) if (b.Below != null && b.LastUsed < limit) ReleaseBelow(b);
+        }
+        void ClearCpuBlocks()
+        {
+            foreach (var b in cpuBlocks.Values) ReleaseBelow(b);
+            cpuBlocks.Clear();
         }
         void UploadFrame()
         {
@@ -288,8 +461,9 @@ namespace Yozolab.YoluPainter.Editor
             public int Count => (X1 - X0) * (Y1 - Y0);
             public override string ToString() => "[" + X0 + "," + X1 + ")x[" + Y0 + "," + Y1 + ")";
         }
-        /// <summary>CompositeRegion を 1 回呼ぶ手間を、タイル何枚の合成と見るか。4096²・タイル 128・32 スレッドの実測で、タイルごとに
-        /// 呼ぶと全面を 1 回で呼ぶより 1 層で 1 回 0.12 ms（タイル 2.6 枚分）、10 層で 0.9 ms（1.6 枚分）多くかかった。</summary>
+        /// <summary>長方形を 1 つ増やす手間を、タイル何枚の合成と見るか（外接長方形 1 つにまとめるかの目安）。CompositeRegion をタイルごとに
+        /// 呼んでいたときの 4096²・タイル 128・32 スレッドの実測で、全面 1 回より 1 層で 1 回 0.12 ms（タイル 2.6 枚分）、10 層で 0.9 ms
+        /// （1.6 枚分）多くかかった。今は長方形をまとめて 1 回の CompositeRegions に渡すので、手間はこれより小さい。</summary>
         internal const int CallCostInTiles = 2;
 
         /// <summary>tiles（tilesX × tilesY の外は除く）を覆う長方形の並び。行ごとの連続を、すぐ下の行の同じ幅の連続とつないで、tiles だけを
@@ -982,7 +1156,7 @@ namespace Yozolab.YoluPainter.Editor
         public void Dispose()
         {
             ReleaseResidentCaches();
-            blocks.Clear();
+            blocks.Clear(); cpuBlocks.Clear();
             foreach (var level in levels) { Release(level.A); Release(level.B); Release(level.ClipA); Release(level.ClipB); }
             levels.Clear(); NestedRenderTextureCount = 0;
             Release(composite); Release(cpuTile);

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Yozolab.YoluPainter.Core
 {
@@ -44,13 +45,14 @@ namespace Yozolab.YoluPainter.Core
         /// Photoshop's own output is not measured.</summary>
         public static void BlendRgb(LayerBlendMode mode, double dr, double dg, double db, double sr, double sg, double sb, out double r, out double g, out double b)
         {
+            double tr, tg, tb;
             switch (mode)
             {
                 case LayerBlendMode.Normal: case LayerBlendMode.PassThrough: r = sr; g = sg; b = sb; return;
-                case LayerBlendMode.Hue: SetLum(SetSat(sr, sg, sb, Sat(dr, dg, db)), Lum(dr, dg, db), out r, out g, out b); return;
-                case LayerBlendMode.Saturation: SetLum(SetSat(dr, dg, db, Sat(sr, sg, sb)), Lum(dr, dg, db), out r, out g, out b); return;
-                case LayerBlendMode.Color: SetLum((sr, sg, sb), Lum(dr, dg, db), out r, out g, out b); return;
-                case LayerBlendMode.Luminosity: SetLum((dr, dg, db), Lum(sr, sg, sb), out r, out g, out b); return;
+                case LayerBlendMode.Hue: SetSat(sr, sg, sb, Sat(dr, dg, db), out tr, out tg, out tb); SetLum(tr, tg, tb, Lum(dr, dg, db), out r, out g, out b); return;
+                case LayerBlendMode.Saturation: SetSat(dr, dg, db, Sat(sr, sg, sb), out tr, out tg, out tb); SetLum(tr, tg, tb, Lum(dr, dg, db), out r, out g, out b); return;
+                case LayerBlendMode.Color: SetLum(sr, sg, sb, Lum(dr, dg, db), out r, out g, out b); return;
+                case LayerBlendMode.Luminosity: SetLum(dr, dg, db, Lum(sr, sg, sb), out r, out g, out b); return;
                 // 和は 8 bit の値の和なので、違うなら 1/255 以上離れている。半段の余裕で同点を浮動小数の誤差から守る（GPU も同じ）。
                 case LayerBlendMode.DarkerColor: if (sr + sg + sb < dr + dg + db - TieMargin) { r = sr; g = sg; b = sb; } else { r = dr; g = dg; b = db; } return;
                 case LayerBlendMode.LighterColor: if (sr + sg + sb > dr + dg + db + TieMargin) { r = sr; g = sg; b = sb; } else { r = dr; g = dg; b = db; } return;
@@ -91,24 +93,36 @@ namespace Yozolab.YoluPainter.Core
         static double Dodge(double d, double s) { return d <= 0 ? 0 : s >= 1 ? 1 : Math.Min(1, d / (1 - s)); }
         static double Burn(double d, double s) { return d >= 1 ? 1 : s <= 0 ? 0 : 1 - Math.Min(1, (1 - d) / s); }
         static double Lum(double r, double g, double b) { return .3 * r + .59 * g + .11 * b; }
-        static double Sat(double r, double g, double b) { return Math.Max(r, Math.Max(g, b)) - Math.Min(r, Math.Min(g, b)); }
-        static void SetLum((double r, double g, double b) c, double l, out double r, out double g, out double b)
+        // 色相・彩度・カラー・輝度の式。比べる値はどれも NaN ではなく −0 も入らない（成分は b/255 か、それに差を足したもの・Scale の
+        // 結果で、−0 にはならない）ので、Math.Min / Max を比較に書き換えても同じ値（Mono は Math.Min / Max を呼び出しにする）。
+        static double Sat(double r, double g, double b)
         {
-            double delta = l - Lum(c.r, c.g, c.b);
-            r = c.r + delta; g = c.g + delta; b = c.b + delta;
+            double max = g > b ? g : b; if (r > max) max = r;
+            double min = g < b ? g : b; if (r < min) min = r;
+            return max - min;
+        }
+        /// <summary>W3C SetLum followed by ClipColor and a clamp to 0..1.</summary>
+        static void SetLum(double cr, double cg, double cb, double l, out double r, out double g, out double b)
+        {
+            double delta = l - Lum(cr, cg, cb);
+            r = cr + delta; g = cg + delta; b = cb + delta;
             // ClipColor
-            double lum = Lum(r, g, b), n = Math.Min(r, Math.Min(g, b)), x = Math.Max(r, Math.Max(g, b));
+            double lum = Lum(r, g, b), n = g < b ? g : b, x = g > b ? g : b;
+            if (r < n) n = r; if (r > x) x = r;
             if (n < 0 && lum - n > 1e-12) { r = lum + (r - lum) * lum / (lum - n); g = lum + (g - lum) * lum / (lum - n); b = lum + (b - lum) * lum / (lum - n); }
             if (x > 1 && x - lum > 1e-12) { r = lum + (r - lum) * (1 - lum) / (x - lum); g = lum + (g - lum) * (1 - lum) / (x - lum); b = lum + (b - lum) * (1 - lum) / (x - lum); }
             r = Clamp01(r); g = Clamp01(g); b = Clamp01(b);
         }
-        static (double r, double g, double b) SetSat(double r, double g, double b, double s)
+        /// <summary>W3C SetSat: the largest component becomes s, the smallest 0, the middle one keeps its ratio.</summary>
+        static void SetSat(double r, double g, double b, double s, out double or, out double og, out double ob)
         {
-            double max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b));
-            if (max - min <= 1e-12) return (0, 0, 0);
-            double Scale(double c) { return c == max ? s : c == min ? 0 : (c - min) * s / (max - min); }
+            double max = g > b ? g : b; if (r > max) max = r;
+            double min = g < b ? g : b; if (r < min) min = r;
+            if (max - min <= 1e-12) { or = 0; og = 0; ob = 0; return; }
             // 最大と最小が同じ成分を指すことは上で除いた。中間の成分は比で写す。
-            return (Scale(r), Scale(g), Scale(b));
+            or = r == max ? s : r == min ? 0 : (r - min) * s / (max - min);
+            og = g == max ? s : g == min ? 0 : (g - min) * s / (max - min);
+            ob = b == max ? s : b == min ? 0 : (b - min) * s / (max - min);
         }
         static double Clamp01(double v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 
@@ -242,171 +256,83 @@ namespace Yozolab.YoluPainter.Core
             if (document == null) throw new ArgumentNullException(nameof(document));
             return CompositeRegion(document, channel, 0, 0, document.Width, document.Height);
         }
-        /// <summary>Per-layer tile buffers for the tiles of the plan being composited at once (one set per slot).</summary>
-        sealed class LayerTile
-        {
-            public readonly PaintLayer Layer; public readonly byte[][] Pixels, Mask; public readonly bool[] Present; public readonly RasterMask MaskSource;
-            readonly double opacity; readonly double[] maskFactor;
-            public LayerTile(PaintLayer layer, int tileBytes, int slots)
-            {
-                Layer = layer; opacity = layer.Opacity; Present = new bool[slots];
-                if (layer.Kind != LayerKind.Adjustment && !layer.IsGroup) { Pixels = new byte[slots][]; for (int k = 0; k < slots; k++) Pixels[k] = new byte[tileBytes]; }
-                // A neutral mask multiplies by exactly 1, so skipping it is exact.
-                if (layer.Mask != null && !layer.Mask.IsNeutral)
-                {
-                    MaskSource = layer.Mask; Mask = new byte[slots][]; for (int k = 0; k < slots; k++) Mask[k] = new byte[tileBytes];
-                    maskFactor = new double[256]; for (int h = 0; h < 256; h++) maskFactor[h] = MaskSource.Factor((byte)h); // the same values Factor gives per pixel
-                }
-            }
-            public void Load(PaintChannel channel, TileCoord coord, int slot)
-            {
-                // フィルターのある層は、フィルターを通した画素（halo を含めて評価した派生物。正本は変えない）
-                Present[slot] = Layer.Kind == LayerKind.Adjustment || Layer.CopyOutputTile(channel, coord, Pixels[slot]);
-                LoadMask(coord, slot);
-            }
-            public void LoadMask(TileCoord coord, int slot) { if (Present[slot] && MaskSource != null) MaskSource.CopyOutputTile(coord, Mask[slot]); }
-            public double Amount(int slot, int offset) { return MaskSource == null ? opacity : opacity * maskFactor[Mask[slot][offset + 3]]; }
-            /// <summary>True when reading the tile goes through a filter stack (the filter engine's cache is single-threaded).</summary>
-            public bool Filtered(PaintChannel channel) { return (Pixels != null && Layer.HasActiveFilters(channel)) || (MaskSource != null && MaskSource.HasActiveFilters); }
-        }
-        /// <summary>The plan with tile buffers per layer, mirroring StackEntry. Per-layer facts the pixel loop asks for are read once.</summary>
-        sealed class Node
-        {
-            public StackEntry Entry; public LayerTile Tile; public Node[] Children, Clips;
-            public bool Adjustment, Group, PassesThrough; public LayerBlendMode Mode, AdjustmentMode; public AdjustmentSettings Settings;
-            public static Node[] Build(System.Collections.Generic.IReadOnlyList<StackEntry> plan, int tileBytes, int slots)
-            {
-                var nodes = new Node[plan.Count];
-                for (int i = 0; i < plan.Count; i++)
-                {
-                    var e = plan[i]; var layer = e.Base;
-                    nodes[i] = new Node
-                    {
-                        Entry = e, Tile = new LayerTile(layer, tileBytes, slots), Children = Build(e.Children, tileBytes, slots), Clips = Build(e.ClipEntries, tileBytes, slots),
-                        Adjustment = layer.Kind == LayerKind.Adjustment, Group = layer.IsGroup, PassesThrough = e.PassesThrough,
-                        Mode = ModeOf(layer), AdjustmentMode = layer.BlendMode, Settings = layer.Adjustment,
-                    };
-                }
-                return nodes;
-            }
-            /// <summary>Loads the tile for every node into slot; returns true when any raster or fill pixels are present below it.</summary>
-            public static bool Load(Node[] nodes, PaintChannel channel, TileCoord coord, int slot)
-            {
-                bool any = false;
-                foreach (var n in nodes)
-                {
-                    bool pixels;
-                    if (n.Group) { pixels = Load(n.Children, channel, coord, slot); n.Tile.Present[slot] = pixels || HasAdjustment(n.Children, slot); n.Tile.LoadMask(coord, slot); }
-                    else { n.Tile.Load(channel, coord, slot); pixels = !n.Adjustment && n.Tile.Present[slot]; }
-                    if (n.Tile.Present[slot]) pixels |= Load(n.Clips, channel, coord, slot);
-                    any |= pixels;
-                }
-                return any;
-            }
-            static bool HasAdjustment(Node[] nodes, int slot) { foreach (var n in nodes) if (n.Tile.Present[slot] && n.Adjustment || n.Group && n.Tile.Present[slot]) return true; return false; }
-            public static bool Filtered(Node[] nodes, PaintChannel channel) { foreach (var n in nodes) if (n.Tile.Filtered(channel) || Filtered(n.Children, channel) || Filtered(n.Clips, channel)) return true; return false; }
-        }
-        /// <summary>Tile variant of EvaluatePixel (it replaced the per-pixel EvaluateTile): composites count pixels of one tile row
-        /// (tile byte offset src in slot) onto res at resOff, which holds the backdrop. Node by node over the span instead of pixel
-        /// by pixel; every pixel goes through the same arithmetic in the same order as EvaluatePixel. Groups and clipping use
-        /// scratch spans per depth.</summary>
-        static void EvaluateSpan(Node[] nodes, byte[] res, int resOff, int slot, int src, int count, bool normal, SpanScratch scratch, int depth)
-        {
-            foreach (var n in nodes)
-            {
-                var b = n.Tile; if (!b.Present[slot]) continue;
-                if (n.Adjustment)
-                {
-                    for (int i = 0, r = resOff, t = src; i < count; i++, r += 4, t += 4) Write(res, r, n.Settings.Composite(Read(res, r), b.Amount(slot, t), n.AdjustmentMode));
-                    continue;
-                }
-                if (n.PassesThrough)
-                {
-                    var inner = scratch.Get(depth, 0); Buffer.BlockCopy(res, resOff, inner, 0, count * 4);
-                    EvaluateSpan(n.Children, inner, 0, slot, src, count, normal, scratch, depth + 1);
-                    for (int i = 0, r = resOff, t = src; i < count; i++, r += 4, t += 4) Write(res, r, StackFade(normal, Read(res, r), Read(inner, i * 4), b.Amount(slot, t)));
-                    continue;
-                }
-                byte[] g; int gOff;
-                if (n.Group)
-                {
-                    g = scratch.Get(depth, 1); gOff = 0; Array.Clear(g, 0, count * 4);
-                    EvaluateSpan(n.Children, g, 0, slot, src, count, normal, scratch, depth + 1);
-                }
-                else if (n.Clips.Length > 0) { g = scratch.Get(depth, 1); gOff = 0; Buffer.BlockCopy(b.Pixels[slot], src, g, 0, count * 4); }
-                else { g = b.Pixels[slot]; gOff = src; } // read in place (nothing changes the layer's own pixels)
-                foreach (var clip in n.Clips)
-                {
-                    var ct = clip.Tile; if (!ct.Present[slot]) continue;
-                    if (clip.Adjustment)
-                    {
-                        for (int i = 0, t = src; i < count; i++, t += 4) Write(g, gOff + i * 4, clip.Settings.Composite(Read(g, gOff + i * 4), ct.Amount(slot, t), clip.AdjustmentMode));
-                        continue;
-                    }
-                    byte[] c; int cOff;
-                    if (clip.Group) { c = scratch.Get(depth, 2); cOff = 0; Array.Clear(c, 0, count * 4); EvaluateSpan(clip.Children, c, 0, slot, src, count, normal, scratch, depth + 1); }
-                    else { c = ct.Pixels[slot]; cOff = src; }
-                    for (int i = 0, t = src; i < count; i++, t += 4)
-                        Write(g, gOff + i * 4, StackClip(normal, Read(g, gOff + i * 4), Read(c, cOff + i * 4), ct.Amount(slot, t), clip.Mode));
-                }
-                if (normal)
-                    for (int i = 0, r = resOff, t = src; i < count; i++, r += 4, t += 4) Write(res, r, NormalMaps.BlendUnchecked(Read(res, r), Read(g, gOff + i * 4), b.Amount(slot, t), n.Mode));
-                else BlendSpan(res, resOff, g, gOff, count, b, slot, src, n.Mode);
-            }
-        }
-        static Rgba32 Read(byte[] a, int o) { return new Rgba32(a[o], a[o + 1], a[o + 2], a[o + 3]); }
-        static void Write(byte[] a, int o, Rgba32 c) { a[o] = c.R; a[o + 1] = c.G; a[o + 2] = c.B; a[o + 3] = c.A; }
 
-        /// <summary><see cref="BlendUnchecked"/> over a span, reading and writing the bytes in place (the same arithmetic in the same
-        /// order for every pixel; the editor's Mono runs this about twice as fast as passing each pixel as an Rgba32).</summary>
-        static void BlendSpan(byte[] res, int resOff, byte[] src, int srcOff, int count, LayerTile layer, int slot, int tileOff, LayerBlendMode mode)
+        /// <summary>One region for <see cref="CompositeRegions"/>: where, the backdrop it starts from, where the result goes and an optional
+        /// copy of an intermediate result. Entry indices count the top-level entries of <see cref="Plan"/> for the document and channel at
+        /// the time of the call.</summary>
+        public sealed class CompositeJob
         {
-            var unit = MathUtil.ByteUnit; bool simple = mode == LayerBlendMode.Normal || mode == LayerBlendMode.PassThrough;
-            // 分離できるモードは BlendRgb の既定の枝（成分ごとの Separable）を直接呼ぶ
-            bool separable = !simple && mode != LayerBlendMode.Hue && mode != LayerBlendMode.Saturation && mode != LayerBlendMode.Color && mode != LayerBlendMode.Luminosity
-                && mode != LayerBlendMode.DarkerColor && mode != LayerBlendMode.LighterColor;
-            for (int i = 0; i < count; i++)
-            {
-                int r = resOff + i * 4, s = srcOff + i * 4;
-                double amount = layer.Amount(slot, tileOff + i * 4);
-                if (simple && src[s + 3] == 255 && amount == 1) { res[r] = src[s]; res[r + 1] = src[s + 1]; res[r + 2] = src[s + 2]; res[r + 3] = 255; continue; } // BlendUnchecked と同じ近道
-                double sa = unit[src[s + 3]] * amount, da = unit[res[r + 3]];
-                if (sa <= 0) continue; // the destination as it is
-                double a = sa + da * (1 - sa);
-                if (a <= 0) { res[r] = 0; res[r + 1] = 0; res[r + 2] = 0; res[r + 3] = 0; continue; }
-                double dr = unit[res[r]], dg = unit[res[r + 1]], db = unit[res[r + 2]];
-                double sr = unit[src[s]], sg = unit[src[s + 1]], sb = unit[src[s + 2]];
-                double br, bg, bb;
-                if (simple) { br = sr; bg = sg; bb = sb; }
-                else if (separable) { br = Separable(mode, dr, sr); bg = Separable(mode, dg, sg); bb = Separable(mode, db, sb); }
-                else BlendRgb(mode, dr, dg, db, sr, sg, sb, out br, out bg, out bb);
-                double wd = (1 - sa) * da, ws = (1 - da) * sa, wb = da * sa;
-                // MathUtil.ToByte written out (x × 255 + 0.5, floor by truncation of a positive value, clamped)
-                double vr = (wd * dr + ws * sr + wb * br) / a * 255 + 0.5, vg = (wd * dg + ws * sg + wb * bg) / a * 255 + 0.5;
-                double vb = (wd * db + ws * sb + wb * bb) / a * 255 + 0.5, va = a * 255 + 0.5;
-                res[r] = vr >= 255 ? (byte)255 : vr > 0 ? (byte)(int)vr : (byte)0;
-                res[r + 1] = vg >= 255 ? (byte)255 : vg > 0 ? (byte)(int)vg : (byte)0;
-                res[r + 2] = vb >= 255 ? (byte)255 : vb > 0 ? (byte)(int)vb : (byte)0;
-                res[r + 3] = va >= 255 ? (byte)255 : va > 0 ? (byte)(int)va : (byte)0;
-            }
+            /// <param name="pixels">At least width × height × 4 bytes, rows packed from the lowest (row r at r × width × 4). On entry the
+            /// composite of plan entries [0, start) — ignored when start is 0 or a backdrop is given — and on return the composite of every
+            /// entry.</param>
+            /// <param name="start">The first plan entry to composite onto the backdrop (0 = from transparent).</param>
+            /// <param name="captureAt">−1, or start..entries: <paramref name="capture"/> then receives the composite of entries [0, captureAt)
+            /// in the same layout, taken on the way.</param>
+            public CompositeJob(int x, int y, int width, int height, byte[] pixels, int start = 0, int captureAt = -1, byte[] capture = null)
+            { X = x; Y = y; Width = width; Height = height; Pixels = pixels; Start = start; CaptureAt = captureAt; Capture = capture; }
+            /// <summary>A job whose backdrop (the composite of entries [0, start)) is read from another array instead of being placed in the
+            /// pixels first: row r of the region at backdrop[backdropOffset + r × backdropStride] (the workers copy it, so a large backdrop
+            /// costs no time on the calling thread). The backdrop is only read; several jobs may share it, but it must not be a job's pixels
+            /// or capture.</summary>
+            public CompositeJob(int x, int y, int width, int height, byte[] pixels, int start, byte[] backdrop, int backdropOffset, int backdropStride, int captureAt = -1, byte[] capture = null)
+                : this(x, y, width, height, pixels, start, captureAt, capture)
+            { Backdrop = backdrop; BackdropOffset = backdropOffset; BackdropStride = backdropStride; }
+            public int X { get; }
+            public int Y { get; }
+            public int Width { get; }
+            public int Height { get; }
+            public byte[] Pixels { get; }
+            public int Start { get; }
+            public int CaptureAt { get; }
+            public byte[] Capture { get; }
+            public byte[] Backdrop { get; }
+            public int BackdropOffset { get; }
+            public int BackdropStride { get; }
         }
-        /// <summary>Scratch spans of one worker: per group depth, the pass-through backdrop copy, the group or clipping base, and a
-        /// clipped group.</summary>
-        sealed class SpanScratch
+
+        /// <summary>Composites several regions in one pass, each from its own backdrop: a job's pixels hold the composite of the plan
+        /// entries below its Start, and only the entries from Start up are composited onto them (a display cache keeps that lower part
+        /// and redraws only what changed above it). Optionally a job also keeps the composite below CaptureAt. Every pixel is the same
+        /// as <see cref="CompositeRegion"/> gives when the backdrop is right; the bytes do not depend on the number of threads. Jobs
+        /// may overlap, but no array may be used twice (as two jobs' pixels, or as a job's pixels and capture).</summary>
+        public static void CompositeRegions(PaintDocument document, PaintChannel channel, IReadOnlyList<CompositeJob> jobs)
         {
-            readonly System.Collections.Generic.List<byte[]> spans = new System.Collections.Generic.List<byte[]>(); readonly int length;
-            public SpanScratch(int tileSize) { length = tileSize * 4; }
-            public byte[] Get(int depth, int purpose)
+            if (document == null) throw new ArgumentNullException(nameof(document));
+            PaintLayer.ValidateChannel(channel);
+            if (jobs == null) throw new ArgumentNullException(nameof(jobs));
+            var arrays = new HashSet<byte[]>(ReferenceComparer.Instance);
+            foreach (var job in jobs)
             {
-                int index = depth * 3 + purpose;
-                while (spans.Count <= index) spans.Add(null);
-                return spans[index] ?? (spans[index] = new byte[length]);
+                if (job == null) throw new ArgumentNullException(nameof(jobs), "A job is null.");
+                if (job.Width < 0 || job.Height < 0 || job.X < 0 || job.Y < 0 || (long)job.X + job.Width > document.Width || (long)job.Y + job.Height > document.Height)
+                    throw new ArgumentOutOfRangeException(nameof(jobs), "A job's region is outside the document.");
+                long bytes = (long)job.Width * job.Height * 4;
+                if (job.Pixels == null || job.Pixels.Length < bytes) throw new ArgumentException("A job's pixels are missing or too short.", nameof(jobs));
+                if (!arrays.Add(job.Pixels)) throw new ArgumentException("An array is used by more than one job.", nameof(jobs));
+                if (job.CaptureAt == -1) { if (job.Capture != null) throw new ArgumentException("A capture array without CaptureAt.", nameof(jobs)); }
+                else
+                {
+                    if (job.CaptureAt < job.Start) throw new ArgumentOutOfRangeException(nameof(jobs), "CaptureAt is below Start.");
+                    if (job.Capture == null || job.Capture.Length < bytes) throw new ArgumentException("A job's capture array is missing or too short.", nameof(jobs));
+                    if (!arrays.Add(job.Capture)) throw new ArgumentException("An array is used by more than one job.", nameof(jobs));
+                }
+                if (job.Start < 0) throw new ArgumentOutOfRangeException(nameof(jobs), "Start is negative.");
             }
+            foreach (var job in jobs)
+                if (job.Backdrop != null)
+                {
+                    if (job.Start == 0) throw new ArgumentException("A backdrop is given for a job that starts from transparent.", nameof(jobs));
+                    if (arrays.Contains(job.Backdrop)) throw new ArgumentException("A backdrop is also a job's pixels or capture.", nameof(jobs));
+                    if (job.Height > 0 && (job.BackdropOffset < 0 || job.BackdropStride < job.Width * 4 || (long)job.BackdropOffset + (long)(job.Height - 1) * job.BackdropStride + job.Width * 4L > job.Backdrop.Length))
+                        throw new ArgumentOutOfRangeException(nameof(jobs), "The backdrop's rows are outside its array.");
+                }
+            document.PollGeneratorInputs(); // Generator が読むメッシュマップが変わっていれば、新しいマップで合成する
+            var plan = Plan(document, channel);
+            foreach (var job in jobs)
+                if (job.Start > plan.Count || job.CaptureAt > plan.Count) throw new ArgumentOutOfRangeException(nameof(jobs), "Start or CaptureAt is past the plan's " + plan.Count + " entries.");
+            Run(document, channel, plan, jobs, false);
         }
-        /// <summary>Tile buffers held at once by one CompositeRegion call when it composites several tiles in parallel.</summary>
-        const long ParallelBufferBytes = 64L * 1024 * 1024;
-        /// <summary>Below this many pixel × layer steps a region is composited on the calling thread (starting workers costs more).</summary>
-        const long ParallelMinimumWork = 1L << 16;
+
         public static byte[] CompositeRegion(PaintDocument document, PaintChannel channel, int x, int y, int width, int height)
         {
             if (document == null) throw new ArgumentNullException(nameof(document));
@@ -416,58 +342,425 @@ namespace Yozolab.YoluPainter.Core
             var bytes = new byte[checked(width * height * 4)];
             if (width == 0 || height == 0) return bytes;
             document.PollGeneratorInputs(); // Generator が読むメッシュマップが変わっていれば、新しいマップで合成する
-            // Same per-pixel arithmetic as CompositePixel, but each layer's tile is read once instead of one dictionary
-            // lookup per pixel per layer. Tiles are independent: several are loaded into their own buffers (slots) and their
-            // pixels computed on worker threads; every output pixel depends only on its own inputs, so the bytes do not depend
-            // on the number of threads or the order.
-            int tile = document.TileSize, tileBytes = checked(tile * tile * 4);
-            var plan = Plan(document, channel);
-            var coords = new System.Collections.Generic.List<TileCoord>();
-            for (int ty = y / tile; ty <= (y + height - 1) / tile; ty++)
-                for (int tx = x / tile; tx <= (x + width - 1) / tile; tx++) coords.Add(new TileCoord(tx, ty));
-            int degree = CoreParallelism.Degree, layerCount = Math.Max(1, CountEntries(plan));
-            if ((long)width * height * layerCount < ParallelMinimumWork) degree = 1;
-            int buffers = Math.Max(1, CountBuffers(plan));
-            int slots = (int)Math.Max(1, Math.Min(Math.Min(coords.Count, degree), ParallelBufferBytes / ((long)buffers * tileBytes)));
-            var nodes = Node.Build(plan, tileBytes, slots);
-            // 読み込みもワーカーで: フィルターを通る層が無ければ、読むのは面のタイルの写しだけ（書き換えは無い）。フィルターの
-            // キャッシュはこのスレッドからだけ触る。
-            bool concurrentLoad = slots > 1 && !Node.Filtered(nodes, channel);
-            bool normal = channel == PaintChannel.Normal;
-            var any = new bool[slots];
-            for (int start = 0; start < coords.Count; start += slots)
-            {
-                int count = Math.Min(slots, coords.Count - start), first = start;
-                // Nothing with pixels in a tile: the result stays transparent, and adjustments leave transparent pixels alone.
-                if (concurrentLoad) CoreParallelism.For(count, degree, k => any[k] = Node.Load(nodes, channel, coords[first + k], k));
-                else for (int k = 0; k < count; k++) any[k] = Node.Load(nodes, channel, coords[first + k], k);
-                // 行の束に分けて計算する（タイルが少ないときもスレッドが余らないように）
-                int chunks = Math.Max(1, Math.Min(tile / 8, (degree + count - 1) / count)), rowsPerChunk = (tile + chunks - 1) / chunks;
-                CoreParallelism.For(count * chunks, degree, item =>
-                {
-                    int k = item / chunks, chunk = item - k * chunks; if (!any[k]) return;
-                    var c = coords[first + k]; int tx = c.X, ty = c.Y;
-                    int x0 = Math.Max(x, tx * tile), x1 = Math.Min(x + width, (tx + 1) * tile);
-                    int y0 = Math.Max(y, Math.Max(ty * tile, ty * tile + chunk * rowsPerChunk)), y1 = Math.Min(y + height, Math.Min((ty + 1) * tile, ty * tile + (chunk + 1) * rowsPerChunk));
-                    var scratch = new SpanScratch(tile);
-                    // 出力は透明（0）から始まるので、そのまま背景として行ごとに重ねる
-                    for (int py = y0; py < y1; py++)
-                        EvaluateSpan(nodes, bytes, ((py - y) * width + (x0 - x)) * 4, k, ((py - ty * tile) * tile + (x0 - tx * tile)) * 4, x1 - x0, normal, scratch, 0);
-                });
-            }
+            Run(document, channel, Plan(document, channel), new[] { new CompositeJob(x, y, width, height, bytes) }, true);
             return bytes;
         }
-        static int CountEntries(System.Collections.Generic.IReadOnlyList<StackEntry> plan)
+
+        sealed class ReferenceComparer : IEqualityComparer<byte[]>
+        {
+            public static readonly ReferenceComparer Instance = new ReferenceComparer();
+            public bool Equals(byte[] a, byte[] b) { return ReferenceEquals(a, b); }
+            public int GetHashCode(byte[] a) { return System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(a); }
+        }
+
+        /// <summary>Tile pixels shared by every slot during one call, made on the calling thread before the workers start: the expansion
+        /// of each uniform tile colour met (layers and masks read in place), a fill layer's tile, and zeros.</summary>
+        sealed class SharedTiles
+        {
+            readonly Dictionary<uint, byte[]> uniform = new Dictionary<uint, byte[]>();
+            readonly int tileBytes;
+            public readonly byte[] Zero;
+            public SharedTiles(int tileBytes) { this.tileBytes = tileBytes; Zero = new byte[tileBytes]; }
+            static uint Key(Rgba32 c) { return (uint)(c.R | c.G << 8 | c.B << 16 | c.A << 24); }
+            /// <summary>Makes the expanded tile of colour (calling thread only).</summary>
+            public byte[] Make(Rgba32 c)
+            {
+                if (c == Rgba32.Transparent) return Zero;
+                if (!uniform.TryGetValue(Key(c), out var t))
+                {
+                    t = new byte[tileBytes];
+                    for (int i = 0; i < t.Length; i += 4) { t[i] = c.R; t[i + 1] = c.G; t[i + 2] = c.B; t[i + 3] = c.A; }
+                    uniform.Add(Key(c), t);
+                }
+                return t;
+            }
+            /// <summary>The expanded tile made before (workers read only).</summary>
+            public byte[] Get(Rgba32 c) { return c == Rgba32.Transparent ? Zero : uniform[Key(c)]; }
+        }
+
+        /// <summary>Per-layer tile buffers for the tiles of the plan being composited at once (one set per slot). Unfiltered raster
+        /// tiles and masks are read in place from the surface (uniform tiles from a shared expansion), fill layers from one shared tile;
+        /// only filter output is copied, into the layer's own slot buffers.</summary>
+        sealed class LayerTile
+        {
+            public readonly PaintLayer Layer; public readonly byte[][] Pixels, Mask; public readonly bool[] Present; public readonly RasterMask MaskSource;
+            public readonly double Opacity; public readonly double[] MaskFactor;
+            readonly byte[][] ownPixels, ownMask;
+            /// <summary>Read in place: the raster surface without active filters, and the mask's surface without mask filters.</summary>
+            readonly SparseTileSurface surface, maskSurface;
+            /// <summary>An unfiltered fill layer's tile (null: the fill has no colour in this channel or it is transparent).</summary>
+            readonly byte[] fillTile; readonly bool fill;
+            readonly SharedTiles shared;
+            public LayerTile(PaintLayer layer, PaintChannel channel, int tileBytes, int slots, SharedTiles shared)
+            {
+                Layer = layer; Opacity = layer.Opacity; Present = new bool[slots]; this.shared = shared;
+                if (layer.Kind != LayerKind.Adjustment && !layer.IsGroup)
+                {
+                    Pixels = new byte[slots][];
+                    if (layer.HasActiveFilters(channel)) { ownPixels = new byte[slots][]; for (int k = 0; k < slots; k++) ownPixels[k] = new byte[tileBytes]; }
+                    else if (layer.Kind == LayerKind.Fill)
+                    {
+                        fill = true;
+                        // PaintLayer.CopyTile と同じ: 値が無いか透明なら画素は無い
+                        if (layer.FillValues.TryGetValue(channel, out var value) && value != Rgba32.Transparent) fillTile = shared.Make(value);
+                    }
+                    else layer.TryGetChannel(channel, out surface);
+                }
+                // A neutral mask multiplies by exactly 1, so skipping it is exact.
+                if (layer.Mask != null && !layer.Mask.IsNeutral)
+                {
+                    MaskSource = layer.Mask; Mask = new byte[slots][];
+                    if (MaskSource.HasActiveFilters) { ownMask = new byte[slots][]; for (int k = 0; k < slots; k++) ownMask[k] = new byte[tileBytes]; }
+                    else maskSurface = MaskSource.Surface;
+                    MaskFactor = new double[256]; for (int h = 0; h < 256; h++) MaskFactor[h] = MaskSource.Factor((byte)h); // the same values Factor gives per pixel
+                }
+            }
+            /// <summary>Calling thread, before the workers: makes the shared expansions of the uniform tiles this layer reads in place.</summary>
+            public void PrepareUniform(IEnumerable<TileCoord> coords)
+            {
+                if (surface == null && maskSurface == null) return;
+                foreach (var c in coords)
+                {
+                    TileStorage t;
+                    if (surface != null && (t = surface.PeekTile(c)) != null && t.IsUniform) shared.Make(t.UniformColor);
+                    if (maskSurface != null && (t = maskSurface.PeekTile(c)) != null && t.IsUniform) shared.Make(t.UniformColor);
+                }
+            }
+            public void Load(PaintChannel channel, TileCoord coord, int slot)
+            {
+                if (Layer.Kind == LayerKind.Adjustment) Present[slot] = true;
+                else if (ownPixels != null)
+                {
+                    // フィルターのある層は、フィルターを通した画素（halo を含めて評価した派生物。正本は変えない）
+                    Pixels[slot] = ownPixels[slot]; Present[slot] = Layer.CopyOutputTile(channel, coord, ownPixels[slot]);
+                }
+                else if (fill) { Pixels[slot] = fillTile; Present[slot] = fillTile != null; }
+                else Present[slot] = Peek(surface, coord, out Pixels[slot]);
+                LoadMask(coord, slot);
+            }
+            public void LoadMask(TileCoord coord, int slot)
+            {
+                if (!Present[slot] || MaskSource == null) return;
+                if (ownMask != null) { Mask[slot] = ownMask[slot]; MaskSource.CopyOutputTile(coord, ownMask[slot]); }
+                else if (!Peek(maskSurface, coord, out Mask[slot])) Mask[slot] = shared.Zero; // 無いタイル = 何も隠さない
+            }
+            /// <summary>The surface's tile read in place (CopyTile's bytes without the copy); false where it has none.</summary>
+            bool Peek(SparseTileSurface s, TileCoord coord, out byte[] pixels)
+            {
+                var t = s?.PeekTile(coord);
+                if (t == null) { pixels = null; return false; }
+                pixels = t.PeekData ?? shared.Get(t.UniformColor);
+                return true;
+            }
+            /// <summary>True when reading the tile goes through a filter stack (the filter engine's cache is single-threaded).</summary>
+            public bool Filtered { get { return ownPixels != null || ownMask != null; } }
+        }
+        /// <summary>The plan with tile buffers per layer, mirroring StackEntry. Per-layer facts the pixel loop asks for are read once.</summary>
+        sealed class Node
+        {
+            public StackEntry Entry; public LayerTile Tile; public Node[] Children, Clips;
+            public bool Adjustment, Group, PassesThrough; public LayerBlendMode Mode, AdjustmentMode; public AdjustmentSettings Settings;
+            /// <summary>The separable blend of Mode for every pair of bytes (null for the other modes).</summary>
+            public double[] Table;
+            public static Node[] Build(IReadOnlyList<StackEntry> plan, PaintChannel channel, int tileBytes, int slots, SharedTiles shared)
+            {
+                var nodes = new Node[plan.Count];
+                for (int i = 0; i < plan.Count; i++)
+                {
+                    var e = plan[i]; var layer = e.Base;
+                    nodes[i] = new Node
+                    {
+                        Entry = e, Tile = new LayerTile(layer, channel, tileBytes, slots, shared), Children = Build(e.Children, channel, tileBytes, slots, shared), Clips = Build(e.ClipEntries, channel, tileBytes, slots, shared),
+                        Adjustment = layer.Kind == LayerKind.Adjustment, Group = layer.IsGroup, PassesThrough = e.PassesThrough,
+                        Mode = ModeOf(layer), AdjustmentMode = layer.BlendMode, Settings = layer.Adjustment,
+                    };
+                    if (channel != PaintChannel.Normal) nodes[i].Table = SeparableTable(nodes[i].Mode);
+                }
+                return nodes;
+            }
+            /// <summary>Loads the tiles of nodes [from, to) into slot; returns true when any raster or fill pixels are present below
+            /// them. present is set when any of them has anything at all (an adjustment counts).</summary>
+            public static bool Load(Node[] nodes, int from, int to, PaintChannel channel, TileCoord coord, int slot, out bool present)
+            {
+                bool any = false; present = false;
+                for (int i = from; i < to; i++)
+                {
+                    var n = nodes[i];
+                    bool pixels;
+                    if (n.Group) { pixels = Load(n.Children, 0, n.Children.Length, channel, coord, slot, out _); n.Tile.Present[slot] = pixels || HasAdjustment(n.Children, slot); n.Tile.LoadMask(coord, slot); }
+                    else { n.Tile.Load(channel, coord, slot); pixels = !n.Adjustment && n.Tile.Present[slot]; }
+                    if (n.Tile.Present[slot]) { pixels |= Load(n.Clips, 0, n.Clips.Length, channel, coord, slot, out _); present = true; }
+                    any |= pixels;
+                }
+                return any;
+            }
+            static bool HasAdjustment(Node[] nodes, int slot) { foreach (var n in nodes) if (n.Tile.Present[slot] && n.Adjustment || n.Group && n.Tile.Present[slot]) return true; return false; }
+            public static bool Filtered(Node[] nodes) { foreach (var n in nodes) if (n.Tile.Filtered || Filtered(n.Children) || Filtered(n.Clips)) return true; return false; }
+            public static void PrepareUniform(Node[] nodes, IEnumerable<TileCoord> coords)
+            { foreach (var n in nodes) { n.Tile.PrepareUniform(coords); PrepareUniform(n.Children, coords); PrepareUniform(n.Clips, coords); } }
+        }
+
+        // 分離できるモードの B(下, 上) は 2 つの 8 bit の値だけで決まるので、256×256 の表に Separable の値そのものを入れて引く（同じ関数の
+        // 同じ引数なので同じ double）。表はモードごとに 1 回だけ、合成を呼んだスレッドで作る（ワーカーでは割り当てない）。1 つ 512 KiB。
+        static readonly double[][] separableTables = new double[(int)LayerBlendMode.PassThrough + 1][];
+        static bool IsSeparable(LayerBlendMode mode) { return mode >= LayerBlendMode.Multiply && mode <= LayerBlendMode.Divide; }
+        static double[] SeparableTable(LayerBlendMode mode)
+        {
+            if (!IsSeparable(mode)) return null;
+            var t = System.Threading.Volatile.Read(ref separableTables[(int)mode]);
+            if (t != null) return t;
+            var unit = MathUtil.ByteUnit; t = new double[65536];
+            for (int d = 0; d < 256; d++) for (int s = 0; s < 256; s++) t[d << 8 | s] = Separable(mode, unit[d], unit[s]);
+            System.Threading.Volatile.Write(ref separableTables[(int)mode], t); // 2 つのスレッドが同時に作っても同じ表
+            return t;
+        }
+
+        /// <summary>Tile variant of EvaluatePixel (it replaced the per-pixel EvaluateTile): composites count pixels of one tile row
+        /// (tile byte offset src in slot) onto res at resOff, which holds the backdrop, with the nodes [from, to). Node by node over the
+        /// span instead of pixel by pixel; every pixel goes through the same arithmetic in the same order as EvaluatePixel. Groups and
+        /// clipping use scratch spans per depth.</summary>
+        static void EvaluateSpan(Node[] nodes, int from, int to, byte[] res, int resOff, int slot, int src, int count, bool normal, SpanScratch scratch, int depth)
+        {
+            for (int index = from; index < to; index++)
+            {
+                var n = nodes[index];
+                var b = n.Tile; if (!b.Present[slot]) continue;
+                if (n.Adjustment)
+                {
+                    for (int i = 0, r = resOff, t = src; i < count; i++, r += 4, t += 4) Write(res, r, n.Settings.Composite(Read(res, r), Amount(b, slot, t), n.AdjustmentMode));
+                    continue;
+                }
+                if (n.PassesThrough)
+                {
+                    var inner = scratch.Get(depth, 0); Buffer.BlockCopy(res, resOff, inner, 0, count * 4);
+                    EvaluateSpan(n.Children, 0, n.Children.Length, inner, 0, slot, src, count, normal, scratch, depth + 1);
+                    for (int i = 0, r = resOff, t = src; i < count; i++, r += 4, t += 4) Write(res, r, StackFade(normal, Read(res, r), Read(inner, i * 4), Amount(b, slot, t)));
+                    continue;
+                }
+                byte[] g; int gOff;
+                if (n.Group)
+                {
+                    g = scratch.Get(depth, 1); gOff = 0; Array.Clear(g, 0, count * 4);
+                    EvaluateSpan(n.Children, 0, n.Children.Length, g, 0, slot, src, count, normal, scratch, depth + 1);
+                }
+                else if (n.Clips.Length > 0) { g = scratch.Get(depth, 1); gOff = 0; Buffer.BlockCopy(b.Pixels[slot], src, g, 0, count * 4); }
+                else { g = b.Pixels[slot]; gOff = src; } // read in place (nothing changes the layer's own pixels)
+                foreach (var clip in n.Clips)
+                {
+                    var ct = clip.Tile; if (!ct.Present[slot]) continue;
+                    if (clip.Adjustment)
+                    {
+                        for (int i = 0, t = src; i < count; i++, t += 4) Write(g, gOff + i * 4, clip.Settings.Composite(Read(g, gOff + i * 4), Amount(ct, slot, t), clip.AdjustmentMode));
+                        continue;
+                    }
+                    byte[] c; int cOff;
+                    if (clip.Group) { c = scratch.Get(depth, 2); cOff = 0; Array.Clear(c, 0, count * 4); EvaluateSpan(clip.Children, 0, clip.Children.Length, c, 0, slot, src, count, normal, scratch, depth + 1); }
+                    else { c = ct.Pixels[slot]; cOff = src; }
+                    if (normal)
+                        for (int i = 0, t = src; i < count; i++, t += 4)
+                            Write(g, gOff + i * 4, NormalMaps.ClipOnto(Read(g, gOff + i * 4), Read(c, cOff + i * 4), Amount(ct, slot, t), clip.Mode));
+                    else ClipSpan(g, gOff, c, cOff, count, ct, slot, src, clip.Mode, clip.Table);
+                }
+                if (normal)
+                    for (int i = 0, r = resOff, t = src; i < count; i++, r += 4, t += 4) Write(res, r, NormalMaps.BlendUnchecked(Read(res, r), Read(g, gOff + i * 4), Amount(b, slot, t), n.Mode));
+                else BlendSpan(res, resOff, g, gOff, count, b, slot, src, n.Mode, n.Table);
+            }
+        }
+        static double Amount(LayerTile layer, int slot, int offset) { return layer.MaskSource == null ? layer.Opacity : layer.Opacity * layer.MaskFactor[layer.Mask[slot][offset + 3]]; }
+        static Rgba32 Read(byte[] a, int o) { return new Rgba32(a[o], a[o + 1], a[o + 2], a[o + 3]); }
+        static void Write(byte[] a, int o, Rgba32 c) { a[o] = c.R; a[o + 1] = c.G; a[o + 2] = c.B; a[o + 3] = c.A; }
+
+        /// <summary>Below this the product a·c of the transparent-backdrop shortcut could be subnormal and lose bits.</summary>
+        const double MinShortcutAlpha = 1e-300;
+
+        /// <summary><see cref="BlendUnchecked"/> over a span, reading and writing the bytes in place (the same result for every pixel;
+        /// the editor's Mono runs this about twice as fast as passing each pixel as an Rgba32). Shortcuts that give the formula's own
+        /// bytes: a transparent source pixel leaves the backdrop; an opaque one at amount 1 in Normal mode is copied; on a transparent
+        /// backdrop the result is the source colour with alpha a (the weights are 0, a, 0 and (a·c)/a rounds back to c); on an opaque
+        /// backdrop a = a_s + (1 − a_s) is exactly 1, so the division by a and the zero term drop out. Separable modes look their blend
+        /// colour up in <paramref name="table"/>.</summary>
+        static void BlendSpan(byte[] res, int resOff, byte[] src, int srcOff, int count, LayerTile layer, int slot, int tileOff, LayerBlendMode mode, double[] table)
+        {
+            var unit = MathUtil.ByteUnit; bool simple = mode == LayerBlendMode.Normal || mode == LayerBlendMode.PassThrough;
+            byte[] mask = layer.MaskSource == null ? null : layer.Mask[slot]; var factor = layer.MaskFactor; double opacity = layer.Opacity;
+            for (int r = resOff, s = srcOff, m = tileOff + 3, end = resOff + count * 4; r < end; r += 4, s += 4, m += 4)
+            {
+                byte sA = src[s + 3];
+                if (sA == 0) continue; // a_s = 0: the destination as it is
+                double amount = mask == null ? opacity : opacity * factor[mask[m]];
+                if (simple && sA == 255 && amount == 1) { res[r] = src[s]; res[r + 1] = src[s + 1]; res[r + 2] = src[s + 2]; res[r + 3] = 255; continue; } // BlendUnchecked と同じ近道
+                double sa = unit[sA] * amount;
+                if (sa <= 0) continue;
+                byte dA = res[r + 3];
+                if (dA == 0 && sa >= MinShortcutAlpha)
+                {
+                    // 下が透明: 重みは 0・a_s・0 で色は (a_s·c)/a_s。積が正規化数なら c から 2 ulp 以内で、×255 + 0.5 の切り捨ては c のバイト
+                    res[r] = src[s]; res[r + 1] = src[s + 1]; res[r + 2] = src[s + 2];
+                    double v = sa * 255 + 0.5; res[r + 3] = v >= 255 ? (byte)255 : v > 0 ? (byte)(int)v : (byte)0;
+                    continue;
+                }
+                double dr = unit[res[r]], dg = unit[res[r + 1]], db = unit[res[r + 2]];
+                double sr = unit[src[s]], sg = unit[src[s + 1]], sb = unit[src[s + 2]];
+                double br, bg, bb;
+                if (simple) { br = sr; bg = sg; bb = sb; }
+                else if (table != null) { br = table[res[r] << 8 | src[s]]; bg = table[res[r + 1] << 8 | src[s + 1]]; bb = table[res[r + 2] << 8 | src[s + 2]]; }
+                else BlendRgb(mode, dr, dg, db, sr, sg, sb, out br, out bg, out bb);
+                // MathUtil.ToByte written out (x × 255 + 0.5, floor by truncation of a positive value, clamped)
+                double vr, vg, vb;
+                if (dA == 255)
+                {
+                    // 下が不透明: a = a_s + (1 − a_s) はちょうど 1、重みは 1 − a_s・0・a_s（0 の項と ÷1 は値を変えない）
+                    double t = 1 - sa;
+                    vr = (t * dr + sa * br) * 255 + 0.5; vg = (t * dg + sa * bg) * 255 + 0.5; vb = (t * db + sa * bb) * 255 + 0.5;
+                    res[r + 3] = 255;
+                }
+                else
+                {
+                    double da = unit[dA], a = sa + da * (1 - sa);
+                    double wd = (1 - sa) * da, ws = (1 - da) * sa, wb = da * sa;
+                    vr = (wd * dr + ws * sr + wb * br) / a * 255 + 0.5; vg = (wd * dg + ws * sg + wb * bg) / a * 255 + 0.5;
+                    vb = (wd * db + ws * sb + wb * bb) / a * 255 + 0.5; double va = a * 255 + 0.5;
+                    res[r + 3] = va >= 255 ? (byte)255 : va > 0 ? (byte)(int)va : (byte)0;
+                }
+                res[r] = vr >= 255 ? (byte)255 : vr > 0 ? (byte)(int)vr : (byte)0;
+                res[r + 1] = vg >= 255 ? (byte)255 : vg > 0 ? (byte)(int)vg : (byte)0;
+                res[r + 2] = vb >= 255 ? (byte)255 : vb > 0 ? (byte)(int)vb : (byte)0;
+            }
+        }
+        /// <summary><see cref="ClipOnto"/> over a span, in place on the clipping group g (the same arithmetic as ClipOnto → MixRgb for
+        /// every pixel: below + (B(below, over) − below) × a, the group's alpha kept). Separable modes look B up in table.</summary>
+        static void ClipSpan(byte[] g, int gOff, byte[] c, int cOff, int count, LayerTile layer, int slot, int tileOff, LayerBlendMode mode, double[] table)
+        {
+            var unit = MathUtil.ByteUnit; bool simple = mode == LayerBlendMode.Normal || mode == LayerBlendMode.PassThrough;
+            byte[] mask = layer.MaskSource == null ? null : layer.Mask[slot]; var factor = layer.MaskFactor; double opacity = layer.Opacity;
+            for (int r = gOff, s = cOff, m = tileOff + 3, end = gOff + count * 4; r < end; r += 4, s += 4, m += 4)
+            {
+                byte cA = c[s + 3];
+                if (cA == 0 || g[r + 3] == 0) continue; // a = 0, or nothing to clip to: the group as it is
+                double a = unit[cA] * (mask == null ? opacity : opacity * factor[mask[m]]);
+                if (a <= 0) continue;
+                double dr = unit[g[r]], dg = unit[g[r + 1]], db = unit[g[r + 2]];
+                double br, bg, bb;
+                if (simple) { br = unit[c[s]]; bg = unit[c[s + 1]]; bb = unit[c[s + 2]]; }
+                else if (table != null) { br = table[g[r] << 8 | c[s]]; bg = table[g[r + 1] << 8 | c[s + 1]]; bb = table[g[r + 2] << 8 | c[s + 2]]; }
+                else BlendRgb(mode, dr, dg, db, unit[c[s]], unit[c[s + 1]], unit[c[s + 2]], out br, out bg, out bb);
+                double vr = (dr + (br - dr) * a) * 255 + 0.5, vg = (dg + (bg - dg) * a) * 255 + 0.5, vb = (db + (bb - db) * a) * 255 + 0.5;
+                g[r] = vr >= 255 ? (byte)255 : vr > 0 ? (byte)(int)vr : (byte)0;
+                g[r + 1] = vg >= 255 ? (byte)255 : vg > 0 ? (byte)(int)vg : (byte)0;
+                g[r + 2] = vb >= 255 ? (byte)255 : vb > 0 ? (byte)(int)vb : (byte)0;
+            }
+        }
+        /// <summary>Scratch spans of one worker: per group depth, the pass-through backdrop copy, the group or clipping base, and a
+        /// clipped group.</summary>
+        sealed class SpanScratch
+        {
+            readonly List<byte[]> spans = new List<byte[]>(); readonly int length;
+            public SpanScratch(int tileSize) { length = tileSize * 4; }
+            public byte[] Get(int depth, int purpose)
+            {
+                int index = depth * 3 + purpose;
+                while (spans.Count <= index) spans.Add(null);
+                return spans[index] ?? (spans[index] = new byte[length]);
+            }
+        }
+        /// <summary>Tile buffers held at once by one call when it composites several tiles in parallel (filter output only; other
+        /// tiles are read in place).</summary>
+        const long ParallelBufferBytes = 64L * 1024 * 1024;
+        /// <summary>Below this many pixel × layer steps a region is composited on the calling thread (starting workers costs more).</summary>
+        const long ParallelMinimumWork = 1L << 16;
+
+        /// <summary>The tiles of the jobs: every tile a job's region touches (a tile in two jobs is two items).</summary>
+        struct Item { public int Job; public TileCoord Coord; }
+
+        // Same per-pixel arithmetic as CompositePixel, but each layer's tile is read once instead of one dictionary lookup per pixel
+        // per layer. Tiles are independent: they are loaded into their own slots and their pixels computed on worker threads; every
+        // output pixel depends only on its own inputs, so the bytes do not depend on the number of threads or the order.
+        static void Run(PaintDocument document, PaintChannel channel, List<StackEntry> plan, IReadOnlyList<CompositeJob> jobs, bool fresh)
+        {
+            int tile = document.TileSize, tileBytes = checked(tile * tile * 4);
+            var items = new List<Item>(); var coords = new HashSet<TileCoord>(); long area = 0;
+            for (int j = 0; j < jobs.Count; j++)
+            {
+                var job = jobs[j]; if (job.Width == 0 || job.Height == 0) continue;
+                area += (long)job.Width * job.Height;
+                for (int ty = job.Y / tile; ty <= (job.Y + job.Height - 1) / tile; ty++)
+                    for (int tx = job.X / tile; tx <= (job.X + job.Width - 1) / tile; tx++) { var c = new TileCoord(tx, ty); items.Add(new Item { Job = j, Coord = c }); coords.Add(c); }
+            }
+            if (items.Count == 0) return;
+            var shared = new SharedTiles(tileBytes);
+            int degree = CoreParallelism.Degree, layerCount = Math.Max(1, CountEntries(plan)), buffers = CountOwnBuffers(plan, channel);
+            if (area * layerCount < ParallelMinimumWork) degree = 1;
+            int slots = (int)Math.Max(1, Math.Min(Math.Min(items.Count, degree), buffers == 0 ? int.MaxValue : ParallelBufferBytes / ((long)buffers * tileBytes)));
+            var nodes = Node.Build(plan, channel, tileBytes, slots, shared);
+            Node.PrepareUniform(nodes, coords);
+            // 読み込みもワーカーで: フィルターを通る層が無ければ、読むのは面のタイルそのもの（書き換えは無い）。フィルターのキャッシュは
+            // このスレッドからだけ触る。
+            bool concurrentLoad = slots > 1 && !Node.Filtered(nodes);
+            bool normal = channel == PaintChannel.Normal;
+            var scratches = new SpanScratch[Math.Max(slots, degree)]; for (int k = 0; k < scratches.Length; k++) scratches[k] = new SpanScratch(tile);
+            var any = new bool[slots];
+            if (concurrentLoad && items.Count >= 2 * slots)
+            {
+                // タイルが十分あれば、ワーカーごとに自分の枠で「読む → 計算する」をタイルごとに続ける（段ごとの待ち合わせが無い）
+                CoreParallelism.ForWorkers(items.Count, slots, (worker, i) =>
+                {
+                    var item = items[i]; var job = jobs[item.Job];
+                    bool pixels = Node.Load(nodes, job.Start, nodes.Length, channel, item.Coord, worker, out bool present);
+                    Compute(nodes, job, item.Coord, tile, worker, job.Start == 0 ? pixels : present, 0, tile, normal, scratches[worker], fresh);
+                });
+                return;
+            }
+            for (int first = 0; first < items.Count; first += slots)
+            {
+                int count = Math.Min(slots, items.Count - first), batch = first;
+                if (concurrentLoad) CoreParallelism.For(count, degree, k => { var job = jobs[items[batch + k].Job]; bool p = Node.Load(nodes, job.Start, nodes.Length, channel, items[batch + k].Coord, k, out bool present); any[k] = job.Start == 0 ? p : present; });
+                else for (int k = 0; k < count; k++) { var job = jobs[items[batch + k].Job]; bool p = Node.Load(nodes, job.Start, nodes.Length, channel, items[batch + k].Coord, k, out bool present); any[k] = job.Start == 0 ? p : present; }
+                // 行の束に分けて計算する（タイルが少ないときもスレッドが余らないように）
+                int chunks = Math.Max(1, Math.Min(tile / 8, (degree + count - 1) / count)), rowsPerChunk = (tile + chunks - 1) / chunks;
+                CoreParallelism.ForWorkers(count * chunks, Math.Min(degree, count * chunks), (worker, w) =>
+                {
+                    int k = w / chunks, chunk = w - k * chunks; var item = items[batch + k];
+                    Compute(nodes, jobs[item.Job], item.Coord, tile, k, any[k], chunk * rowsPerChunk, (chunk + 1) * rowsPerChunk, normal, scratches[worker], fresh);
+                });
+            }
+        }
+        static int CountEntries(IReadOnlyList<StackEntry> plan)
         { int c = 0; foreach (var e in plan) c += 1 + CountEntries(e.Children) + CountEntries(e.ClipEntries); return c; }
-        static int CountBuffers(System.Collections.Generic.IReadOnlyList<StackEntry> plan)
+        /// <summary>Slot buffers a call needs per slot: one per layer and per mask whose tiles go through a filter stack.</summary>
+        static int CountOwnBuffers(IReadOnlyList<StackEntry> plan, PaintChannel channel)
         {
             int b = 0;
             foreach (var e in plan)
             {
                 var l = e.Base;
-                b += (l.Kind != LayerKind.Adjustment && !l.IsGroup ? 1 : 0) + (l.Mask != null && !l.Mask.IsNeutral ? 1 : 0) + CountBuffers(e.Children) + CountBuffers(e.ClipEntries);
+                b += (l.Kind != LayerKind.Adjustment && !l.IsGroup && l.HasActiveFilters(channel) ? 1 : 0) + (l.Mask != null && !l.Mask.IsNeutral && l.Mask.HasActiveFilters ? 1 : 0)
+                    + CountOwnBuffers(e.Children, channel) + CountOwnBuffers(e.ClipEntries, channel);
             }
             return b;
+        }
+
+        /// <summary>Composites the rows [rowFrom, rowTo) of one tile (tile-relative) of a job's region, with the tile loaded in slot.
+        /// any: whether anything from the job's Start up has something in this tile (if not, the result is the backdrop).</summary>
+        static void Compute(Node[] nodes, CompositeJob job, TileCoord c, int tile, int slot, bool any, int rowFrom, int rowTo, bool normal, SpanScratch scratch, bool fresh)
+        {
+            int tx = c.X, ty = c.Y;
+            int x0 = Math.Max(job.X, tx * tile), x1 = Math.Min(job.X + job.Width, (tx + 1) * tile);
+            int y0 = Math.Max(job.Y, ty * tile + rowFrom), y1 = Math.Min(job.Y + job.Height, Math.Min((ty + 1) * tile, ty * tile + rowTo));
+            int length = (x1 - x0) * 4, start = job.Start, capture = job.CaptureAt;
+            for (int py = y0; py < y1; py++)
+            {
+                int off = ((py - job.Y) * job.Width + (x0 - job.X)) * 4, src = ((py - ty * tile) * tile + (x0 - tx * tile)) * 4;
+                if (start == 0) { if (!fresh) Array.Clear(job.Pixels, off, length); } // 透明から
+                else if (job.Backdrop != null) Buffer.BlockCopy(job.Backdrop, job.BackdropOffset + (py - job.Y) * job.BackdropStride + (x0 - job.X) * 4, job.Pixels, off, length);
+                if (!any) { if (capture >= 0) Buffer.BlockCopy(job.Pixels, off, job.Capture, off, length); continue; }
+                if (capture >= 0)
+                {
+                    EvaluateSpan(nodes, start, capture, job.Pixels, off, slot, src, x1 - x0, normal, scratch, 0);
+                    Buffer.BlockCopy(job.Pixels, off, job.Capture, off, length);
+                    EvaluateSpan(nodes, capture, nodes.Length, job.Pixels, off, slot, src, x1 - x0, normal, scratch, 0);
+                }
+                else EvaluateSpan(nodes, start, nodes.Length, job.Pixels, off, slot, src, x1 - x0, normal, scratch, 0);
+            }
         }
     }
 }

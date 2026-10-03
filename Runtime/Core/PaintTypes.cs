@@ -215,5 +215,25 @@ namespace Yozolab.YoluPainter.Core
             });
             if (failure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
         }
+        /// <summary><see cref="For"/> that also tells the body which worker runs it: body(worker, i) with worker in [0, workers), and
+        /// no two bodies with the same worker run at once, so a worker can own a buffer for the whole run. The same exception
+        /// rules as For.</summary>
+        internal static void ForWorkers(int count, int workers, Action<int, int> body)
+        {
+            if (count <= 0) return;
+            workers = Math.Min(workers, count);
+            if (workers <= 1) { for (int i = 0; i < count; i++) body(0, i); return; }
+            int next = -1; Exception failure = null;
+            System.Threading.Tasks.Parallel.For(0, workers, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = workers }, worker =>
+            {
+                for (int i; (i = System.Threading.Interlocked.Increment(ref next)) < count;)
+                {
+                    if (System.Threading.Volatile.Read(ref failure) != null) return;
+                    try { body(worker, i); }
+                    catch (Exception e) { System.Threading.Interlocked.CompareExchange(ref failure, e, null); return; }
+                }
+            });
+            if (failure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+        }
     }
 }
