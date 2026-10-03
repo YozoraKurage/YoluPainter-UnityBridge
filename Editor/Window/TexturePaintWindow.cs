@@ -143,7 +143,7 @@ namespace Yozolab.YoluPainter.Editor
             ResetSetsBaseline(false);
         }
         void OnLostFocus() { ClearPolygonFillHover(); pickHoverPointer = new Vector2(-100, -100); FinishStroke(false); CancelShapeDrag(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); ReleaseStencilInput(); preview?.CancelNavigation(); SaveRecovery(); }
-        void BeforeReload() { FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); EndLightingDrag(true); preview?.CancelNavigation(); SaveRecovery(); }
+        void BeforeReload() { FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); EndLightingDrag(true); preview?.CancelNavigation(); preview?.CancelPreparation(); SaveRecovery(); }
         void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); SaveRecovery(); } }
         void OnDisable()
         {
@@ -157,6 +157,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if(document==null) return;
             if(EditorApplication.timeSinceStartup-lastRecoveryStorageCheck>60) CheckRecoveryStorage();
+            TickModelPreparation();
             TickAssetsPanel(); // アセットのパネルが出たら、リソースの出どころを確かめる（TexturePaintWindow.AssetsPanel.cs）
             if(stroke==null && EditorApplication.timeSinceStartup-lastRecovery>PainterSettings.RecoveryIntervalSeconds && !RecoveryIsCurrent()) SaveRecovery();
             if(!String.IsNullOrEmpty(projectPath) && EditorApplication.timeSinceStartup-lastExternalCheck>3) CheckExternalChange();
@@ -214,6 +215,7 @@ namespace Yozolab.YoluPainter.Editor
                 if(Event.current!=null) Event.current.mousePosition=pointerAtStart;
             }
             DrawShell();
+            DrawModelPreparation();
             if(surfaceRect.width>0){DrawSurfaceBrushCursor(pointerAtStart);DrawMirroredBrushCursor(pointerAtStart);} // 3D の描画の後に GUI の状態を戻してから重ねる
             return true;
         }
@@ -223,6 +225,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>schedule の時間の中で合成する（Repaint から。null なら全部）。</summary>
         void RefreshPreviewTextures(CompositeSchedule schedule)
         {
+            BeginPreviewDisplayFrame(schedule);
             TryAction(()=> { compositor.Update(document,channel,schedule); UpdateNormalOutput(); ShowTextureSets(); });
             TryAction(UpdatePreviewLighting);
             TryAction(ShowMaterialChannels);

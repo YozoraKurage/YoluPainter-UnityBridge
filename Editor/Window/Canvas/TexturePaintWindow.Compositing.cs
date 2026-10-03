@@ -49,7 +49,7 @@ namespace Yozolab.YoluPainter.Editor
         // ───────── 描くたびの合成（時間で区切る） ─────────
 
         /// <summary>この描画で表示の合成が要るか（文書が変わった・表示を作り直す印・合成器に残りの仕事がある）。</summary>
-        bool DisplayNeedsCompositing => repaintPixels || renderedRevision != document.Revision || compositor != null && compositor.HasPendingWork;
+        bool DisplayNeedsCompositing => previewDisplayPending || repaintPixels || renderedRevision != document.Revision || compositor != null && compositor.HasPendingWork;
 
         /// <summary>残りの表示の合成を今すべて終える（窓を 1 回だけ描いて残すとき: OffscreenGui）。</summary>
         internal void FinishDisplayCompositing() { if (document != null && compositor != null && DisplayNeedsCompositing) RefreshPreviewTextures(); }
@@ -58,7 +58,7 @@ namespace Yozolab.YoluPainter.Editor
         void RefreshDisplayForFrame()
         {
             RefreshPreviewTextures(DisplaySchedule());
-            if (compositor != null && compositor.HasPendingWork) Repaint();
+            if (previewDisplayPending || compositor != null && compositor.HasPendingWork) Repaint();
         }
 
         /// <summary>今の描画の合成の指示: 個人の設定の時間（0 = 分けない）、ストロークの最中は描いた所を急ぎに、2D で見えている文書の範囲、

@@ -338,12 +338,12 @@ namespace Yozolab.YoluPainter.Editor
             {
                 // 3D だけの表示では 3D ビューの左端が表示の切り替えのボタンの下なので、2D の見出しと同じくボタンの後から書く
                 float right = DrawModelShowButton(bar, DrawShadingSwitch(bar)), left = Mathf.Max(x + 8, surfaceRect.x + 8); // 見せるもののボタン（ModelShow.cs）
-                string label = "3D · " + (preview.HasModel ? (model != null ? model.name : L.Tr("Demo cube")) : L.Tr("No model"));
+                string label = "3D · " + (preview.HasSnapshot ? (model != null ? model.name : L.Tr("Demo cube")) : L.Tr("No model"));
                 float width = Mathf.Max(0, Mathf.Min(300, right - left - 4));
                 surfaceHeaderLabelForTests = new Rect(left, bar.y, width, bar.height); viewModeButtonsEndForTests = x;
                 PaintGui.Text(new Rect(left, bar.y, width, bar.height), PaintGui.Fit(label, width, PaintTheme.LabelDim, false), PaintTheme.LabelDim);
             }
-            if (surfaceRect.width > 0 && !preview.HasModel)
+            if (surfaceRect.width > 0 && !preview.HasSnapshot)
                 PaintGui.Text(surfaceRect, L.Tr("Choose a model in Texture Set, or 3D ▸ Demo Cube.\nThe original prefab is never instantiated."), new GUIStyle(PaintTheme.LabelDim) { alignment = TextAnchor.MiddleCenter, wordWrap = true });
         }
 

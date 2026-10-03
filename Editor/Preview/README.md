@@ -1,4 +1,4 @@
-# G1 isolated static surface preview
+# G1 isolated surface preview
 
 `IsolatedModelPreview` owns a `PreviewRenderUtility`, newly constructed MeshFilter/MeshRenderer-only GameObjects in its preview scene, transformed Mesh copies, and private Material copies. It never instantiates a supplied GameObject/Prefab, copies user behaviours, changes a source material/mesh/import setting, or uses global Physics picking. Disposal destroys owned objects/meshes/materials and calls `PreviewRenderUtility.Cleanup()`; call it on EditorWindow disable/reload. Source transform translation is removed as a common snapshot origin, while its scale, rotation and child transforms remain represented.
 
@@ -39,11 +39,11 @@ This is a CPU spherical footprint prototype, not a geodesic brush, GPU brush bac
 
 ## Explicit limitations and rejection
 
-- Enabled readable static triangular meshes only; 250,000 vertices per mesh and 150,000 total input triangles are admission budgets, not measured support claims.
-- Unsupported active renderers (including skinned meshes), unreadable meshes, unsupported topology, invalid geometry or an omitted over-budget mesh disable surface painting for the incomplete snapshot. Omitted clothing cannot silently become transparent to the brush.
+- 有効な静的メッシュと、CPU でベイクしたスキンメッシュの三角形を扱う。エディタの `MeshUtility.AcquireReadOnlyMeshData` で Read/Write が無効でも読み取る。 250,000 vertices per mesh and 150,000 total input triangles are admission budgets, not measured support claims.
+- Unsupported active renderers, meshes the Editor cannot read, unsupported topology, invalid geometry or an omitted over-budget mesh disable surface painting for the incomplete snapshot. Omitted clothing cannot silently become transparent to the brush.
 - Missing UV0 meshes remain visible occluders but cannot receive paint.
 - Any UV0 coordinate outside 0–1 disables surface painting. The prototype does not silently wrap, truncate, or approximate repeated/UDIM painting.
-- Source texture transforms, material effects, alpha cutouts, shader displacement, bones and BlendShapes are not reproduced by the neutral view. The material view shows the source shader's own effects with the material's tiling/offset, while painting still uses UV0 directly (a note says so when a mapped property is tiled). Pose/BlendShape editing remains future scope.
+- Source texture transforms, material effects, alpha cutouts, shader displacement, shader-driven vertex motion is not reproduced by the neutral view. Bones and BlendShapes use the CPU-baked snapshot. The material view shows the source shader's own effects with the material's tiling/offset, while painting still uses UV0 directly (a note says so when a mapped property is tiled).
 - All enabled MeshRenderers are extracted; source LODGroup-driven selection, occlusion culling, renderer property blocks and animation are not replicated.
 - Preview isolation is within Unity's process and graphics device. Render callbacks and global GPU/resource contention are not sandboxed.
 
@@ -51,7 +51,7 @@ Per dab, default limits are 2,048 visited triangles, 262,144 candidate texels, 1
 
 ## Validation status
 
-All geometry tests and the three preview ownership tests run as Unity 2022.3.22f1 EditMode tests (2026-10-02). WindowTests drive the EditorWindow through real IMGUI events and confirm source-asset isolation, cleanup and stroke cancellation on focus loss / reload / play notifications. Still unverified: actual domain reload and play-mode transitions mid-stroke, HiDPI, tablets, SRP, and real GPUs (the devcontainer renders with llvmpipe).
+All geometry tests and the three preview ownership tests run as Unity 2022.3.22f1 EditMode tests (2026-10-02). WindowTests drive the EditorWindow through real IMGUI events and confirm source-asset isolation, cleanup and stroke cancellation on focus loss / reload / play notifications. Still unverified: actual domain reload and play-mode transitions mid-stroke, HiDPI, tablets, SRP, and Windows D3D11. The container GPU checks use OpenGL.
 
 API references checked against Unity 2022.3:
 - [PreviewRenderUtility source](https://github.com/Unity-Technologies/UnityCsReference/blob/2022.3/Editor/Mono/Inspector/PreviewRenderUtility.cs)
@@ -63,3 +63,13 @@ Unity 2022.3's `PreviewRenderUtility.Render` temporarily changes a public editor
 3D のホバーはポリゴン塗りつぶし・通常の選択・バケツで同じ範囲索引を使う。ID 選択と Generator の ID スポイトは、クリックしたテクセルの RGB と許容幅で焼いた ID マップをシェーダー内で照合する。三角形の中心の色で近似せず、高ポリからの色や重複 UV も実際の選択と同じ画素を強調する。ID のテクスチャ・色・許容幅も描画の鍵に入り、同じ範囲／色の中で動くあいだは前の絵を再利用する。色だけ変えてもメッシュを作り直さず、ID のテクスチャはベイクが替わったときだけ作る。前のテクスチャを保持した置き換えと作業画素を含め、予算を超える強調は描かない。
 
 2D の重複 UV は範囲ごとの候補を提示し、Tab／Shift+Tab・右クリック・オプションバーから切り替える。候補のホバーとクリック・ドラッグは同じ範囲を使い、候補の変更自体は Undo に入れない。共有画素の最終色を面ごとに分離することはできない。
+
+## 大きなモデルの準備
+
+新規プロジェクトのダイアログで用意したプレビューは、モデルの指紋を確かめて作成先へ渡す。同じ形・UV・姿勢・スロットなら読み直さない。元のメッシュ、インポート設定、保存済みのモデルの GUID は変更しない。[エディタの読み取り用 API](https://docs.unity3d.com/2022.3/Documentation/ScriptReference/MeshUtility.AcquireReadOnlyMeshData.html) は `isReadable` の検査を省略する。
+
+`Load` は同期の契約を保つ。窓からの大きなモデルの読込みは、表示用のメッシュと三角形を主スレッドで写し、隣り合わせと BVH を別スレッドで作る。完成までは `Geometry` を公開せず、`CanPaint` は false。進捗・取消・再試行を表示し、取消の後もモデルの表示と2Dの操作を残す。リロード、Play への移行、破棄、別の読込みの後には古い結果を採用しない。元のスクリプトは生成しない。
+
+幾何の頂点は従来と同じ量子化で溶接し、辺の初出順で隣り合わせを作る。BVH の構築は境界と分割中心を一度だけ計算し、中央値で分ける。非多様体の辺、マテリアルスロットの境界、UV の扱いと予算の拒否は従来どおり。完全に同距離で重なる面について、旧 BVH の葉内の選択順は保証しない。
+
+ほかのテクスチャセットの CPU 表示と照明は、表示のフレーム予算で順に準備する。取消と再開ができ、正本と Undo は変わらない。予算は仕事の区切りで見るため、1 セットの合成、メッシュの複製・ベイク、GPU の転送・最初の描画に掛かる時間を厳密には制限しない。実モデル、すべての解像度やドライバーに対する応答時間の保証ではない。

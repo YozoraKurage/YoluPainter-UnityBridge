@@ -47,7 +47,12 @@ namespace Yozolab.YoluPainter.Editor
             if (previewNormals && preview.HasModel)
                 foreach (var set in textureSets)
                     if (set != currentSet && set.MaterialSlot < preview.MaterialSlotCount && !normals.ContainsKey(set.MaterialSlot))
-                    { var n = SetLighting(set); if (n != null) normals[set.MaterialSlot] = n; }
+                    {
+                        bool used = YlpContent.UsedChannels(set.Document).Contains(PaintChannel.Normal);
+                        bool cached = set.Lighting != null && set.LightingKey == SetLightingKey(set.Document);
+                        var n = !used || cached || AdmitPreviewDisplayWork() ? SetLighting(set) : set.Lighting;
+                        if (n != null) normals[set.MaterialSlot] = n;
+                    }
             preview.SetNormalTextures(normals);
         }
         void DisposeLighting() { lightingOutput?.Dispose(); lightingOutput = null; lightingCompositor?.Dispose(); lightingCompositor = null; lightingRevision = -1; }

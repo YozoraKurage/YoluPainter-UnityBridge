@@ -26,7 +26,7 @@ namespace Yozolab.YoluPainter.Tests
         }
 
         /// <summary>担当のふだんの全件は Tests/Editor/Support/SlowTests.txt の重い試験を飛ばす（統合と --full では回す）。一覧の行が今ある
-        /// [Test] のメソッドを指していること（名前を変えた試験が一覧に残って、黙って重いまま回り続けないように）。</summary>
+        /// [Test]・[TestCase]・[UnityTest] のメソッドを指していること（名前を変えた試験が一覧に残って、黙って重いまま回り続けないように）。</summary>
         [Test] public void EverySlowTestEntryNamesAnExistingTest()
         {
             string tests = PackagePaths.Physical("Tests/Editor");
@@ -42,7 +42,7 @@ namespace Yozolab.YoluPainter.Tests
                 Assert.That(type, Is.Not.Null, entry + ": no such test class");
                 var method = type.GetMethods().FirstOrDefault(m => m.Name == parts[1]);
                 Assert.That(method, Is.Not.Null, entry + ": no such method");
-                Assert.That(method.GetCustomAttributes(true).Any(a => a is TestAttribute || a is TestCaseAttribute || a is TestCaseSourceAttribute), Is.True, entry + ": not a test");
+                Assert.That(method.GetCustomAttributes(true).Any(a => a is TestAttribute || a is TestCaseAttribute || a is TestCaseSourceAttribute || a is UnityEngine.TestTools.UnityTestAttribute), Is.True, entry + ": not a test");
             }
         }
     }

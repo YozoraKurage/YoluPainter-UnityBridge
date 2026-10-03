@@ -35,6 +35,7 @@ namespace Yozolab.YoluPainter.Editor
         public static readonly int[] Resolutions = { 512, 1024, 2048, 4096, 8192 };
         public ProjectTemplate Template = ProjectTemplate.Pbr;
         public GameObject Model;
+        internal PreparedModel PreparedModel;
         /// <summary>新規: テクスチャセットにするマテリアルのスロット（null ならモデルの全部のスロット。モデルが無ければスロット 0 の 1 つ）。
         /// モデルに無いスロットは最後のスロットに寄せる。</summary>
         public int[] Slots;
@@ -137,8 +138,9 @@ namespace Yozolab.YoluPainter.Editor
             return w;
         }
 
-        void OnEnable() { wantsMouseMove = true; L.LanguageChanged += Repaint; }
-        void OnDisable() { L.LanguageChanged -= Repaint; preview?.Dispose(); preview = null; }
+        void OnEnable() { wantsMouseMove = true; L.LanguageChanged += Repaint; EditorApplication.update += TickPreparation; }
+        void TickPreparation() { if (preview != null && (preview.IsPreparing || preview.PreparationCanceled)) Repaint(); }
+        void OnDisable() { EditorApplication.update -= TickPreparation; L.LanguageChanged -= Repaint; preview?.Dispose(); preview = null; }
 
         /// <summary>モデルが変わったら読み直す（スロットの名前と注意のため）。新規では選んだスロットを全部に戻す。</summary>
         void EnsurePreview()
@@ -147,7 +149,7 @@ namespace Yozolab.YoluPainter.Editor
             if (preview == null) preview = new IsolatedModelPreview();
             if (loaded && !Configure) Settings.Slots = null;
             loadedFor = Settings.Model; loaded = true;
-            try { if (Settings.Model != null) preview.Load(Settings.Model); else preview.Load(null); }
+            try { if (Settings.Model != null) preview.BeginLoad(Settings.Model); else preview.Load(null); }
             catch (Exception ex) { Debug.LogWarning("YoluPainter: " + ex.Message); }
         }
 
@@ -242,7 +244,7 @@ namespace Yozolab.YoluPainter.Editor
         void DrawSlotChoice(UiRows rows)
         {
             PaintGui.Text(rows.Row(18), L.Tr("Texture Sets"), PaintTheme.Header);
-            int slots = preview.HasModel ? Mathf.Max(1, preview.MaterialSlotCount) : 0;
+            int slots = preview.HasSnapshot ? Mathf.Max(1, preview.MaterialSlotCount) : 0;
             if (slots == 0) { PaintGui.Text(rows.Row(18, 2), L.Tr("One texture set (no model yet)."), PaintTheme.LabelDim); return; }
             int chosen = Settings.Slots == null ? slots : Settings.Slots.Count(s => s < slots);
             var list = rows.Row(Mathf.Min(slots, SetRowsShown) * SetRow);
@@ -300,7 +302,7 @@ namespace Yozolab.YoluPainter.Editor
             bool canAdd = sets.Count < YlpFormat.MaxTextureSets && sets.All(o => o.Slot != free);
             if (PaintGui.Button(new Rect(add.x, add.y, Mathf.Min(220, add.width), add.height), L.Tr("Add Texture Set"), false, canAdd, L.Tr("An empty texture set for an unused material slot (same size and channels as the open one)"), "add"))
             {
-                string baseName = preview.HasModel && preview.SourceMaterial(free) != null ? preview.SourceMaterial(free).name : L.Tr("Texture Set") + " " + (free + 1);
+                string baseName = preview.HasSnapshot && preview.SourceMaterial(free) != null ? preview.SourceMaterial(free).name : L.Tr("Texture Set") + " " + (free + 1);
                 string unique = baseName; for (int n = 2; sets.Any(o => string.Equals(o.Name, unique, StringComparison.OrdinalIgnoreCase)); n++) unique = baseName + " " + n;
                 sets.Add(new TextureSetDraft { Id = Guid.Empty, Name = unique, Slot = free, Width = Settings.Resolution, Height = Settings.Resolution }); Settings.Sets = sets; error = null;
             }
@@ -347,7 +349,7 @@ namespace Yozolab.YoluPainter.Editor
         int SlotChoices()
         {
             int maxDraft = Settings.Sets != null && Settings.Sets.Count > 0 ? Settings.Sets.Max(s => s.Slot) + 1 : 1;
-            return preview.HasModel ? Mathf.Max(preview.MaterialSlotCount, maxDraft) : Mathf.Max(maxDraft + 1, (Settings.Sets?.Count ?? 0) + 1);
+            return preview.HasSnapshot ? Mathf.Max(preview.MaterialSlotCount, maxDraft) : Mathf.Max(maxDraft + 1, (Settings.Sets?.Count ?? 0) + 1);
         }
 
         /// <summary>行の一覧（多ければスクロール）。draw(i) は一覧の中の座標で描く。</summary>
@@ -369,10 +371,11 @@ namespace Yozolab.YoluPainter.Editor
         {
             PaintGui.Rounded(r, PaintTheme.CanvasBg, 4); PaintGui.Outline(r, PaintTheme.Border, 1, 4);
             var view = new Rect(r.x + 1, r.y + 1, r.width - 2, r.width - 2);
-            if (preview.HasModel && Event.current.type == EventType.Repaint) { try { preview.Render(view); } catch (Exception) { } }
-            else if (!preview.HasModel) PaintGui.Text(view, L.Tr("No model"), PaintTheme.LabelCenter, PaintTheme.TextDim);
+            if (preview.HasSnapshot && Event.current.type == EventType.Repaint) { try { preview.Render(view); } catch (Exception) { } }
+            else if (!preview.HasSnapshot) PaintGui.Text(view, L.Tr("No model"), PaintTheme.LabelCenter, PaintTheme.TextDim);
             var rows = new UiRows(new Rect(r.x, view.yMax, r.width, r.yMax - view.yMax), 6);
-            if (preview.HasModel)
+            DrawPreparation(rows);
+            if (preview.Geometry != null)
             {
                 PaintGui.Text(rows.Row(16, 2), L.Tr("Triangles") + ": " + preview.Geometry.TriangleCount.ToString("N0"), PaintTheme.LabelDim);
                 PaintGui.Text(rows.Row(16, 2), L.Tr("Material slots") + ": " + preview.MaterialSlotCount, PaintTheme.LabelDim);
@@ -387,15 +390,30 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
 
+        void DrawPreparation(UiRows rows)
+        {
+            if (preview == null) return;
+            if (preview.IsPreparing)
+            {
+                PaintGui.Text(rows.Row(18), L.Tr("Preparing model: {0}%", Mathf.RoundToInt(preview.PreparationProgress * 100)), PaintTheme.LabelDim);
+                if (PaintGui.Button(rows.Row(24), L.Tr("Cancel preparation"))) preview.CancelPreparation();
+            }
+            else if (preview.PreparationCanceled)
+            {
+                PaintGui.Text(rows.Row(18), L.Tr("Model preparation canceled. 3D painting is unavailable."), PaintTheme.LabelDim);
+                if (PaintGui.Button(rows.Row(24), L.Tr("Prepare again"))) { loaded = false; EnsurePreview(); }
+            }
+        }
+
         /// <summary>スロットの番号とマテリアルの名前（狭い欄用。モデルに無ければそう書く）。</summary>
         string ShortSlotLabel(int slot)
         {
-            if (preview == null || !preview.HasModel) return slot.ToString();
+            if (preview == null || !preview.HasSnapshot) return slot.ToString();
             if (slot >= preview.MaterialSlotCount) return slot + " (" + L.Tr("not in this model") + ")";
             var material = preview.SourceMaterial(slot);
             return slot + ": " + (material != null ? material.name : preview.MaterialSlotNames[slot]);
         }
-        string SlotLabel(int slot) => preview != null && slot < preview.MaterialSlotNames.Count ? slot + ": " + preview.MaterialSlotNames[slot] : slot.ToString() + (preview != null && preview.HasModel ? " (" + L.Tr("not in this model") + ")" : "");
+        string SlotLabel(int slot) => preview != null && slot < preview.MaterialSlotNames.Count ? slot + ": " + preview.MaterialSlotNames[slot] : slot.ToString() + (preview != null && preview.HasSnapshot ? " (" + L.Tr("not in this model") + ")" : "");
 
         void HandleDrop(Rect box)
         {
@@ -418,11 +436,13 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>決める。設定が通らなければ（名前の重なりなど）理由を下に出して閉じない。</summary>
         internal void Accept()
         {
+            EnsurePreview();
             NewProjectSettings settings;
             try { settings = TakeSettings(); }
             catch (ArgumentException ex) { error = ex.Message.Split('\n')[0].Split(new[] { " (Parameter" }, StringSplitOptions.None)[0]; Repaint(); return; }
+            if (!Configure && preview != null) { settings.PreparedModel = new PreparedModel(preview); preview = null; }
             Close();
-            accept?.Invoke(settings);
+            try { accept?.Invoke(settings); } finally { settings.PreparedModel?.Dispose(); settings.PreparedModel = null; }
         }
         internal string Error => error;
     }

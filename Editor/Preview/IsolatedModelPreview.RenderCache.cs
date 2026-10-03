@@ -87,7 +87,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         internal Texture RenderCached(Rect rect, float pixelsPerPoint)
         {
             ThrowIfDisposed();
-            if (!HasModel || rect.width < 2 || rect.height < 2) return null;
+            if (!HasSnapshot || rect.width < 2 || rect.height < 2) return null;
             EnsurePreview();
             var key = ComputeRenderKey(rect, pixelsPerPoint);
             var picture = lastPicture;

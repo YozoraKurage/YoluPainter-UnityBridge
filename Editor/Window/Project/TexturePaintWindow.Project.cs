@@ -50,11 +50,18 @@ namespace Yozolab.YoluPainter.Editor
             if (s == null) throw new ArgumentNullException(nameof(s));
             s.Validate();
             if (stroke != null) throw new InvalidOperationException(L.Tr("Finish the stroke first."));
+            previewDisplayCanceled = false;
             resolution = s.Resolution;
             model = s.Model;
-            preview.Load(model); // null ならモデル無し
-            int slotCount = preview.HasModel ? Mathf.Max(1, preview.MaterialSlotCount) : 1;
-            var slots = (preview.HasModel ? s.Slots ?? Enumerable.Range(0, slotCount).ToArray() : new[] { 0 })
+            var prepared = s.PreparedModel?.Take(model);
+            if (prepared != null)
+            {
+                preview.Dispose(); preview = prepared;
+                ApplyPreviewFrameRate(); preview.MaterialEdits = materialEdits; preview.Shading = previewShading; BindPreviewScene();
+            }
+            else preview.BeginLoad(model); // null ならモデル無し
+            int slotCount = preview.HasSnapshot ? Mathf.Max(1, preview.MaterialSlotCount) : 1;
+            var slots = (preview.HasSnapshot ? s.Slots ?? Enumerable.Range(0, slotCount).ToArray() : new[] { 0 })
                 .Select(slot => Mathf.Clamp(slot, 0, slotCount - 1)).Distinct().OrderBy(slot => slot).Take(YlpFormat.MaxTextureSets).ToList();
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var sets = new List<TextureSet>();
@@ -79,7 +86,7 @@ namespace Yozolab.YoluPainter.Editor
             message = model == null ? L.Tr("New project without a model. Choose one in Texture Set or File ▸ Project Configuration.")
                 : sets.Count == 1 ? L.Tr("New project for {0} ({1}).", model.name, SlotDisplayName(materialSlot))
                 : L.Tr("New project for {0} with {1} texture sets.", model.name, sets.Count);
-            if (s.BakeMeshMaps && preview.CanPaint) BakeMeshMaps();
+            if (s.BakeMeshMaps) { if (preview.IsPreparing) bakePreparedModel = preview; else if (preview.CanPaint) BakeMeshMaps(); }
         }
 
         /// <summary>モデル・テクスチャセット（名前・スロット・大きさ・足す・消す）・ノーマルマップの形式を変える。消すセット・大きさを変えるセットが
@@ -292,8 +299,9 @@ namespace Yozolab.YoluPainter.Editor
         }
         internal void SetModel(GameObject next)
         {
-            model = next;
-            TryAction(() => { preview.Load(model); FitSingleSetSlot(); message = string.Join("; ", preview.Diagnostics); repaintPixels = true; });
+            FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); EndLightingDrag(true);
+            previewDisplayCanceled = false; model = next;
+            TryAction(() => { preview.BeginLoad(model); FitSingleSetSlot(); message = string.Join("; ", preview.Diagnostics); repaintPixels = true; });
         }
     }
 }

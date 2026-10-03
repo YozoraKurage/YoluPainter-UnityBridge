@@ -49,12 +49,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
         Vector3 target;
         Rect lastRect;
         public bool HasModel => geometry != null && geometry.TriangleCount > 0;
+        internal bool HasSnapshot => HasModel || pendingTriangleCount > 0;
         /// <summary>今のスナップショットの幾何（読むだけ）。モデルが無ければ null。</summary>
         public SurfaceGeometry Geometry => geometry;
         /// <summary>今のスナップショットの三角形ごとの頂点の属性（法線・接線・頂点カラー・レンダラー名。<see cref="Geometry"/> と同じ並び）。</summary>
         public SurfaceAttributes Attributes => attributes;
-        public bool CanPaint => HasModel && report.CanPaint;
-        public Bounds Bounds => geometry != null ? geometry.Bounds : new Bounds(Vector3.zero, Vector3.one);
+        public bool CanPaint => geometry != null && !IsPreparing && report.CanPaint;
+        public Bounds Bounds => geometry != null ? geometry.Bounds : snapshotBounds;
         public float ModelRadius => Mathf.Max(0.0001f, Bounds.extents.magnitude);
         public float CameraDistance => distance;
         public int SnapshotRevision => revision;
@@ -74,7 +75,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>カメラを (yaw, pitch) の向きにして、モデル全体が入るように置き直す（モデルが無ければ何もしない）。</summary>
         public void ViewFrom(float viewYaw, float viewPitch)
         {
-            if (!HasModel) return;
+            if (!HasSnapshot) return;
             target = Bounds.center; yaw = viewYaw; pitch = Mathf.Clamp(viewPitch, -89, 89);
             distance = ModelRadius / Mathf.Sin(15 * Mathf.Deg2Rad) * 1.15f;
             UpdateCamera(lastRect.width > 0 ? lastRect : new Rect(0, 0, 500, 500));
@@ -233,10 +234,15 @@ namespace Yozolab.YoluPainter.Editor.Preview
             }
         }
 
-        public PreviewLoadReport Load(GameObject source, PreviewLoadOptions options = null)
+        public PreviewLoadReport Load(GameObject source, PreviewLoadOptions options = null) => LoadCore(source, options, false);
+        internal PreviewLoadReport BeginLoad(GameObject source, PreviewLoadOptions options = null) => LoadCore(source, options, true);
+        PreviewLoadReport LoadCore(GameObject source, PreviewLoadOptions options, bool asynchronous)
         {
             ThrowIfDisposed();
             ClearModel(); revision++; report = new PreviewLoadReport(); loadOptions = options ?? new PreviewLoadOptions();
+            LoadCount++; Timings = new PreviewLoadTimings();
+            var loadClock = System.Diagnostics.Stopwatch.StartNew();
+            LoadedSource = source; SourceFingerprint = PreviewSourceFingerprint.Of(source);
             if (source == null) { report.Diagnostics.Add("Choose a model GameObject or Prefab to load."); return report; }
             EnsurePreview();
             var shader = Shader.Find("Hidden/YoluPainter/PreviewSurface");
@@ -283,7 +289,9 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 var matrix = renderer.localToWorldMatrix;
                 AddEntry(renderer, input, matrix, matrix.determinant < 0, origin, shader, ref incomplete, null);
             }
+            Timings.SnapshotMilliseconds = loadClock.Elapsed.TotalMilliseconds; loadClock.Restart();
             var triangles = BuildTriangles();
+            Timings.TrianglesMilliseconds = loadClock.Elapsed.TotalMilliseconds; loadClock.Restart();
             var animator = source.GetComponentInChildren<Animator>(true);
             if (skeleton != null && animator != null && animator.avatar != null && animator.avatar.isValid && animator.avatar.isHuman && skeleton[animator.transform] != null)
             { humanAvatar = animator.avatar; humanRoot = animator.transform; }
@@ -291,17 +299,15 @@ namespace Yozolab.YoluPainter.Editor.Preview
             {
                 if (triangles.Count > 0)
                 {
-                    geometry = new SurfaceGeometry(triangles, revision);
-                    report.TriangleCount = geometry.TriangleCount;
-                    if (geometry.NonManifoldEdgeCount > 0) report.Diagnostics.Add("Nonmanifold edges are not crossed by the surface brush.");
+                    PrepareGeometry(triangles, incomplete, asynchronous);
                     FrameModel();
                 }
             }
             catch (Exception exception)
             { incomplete = true; geometry = null; report.Diagnostics.Add("Invalid mesh snapshot: " + exception.Message); }
-            report.CanPaint = HasModel && !incomplete;
+            report.CanPaint = geometry != null && !incomplete;
             MaterialView.Reset(materials.Count); ApplyRendererMaterials();
-            report.Diagnostics.Add("G1 uses UV0, 0–1 UVs, static readable meshes and an opaque neutral shader. UV tiling, alpha cutouts, shader displacement, exact lilToon/SRP appearance and shader-driven vertex motion are not represented. Skinned meshes show their current pose and BlendShapes, baked on the CPU.");
+            report.Diagnostics.Add("G1 uses UV0, 0–1 UVs, editor mesh snapshots and an opaque neutral shader. UV tiling, alpha cutouts, shader displacement, exact lilToon/SRP appearance and shader-driven vertex motion are not represented. Skinned meshes show their current pose and BlendShapes, baked on the CPU.");
             report.Diagnostics.Add("Overlapping UVs share pixels. Duplicate-position edges may join seams; surface filtering cannot make overlapping UVs independent.");
             if (incomplete) report.Diagnostics.Add("Surface painting is disabled for this incomplete snapshot, so omitted geometry cannot silently allow painting through clothes. Choose a supported static-mesh root.");
             return report;
@@ -375,8 +381,6 @@ namespace Yozolab.YoluPainter.Editor.Preview
 
         bool CheckInput(Renderer renderer, Mesh input, ref bool incomplete, ref long triangleTotal)
         {
-            if (!input.isReadable)
-            { incomplete = true; report.Diagnostics.Add(renderer.name + ": mesh is not CPU-readable. Import settings were not changed."); return false; }
             if (input.vertexCount > loadOptions.MaxVerticesPerMesh)
             { incomplete = true; report.Diagnostics.Add(renderer.name + ": exceeds the vertex budget (" + loadOptions.MaxVerticesPerMesh.ToString("N0") + " per mesh)."); return false; }
             long inputTriangles = 0; bool unsupported = false;
@@ -398,7 +402,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             int firstSlot = materials.Count, firstMesh = meshes.Count, firstObject = objects.Count;
             try
             {
-                Mesh mesh = Object.Instantiate(input); // Mesh only: no source GameObject or behaviour is instantiated.
+                Mesh mesh = CopyReadableMesh(input); // メッシュだけを複製し、元のオブジェクトやスクリプトは作らない。
                 mesh.name = input.name + " (paint snapshot)"; mesh.hideFlags = HideFlags.HideAndDontSave; meshes.Add(mesh);
                 var vertices = mesh.vertices;
                 var normalMatrix = matrix.inverse.transpose;
@@ -488,7 +492,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 sourceMaterials.RemoveRange(firstSlot, sourceMaterials.Count - firstSlot);
                 sourceColors.RemoveRange(firstSlot, sourceColors.Count - firstSlot);
                 slotNames.RemoveRange(firstSlot, slotNames.Count - firstSlot);
-                report.Diagnostics.Add(renderer.name + ": could not build safe mesh snapshot: " + exception.Message);
+                report.Diagnostics.Add(renderer.name + ": " + L.Tr("The mesh could not be read in the Editor. Enable Read/Write in its model import settings and try again; YoluPainter does not change those settings.") + " " + exception.Message);
                 return false;
             }
         }
@@ -572,6 +576,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public bool ApplyPose()
         {
             ThrowIfDisposed();
+            if (IsPreparing) throw new InvalidOperationException(L.Tr("Wait for the model preparation to finish, or cancel it."));
             if (!HasSkinnedMeshes) return false;
             foreach (var e in entries)
             {
@@ -651,7 +656,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         }
         public void FrameModel()
         {
-            if (!HasModel) return;
+            if (!HasSnapshot) return;
             target = Bounds.center; yaw = 25; pitch = 10;
             distance = ModelRadius / Mathf.Sin(15 * Mathf.Deg2Rad) * 1.15f;
             UpdateCamera(lastRect.width > 0 ? lastRect : new Rect(0, 0, 500, 500));
@@ -675,7 +680,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         {
             ThrowIfDisposed();
             if (Event.current != null && Event.current.type != EventType.Repaint) return;
-            if (!HasModel || rect.width < 2 || rect.height < 2) return;
+            if (!HasSnapshot || rect.width < 2 || rect.height < 2) return;
             var texture = RenderCached(rect, EditorGUIUtility.pixelsPerPoint);
             if (texture != null) GUI.DrawTexture(rect, texture, ScaleMode.StretchToFill, false);
         }
@@ -945,7 +950,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         }
         public bool HandleNavigation(Rect rect, Event current)
         {
-            if (current == null || !HasModel) return false;
+            if (current == null || !HasSnapshot) return false;
             int id = GUIUtility.GetControlID("YoluPainterPreviewNavigation".GetHashCode(), FocusType.Passive, rect);
             if (current.type == EventType.MouseDown && rect.Contains(current.mousePosition) && GUIUtility.hotControl == 0 &&
                 (current.button == 1 || current.button == 2 || (current.alt && current.button == 0)))
@@ -982,6 +987,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         }
         void ClearModel()
         {
+            CancelPreparation(); PreparationCanceled = false; pendingTriangleCount = 0; snapshotBounds = new Bounds(Vector3.zero, Vector3.one);
             contentVersion++;
             CancelNavigation(); geometry = null; attributes = null;
             ModelRootPosition = Vector3.zero; ModelRootRotation = Quaternion.identity;

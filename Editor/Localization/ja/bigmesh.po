@@ -1,0 +1,32 @@
+# Japanese translation for model preparation.
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Preparing model: {0}%"
+msgstr "モデルを準備中: {0}%"
+
+msgid "Cancel preparation"
+msgstr "準備を取り消す"
+
+msgid "Prepare again"
+msgstr "もう一度準備する"
+
+msgid "Model preparation canceled. 3D painting is unavailable."
+msgstr "モデルの準備を取り消しました。3D では描けません。"
+
+msgid "Wait for the model preparation to finish, or cancel it."
+msgstr "モデルの準備が終わるまでお待ちください。準備は取り消せます。"
+
+msgid "Model preparation failed: {0}"
+msgstr "モデルを準備できませんでした: {0}"
+
+msgid "The mesh could not be read in the Editor. Enable Read/Write in its model import settings and try again; YoluPainter does not change those settings."
+msgstr "エディタでメッシュを読めませんでした。モデルのインポート設定で Read/Write を有効にして、もう一度お試しください。YoluPainter はその設定を変更しません。"
+
+msgid "Preparing texture set previews: {0} remaining"
+msgstr "テクスチャセットの表示を準備中: 残り {0} 件"
+
+msgid "Texture set preview preparation canceled."
+msgstr "テクスチャセットの表示の準備を取り消しました。"

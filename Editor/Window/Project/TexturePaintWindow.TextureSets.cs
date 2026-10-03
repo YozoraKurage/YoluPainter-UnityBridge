@@ -156,7 +156,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>スロットのマテリアルの名前（モデルが無い・割り当てが無ければ null）。</summary>
         string SlotMaterialName(int slot)
         {
-            var material = preview != null && preview.HasModel ? preview.SourceMaterial(slot) : null;
+            var material = preview != null && preview.HasSnapshot ? preview.SourceMaterial(slot) : null;
             return material != null && !string.IsNullOrWhiteSpace(material.name) ? material.name.Trim() : null;
         }
         /// <summary>セットの既定の名前: マテリアルの名前、無ければ「テクスチャセット n」（n はスロット + 1）。</summary>
@@ -316,7 +316,11 @@ namespace Yozolab.YoluPainter.Editor
             textures[materialSlot] = DisplayTexture;
             if (preview.HasModel)
                 foreach (var set in textureSets)
-                    if (set != currentSet && set.MaterialSlot < preview.MaterialSlotCount && !textures.ContainsKey(set.MaterialSlot)) textures[set.MaterialSlot] = SetDisplay(set);
+                    if (set != currentSet && set.MaterialSlot < preview.MaterialSlotCount && !textures.ContainsKey(set.MaterialSlot)) {
+                        string key = SetDisplayKey(set.Document);
+                        if (set.Display != null && set.DisplayKey == key || AdmitPreviewDisplayWork()) textures[set.MaterialSlot] = SetDisplay(set);
+                        else if (set.Display != null) textures[set.MaterialSlot] = set.Display;
+                    }
             preview.SetPaintTextures(textures);
         }
 
@@ -324,19 +328,22 @@ namespace Yozolab.YoluPainter.Editor
         internal Texture2D SetDisplay(TextureSet set)
         {
             var d = set.Document; bool output = channel == PaintChannel.Normal && showNormalOutput;
-            string key = d.Revision + "|" + channel + "|" + output + "|" + d.Width + "x" + d.Height;
+            string key = SetDisplayKey(d);
             if (set.Display != null && set.DisplayKey == key) return set.Display;
             set.Display = Upload(set.Display, output ? NormalMaps.Output(d) : d.Composite(channel), d.Width, d.Height, "YoluPainter texture set " + set.Name);
             set.DisplayKey = key;
             return set.Display;
         }
 
+        string SetDisplayKey(PaintDocument d) => d.Revision + "|" + channel + "|" + (channel == PaintChannel.Normal && showNormalOutput) + "|" + d.Width + "x" + d.Height;
+        static string SetLightingKey(PaintDocument d) => d.Revision + "|" + d.Width + "x" + d.Height;
+
         /// <summary>ほかのセットの照明のノーマルマップ（Normal を使っていなければ null）。</summary>
         Texture2D SetLighting(TextureSet set)
         {
             var d = set.Document;
             if (!YlpContent.UsedChannels(d).Contains(PaintChannel.Normal)) { if (set.Lighting != null) { DestroyImmediate(set.Lighting); set.Lighting = null; set.LightingKey = null; } return null; }
-            string key = d.Revision + "|" + d.Width + "x" + d.Height;
+            string key = SetLightingKey(d);
             if (set.Lighting != null && set.LightingKey == key) return set.Lighting;
             set.Lighting = Upload(set.Lighting, NormalMaps.Output(d), d.Width, d.Height, "YoluPainter texture set normals " + set.Name);
             set.LightingKey = key;
