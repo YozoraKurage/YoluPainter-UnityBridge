@@ -40,23 +40,80 @@ namespace Yozolab.YoluPainter.Core.Persistence
         }
     }
 
-    /// <summary>project.json の 1 つのテクスチャセット: ID（エントリの置き場 sets/&lt;ID&gt;/ の名前）、名前、描くマテリアルのスロット。</summary>
+    /// <summary>
+    /// テクスチャセットが描くマテリアル（project.json の "material"。形式 7 から）。テクスチャセットはモデルの中のマテリアル 1 つで、そのマテリアルを
+    /// 使うスロット（レンダラー × サブメッシュ）を全部受け持つ（Substance Painter と同じ）。3 つの形のどれか 1 つ:
+    /// <list type="bullet">
+    /// <item>マテリアル: 名前と、分かれば Unity のアセットの GUID と localFileId（埋め込みのマテリアルは FBX の GUID と、その中の番号）。
+    /// モデルのマテリアルへの照合は識別子 → 名前の順（窓がする）。</item>
+    /// <item>Unassigned: マテリアルの無いスロットの全部（Substance の DefaultMaterial に当たる。モデルに 1 つまで）。</item>
+    /// <item>スロットの番号: まだマテリアルに結び付けていない（形式 6 までのファイルを開いたがモデルが無かった・モデル無しで作った）。
+    /// モデルを読んだとき、平らにしたスロットの並びのその番号のスロットのマテリアルに読み替える。</item>
+    /// </list>
+    /// </summary>
+    public sealed class YlpMaterialRef : IEquatable<YlpMaterialRef>
+    {
+        /// <summary>マテリアルの名前（マテリアルの形のときだけ。空でもよい）。</summary>
+        public string Name { get; }
+        /// <summary>Unity のアセットの GUID（小文字の 16 進 32 文字）。アセットでないマテリアル（シーンの中で作ったもの）は null。</summary>
+        public string AssetGuid { get; }
+        /// <summary>アセットの中の localFileId（<see cref="AssetGuid"/> があるときだけ意味を持つ）。</summary>
+        public long LocalFileId { get; }
+        /// <summary>マテリアルの無いスロットの組か。</summary>
+        public bool Unassigned { get; }
+        /// <summary>まだマテリアルに結び付けていないスロットの番号（それ以外は −1）。</summary>
+        public int Slot { get; }
+        public bool IsMaterial => !Unassigned && Slot < 0;
+        public bool IsPendingSlot => Slot >= 0;
+        /// <summary>識別子（GUID と localFileId）。無ければ null。</summary>
+        public string Identity => AssetGuid != null ? AssetGuid + ":" + LocalFileId.ToString(CultureInfo.InvariantCulture) : null;
+
+        YlpMaterialRef(string name, string guid, long fileId, bool unassigned, int slot) { Name = name; AssetGuid = guid; LocalFileId = fileId; Unassigned = unassigned; Slot = slot; }
+
+        /// <summary>マテリアル（名前は 0〜256 文字で制御文字を含まない。GUID は小文字の 16 進 32 文字か null）。</summary>
+        public static YlpMaterialRef Material(string name, string assetGuid = null, long localFileId = 0)
+        {
+            if (name == null) throw new ArgumentNullException(nameof(name));
+            if (name.Length > YlpFormat.MaxText) throw new ArgumentException("A material name is at most " + YlpFormat.MaxText + " characters.", nameof(name));
+            if (name.Any(c => c < 0x20 || c == 0x7f)) throw new ArgumentException("A material name cannot hold control characters.", nameof(name));
+            if (assetGuid != null && !IsGuid(assetGuid)) throw new ArgumentException("An asset GUID is 32 lower-case hexadecimal digits.", nameof(assetGuid));
+            return new YlpMaterialRef(name, assetGuid, assetGuid != null ? localFileId : 0, false, -1);
+        }
+        public static readonly YlpMaterialRef UnassignedSlots = new YlpMaterialRef(null, null, 0, true, -1);
+        public static YlpMaterialRef PendingSlot(int slot)
+        {
+            if (slot < 0 || slot > YlpFormat.MaxMaterialSlot) throw new ArgumentOutOfRangeException(nameof(slot), "The material slot must be 0–" + YlpFormat.MaxMaterialSlot + ".");
+            return new YlpMaterialRef(null, null, 0, false, slot);
+        }
+        static bool IsGuid(string s) => s.Length == 32 && s.All(c => c >= '0' && c <= '9' || c >= 'a' && c <= 'f');
+
+        /// <summary>同じものを指す鍵か（識別子のあるマテリアルは識別子で、無ければ名前で。Unassigned 同士、同じスロットの番号同士）。
+        /// project.json で 2 つのセットが同じ鍵を持つことは許さない（名前だけのマテリアルは除く: 同じ名前の別のマテリアルがありうる）。</summary>
+        public string ExclusiveKey => Unassigned ? "unassigned" : IsPendingSlot ? "slot:" + Slot.ToString(CultureInfo.InvariantCulture) : Identity != null ? "asset:" + Identity : null;
+
+        public bool Equals(YlpMaterialRef other) => other != null && Name == other.Name && AssetGuid == other.AssetGuid && LocalFileId == other.LocalFileId && Unassigned == other.Unassigned && Slot == other.Slot;
+        public override bool Equals(object obj) => Equals(obj as YlpMaterialRef);
+        public override int GetHashCode() { unchecked { return ((Name?.GetHashCode() ?? 0) * 397 ^ (AssetGuid?.GetHashCode() ?? 0)) * 397 ^ LocalFileId.GetHashCode() ^ Slot * 31 ^ (Unassigned ? 7 : 0); } }
+        public override string ToString() => Unassigned ? "(unassigned)" : IsPendingSlot ? "slot " + Slot : Name + (Identity != null ? " [" + Identity + "]" : "");
+    }
+
+    /// <summary>project.json の 1 つのテクスチャセット: ID（エントリの置き場 sets/&lt;ID&gt;/ の名前）、名前、描くマテリアル。</summary>
     public sealed class YlpTextureSetInfo
     {
         public Guid Id { get; }
         public string Name { get; }
-        /// <summary>モデルのプレビューで平らにしたマテリアルのスロットの番号（モデルが無ければ意味を持たない番号）。</summary>
-        public int MaterialSlot { get; }
-        public YlpTextureSetInfo(Guid id, string name, int materialSlot)
+        /// <summary>描くマテリアル（形式 7 から。形式 6 までのファイルは移行でスロットの番号になる）。</summary>
+        public YlpMaterialRef Material { get; }
+        public YlpTextureSetInfo(Guid id, string name, YlpMaterialRef material)
         {
             if (id == Guid.Empty) throw new ArgumentException("A texture set needs an ID.", nameof(id));
             YlpFormat.CheckSetName(name);
-            if (materialSlot < 0 || materialSlot > YlpFormat.MaxMaterialSlot) throw new ArgumentOutOfRangeException(nameof(materialSlot), "The material slot must be 0–" + YlpFormat.MaxMaterialSlot + ".");
-            Id = id; Name = name; MaterialSlot = materialSlot;
+            Id = id; Name = name; Material = material ?? throw new ArgumentNullException(nameof(material));
         }
     }
 
-    /// <summary>project.json の中身: テクスチャセットの並び（1 つ以上。ID・名前・スロットはどれも重ならない）と、今のセット。</summary>
+    /// <summary>project.json の中身: テクスチャセットの並び（1 つ以上。ID・名前は重ならない。マテリアルは識別子・Unassigned・スロットの番号が
+    /// 重ならない）と、今のセット。</summary>
     public sealed class YlpProjectInfo
     {
         public IReadOnlyList<YlpTextureSetInfo> Sets { get; }
@@ -68,7 +125,8 @@ namespace Yozolab.YoluPainter.Core.Persistence
             if (list.Count > YlpFormat.MaxTextureSets) throw new ArgumentException("A project has at most " + YlpFormat.MaxTextureSets + " texture sets.", nameof(sets));
             if (list.Any(s => s == null)) throw new ArgumentException("Null texture set.", nameof(sets));
             if (list.Select(s => s.Id).Distinct().Count() != list.Count) throw new ArgumentException("Two texture sets have the same ID.", nameof(sets));
-            if (list.Select(s => s.MaterialSlot).Distinct().Count() != list.Count) throw new ArgumentException("Two texture sets paint the same material slot.", nameof(sets));
+            var keys = list.Select(s => s.Material.ExclusiveKey).Where(k => k != null).ToList();
+            if (keys.Distinct(StringComparer.Ordinal).Count() != keys.Count) throw new ArgumentException("Two texture sets paint the same material.", nameof(sets));
             if (list.Select(s => s.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != list.Count) throw new ArgumentException("Two texture sets have the same name.", nameof(sets));
             if (!list.Any(s => s.Id == currentSet)) throw new ArgumentException("The current texture set is not in the project.", nameof(currentSet));
             Sets = list.AsReadOnly(); CurrentSet = currentSet;
@@ -116,6 +174,10 @@ namespace Yozolab.YoluPainter.Core.Persistence
     /// resources/&lt;中身の SHA-256&gt;.png（<see cref="ResourceIndex"/>）。どちらも正本。manifest は YOLUPAINTER-YLP-3。</item>
     /// <item>形式 5: リソースの種類にスマートマテリアルとスマートマスク（resources.json の kind が smartMaterial / smartMask、ファイルはそのまま
     /// resources/&lt;ファイルの SHA-256&gt;.ylsmart。<see cref="SmartMaterialFile"/>）。どちらも正本。名前の決まりは同じなので manifest は YLP-3 のまま。</item>
+    /// <item>形式 6: リソースの種類にブラシ・マテリアル、Unity のアセットの localFileId、自分の置き場の下位の階層（並びは同じ）。</item>
+    /// <item>形式 7: テクスチャセットはマテリアルごと。project.json の各セットの materialSlot（平らにしたスロットの番号）をやめ、material
+    /// （<see cref="YlpMaterialRef"/>: 名前と GUID・localFileId、Unassigned、まだ結び付けていないスロットの番号）にした。移行ではスロットの番号を
+    /// そのまま持ち、窓がモデルを読んだときにそのスロットのマテリアルへ読み替える。</item>
     /// </list>
     /// 開くときは <see cref="Open"/> が形式を読み、古い形式なら <see cref="Steps"/> を順に通して今の形式の並びにする（メモリの上だけで、
     /// ファイルは書き換えない）。今より新しい形式は、どのエントリにも触れずに断る。保存は <see cref="Stamp"/> でいつも今の形式で書く。
@@ -124,7 +186,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
     public static class YlpFormat
     {
         /// <summary>今の形式。</summary>
-        public const int Current = 6;
+        public const int Current = 7;
         /// <summary>形式と書いたアプリの記録（形式 2 から）。</summary>
         public const string InfoName = "ylp.json";
         /// <summary>テクスチャセットの並び（形式 3 から）。</summary>
@@ -146,6 +208,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             (files, notes) => { }, // 3 → 4: 並びは同じ（形式 3 のファイルにはリソースが無い。resources.json の無いファイルはリソース無し）
             (files, notes) => { }, // 4 → 5: 並びは同じ（形式 4 のリソースは画像だけ。スマートマテリアルの種類が増えただけ）
             (files, notes) => { }, // 5 → 6: ブラシ・マテリアルと localFileID、下位階層の置き場（画像とスマートの旧リソースはそのまま）
+            ToMaterials,           // 6 → 7: project.json の materialSlot をスロットの番号のマテリアル（まだ結び付けていない）に
         };
 
         /// <summary>エントリの種類。</summary>
@@ -225,7 +288,16 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 files.Add(folder + name, files[name]);
                 files.Remove(name);
             }
-            files[ProjectName] = WriteProject(new YlpProjectInfo(new[] { new YlpTextureSetInfo(id, MigratedSetName, slot) }, id));
+            files[ProjectName] = WriteProject(new YlpProjectInfo(new[] { new YlpTextureSetInfo(id, MigratedSetName, YlpMaterialRef.PendingSlot(slot)) }, id));
+        }
+
+        /// <summary>6 → 7: project.json の各セットの materialSlot を、まだマテリアルに結び付けていないスロットの番号（"material": { "slot": n }）に
+        /// する。どのマテリアルかはモデルが要るので、窓が読んだモデルで決める（同じマテリアルに 2 つが落ちれば片方を「モデルに無い」として残す）。
+        /// ほかのエントリは変えない。</summary>
+        static void ToMaterials(Dictionary<string, byte[]> files, List<string> notes)
+        {
+            if (!files.TryGetValue(ProjectName, out var bytes)) return; // 無ければ Open が断る
+            files[ProjectName] = WriteProject(ReadProject(bytes, legacySlots: true));
         }
 
         /// <summary>形式 2 までの view.json の materialSlot（無ければ 0。読めなければ InvalidDataException）。移行とインポーターが使う。</summary>
@@ -355,15 +427,58 @@ namespace Yozolab.YoluPainter.Core.Persistence
             {
                 var set = project.Sets[i];
                 s.Append(i == 0 ? "\n" : ",\n").Append("    { \"id\": ").Append(Quote(set.Id.ToString("D"))).Append(", \"name\": ").Append(Quote(set.Name))
-                 .Append(", \"materialSlot\": ").Append(set.MaterialSlot.ToString(CultureInfo.InvariantCulture)).Append(" }");
+                 .Append(", \"material\": ").Append(WriteMaterial(set.Material)).Append(" }");
             }
             s.Append("\n  ],\n  \"current\": ").Append(Quote(project.CurrentSet.ToString("D"))).Append("\n}\n");
             return Encoding.UTF8.GetBytes(s.ToString());
         }
 
+        static string WriteMaterial(YlpMaterialRef m)
+        {
+            if (m.Unassigned) return "{ \"unassigned\": true }";
+            if (m.IsPendingSlot) return "{ \"slot\": " + m.Slot.ToString(CultureInfo.InvariantCulture) + " }";
+            var s = new StringBuilder("{ \"name\": ").Append(Quote(m.Name));
+            if (m.AssetGuid != null) s.Append(", \"guid\": ").Append(Quote(m.AssetGuid)).Append(", \"fileId\": ").Append(m.LocalFileId.ToString(CultureInfo.InvariantCulture));
+            return s.Append(" }").ToString();
+        }
+
+        /// <summary>project.json の "material" を読む。形は 1 つだけ（unassigned が true、slot、name のどれか）。知らないキーは読み飛ばす。</summary>
+        static YlpMaterialRef ReadMaterial(object value, string set)
+        {
+            if (!(value is Dictionary<string, object> o)) throw new InvalidDataException("project.json: texture set \"" + set + "\" has no \"material\" object.");
+            bool unassigned = o.TryGetValue("unassigned", out var u) && u is bool b && b;
+            if (o.TryGetValue("unassigned", out u) && !(u is bool)) throw new InvalidDataException("project.json: texture set \"" + set + "\": \"unassigned\" is not true or false.");
+            bool hasSlot = o.TryGetValue("slot", out var slotValue), hasName = o.TryGetValue("name", out var nameValue);
+            if ((unassigned ? 1 : 0) + (hasSlot ? 1 : 0) + (hasName ? 1 : 0) != 1)
+                throw new InvalidDataException("project.json: texture set \"" + set + "\": \"material\" needs exactly one of \"name\", \"slot\" and \"unassigned\": true.");
+            if (unassigned) return YlpMaterialRef.UnassignedSlots;
+            if (hasSlot)
+            {
+                if (!(slotValue is long slot) || slot < 0 || slot > MaxMaterialSlot) throw new InvalidDataException("project.json: texture set \"" + set + "\": \"slot\" is not an integer of 0–" + MaxMaterialSlot + ".");
+                return YlpMaterialRef.PendingSlot((int)slot);
+            }
+            if (!(nameValue is string name)) throw new InvalidDataException("project.json: texture set \"" + set + "\": the material \"name\" is not a string.");
+            string guid = null; long fileId = 0;
+            bool hasGuid = o.TryGetValue("guid", out var guidValue), hasFile = o.TryGetValue("fileId", out var fileValue);
+            if (hasGuid != hasFile) throw new InvalidDataException("project.json: texture set \"" + set + "\": a material's \"guid\" and \"fileId\" go together.");
+            if (hasGuid)
+            {
+                if (!(guidValue is string g)) throw new InvalidDataException("project.json: texture set \"" + set + "\": the material \"guid\" is not a string.");
+                if (!(fileValue is long f)) throw new InvalidDataException("project.json: texture set \"" + set + "\": the material \"fileId\" is not an integer.");
+                guid = g; fileId = f;
+            }
+            try { return YlpMaterialRef.Material(name, guid, fileId); }
+            catch (ArgumentException ex) { throw new InvalidDataException("project.json: texture set \"" + set + "\": " + Reason(ex), ex); }
+        }
+
         /// <summary>project.json を読む。知らないキーは読み飛ばす。ID は小文字のハイフン付きの形、セットは 1〜64、ID・名前（大文字小文字を
-        /// 区別しない）・スロットの重なり、今のセットが並びに無いものは断る（InvalidDataException）。</summary>
-        public static YlpProjectInfo ReadProject(byte[] bytes)
+        /// 区別しない）・マテリアル（識別子・Unassigned・スロットの番号）の重なり、今のセットが並びに無いものは断る（InvalidDataException）。</summary>
+        public static YlpProjectInfo ReadProject(byte[] bytes) => ReadProject(bytes, legacySlots: false);
+        /// <summary>移行せずに project.json を読む（インポーターの一覧）: 形式 6 までの "materialSlot" も、まだ結び付けていないスロットの番号として読む。</summary>
+        public static YlpProjectInfo ReadProjectOfAnyFormat(byte[] bytes) => ReadProject(bytes, legacySlots: true);
+
+        /// <summary>legacySlots: 形式 6 までの "materialSlot"（整数）も読む（"material" が無いセットだけ。移行の段が使う）。</summary>
+        static YlpProjectInfo ReadProject(byte[] bytes, bool legacySlots)
         {
             var root = ParseObject(bytes, ProjectName);
             if (!root.TryGetValue("sets", out var setsValue) || !(setsValue is List<object> items)) throw new InvalidDataException("project.json has no \"sets\" list.");
@@ -373,8 +488,15 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 if (!(item is Dictionary<string, object> o)) throw new InvalidDataException("project.json \"sets\" holds something that is not an object.");
                 var id = ReadGuid(o, "id", "a texture set");
                 if (!o.TryGetValue("name", out var nameValue) || !(nameValue is string name)) throw new InvalidDataException("project.json: a texture set has no \"name\".");
-                if (!o.TryGetValue("materialSlot", out var slotValue) || !(slotValue is long slot)) throw new InvalidDataException("project.json: texture set \"" + name + "\" has no integer \"materialSlot\".");
-                try { sets.Add(new YlpTextureSetInfo(id, name, slot < 0 || slot > MaxMaterialSlot ? -1 : (int)slot)); }
+                YlpMaterialRef material;
+                if (legacySlots && !o.ContainsKey("material"))
+                {
+                    if (!o.TryGetValue("materialSlot", out var slotValue) || !(slotValue is long slot) || slot < 0 || slot > MaxMaterialSlot)
+                        throw new InvalidDataException("project.json: texture set \"" + name + "\" has no \"materialSlot\" of 0–" + MaxMaterialSlot + ".");
+                    material = YlpMaterialRef.PendingSlot((int)slot);
+                }
+                else material = ReadMaterial(o.TryGetValue("material", out var m) ? m : null, name);
+                try { sets.Add(new YlpTextureSetInfo(id, name, material)); }
                 catch (ArgumentException ex) { throw new InvalidDataException("project.json: " + Reason(ex), ex); }
             }
             var current = ReadGuid(root, "current", "the current texture set");

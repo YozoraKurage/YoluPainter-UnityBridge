@@ -51,7 +51,7 @@ namespace Yozolab.YoluPainter.Editor
             if (onSurface)
             {
                 if (!surfaceRect.Contains(pointer) || !preview.TryPick(surfaceRect, pointer, out var hit)) return -1;
-                return PickSlotInCurrentSet(hit.MaterialSlot) ? hit.TriangleIndex : -1;
+                return PaintsSlot(hit.MaterialSlot) ? hit.TriangleIndex : -1;
             }
             if (!canvasRect.Contains(pointer)) return -1;
             overlapPointer = pointer;
@@ -103,7 +103,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (preview == null || !preview.HasModel) { message = L.Tr("Load a model (or the demo cube) to fill its polygons on the 3D view or its UVs on the 2D canvas."); return; }
             if (!preview.CanPaint) { message = "This preview snapshot is not safe to paint. See its load diagnostics."; return; }
-            if (onSurface && preview.TryPick(surfaceRect, pointer, out var hit) && !PickSlotInCurrentSet(hit.MaterialSlot)) { OtherSlotPressed(hit.MaterialSlot); return; }
+            if (onSurface && preview.TryPick(surfaceRect, pointer, out var hit) && !PaintsSlot(hit.MaterialSlot)) { OtherSlotPressed(hit.MaterialSlot); return; }
             var layer = document.GetLayer(selectedLayer);
             TriangleFill fill;
             if (EditingMask) fill = document.BeginMaskTriangleFill(selectedLayer, brush.opacity, reveal: MaskFillReveals(layer));
@@ -187,9 +187,9 @@ namespace Yozolab.YoluPainter.Editor
         void SetPolygonFillHover(int triangle, bool onSurface)
         {
             var geometry = preview != null && preview.HasModel ? preview.Geometry : null;
-            if (idHoverRgb.HasValue || !ReferenceEquals(geometry, hoverGeometry) || materialSlot != hoverSlot) { hoverKey = -1; idHoverRgb = null; }
-            if (triangle == hoverTriangle && onSurface == hoverOnSurface && surfacePick == hoverKind && ReferenceEquals(geometry, hoverGeometry) && materialSlot == hoverSlot) return;
-            hoverTriangle = triangle; hoverOnSurface = onSurface; hoverKind = surfacePick; hoverGeometry = geometry; hoverSlot = materialSlot;
+            if (idHoverRgb.HasValue || !ReferenceEquals(geometry, hoverGeometry) || CurrentMaterialGroup != hoverSlot) { hoverKey = -1; idHoverRgb = null; }
+            if (triangle == hoverTriangle && onSurface == hoverOnSurface && surfacePick == hoverKind && ReferenceEquals(geometry, hoverGeometry) && CurrentMaterialGroup == hoverSlot) return;
+            hoverTriangle = triangle; hoverOnSurface = onSurface; hoverKind = surfacePick; hoverGeometry = geometry; hoverSlot = CurrentMaterialGroup;
             if (triangle < 0 || geometry == null) { hoverKey = -1; hoverOutline = null; preview?.HideRegion(); return; }
             var index = RegionIndex(); long key = index.Key(triangle, surfacePick);
             if (key == hoverKey) return;

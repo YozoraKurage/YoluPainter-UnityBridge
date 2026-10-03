@@ -132,14 +132,15 @@ namespace Yozolab.YoluPainter.Editor
             return new RectInt(ix0, iy0, ix1 - ix0, iy1 - iy0);
         }
 
-        HashSet<TileCoord> modelTiles; (int revision, int slot, int width, int height, int tile) modelTilesKey;
-        /// <summary>今のセットのスロットの三角形の UV（0〜1 に切り詰めた外接矩形）が掛かるタイル。モデル・スロット・文書の大きさが同じあいだは
-        /// 作り直さない。</summary>
+        HashSet<TileCoord> modelTiles; (int revision, int material, int width, int height, int tile) modelTilesKey;
+        /// <summary>今のセット（マテリアルを使う全部のスロット）の三角形の UV（0〜1 に切り詰めた外接矩形）が掛かるタイル。モデル・マテリアル・
+        /// 文書の大きさが同じあいだは作り直さない。</summary>
         internal ISet<TileCoord> ModelTiles()
         {
             var geometry = preview?.Geometry;
             if (geometry == null || document == null) return null;
-            var key = (preview.SnapshotRevision, materialSlot, document.Width, document.Height, document.TileSize);
+            int material = CurrentMaterialGroup;
+            var key = (preview.SnapshotRevision, material, document.Width, document.Height, document.TileSize);
             if (modelTiles != null && modelTilesKey.Equals(key)) return modelTiles;
             int tile = document.TileSize, maxX = (document.Width + tile - 1) / tile - 1, maxY = (document.Height + tile - 1) / tile - 1;
             long all = (long)(maxX + 1) * (maxY + 1);
@@ -148,7 +149,7 @@ namespace Yozolab.YoluPainter.Editor
             int Row(float v) => Mathf.Clamp((int)(Mathf.Clamp01(v) * document.Height) / tile, 0, maxY);
             foreach (var t in geometry.Triangles)
             {
-                if (t.MaterialSlot != materialSlot) continue;
+                if (t.Material != material) continue;
                 int tx0 = Column(Mathf.Min(t.UvA.x, Mathf.Min(t.UvB.x, t.UvC.x))), tx1 = Column(Mathf.Max(t.UvA.x, Mathf.Max(t.UvB.x, t.UvC.x)));
                 int ty0 = Row(Mathf.Min(t.UvA.y, Mathf.Min(t.UvB.y, t.UvC.y))), ty1 = Row(Mathf.Max(t.UvA.y, Mathf.Max(t.UvB.y, t.UvC.y)));
                 for (int ty = ty0; ty <= ty1; ty++) for (int tx = tx0; tx <= tx1; tx++) tiles.Add(new TileCoord(tx, ty));

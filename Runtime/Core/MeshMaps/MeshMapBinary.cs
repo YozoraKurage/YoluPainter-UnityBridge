@@ -8,7 +8,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
     /// <summary>
     /// mesh map 1 枚の保存形式（.ylp の中の meshmap-&lt;種類&gt;.bin）。リトルエンディアン:
     /// "YLPMMAP\0"、形式の版、種類、エンジンの版、モデルの指紋、形の指紋（UV・三角形）、UV チャンネル、幅、高さ、スロット、余白、
-    /// アンチエイリアスの段数（版 2 から）、チャンネル数、
+    /// アンチエイリアスの段数（版 2 から）、チャンネル数、焼いたスロットの並び（版 3 から。数と昇順の番号。版 2 までは「スロット」1 つ、−1 は全部）、
     /// 種類の設定・空間・姿勢・焼く元の文字列（長さ付き UTF-8）、境界箱（double × 6）、圧縮した中身の長さと中身。
     /// 中身は由来の面（1 バイト/テクセル）と、チャンネルごとに「行の中で左との差（16 bit）」の上位バイトの面・下位バイトの面を
     /// 並べて Deflate したもの。日時は入れない（同じ結果なら同じバイト列）。読むときは長さ・範囲・版を確かめ、宣言した大きさを
@@ -16,8 +16,10 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
     /// </summary>
     public static class MeshMapBinary
     {
-        /// <summary>版 2 でアンチエイリアスの段数を足した（版 1 も読める。段数 1）。</summary>
-        public const int FormatVersion = 2;
+        /// <summary>版 2 でアンチエイリアスの段数、版 3 で焼いたスロットの並び（テクスチャセットがマテリアルごとになり、1 つのセットが複数の
+        /// スロットを受け持つ）を足した（版 1・2 も読める。段数 1、スロットは 1 つ）。</summary>
+        public const int FormatVersion = 3;
+        const int MaxTargetSlots = 65536;
         public const string EntryPrefix = "meshmap-", EntrySuffix = ".bin";
         const int MaxString = 4096;
         static readonly byte[] Magic = Encoding.ASCII.GetBytes("YLPMMAP\0");
@@ -41,6 +43,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                 {
                     w.Write(Magic); w.Write(FormatVersion); w.Write((int)p.Kind); w.Write(p.EngineVersion); WriteString(w, p.MeshHash); WriteString(w, p.TopologyHash);
                     w.Write(p.UvChannel); w.Write(p.Width); w.Write(p.Height); w.Write(p.TargetSlot); w.Write(p.Padding); w.Write(p.Antialiasing); w.Write(map.Channels);
+                    w.Write(p.TargetSlots.Count); foreach (int s in p.TargetSlots) w.Write(s);
                     WriteString(w, p.SettingsKey); WriteString(w, p.Space); WriteString(w, p.Pose); WriteString(w, p.Source);
                     for (int a = 0; a < 3; a++) w.Write(p.BoundsMin(a));
                     for (int a = 0; a < 3; a++) w.Write(p.BoundsMax(a));
@@ -108,6 +111,19 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                     int engine = r.ReadInt32(); string hash = ReadString(r), topology = ReadString(r);
                     int uv = r.ReadInt32(), width = r.ReadInt32(), height = r.ReadInt32(), slot = r.ReadInt32(), padding = r.ReadInt32();
                     int antialiasing = version >= 2 ? r.ReadInt32() : 1, channels = r.ReadInt32();
+                    int[] targets = null;
+                    if (version >= 3)
+                    {
+                        int count = r.ReadInt32();
+                        if (count < 0 || count > MaxTargetSlots || count * 4L > stream.Length - stream.Position) throw new InvalidDataException("Mesh map slot list is out of range.");
+                        targets = new int[count];
+                        for (int i = 0; i < count; i++)
+                        {
+                            targets[i] = r.ReadInt32();
+                            if (targets[i] < 0 || i > 0 && targets[i] <= targets[i - 1]) throw new InvalidDataException("Mesh map slots must be ascending, distinct and not negative.");
+                        }
+                        if (count > 0 ? targets[0] != slot : slot != -1) throw new InvalidDataException("Mesh map slot list does not start with its slot.");
+                    }
                     if (antialiasing < 1 || antialiasing > MeshBakeSettings.MaxAntialiasing) throw new InvalidDataException("Mesh map antialiasing is out of range.");
                     if (width < 1 || height < 1 || width > MeshBakeSettings.MaxSize || height > MeshBakeSettings.MaxSize) throw new InvalidDataException("Mesh map size " + width + "×" + height + " is out of range.");
                     if (channels != BakedMeshMap.ChannelCount(kind)) throw new InvalidDataException("Mesh map channel count does not match its kind.");
@@ -140,7 +156,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                             }
                         }
                     }
-                    var provenance = new MeshMapProvenance(kind, engine, hash, topology, uv, width, height, slot, padding, antialiasing, settings, space, pose, source, min, max);
+                    var provenance = new MeshMapProvenance(kind, engine, hash, topology, uv, width, height, slot, padding, antialiasing, settings, space, pose, source, min, max, targets);
                     return new BakedMeshMap(provenance, data, coverage);
                 }
             }

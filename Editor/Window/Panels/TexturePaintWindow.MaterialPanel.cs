@@ -35,7 +35,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>シェーダーのプロパティ（シェーダーと lilToon の検査が同じあいだは作り直さない）。</summary>
         internal List<MaterialPropertyInfo> MaterialProperties(Material source)
         {
-            var binding = preview.MaterialBinding(materialSlot);
+            var binding = preview.MaterialBinding(CurrentFirstSlot);
             if (materialInfos == null || materialInfoShader != source.shader || !ReferenceEquals(materialInfoLil, binding?.LilToon))
             { materialInfos = MaterialPropertyInfo.Describe(source.shader, binding?.LilToon); materialInfoShader = source.shader; materialInfoLil = binding?.LilToon; }
             return materialInfos;
@@ -55,7 +55,7 @@ namespace Yozolab.YoluPainter.Editor
                 MaterialSpot("material.header", header);
                 var rows = new UiRows(new Rect(0, 0, r.width - 16, materialHeaderHeight), 8);
                 materialHeaderScroll = GUI.BeginScrollView(header, materialHeaderScroll, new Rect(0, 0, r.width - 16, materialHeaderHeight), false, false, GUIStyle.none, GUI.skin.verticalScrollbar);
-                var binding = source != null ? preview.MaterialBinding(materialSlot) : null;
+                var binding = source != null ? preview.MaterialBinding(CurrentFirstSlot) : null;
                 try
                 {
                     // 1 行目: 見せるマテリアル（元のマテリアル・プロジェクトのマテリアル・シェーダーから選ぶ。Model/TexturePaintWindow.PreviewMaterial.cs）。
@@ -110,9 +110,9 @@ namespace Yozolab.YoluPainter.Editor
         internal List<string> MaterialNotes(Material source, PreviewMaterialBinding binding)
         {
             var notes = new List<string>();
-            string reason = preview.MaterialReason(materialSlot);
+            string reason = preview.MaterialReason(CurrentFirstSlot);
             if (reason != null && reason != binding.Unusable) notes.Add(reason);
-            notes.AddRange(binding.Notes(preview.DisplayMaterial(materialSlot), YlpContent.UsedChannels(document)));
+            notes.AddRange(binding.Notes(preview.DisplayMaterial(CurrentFirstSlot), YlpContent.UsedChannels(document)));
             if (materialEdits.For(source).Any() && previewShading == PreviewShading.Neutral) notes.Add(L.Tr("The changes show in the 3D view with material shading."));
             return notes;
         }

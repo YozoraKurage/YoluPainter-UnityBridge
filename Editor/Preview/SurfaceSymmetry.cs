@@ -108,7 +108,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 dab.Outcome = MirrorOutcome.NoSurface; return dab;
             }
             dab.MirrorHit = mirrorHit; dab.HasMirrorHit = true;
-            if (mirrorHit.MaterialSlot != hit.MaterialSlot || mirrorHit.RendererIndex != hit.RendererIndex) { dab.Outcome = MirrorOutcome.OtherSlot; return dab; }
+            if (mirrorHit.Material != hit.Material) { dab.Outcome = MirrorOutcome.OtherSlot; return dab; } // 同じマテリアル（テクスチャセット）なら別のメッシュでも描く
 
             var mirror = geometry.BuildSurfaceDabs(mirrorHit, radiusWorld, width, height, cameraPosition, hardness, budget, cache, ignoreVisibility);
             dab.Mirror = mirror;

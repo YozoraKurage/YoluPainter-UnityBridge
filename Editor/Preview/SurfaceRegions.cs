@@ -15,12 +15,12 @@ namespace Yozolab.YoluPainter.Editor.Preview
         UvIsland,
         /// <summary>3D の位置で辺を共有してつながる三角形（UV の継ぎ目をまたぐメッシュの塊）。</summary>
         MeshPart,
-        /// <summary>同じマテリアルスロットの三角形すべて。</summary>
+        /// <summary>同じマテリアル（<see cref="SurfaceTriangle.Material"/> の組。テクスチャセット 1 つ）の三角形すべて。</summary>
         Material,
     }
 
     /// <summary>スナップショットの三角形から範囲をたどり、テクスチャの選択範囲にする（Substance の Polygon Fill に当たる）。
-    /// たどるのは同じマテリアルスロットの中だけ。</summary>
+    /// UV アイランド・メッシュの塊は同じスロット（レンダラー × サブメッシュ）の中だけをたどり、マテリアルは同じマテリアルの組の全部。</summary>
     public static class SurfaceRegions
     {
         /// <summary>三角形 start を含む範囲の三角形の番号（昇順）。</summary>
@@ -30,11 +30,11 @@ namespace Yozolab.YoluPainter.Editor.Preview
             var triangles = geometry.Triangles;
             if (start < 0 || start >= triangles.Count) throw new ArgumentOutOfRangeException(nameof(start));
             if (!Enum.IsDefined(typeof(SurfaceRegionKind), kind)) throw new ArgumentOutOfRangeException(nameof(kind));
-            int slot = triangles[start].MaterialSlot;
+            int slot = triangles[start].MaterialSlot, material = triangles[start].Material;
             switch (kind)
             {
                 case SurfaceRegionKind.Triangle: return new List<int> { start };
-                case SurfaceRegionKind.Material: return Enumerable.Range(0, triangles.Count).Where(i => triangles[i].MaterialSlot == slot).ToList();
+                case SurfaceRegionKind.Material: return Enumerable.Range(0, triangles.Count).Where(i => triangles[i].Material == material).ToList();
             }
             // 辺 → 三角形。UV アイランドは UV の端点、メッシュの塊は 3D の端点（量子化して溶接）で辺を比べる
             var edges = new Dictionary<(long, long, long, long, long, long), List<int>>();

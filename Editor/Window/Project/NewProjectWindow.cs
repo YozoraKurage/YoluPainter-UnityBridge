@@ -17,7 +17,12 @@ namespace Yozolab.YoluPainter.Editor
     {
         public Guid Id;
         public string Name;
-        public int Slot;
+        /// <summary>描くマテリアル: 設定の画面のモデルのマテリアルの組（<see cref="IsolatedModelPreview.MaterialGroups"/> の番号）。−1 はモデルに無い
+        /// （ある鍵のまま。足すセットならモデルを読んだときに決める）。</summary>
+        public int Material = -1;
+        /// <summary>設定を開いたときのセットのマテリアルの鍵（足すセットは選んだマテリアルの鍵）。モデルを替えたとき、これで新しいモデルの
+        /// マテリアルに付け直す（識別子 → 名前の順）。</summary>
+        public YlpMaterialRef Key;
         /// <summary>セットの大きさ（画素）。今と違えば、適用でセットの画素を新しい大きさに再標本化する（<see cref="NewProjectSettings.Resampling"/>）。
         /// 0 × 0 は「変えない」（足すセットなら開いているセットと同じ大きさ）。</summary>
         public int Width, Height;
@@ -36,21 +41,23 @@ namespace Yozolab.YoluPainter.Editor
         public ProjectTemplate Template = ProjectTemplate.Pbr;
         public GameObject Model;
         internal PreparedModel PreparedModel;
-        /// <summary>新規: テクスチャセットにするマテリアルのスロット（null ならモデルの全部のスロット。モデルが無ければスロット 0 の 1 つ）。
-        /// モデルに無いスロットは最後のスロットに寄せる。</summary>
-        public int[] Slots;
-        /// <summary>プロジェクト設定: テクスチャセットの並び（名前・スロット。消したセットは並びに無い）。null なら変えない。</summary>
+        /// <summary>新規: テクスチャセットにするモデルのマテリアル（<see cref="IsolatedModelPreview.MaterialGroups"/> の番号。null なら全部。
+        /// モデルが無ければ 1 つ）。モデルに無い番号は最後のマテリアルに寄せる。</summary>
+        public int[] Materials;
+        /// <summary>プロジェクト設定: テクスチャセットの並び（名前・マテリアル。消したセットは並びに無い）。null なら変えない。</summary>
         public List<TextureSetDraft> Sets;
         public int Resolution = 2048;
         public NormalYDirection NormalFormat = NormalYDirection.OpenGL;
         public bool BakeMeshMaps;
+        /// <summary>プロジェクト設定: 同じモデルでもアセットから読み直す（書き出し直した FBX を読み直す。Substance のメッシュの読み直し）。</summary>
+        public bool ReloadModel;
         /// <summary>プロジェクト設定: セットの大きさを変えるときの再標本化。null は自動（縮めるなら面積平均、広げるならバイリニア）。</summary>
         public CanvasResampling? Resampling;
 
         public NewProjectSettings Clone()
         {
             var copy = (NewProjectSettings)MemberwiseClone();
-            copy.Slots = Slots?.ToArray(); copy.Sets = Sets?.Select(s => s.Clone()).ToList();
+            copy.Materials = Materials?.ToArray(); copy.Sets = Sets?.Select(s => s.Clone()).ToList();
             return copy;
         }
 
@@ -80,10 +87,10 @@ namespace Yozolab.YoluPainter.Editor
             if (!Enum.IsDefined(typeof(ProjectTemplate), Template)) throw new ArgumentOutOfRangeException(nameof(Template));
             if (!Enum.IsDefined(typeof(NormalYDirection), NormalFormat)) throw new ArgumentOutOfRangeException(nameof(NormalFormat));
             if (Resampling.HasValue && !Enum.IsDefined(typeof(CanvasResampling), Resampling.Value)) throw new ArgumentOutOfRangeException(nameof(Resampling));
-            if (Slots != null)
+            if (Materials != null)
             {
-                if (Slots.Length == 0) throw new ArgumentException(L.Tr("Choose at least one texture set."), nameof(Slots));
-                if (Slots.Any(s => s < 0 || s > YlpFormat.MaxMaterialSlot)) throw new ArgumentOutOfRangeException(nameof(Slots));
+                if (Materials.Length == 0) throw new ArgumentException(L.Tr("Choose at least one texture set."), nameof(Materials));
+                if (Materials.Any(s => s < 0 || s > YlpFormat.MaxMaterialSlot)) throw new ArgumentOutOfRangeException(nameof(Materials));
             }
             if (Sets != null)
             {
@@ -93,15 +100,15 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     try { YlpFormat.CheckSetName(set.Name); }
                     catch (ArgumentException) { throw new ArgumentException(L.Tr("Every texture set needs a name (at most {0} characters, no control characters).", YlpFormat.MaxTextureSetNameLength), nameof(Sets)); }
-                    if (set.Slot < 0 || set.Slot > YlpFormat.MaxMaterialSlot) throw new ArgumentOutOfRangeException(nameof(Sets));
+                    if (set.Material < -1 || set.Material > YlpFormat.MaxMaterialSlot) throw new ArgumentOutOfRangeException(nameof(Sets));
                     bool keep = set.Width == 0 && set.Height == 0 || set.Width == set.CurrentWidth && set.Height == set.CurrentHeight;
                     if (!keep && !(set.Width == set.Height && Resolutions.Contains(set.Width)))
                         throw new ArgumentException(L.Tr("A texture set's size must be one of {0}.", string.Join(", ", Resolutions.Select(r => r + " × " + r))), nameof(Sets));
                 }
                 var name = Sets.GroupBy(s => s.Name.Trim(), StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
                 if (name != null) throw new ArgumentException(L.Tr("Two texture sets are named {0}.", name.Key), nameof(Sets));
-                var slot = Sets.GroupBy(s => s.Slot).FirstOrDefault(g => g.Count() > 1);
-                if (slot != null) throw new ArgumentException(L.Tr("Two texture sets paint material slot {0}.", slot.Key), nameof(Sets));
+                var material = Sets.Where(s => s.Material >= 0).GroupBy(s => s.Material).FirstOrDefault(g => g.Count() > 1);
+                if (material != null) throw new ArgumentException(L.Tr("Two texture sets paint the same material ({0} and {1}).", material.First().Name, material.Skip(1).First().Name), nameof(Sets));
                 if (Sets.Where(s => s.Id != Guid.Empty).Select(s => s.Id).Distinct().Count() != Sets.Count(s => s.Id != Guid.Empty)) throw new ArgumentException("A texture set is listed twice.", nameof(Sets));
             }
         }
@@ -109,10 +116,11 @@ namespace Yozolab.YoluPainter.Editor
 
     /// <summary>
     /// 新規プロジェクト（と、開いているプロジェクトの設定）のダイアログ。モデルは隔離したプレビュー（ウィンドウと同じ読み込み）で読み、
-    /// マテリアルのスロットの名前と読み込みの注意を出す（スロットの番号がウィンドウと必ず一致する）。元のモデルは Instantiate しない。
-    /// 新規ではスロットの一覧をチェックで選び（既定は全部）、それぞれがテクスチャセットになる。設定ではテクスチャセットの並びを編む（名前・
-    /// スロット・足す・消す。消すのは決めたときに持ち主が確かめる）。決めたら accept を呼んで閉じる。モーダルにはしない（テストと、ほかの
-    /// ウィンドウの操作を止めないため）。
+    /// マテリアル（同じ Material を使うスロットをまとめたもの。使っているメッシュの名前を添える）と読み込みの注意を出す（マテリアルの組の番号は
+    /// ウィンドウと必ず一致する）。元のモデルは Instantiate しない。新規ではマテリアルの一覧をチェックで選び（既定は全部）、それぞれがテクスチャ
+    /// セットになる。設定ではテクスチャセットの並びを編む（名前・マテリアル・足す・消す。消すのは決めたときに持ち主が確かめる）。モデルを
+    /// 替えたら、セットのマテリアルを新しいモデルのマテリアルに付け直す（識別子 → 名前。<see cref="TexturePaintWindow.MatchMaterials"/>）。
+    /// 決めたら accept を呼んで閉じる。モーダルにはしない（テストと、ほかのウィンドウの操作を止めないため）。
     /// </summary>
     internal sealed class NewProjectWindow : EditorWindow, IPainterShortcutScope
     {
@@ -121,6 +129,8 @@ namespace Yozolab.YoluPainter.Editor
         internal bool Configure;
         Action<NewProjectSettings> accept;
         IsolatedModelPreview preview; GameObject loadedFor; bool loaded;
+        /// <summary>設定を開いたときのプロジェクトのモデル（替えたか・読み直すかを知らせるため）。</summary>
+        internal GameObject OriginalModel;
         Vector2 setScroll; string error;
         const int PickerId = 0x59500003;
         internal const float Width = 640, Height = 600;
@@ -129,7 +139,7 @@ namespace Yozolab.YoluPainter.Editor
         internal static NewProjectWindow Open(NewProjectSettings initial, bool configure, Action<NewProjectSettings> onAccept)
         {
             var w = CreateInstance<NewProjectWindow>();
-            w.Settings = initial.Clone(); w.Configure = configure; w.accept = onAccept;
+            w.Settings = initial.Clone(); w.Configure = configure; w.accept = onAccept; w.OriginalModel = configure ? initial.Model : null;
             w.titleContent = L.Content(configure ? "Project Configuration" : "New Project");
             w.minSize = w.maxSize = new Vector2(Width, Height);
             w.ShowUtility();
@@ -142,16 +152,58 @@ namespace Yozolab.YoluPainter.Editor
         void TickPreparation() { if (preview != null && (preview.IsPreparing || preview.PreparationCanceled)) Repaint(); }
         void OnDisable() { EditorApplication.update -= TickPreparation; L.LanguageChanged -= Repaint; preview?.Dispose(); preview = null; }
 
-        /// <summary>モデルが変わったら読み直す（スロットの名前と注意のため）。新規では選んだスロットを全部に戻す。</summary>
+        /// <summary>モデルが変わったら読み直す（マテリアルの名前と注意のため）。新規では選んだマテリアルを全部に戻す。設定では、セットの
+        /// マテリアルを新しいモデルのマテリアルに付け直す（最初に開いたときは、ウィンドウと同じモデルなので付け直さない）。</summary>
         void EnsurePreview()
         {
             if (loaded && loadedFor == Settings.Model) return;
             if (preview == null) preview = new IsolatedModelPreview();
-            if (loaded && !Configure) Settings.Slots = null;
+            bool changed = loaded;
+            if (loaded && !Configure) Settings.Materials = null;
             loadedFor = Settings.Model; loaded = true;
             try { if (Settings.Model != null) preview.BeginLoad(Settings.Model); else preview.Load(null); }
             catch (Exception ex) { Debug.LogWarning("YoluPainter: " + ex.Message); }
+            if (changed && Configure) RematchDrafts();
         }
+
+        /// <summary>設定: セットの鍵を今のモデルのマテリアルに照合し直す（合わないセットはモデルに無い）。</summary>
+        internal void RematchDrafts()
+        {
+            if (Settings.Sets == null) return;
+            var groups = preview != null && preview.HasSnapshot ? preview.MaterialGroups : (IReadOnlyList<PreviewMaterialGroup>)new PreviewMaterialGroup[0];
+            var keys = Settings.Sets.Select(d => d.Key ?? YlpMaterialRef.Material(d.Name ?? "")).ToList();
+            var match = TexturePaintWindow.MatchMaterials(keys, groups);
+            for (int i = 0; i < Settings.Sets.Count; i++) Settings.Sets[i].Material = match[i];
+            error = null;
+        }
+
+        /// <summary>設定: 同じモデルをアセットから読み直すか（読み直して、セットのマテリアルを照合し直す）。</summary>
+        internal void ReloadModel(bool on)
+        {
+            Settings.ReloadModel = on && Settings.Model != null;
+            if (!Settings.ReloadModel) return;
+            if (preview == null) preview = new IsolatedModelPreview();
+            try { preview.BeginLoad(Settings.Model); } catch (Exception ex) { Debug.LogWarning("YoluPainter: " + ex.Message); }
+            loadedFor = Settings.Model; loaded = true;
+            RematchDrafts();
+        }
+
+        /// <summary>設定: モデルを替えた・読み直すときの知らせ（何が起きるか、モデルに無いセット、セットの無いマテリアル）。</summary>
+        void DrawModelChangeNotice(UiRows rows)
+        {
+            bool changing = OriginalModel != null && Settings.Model != null && (Settings.Model != OriginalModel || Settings.ReloadModel);
+            if (!changing || Settings.Sets == null) return;
+            var groups = preview.HasSnapshot ? preview.MaterialGroups : (IReadOnlyList<PreviewMaterialGroup>)new PreviewMaterialGroup[0];
+            int missing = Settings.Sets.Count(d => d.Id != Guid.Empty && d.Material < 0);
+            int unused = groups.Count(g => Settings.Sets.All(d => d.Material != g.Index));
+            string text = (Settings.ReloadModel && Settings.Model == OriginalModel ? L.Tr("The model is reloaded when you apply.") : L.Tr("The model is changed when you apply."))
+                + " " + L.Tr("Texture sets keep their pixels and move to the materials below (matched by asset, then by name); you confirm the changes first.")
+                + (missing > 0 ? " " + L.Tr("{0} not in this model.", missing) : "") + (unused > 0 ? " " + L.Tr("{0} material(s) without a texture set.", unused) : "");
+            PaintGui.Notice(rows, text, missing > 0 ? "warning" : "info", missing > 0 ? PaintTheme.Warning : PaintTheme.TextDim);
+        }
+
+        /// <summary>設定の画面のモデル（読み込んだもの）。試験が中を見る。</summary>
+        internal IsolatedModelPreview Preview { get { EnsurePreview(); return preview; } }
 
         bool editingText;
         bool IPainterShortcutScope.EditingText => editingText;
@@ -195,18 +247,23 @@ namespace Yozolab.YoluPainter.Editor
 
             PaintGui.Text(rows.Row(18), L.Tr("Mesh"), PaintTheme.Header);
             var modelRow = rows.Row(26);
-            var box = new Rect(modelRow.x, modelRow.y, modelRow.width - 30, modelRow.height);
+            bool canReload = Configure && Settings.Model != null && Settings.Model == OriginalModel;
+            var box = new Rect(modelRow.x, modelRow.y, modelRow.width - (canReload ? 60 : 30), modelRow.height);
             PaintGui.Rounded(box, PaintTheme.ControlBg, 3); PaintGui.Outline(box, PaintTheme.Border, 1, 3);
             PaintGui.Icon(new Rect(box.x + 2, box.y, 22, box.height), "deployed_code", PaintTheme.TextDim, 15);
             string modelName = Settings.Model != null ? Settings.Model.name : L.Tr("None (paint in 2D; choose a model later)");
             PaintGui.Text(new Rect(box.x + 26, box.y, box.width - 30, box.height), modelName, PaintTheme.Label, Settings.Model != null ? PaintTheme.Text : PaintTheme.TextDim);
             HandleDrop(box);
-            if (PaintGui.IconButton(new Rect(box.xMax + 4, modelRow.y, 26, modelRow.height), "folder_open", L.Tr("Choose a model…"), false, true, 17))
+            if (canReload && PaintGui.IconButton(new Rect(box.xMax + 4, modelRow.y, 26, modelRow.height), "restart_alt",
+                    L.Tr("Reload the model from its asset when you apply (after exporting the FBX again). The texture sets stay on their materials."), Settings.ReloadModel, true, 17))
+                ReloadModel(!Settings.ReloadModel);
+            if (PaintGui.IconButton(new Rect(modelRow.xMax - 26, modelRow.y, 26, modelRow.height), "folder_open", L.Tr("Choose a model…"), false, true, 17))
                 EditorGUIUtility.ShowObjectPicker<GameObject>(Settings.Model, false, "t:Model t:Prefab", PickerId);
             string path = Settings.Model != null ? AssetDatabase.GetAssetPath(Settings.Model) : null;
             PaintGui.Text(rows.Row(16), string.IsNullOrEmpty(path) ? (Settings.Model != null ? L.Tr("A scene object (its meshes are copied, the object is not changed)") : "") : path, PaintTheme.LabelSmall);
+            if (Configure) DrawModelChangeNotice(rows);
             rows.Space(4);
-            if (Configure) DrawSetDrafts(rows); else DrawSlotChoice(rows);
+            if (Configure) DrawSetDrafts(rows); else DrawMaterialChoice(rows);
             rows.Space(8);
 
             PaintGui.Text(rows.Row(18), L.Tr("Document"), PaintTheme.Header);
@@ -240,35 +297,43 @@ namespace Yozolab.YoluPainter.Editor
             if (PaintGui.Button(new Rect(foot.xMax - 124, foot.y + 12, 112, 28), L.Tr(Configure ? "Apply" : "Create"), true)) Accept();
         }
 
-        /// <summary>新規: テクスチャセットにするスロットのチェックの一覧（既定は全部。最後の 1 つは外せない）。モデルが無ければ 1 つ。</summary>
-        void DrawSlotChoice(UiRows rows)
+        /// <summary>新規: テクスチャセットにするマテリアルのチェックの一覧（既定は全部。最後の 1 つは外せない）。マテリアルを使うメッシュの名前を
+        /// 右に添える。モデルが無ければ 1 つ。</summary>
+        void DrawMaterialChoice(UiRows rows)
         {
             PaintGui.Text(rows.Row(18), L.Tr("Texture Sets"), PaintTheme.Header);
-            int slots = preview.HasSnapshot ? Mathf.Max(1, preview.MaterialSlotCount) : 0;
-            if (slots == 0) { PaintGui.Text(rows.Row(18, 2), L.Tr("One texture set (no model yet)."), PaintTheme.LabelDim); return; }
-            int chosen = Settings.Slots == null ? slots : Settings.Slots.Count(s => s < slots);
-            var list = rows.Row(Mathf.Min(slots, SetRowsShown) * SetRow);
-            ScrollList(list, slots, i =>
+            var groups = preview.HasSnapshot ? preview.MaterialGroups : (IReadOnlyList<PreviewMaterialGroup>)new PreviewMaterialGroup[0];
+            int count = groups.Count;
+            if (count == 0) { PaintGui.Text(rows.Row(18, 2), L.Tr("One texture set (no model yet)."), PaintTheme.LabelDim); return; }
+            int chosen = Settings.Materials == null ? count : Settings.Materials.Count(s => s < count);
+            var list = rows.Row(Mathf.Min(count, SetRowsShown) * SetRow);
+            ScrollList(list, count, i =>
             {
-                var row = new Rect(0, i * SetRow, list.width - (slots > SetRowsShown ? 8 : 0), SetRow - 2);
-                bool on = Settings.Slots == null || Settings.Slots.Contains(i);
-                bool next = PaintGui.Toggle(row, SlotLabel(i), on, on && chosen == 1 ? L.Tr("At least one texture set stays checked.") : L.Tr("Paint this material slot as a texture set"), !(on && chosen == 1));
+                var row = new Rect(0, i * SetRow, list.width - (count > SetRowsShown ? 8 : 0), SetRow - 2);
+                bool on = Settings.Materials == null || Settings.Materials.Contains(i);
+                string name = MaterialName(groups[i]);
+                float nameWidth = Mathf.Min(PaintGui.TextWidth(name, PaintTheme.Label), (row.width - 23) * .55f);
+                string tip = (on && chosen == 1 ? L.Tr("At least one texture set stays checked.") : L.Tr("Paint this material as a texture set")) + "\n" + MaterialDetail(groups[i]);
+                bool next = PaintGui.Toggle(row, PaintGui.Fit(name, nameWidth, PaintTheme.Label, false), on, tip, !(on && chosen == 1));
+                var meshes = new Rect(row.x + 23 + nameWidth + 10, row.y, Mathf.Max(0, row.xMax - (row.x + 23 + nameWidth + 10)), row.height);
+                PaintGui.Text(meshes, PaintGui.Fit(MeshList(groups[i]), meshes.width, PaintTheme.LabelSmall, false), PaintTheme.LabelSmall);
                 if (next != on)
                 {
-                    var set = new HashSet<int>(Settings.Slots ?? Enumerable.Range(0, slots));
+                    var set = new HashSet<int>(Settings.Materials ?? Enumerable.Range(0, count));
                     if (next) set.Add(i); else set.Remove(i);
-                    Settings.Slots = set.Count == slots ? null : set.OrderBy(s => s).ToArray();
+                    Settings.Materials = set.Count == count ? null : set.OrderBy(s => s).ToArray();
                 }
             });
             var summary = rows.Row(16, 2);
-            PaintGui.Text(summary, L.Tr("{0} of {1} material slots become texture sets.", chosen, slots), PaintTheme.LabelSmall);
-            PaintGui.Tooltip(summary, L.Tr("Each texture set gets the template and resolution below."));
+            PaintGui.Text(summary, L.Tr("{0} of {1} materials become texture sets.", chosen, count), PaintTheme.LabelSmall);
+            PaintGui.Tooltip(summary, L.Tr("Each texture set gets the template and resolution below. Meshes that share a material share its texture set."));
         }
 
-        /// <summary>設定: テクスチャセットの並び（名前・スロット・消す）と「足す」。</summary>
+        /// <summary>設定: テクスチャセットの並び（名前・大きさ・マテリアル・消す）と「足す」。</summary>
         void DrawSetDrafts(UiRows rows)
         {
             var sets = Settings.Sets ?? new List<TextureSetDraft>(); // 描くだけでは設定を変えない（並びが無ければ「変えない」のまま）
+            var groups = preview.HasSnapshot ? preview.MaterialGroups : (IReadOnlyList<PreviewMaterialGroup>)new PreviewMaterialGroup[0];
             PaintGui.Text(rows.Row(18), L.Tr("Texture Sets"), PaintTheme.Header);
             var list = rows.Row(Mathf.Max(1, Mathf.Min(sets.Count, SetRowsShown - 1)) * SetRow);
             TextureSetDraft remove = null;
@@ -277,36 +342,48 @@ namespace Yozolab.YoluPainter.Editor
                 var d = sets[i];
                 var row = new Rect(0, i * SetRow, list.width - (sets.Count > SetRowsShown - 1 ? 8 : 0), SetRow - 2);
                 var removeRect = new Rect(row.xMax - 22, row.y, 22, row.height);
-                var slotRect = new Rect(removeRect.x - 4 - 96, row.y, 96, row.height);
-                var sizeRect = new Rect(slotRect.x - 4 - 96, row.y, 96, row.height);
+                var materialRect = new Rect(removeRect.x - 4 - 120, row.y, 120, row.height);
+                var sizeRect = new Rect(materialRect.x - 4 - 80, row.y, 80, row.height);
                 var nameRect = new Rect(row.x, row.y, sizeRect.x - 4 - row.x, row.height);
                 string name = PaintGui.TextField(nameRect, d.Name, d.Id == Guid.Empty ? L.Tr("A new, empty texture set") : L.Tr("Texture set name"));
                 if (name != d.Name) { d.Name = name; error = null; }
-                PaintGui.FitDropdown(slotRect, null, ShortSlotLabel(d.Slot), at =>
+                bool known = d.Material >= 0 && d.Material < groups.Count;
+                string shown = known ? MaterialName(groups[d.Material]) : groups.Count == 0 ? "—" : L.Tr("not in this model");
+                PaintGui.FitDropdown(materialRect, null, shown, at =>
                 {
                     var menu = new GenericMenu();
-                    for (int s = 0; s < SlotChoices(); s++)
+                    for (int g = 0; g < groups.Count; g++)
                     {
-                        int slot = s; bool taken = sets.Any(o => o != d && o.Slot == slot);
-                        if (taken) menu.AddDisabledItem(new GUIContent(SlotLabel(slot)), slot == d.Slot);
-                        else menu.AddItem(new GUIContent(SlotLabel(slot)), slot == d.Slot, () => { d.Slot = slot; error = null; });
+                        int material = g; bool taken = sets.Any(o => o != d && o.Material == material);
+                        var content = new GUIContent(MaterialName(groups[g]) + "  —  " + MeshList(groups[g]));
+                        if (taken) menu.AddDisabledItem(content, g == d.Material);
+                        else menu.AddItem(content, g == d.Material, () => { d.Material = material; d.Key = TexturePaintWindow.MaterialKeyOf(groups[material]); error = null; });
                     }
                     menu.DropDown(at);
-                }, L.Tr("The material slot this texture set paints") + "\n" + SlotLabel(d.Slot), true, 0, true);
+                }, L.Tr("The material this texture set paints (every mesh that uses it)") + "\n" + (known ? MaterialDetail(groups[d.Material]) : shown), groups.Count > 0, 0, true);
                 DrawSizeChoice(sizeRect, d);
                 if (PaintGui.IconButton(removeRect, "delete", sets.Count > 1 ? L.Tr("Remove this texture set (asked again when you apply; its work is lost)") : L.Tr("A project keeps at least one texture set."), false, sets.Count > 1, 15)) remove = d;
             });
             if (remove != null) { sets.Remove(remove); error = null; }
             var add = rows.Row(24);
-            int free = Enumerable.Range(0, SlotChoices()).FirstOrDefault(s => sets.All(o => o.Slot != s));
-            bool canAdd = sets.Count < YlpFormat.MaxTextureSets && sets.All(o => o.Slot != free);
-            if (PaintGui.Button(new Rect(add.x, add.y, Mathf.Min(220, add.width), add.height), L.Tr("Add Texture Set"), false, canAdd, L.Tr("An empty texture set for an unused material slot (same size and channels as the open one)"), "add"))
+            int free = Enumerable.Range(0, groups.Count).Select(g => (int?)g).FirstOrDefault(g => sets.All(o => o.Material != g)) ?? -1;
+            bool canAdd = sets.Count < YlpFormat.MaxTextureSets && (free >= 0 || groups.Count == 0);
+            if (PaintGui.Button(new Rect(add.x, add.y, Mathf.Min(220, add.width), add.height), L.Tr("Add Texture Set"), false, canAdd, L.Tr("An empty texture set for a material without one (same size and channels as the open one)"), "add"))
             {
-                string baseName = preview.HasSnapshot && preview.SourceMaterial(free) != null ? preview.SourceMaterial(free).name : L.Tr("Texture Set") + " " + (free + 1);
+                string baseName = free >= 0 ? MaterialName(groups[free]) : L.Tr("Texture Set") + " " + (sets.Count + 1);
                 string unique = baseName; for (int n = 2; sets.Any(o => string.Equals(o.Name, unique, StringComparison.OrdinalIgnoreCase)); n++) unique = baseName + " " + n;
-                sets.Add(new TextureSetDraft { Id = Guid.Empty, Name = unique, Slot = free, Width = Settings.Resolution, Height = Settings.Resolution }); Settings.Sets = sets; error = null;
+                sets.Add(new TextureSetDraft { Id = Guid.Empty, Name = unique, Material = free, Key = free >= 0 ? TexturePaintWindow.MaterialKeyOf(groups[free]) : null, Width = Settings.Resolution, Height = Settings.Resolution });
+                Settings.Sets = sets; error = null;
             }
         }
+
+        /// <summary>マテリアルの組の名前（マテリアルの無い組は訳した Unassigned）。</summary>
+        static string MaterialName(PreviewMaterialGroup g) => g.Unassigned ? L.Tr(PreviewMaterialGroup.UnassignedName) : string.IsNullOrEmpty(g.Name) ? L.Tr("(unnamed material)") : g.Name;
+        /// <summary>マテリアルを使うメッシュの名前の並び。</summary>
+        static string MeshList(PreviewMaterialGroup g) => g.Meshes.Count == 0 ? "" : string.Join(", ", g.Meshes);
+        /// <summary>ツールチップの詳しい形: マテリアル、メッシュ、スロットの数。</summary>
+        static string MaterialDetail(PreviewMaterialGroup g)
+            => L.Tr("Material") + ": " + MaterialName(g) + "\n" + L.Tr("Meshes") + ": " + MeshList(g) + "\n" + L.Tr("{0} material slot(s)", g.Slots.Count);
 
         static readonly CanvasResampling?[] ResamplingChoices = { null, CanvasResampling.Bilinear, CanvasResampling.Area, CanvasResampling.Nearest };
         internal static string ResamplingName(CanvasResampling? resampling)
@@ -345,13 +422,6 @@ namespace Yozolab.YoluPainter.Editor
             }, tip, true, 0, true);
         }
 
-        /// <summary>スロットのドロップダウンに出す数（モデルのスロット。モデルに無いスロットを描くセットがあればそこまで、モデルが無ければ並びより 1 つ多く）。</summary>
-        int SlotChoices()
-        {
-            int maxDraft = Settings.Sets != null && Settings.Sets.Count > 0 ? Settings.Sets.Max(s => s.Slot) + 1 : 1;
-            return preview.HasSnapshot ? Mathf.Max(preview.MaterialSlotCount, maxDraft) : Mathf.Max(maxDraft + 1, (Settings.Sets?.Count ?? 0) + 1);
-        }
-
         /// <summary>行の一覧（多ければスクロール）。draw(i) は一覧の中の座標で描く。</summary>
         void ScrollList(Rect viewport, int count, Action<int> draw)
         {
@@ -378,7 +448,7 @@ namespace Yozolab.YoluPainter.Editor
             if (preview.Geometry != null)
             {
                 PaintGui.Text(rows.Row(16, 2), L.Tr("Triangles") + ": " + preview.Geometry.TriangleCount.ToString("N0"), PaintTheme.LabelDim);
-                PaintGui.Text(rows.Row(16, 2), L.Tr("Material slots") + ": " + preview.MaterialSlotCount, PaintTheme.LabelDim);
+                PaintGui.Text(rows.Row(16, 2), L.Tr("Materials") + ": " + preview.MaterialGroups.Count + " (" + L.Tr("{0} material slot(s)", preview.MaterialSlotCount) + ")", PaintTheme.LabelDim);
             }
             var notes = preview.Diagnostics;
             if (notes.Count > 0)
@@ -404,16 +474,6 @@ namespace Yozolab.YoluPainter.Editor
                 if (PaintGui.Button(rows.Row(24), L.Tr("Prepare again"))) { loaded = false; EnsurePreview(); }
             }
         }
-
-        /// <summary>スロットの番号とマテリアルの名前（狭い欄用。モデルに無ければそう書く）。</summary>
-        string ShortSlotLabel(int slot)
-        {
-            if (preview == null || !preview.HasSnapshot) return slot.ToString();
-            if (slot >= preview.MaterialSlotCount) return slot + " (" + L.Tr("not in this model") + ")";
-            var material = preview.SourceMaterial(slot);
-            return slot + ": " + (material != null ? material.name : preview.MaterialSlotNames[slot]);
-        }
-        string SlotLabel(int slot) => preview != null && slot < preview.MaterialSlotNames.Count ? slot + ": " + preview.MaterialSlotNames[slot] : slot.ToString() + (preview != null && preview.HasSnapshot ? " (" + L.Tr("not in this model") + ")" : "");
 
         void HandleDrop(Rect box)
         {

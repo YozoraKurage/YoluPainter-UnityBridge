@@ -150,7 +150,7 @@ namespace Yozolab.YoluPainter.Editor
             var textures = new Dictionary<int, Texture>();
             foreach (var set in textureSets)
             {
-                if (set.MaterialSlot >= preview.MaterialSlotCount || textures.ContainsKey(set.MaterialSlot)) continue;
+                if (!set.InModel) continue;
                 bool current = set == currentSet; var d = current ? document : set.Document;
                 Texture t = null;
                 switch (modelShow)
@@ -164,7 +164,7 @@ namespace Yozolab.YoluPainter.Editor
                     case ModelShowKind.Mask: if (current) t = MaskTexture3D(); break;
                     case ModelShowKind.MeshMap: t = MeshMapTexture3D(set); break;
                 }
-                textures[set.MaterialSlot] = t;
+                foreach (int slot in set.Slots) if (!textures.ContainsKey(slot)) textures[slot] = t;
             }
             preview.SetUnlitTextures(textures);
         }

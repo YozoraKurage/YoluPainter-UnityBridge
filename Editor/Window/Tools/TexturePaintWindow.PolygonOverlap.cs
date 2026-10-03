@@ -17,9 +17,9 @@ namespace Yozolab.YoluPainter.Editor
         int PolygonFillUvCandidate(Vector2 uv)
         {
             var index = RegionIndex(); if (index == null) { overlapCandidates.Clear(); return -1; }
-            if (!ReferenceEquals(overlapGeometry, index.Geometry) || overlapSlot != materialSlot || overlapKind != surfacePick)
-            { overlapGeometry = index.Geometry; overlapSlot = materialSlot; overlapKind = surfacePick; overlapSelected = -1; }
-            index.TrianglesAtUv(materialSlot, uv, overlapTriangles); overlapCandidates.Clear(); overlapRegions.Clear();
+            if (!ReferenceEquals(overlapGeometry, index.Geometry) || overlapSlot != CurrentMaterialGroup || overlapKind != surfacePick)
+            { overlapGeometry = index.Geometry; overlapSlot = CurrentMaterialGroup; overlapKind = surfacePick; overlapSelected = -1; }
+            index.TrianglesAtUv(CurrentMaterialGroup, uv, overlapTriangles); overlapCandidates.Clear(); overlapRegions.Clear();
             foreach (int triangle in overlapTriangles) if (overlapRegions.Add(index.Key(triangle, surfacePick))) overlapCandidates.Add(triangle);
             overlapChoice = 0;
             for (int i = 0; i < overlapCandidates.Count; i++) if (index.Key(overlapCandidates[i], surfacePick) == overlapSelected) { overlapChoice = i; break; }
@@ -30,7 +30,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             var index = RegionIndex();
             if (stroke != null || choice < 0 || choice >= overlapCandidates.Count || index == null ||
-                !ReferenceEquals(overlapGeometry, index.Geometry) || overlapSlot != materialSlot || overlapKind != surfacePick) return;
+                !ReferenceEquals(overlapGeometry, index.Geometry) || overlapSlot != CurrentMaterialGroup || overlapKind != surfacePick) return;
             overlapChoice = choice; overlapSelected = RegionIndex().Key(overlapCandidates[choice], surfacePick);
             hoverTriangle = -1; hoverKey = -1; UpdatePolygonFillHover(overlapPointer); Repaint();
             message = L.Tr("UV candidate {0}/{1}. Shared UV pixels still change on every overlapping face.", choice + 1, overlapCandidates.Count);
@@ -53,7 +53,7 @@ namespace Yozolab.YoluPainter.Editor
         }
         void PolygonOverlapOptions(Rect row)
         {
-            if (overlapCandidates.Count < 2 || !ReferenceEquals(overlapGeometry, preview?.Geometry) || overlapSlot != materialSlot || overlapKind != surfacePick) return;
+            if (overlapCandidates.Count < 2 || !ReferenceEquals(overlapGeometry, preview?.Geometry) || overlapSlot != CurrentMaterialGroup || overlapKind != surfacePick) return;
             PaintGui.Dropdown(Mark("polyfill-overlap", row), L.Tr("UV overlap"), (overlapChoice + 1) + "/" + overlapCandidates.Count, OpenPolygonOverlapMenu,
                 L.Tr("Tab / Shift+Tab or right-click on the 2D canvas chooses an overlapping UV region. Shared pixels still affect all faces."), stroke == null);
         }

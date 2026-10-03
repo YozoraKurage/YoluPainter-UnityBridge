@@ -30,7 +30,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>キャンバスでの左ボタンの働き。</summary>
         internal enum PaintTool { Brush, Fill, Gradient, SelectRectangle, SelectEllipse, Lasso, MagicWand, Move, Path, Eyedropper, PolygonFill, IdSelect, Blur, Smudge, Clone }
         PaintTool tool;
-        int materialSlot, resolution = 1024;
+        int resolution = 1024;
         double lastRecovery, lastExternalCheck;
         /// <summary>このドキュメントを取り込んだ PSD のパス（取り込んでからまだ .ylp に保存していなければ保存先の提案に使う）。</summary>
         string importedPsdPath;
@@ -60,6 +60,8 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
         internal bool HasExternalConflict => externalConflict;
+        /// <summary>プロジェクトのモデル（無ければ null。デモキューブも null）。</summary>
+        internal GameObject Model => model;
         internal PaintChannel Channel { get => channel; set { channel = value; repaintPixels = true; } }
         /// <summary>true のあいだ、ストロークは選択レイヤーの画素ではなくマスクに入る。</summary>
         internal bool EditMask { get => editMask; set => editMask = value; }
@@ -73,7 +75,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             MigrateSymmetryState();
             minSize = new Vector2(980,640); wantsMouseMove = true; wantsMouseEnterLeaveWindow = true; L.LanguageChanged += Repaint; PainterToolIcons.Changed += Repaint;
-            compositor = CreateCompositor(); preview = new IsolatedModelPreview(); ApplyPreviewFrameRate(); // 3D を描く回数の上限（Model/TexturePaintWindow.RedrawRate.cs）
+            compositor = CreateCompositor(); preview = new IsolatedModelPreview(); preview.Loaded += PreviewLoaded; ApplyPreviewFrameRate(); // 3D を描く回数の上限（Model/TexturePaintWindow.RedrawRate.cs）
             if (materialEdits == null) materialEdits = new PreviewMaterialEdits();
             materialEdits.Touch(); preview.MaterialEdits = materialEdits; preview.Shading = previewShading; BindPreviewScene();
             if (String.IsNullOrEmpty(recoveryRoot)) recoveryRoot=RecoveryCatalog.NewRoot();
@@ -88,7 +90,7 @@ namespace Yozolab.YoluPainter.Editor
             resolution=PainterSettings.DefaultResolution;
             if (document==null) CreateDocument(resolution);
             BindDocument(); RestorePenInput();
-            if (model!=null) TryAction(()=>preview.Load(model));
+            if (model!=null) TryAction(()=>{preview.Load(model);ResolveSetMaterials();});
             EditorApplication.update+=Tick; PainterSettings.Changed+=SettingsChanged; EditorApplication.projectChanged+=OnUnityProjectChanged; HookResources();
             AssemblyReloadEvents.beforeAssemblyReload+=BeforeReload;
             EditorApplication.playModeStateChanged+=PlayModeChanged;
@@ -129,8 +131,7 @@ namespace Yozolab.YoluPainter.Editor
         void CreateDocument(int size)
         {
             var next=new PaintDocument(size,size,128,PainterSettings.UndoBudgetBytes);
-            int slot=currentSet!=null?materialSlot:0;
-            var set=new TextureSet(next.Id,BaseSetName(slot),slot,next);
+            var set=new TextureSet(next.Id,NumberedSetName(1),YlpMaterialRef.PendingSlot(0),next);
             ReplaceProject(new[]{set},set);
             ApplyBudgets();
             selectedLayer=document.AddLayer(L.Tr("Layer")+" 1").Id; document.ClearHistory(); pristineRevision=document.Revision;

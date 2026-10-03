@@ -128,18 +128,22 @@ namespace Yozolab.YoluPainter.Editor
         void DisposeHighPoly() { highPolyPreview?.Dispose(); highPolyPreview = null; highPolyLoaded = null; highPolyInput = null; highPolyInputFor = null; highPolyNote = null; }
 
         /// <summary>マップを使う側の今の条件（モデル・今のテクスチャセットのドキュメントの大きさ・スロット・欄の設定）。</summary>
-        internal MeshMapExpectation CurrentMeshMapExpectation() => MeshMapExpectationOf(document, materialSlot);
+        internal MeshMapExpectation CurrentMeshMapExpectation() => MeshMapExpectationOf(document, currentSet);
         /// <summary>テクスチャセットのマップの今の条件。</summary>
-        MeshMapExpectation MeshMapExpectationFor(TextureSet set) => set == currentSet ? CurrentMeshMapExpectation() : MeshMapExpectationOf(set.Document, set.MaterialSlot);
-        MeshMapExpectation MeshMapExpectationOf(Core.PaintDocument d, int slot)
+        MeshMapExpectation MeshMapExpectationFor(TextureSet set) => set == currentSet ? CurrentMeshMapExpectation() : MeshMapExpectationOf(set.Document, set);
+        /// <summary>セットのマテリアルを使う全部のスロット（モデルに無ければ −1 の 1 つ: どのマップとも合わない）。</summary>
+        MeshMapExpectation MeshMapExpectationOf(Core.PaintDocument d, TextureSet set)
         {
             var input = CurrentMeshBakeInput();
+            var slots = set != null && set.InModel ? set.Slots.ToArray() : null;
             return new MeshMapExpectation
             {
                 MeshHash = input?.Hash, TopologyHash = input?.TopologyHash, ReferenceHash = CurrentHighPolyInput()?.Hash, Width = d.Width, Height = d.Height,
-                TargetSlot = slot, UvChannel = 0, Settings = meshBakeSettings.WithIdContext(input, CurrentHighPolyInput(), d.IdColors),
+                TargetSlot = slots != null ? slots[0] : -2, TargetSlots = slots, UvChannel = 0, Settings = meshBakeSettings.WithIdContext(input, CurrentHighPolyInput(), d.IdColors),
             };
         }
+        /// <summary>焼いたスロットの見せ方（"0" や "0, 2"）。</summary>
+        static string SlotList(MeshMapProvenance p) => p.TargetSlots.Count == 0 ? "—" : string.Join(", ", p.TargetSlots);
 
         /// <summary>高ポリを選ぶオブジェクトピッカーの印（ExecuteCommand で結果を見分ける）。</summary>
         const int HighPolyPickerId = 0x59500010;
@@ -187,7 +191,7 @@ namespace Yozolab.YoluPainter.Editor
                 float right = PaintGui.TextWidth(state, PaintTheme.LabelDim) + 4;
                 PaintGui.Text(new Rect(row.x + 18, row.y, row.width - 18 - right, row.height), PaintGui.Fit(MeshMapLabel(map.Kind), row.width - 22 - right, PaintTheme.Label), PaintTheme.Label);
                 PaintGui.Text(new Rect(row.xMax - right, row.y, right, row.height), state, StateStyle, color);
-                PaintGui.Tooltip(row, L.Tr("{0} × {1} · slot {2}", map.Width, map.Height, map.Provenance.TargetSlot));
+                PaintGui.Tooltip(row, L.Tr("{0} × {1} · slot {2}", map.Width, map.Height, SlotList(map.Provenance)));
                 if (check.State == MeshMapState.Stale) NoteRow(rows, L.Tr("{0} is stale and is not used: {1} Bake again to update it.", MeshMapLabel(map.Kind), string.Join(" ", check.Reasons).Replace(";", "; ")), NoteKind.Warning, 18); // 由来の条件の文字列は ; で折り返せるようにする
             }
             if (expected.MeshHash == null) NoteRow(rows, L.Tr("No model is loaded, so the maps cannot be checked against it."), NoteKind.Info);

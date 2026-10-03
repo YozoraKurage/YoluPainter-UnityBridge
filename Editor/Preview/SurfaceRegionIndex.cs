@@ -11,7 +11,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
     /// （同じスロットの中で、UV（1e-6 で丸めた端点）か 3D の位置（1e-5 で丸めた端点）の辺を共有してつながる三角形。三角形が 3 つ以上
     /// 集まる辺もつなぐ）。分け方は Core の <see cref="MeshRegions"/> で、ID マップの「メッシュの塊」「UV アイランド」の部品と同じ。
     /// Region は呼ぶたびに辺の表を作るので、三角形が変わるたびに引く強調には使えない。
-    /// 2D キャンバスのクリックのために、スロットごとの UV の格子（点を含む三角形を引く）と、範囲の UV の輪郭（範囲の中で 1 回だけ現れる
+    /// 2D キャンバスのクリックのために、マテリアルの組ごとの UV の格子（点を含む三角形を引く）と、範囲の UV の輪郭（範囲の中で 1 回だけ現れる
     /// UV の辺）も持つ。どれも読むだけで、ジオメトリを変えない。
     /// </summary>
     public sealed class SurfaceRegionIndex
@@ -65,13 +65,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
             }
         }
 
-        /// <summary>スロットごと（マテリアルの範囲）。</summary>
+        /// <summary>マテリアルの組ごと（マテリアルの範囲。同じ Material を使うスロットは 1 つ）。</summary>
         Components BySlot()
         {
             var ids = new Dictionary<int, int>(); var of = new int[triangles.Count];
             for (int i = 0; i < triangles.Count; i++)
             {
-                int slot = triangles[i].MaterialSlot;
+                int slot = triangles[i].Material;
                 if (!ids.TryGetValue(slot, out int id)) ids.Add(slot, id = ids.Count);
                 of[i] = id;
             }
@@ -126,19 +126,19 @@ namespace Yozolab.YoluPainter.Editor.Preview
 
         // ───────── 2D キャンバス: UV の点の三角形と、範囲の輪郭 ─────────
 
-        /// <summary>スロット slot の三角形のうち、UV で点 uv を含むもの（辺と頂点の上も含む）。重なった UV では番号のいちばん小さいもの。
-        /// 無ければ −1。</summary>
-        public int TriangleAtUv(int slot, Vector2 uv)
+        /// <summary>マテリアルの組 material（<see cref="SurfaceTriangle.Material"/>。テクスチャセット 1 つ）の三角形のうち、UV で点 uv を含むもの
+        /// （辺と頂点の上も含む）。重なった UV では番号のいちばん小さいもの。無ければ −1。</summary>
+        public int TriangleAtUv(int material, Vector2 uv)
         {
-            if (!grids.TryGetValue(slot, out var grid)) grids.Add(slot, grid = new UvGrid(triangles, slot));
+            if (!grids.TryGetValue(material, out var grid)) grids.Add(material, grid = new UvGrid(triangles, material));
             return grid.Find(triangles, uv);
         }
 
         /// <summary>UV の点に重なる全三角形（昇順）。呼び手のリストを再利用する。</summary>
-        public void TrianglesAtUv(int slot, Vector2 uv, List<int> result)
+        public void TrianglesAtUv(int material, Vector2 uv, List<int> result)
         {
             if (result == null) throw new ArgumentNullException(nameof(result)); result.Clear();
-            if (!grids.TryGetValue(slot, out var grid)) grids.Add(slot, grid = new UvGrid(triangles, slot));
+            if (!grids.TryGetValue(material, out var grid)) grids.Add(material, grid = new UvGrid(triangles, material));
             grid.Find(triangles, uv, result);
         }
 
@@ -169,16 +169,16 @@ namespace Yozolab.YoluPainter.Editor.Preview
             outlines[key] = result; return result;
         }
 
-        /// <summary>スロットの三角形の UV を、外接矩形を割った格子のセルに入れたもの（セル → 三角形、昇順、CSR）。</summary>
+        /// <summary>マテリアルの組の三角形の UV を、外接矩形を割った格子のセルに入れたもの（セル → 三角形、昇順、CSR）。</summary>
         sealed class UvGrid
         {
             readonly int size; readonly float x0, y0, cellW, cellH; readonly int[] start, items;
-            public UvGrid(IReadOnlyList<SurfaceTriangle> triangles, int slot)
+            public UvGrid(IReadOnlyList<SurfaceTriangle> triangles, int material)
             {
                 var own = new List<int>(); float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
                 for (int i = 0; i < triangles.Count; i++)
                 {
-                    var t = triangles[i]; if (t.MaterialSlot != slot) continue;
+                    var t = triangles[i]; if (t.Material != material) continue;
                     own.Add(i);
                     minX = Mathf.Min(minX, Mathf.Min(t.UvA.x, Mathf.Min(t.UvB.x, t.UvC.x))); maxX = Mathf.Max(maxX, Mathf.Max(t.UvA.x, Mathf.Max(t.UvB.x, t.UvC.x)));
                     minY = Mathf.Min(minY, Mathf.Min(t.UvA.y, Mathf.Min(t.UvB.y, t.UvC.y))); maxY = Mathf.Max(maxY, Mathf.Max(t.UvA.y, Mathf.Max(t.UvB.y, t.UvC.y)));

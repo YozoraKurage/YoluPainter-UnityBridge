@@ -33,7 +33,7 @@ namespace Yozolab.YoluPainter.Editor
             why = null; hit = default;
             if (preview == null || !preview.HasModel || surfaceRect.width <= 0) { why = L.Tr("Load a model (or the demo cube) and show the 3D view to place a decal."); return false; }
             if (!preview.TryPick(surfaceRect, gui, out hit)) { why = L.Tr("Drop the image on the model to place a decal there."); return false; }
-            if (hit.MaterialSlot != materialSlot)
+            if (!PaintsSlot(hit.MaterialSlot))
             {
                 var owner = SetOfSlot(hit.MaterialSlot);
                 why = owner != null ? L.Tr("That face belongs to the texture set {0}. Switch to it (double-click the face) to place a decal there.", owner.Name) : L.Tr("That face belongs to no texture set of this project.");

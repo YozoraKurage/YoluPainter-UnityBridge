@@ -48,7 +48,7 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void ANewProjectUsesTheTemplateChannelsResolutionNormalFormatAndModel()
         {
             var model = PrefabModel("Board");
-            window.CreateProject(new NewProjectSettings { Template = ProjectTemplate.LilToon, Model = model, Slots = new[] { 7 }, Resolution = 512, NormalFormat = NormalYDirection.DirectX });
+            window.CreateProject(new NewProjectSettings { Template = ProjectTemplate.LilToon, Model = model, Materials = new[] { 7 }, Resolution = 512, NormalFormat = NormalYDirection.DirectX });
             var d = window.Document;
             Assert.That((d.Width, d.Height), Is.EqualTo((512, 512)));
             Assert.That(d.Layers.Count, Is.EqualTo(1));

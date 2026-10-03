@@ -38,7 +38,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (!PrepareBrushEffectStroke(e.mousePosition, surfaceStroke)) { e.Use(); Repaint(); return; }
                 if(surfaceStroke && !preview.CanPaint){message="This preview snapshot is not safe to paint. See its load diagnostics.";return;}
                 // ほかのテクスチャセットの面では描き始めない（その面をダブルクリックするか、テクスチャセットのパネルで切り替える）
-                if(surfaceStroke && preview.TryPick(surfaceRect,e.mousePosition,out var startHit) && startHit.MaterialSlot!=materialSlot){OtherSlotPressed(startHit.MaterialSlot);e.Use();Repaint();return;}
+                if(surfaceStroke && preview.TryPick(surfaceRect,e.mousePosition,out var startHit) && !PaintsSlot(startHit.MaterialSlot)){OtherSlotPressed(startHit.MaterialSlot);e.Use();Repaint();return;}
                 TryAction(()=>
                 {
                     RememberColor();
@@ -129,7 +129,7 @@ namespace Yozolab.YoluPainter.Editor
             if(surfaceStroke)
             {
                 if(brush.pressureSize && pressure<=0)return;
-                if(!surfaceRect.Contains(pointer)||!preview.TryPick(surfaceRect,pointer,out var hit)||hit.MaterialSlot!=materialSlot)return;
+                if(!surfaceRect.Contains(pointer)||!preview.TryPick(surfaceRect,pointer,out var hit)||!PaintsSlot(hit.MaterialSlot))return;
                 float radius=Mathf.Max(.000001f,preview.Bounds.size.magnitude)*brush.radius/document.Width*(brush.pressureSize?Mathf.Max(.001f,pressure):1);
                 // ストロークの間はカメラもモデルも動かないので、テクセルの見え方を覚えて、重なる次のダブで撃ち直さない。シンメトリーなら
                 // 映した側のダブも合わせた 1 つのダブ（Model/TexturePaintWindow.Symmetry.cs）

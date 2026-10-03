@@ -19,7 +19,9 @@ namespace Yozolab.YoluPainter.Tests
             ResourceIndex.AddTo(opened.Files,resources); YlpFormat.Stamp(opened.Files,Writer,opened.Info.CreatedBy);
             var again = YlpArchive.Read(YlpArchive.Write(opened.Files));
             Assert.That(YlpFormat.ReadInfo(again[YlpFormat.InfoName]).Format, Is.EqualTo(YlpFormat.Current));
-            foreach (var pair in original.Where(p=>p.Key!=YlpFormat.InfoName)) Assert.That(again[pair.Key], Is.EqualTo(pair.Value), pair.Key);
+            // project.json は 6 → 7 でマテリアルの鍵の形になる（セットの並びと名前は同じ）
+            foreach (var pair in original.Where(p=>p.Key!=YlpFormat.InfoName&&p.Key!=YlpFormat.ProjectName)) Assert.That(again[pair.Key], Is.EqualTo(pair.Value), pair.Key);
+            Assert.That(YlpFormat.ReadProject(again[YlpFormat.ProjectName]).Sets.Select(s=>s.Name), Is.EqualTo(YlpFormat.ReadProjectOfAnyFormat(original[YlpFormat.ProjectName]).Sets.Select(s=>s.Name)));
         }
     }
 }

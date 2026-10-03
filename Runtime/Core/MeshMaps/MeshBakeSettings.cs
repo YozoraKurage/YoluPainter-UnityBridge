@@ -67,8 +67,11 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         public static readonly IReadOnlyList<MeshMapKind> DefaultKinds = new[] { MeshMapKind.WorldNormal, MeshMapKind.Position, MeshMapKind.AmbientOcclusion, MeshMapKind.Curvature, MeshMapKind.Thickness };
 
         public int Width = 1024, Height = 1024;
-        /// <summary>焼き込む三角形のマテリアルスロット（全体を平らにした番号）。-1 ならすべてのスロット。</summary>
+        /// <summary>焼き込む三角形のマテリアルスロット（全体を平らにした番号）。-1 ならすべてのスロット。<see cref="TargetSlots"/> があれば、その最初。</summary>
         public int TargetSlot;
+        /// <summary>焼き込むスロットの並び（昇順・重ならない）。テクスチャセットはマテリアルごとで、同じマテリアルを使うスロットを全部受け持つので、
+        /// それを全部焼く。null か空なら <see cref="TargetSlot"/> 1 つ（−1 なら全部）。</summary>
+        public int[] TargetSlots;
         /// <summary>島の外へ値を延ばす幅（テクセル）。隣の島の本体には書かない。</summary>
         public int Padding = 16;
         public MeshMapKind[] Maps = DefaultKinds.ToArray();
@@ -108,8 +111,12 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         {
             var copy = (MeshBakeSettings)MemberwiseClone();
             copy.Maps = Maps == null ? null : (MeshMapKind[])Maps.Clone();
+            copy.TargetSlots = TargetSlots == null ? null : (int[])TargetSlots.Clone();
             return copy;
         }
+
+        /// <summary>焼くスロットの並び（昇順）。全部のスロットなら null。</summary>
+        public int[] Targets() => TargetSlots != null && TargetSlots.Length > 0 ? (int[])TargetSlots.Clone() : TargetSlot >= 0 ? new[] { TargetSlot } : null;
 
         public bool Includes(MeshMapKind kind) => Maps != null && Array.IndexOf(Maps, kind) >= 0;
 
@@ -118,6 +125,12 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         {
             if (Width < 1 || Height < 1 || Width > MaxSize || Height > MaxSize) throw new ArgumentOutOfRangeException(nameof(Width), "Mesh map size must be 1–" + MaxSize + " texels per side.");
             if (TargetSlot < -1) throw new ArgumentOutOfRangeException(nameof(TargetSlot));
+            if (TargetSlots != null && TargetSlots.Length > 0)
+            {
+                for (int i = 0; i < TargetSlots.Length; i++)
+                    if (TargetSlots[i] < 0 || i > 0 && TargetSlots[i] <= TargetSlots[i - 1]) throw new ArgumentException("Target slots must be ascending, distinct and not negative.", nameof(TargetSlots));
+                if (TargetSlot != TargetSlots[0]) throw new ArgumentException("The target slot must be the first of the target slots.", nameof(TargetSlot));
+            }
             if (Padding < 0 || Padding > MaxPadding) throw new ArgumentOutOfRangeException(nameof(Padding), "Padding must be 0–" + MaxPadding + " texels.");
             if (Maps == null || Maps.Length == 0) throw new ArgumentException("Choose at least one mesh map to bake.", nameof(Maps));
             foreach (var kind in Maps) if (!Enum.IsDefined(typeof(MeshMapKind), kind)) throw new ArgumentOutOfRangeException(nameof(Maps), "Unknown mesh map kind " + (int)kind + ".");
@@ -281,7 +294,12 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         /// <summary>高ポリの指紋。高ポリを使わないなら null。</summary>
         public string ReferenceHash;
         public int Width, Height, TargetSlot, UvChannel;
+        /// <summary>テクスチャセットが受け持つスロットの並び（昇順）。null なら <see cref="TargetSlot"/> 1 つ（−1 は全部、それより小さい値は
+        /// 「モデルに無い」で、どのマップとも合わない）。</summary>
+        public int[] TargetSlots;
         public MeshBakeSettings Settings;
+        /// <summary>照合するスロットの並び（−1 なら全部 = 空）。</summary>
+        internal int[] Targets() => TargetSlots != null && TargetSlots.Length > 0 ? TargetSlots : TargetSlot == -1 ? new int[0] : new[] { TargetSlot };
     }
 
     public enum MeshMapState { Missing, Current, Stale, Unverified }

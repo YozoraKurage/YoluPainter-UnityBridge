@@ -13,6 +13,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public int RendererIndex;
         /// <summary>Global flattened renderer/submesh slot, not the renderer-local index.</summary>
         public int MaterialSlot;
+        /// <summary>マテリアルの組（同じ Material のスロットの組。テクスチャセット 1 つに当たる。<see cref="SurfaceTriangle.Material"/>）。</summary>
+        public int Material;
         public int TriangleIndex;
         public Vector3 Position;
         public Vector3 Normal;
@@ -90,11 +92,14 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public Vector3 A, B, C;
         public Vector2 UvA, UvB, UvC;
         public int RendererIndex, MaterialSlot;
+        /// <summary>マテリアルの組の番号: 同じ Material のオブジェクトを使うスロットは同じ組（マテリアルの無いスロットは 1 つの組）。テクスチャセット
+        /// 1 つが 1 つの組を描く。範囲（マテリアルの種類）・対称・UV の点の三角形は組で比べる。省けば（負なら）スロットの番号と同じ。</summary>
+        public int Material;
         public SurfaceTriangle(Vector3 a, Vector3 b, Vector3 c, Vector2 uvA, Vector2 uvB, Vector2 uvC,
-            int rendererIndex = 0, int materialSlot = 0)
+            int rendererIndex = 0, int materialSlot = 0, int material = -1)
         {
             A = a; B = b; C = c; UvA = uvA; UvB = uvB; UvC = uvC;
-            RendererIndex = rendererIndex; MaterialSlot = materialSlot;
+            RendererIndex = rendererIndex; MaterialSlot = materialSlot; Material = material >= 0 ? material : materialSlot;
         }
         public Vector3 Normal
         {
@@ -328,7 +333,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             var t = triangles[triangle];
             hit = new SurfaceHit
             {
-                SnapshotRevision = SnapshotRevision, TriangleIndex = triangle, RendererIndex = t.RendererIndex, MaterialSlot = t.MaterialSlot,
+                SnapshotRevision = SnapshotRevision, TriangleIndex = triangle, RendererIndex = t.RendererIndex, MaterialSlot = t.MaterialSlot, Material = t.Material,
                 Position = ray.GetPoint(nearest), Normal = t.Normal, Distance = nearest, Barycentric = barycentric,
                 UV = t.UvA * barycentric.x + t.UvB * barycentric.y + t.UvC * barycentric.z
             };
@@ -609,7 +614,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// true にする（重なり合った幾何で問い合わせが止まらないように）。返す当たりの Distance は point からの距離、Barycentric と UV は
         /// その点のもの、Normal は三角形の法線。
         /// </summary>
-        public bool TryFindClosestPoint(Vector3 point, float maxDistance, Vector3 facing, int maxNodeVisits, out SurfaceHit hit, out bool exceeded)
+        /// <param name="material">0 以上なら、そのマテリアルの組（<see cref="SurfaceTriangle.Material"/>）の三角形だけ。</param>
+        public bool TryFindClosestPoint(Vector3 point, float maxDistance, Vector3 facing, int maxNodeVisits, out SurfaceHit hit, out bool exceeded, int material = -1)
         {
             hit = default; exceeded = false;
             if (triangles.Length == 0 || !Finite(point) || !Finite(facing) || float.IsNaN(maxDistance) || maxDistance < 0) return false;
@@ -633,6 +639,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 {
                     int index = indices[i]; var t = triangles[index];
                     if (useFacing && Vector3.Dot(t.Normal, facing) <= 0) continue;
+                    if (material >= 0 && t.Material != material) continue;
                     var closest = ClosestPoint(point, t); float squared = (closest - point).sqrMagnitude;
                     if (squared < bestSquared || (squared == bestSquared && (best < 0 || index < best))) { bestSquared = squared; best = index; bestPoint = closest; }
                 }
@@ -641,7 +648,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             var found = triangles[best]; var weights = Barycentric(bestPoint, found);
             hit = new SurfaceHit
             {
-                SnapshotRevision = SnapshotRevision, TriangleIndex = best, RendererIndex = found.RendererIndex, MaterialSlot = found.MaterialSlot,
+                SnapshotRevision = SnapshotRevision, TriangleIndex = best, RendererIndex = found.RendererIndex, MaterialSlot = found.MaterialSlot, Material = found.Material,
                 Position = bestPoint, Normal = found.Normal, Distance = Mathf.Sqrt(bestSquared), Barycentric = weights,
                 UV = found.UvA * weights.x + found.UvB * weights.y + found.UvC * weights.z
             };

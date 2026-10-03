@@ -10,8 +10,8 @@ namespace Yozolab.YoluPainter.Editor
         Vector2 pickHoverPointer = new Vector2(-100, -100);
         int? idHoverRgb;
         internal int? IdPickHoverRgb => idHoverRgb;
-        /// <summary>今のセットの面か。マテリアルごとのセットへ移行するときの問い合わせ口。</summary>
-        bool PickSlotInCurrentSet(int slot) => slot == materialSlot;
+        /// <summary>今のセットの面か（<see cref="PaintsSlot"/> と同じ。同じマテリアルのスロットは全部）。</summary>
+        bool PickSlotInCurrentSet(int slot) => PaintsSlot(slot);
         bool UsesIdHover => tool == PaintTool.IdSelect || IdColorPicking;
         bool UsesRegionHover => tool == PaintTool.PolygonFill || tool == PaintTool.Fill || tool >= PaintTool.SelectRectangle && tool <= PaintTool.MagicWand;
         void HandlePickHover(Event e)

@@ -59,6 +59,8 @@ namespace Yozolab.YoluPainter.Tests
         readonly List<TexturePaintWindow> others = new List<TexturePaintWindow>();
         readonly List<string> temporary = new List<string>();
         static string Snapshots => Path.GetFullPath(Path.Combine("Logs", "YoluPainterSnapshots", "texture-sets"));
+        /// <summary>セットのただ 1 つのスロット（この試験のモデルはマテリアルごとに 1 つのスロット。無い・2 つ以上なら −1）。</summary>
+        static int SlotOf(TexturePaintWindow.TextureSet s) => s.Slots.Count == 1 ? s.Slots[0] : -1;
 
         sealed class Dialogs : IPainterDialogs
         {
@@ -145,11 +147,13 @@ namespace Yozolab.YoluPainter.Tests
 
         // ───────── 新規プロジェクト ─────────
 
-        [Test] public void ANewProjectMakesOneTextureSetPerCheckedSlot()
+        [Test] public void ANewProjectMakesOneTextureSetPerCheckedMaterial()
         {
             var model = TextureSetModels.Prefab(folder, "Chara", "Body", "Hair", "Eyes");
             var sets = NewProject(model, ProjectTemplate.LilToon);
-            Assert.That(sets.Select(s => (s.Name, s.MaterialSlot)), Is.EqualTo(new[] { ("Body", 0), ("Hair", 1), ("Eyes", 2) }), "every slot by default, named after its material");
+            Assert.That(sets.Select(s => (s.Name, SlotOf(s))), Is.EqualTo(new[] { ("Body", 0), ("Hair", 1), ("Eyes", 2) }), "every material by default, named after it");
+            Assert.That(sets.Select(s => s.Material.Name), Is.EqualTo(new[] { "Body", "Hair", "Eyes" }));
+            Assert.That(sets.All(s => s.Material.AssetGuid != null), Is.True, "material assets are remembered by GUID and local file ID");
             foreach (var set in sets)
             {
                 Assert.That((set.Document.Width, set.Document.Height), Is.EqualTo((512, 512)));
@@ -160,14 +164,14 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.CurrentTextureSet, Is.SameAs(sets[0])); Assert.That(window.Document, Is.SameAs(sets[0].Document));
             Assert.That(window.StatusMessage, Does.Contain("3 texture sets"));
 
-            window.CreateProject(new NewProjectSettings { Model = model, Resolution = 512, Slots = new[] { 2, 0 } });
-            Assert.That(window.TextureSets.Select(s => (s.Name, s.MaterialSlot)), Is.EqualTo(new[] { ("Body", 0), ("Eyes", 2) }), "only the checked slots, in slot order");
+            window.CreateProject(new NewProjectSettings { Model = model, Resolution = 512, Materials = new[] { 2, 0 } });
+            Assert.That(window.TextureSets.Select(s => (s.Name, SlotOf(s))), Is.EqualTo(new[] { ("Body", 0), ("Eyes", 2) }), "only the checked materials, in the model's order");
 
-            window.CreateProject(new NewProjectSettings { Model = null, Resolution = 512, Slots = new[] { 1 } });
-            Assert.That(window.TextureSets.Select(s => (s.Name, s.MaterialSlot)), Is.EqualTo(new[] { ("Texture Set 1", 0) }), "without a model: one set for slot 0");
+            window.CreateProject(new NewProjectSettings { Model = null, Resolution = 512, Materials = new[] { 1 } });
+            Assert.That(window.TextureSets.Select(s => (s.Name, s.Material)), Is.EqualTo(new[] { ("Texture Set 1", YlpMaterialRef.PendingSlot(0)) }), "without a model: one set, for slot 0's material once a model is loaded");
 
             var current = window.Document;
-            Assert.That(() => window.CreateProject(new NewProjectSettings { Model = model, Resolution = 512, Slots = new int[0] }), Throws.ArgumentException);
+            Assert.That(() => window.CreateProject(new NewProjectSettings { Model = model, Resolution = 512, Materials = new int[0] }), Throws.ArgumentException);
             Assert.That(window.Document, Is.SameAs(current), "a refused project leaves the open one");
 
             var twins = TextureSetModels.Prefab(folder, "Twins", "Skin", "Skin");
@@ -262,10 +266,11 @@ namespace Yozolab.YoluPainter.Tests
             var raw = YlpStore.Load(dialogs.File).Files;
             var opened = YlpFormat.Open(raw);
             Assert.That(opened.Info.Format, Is.EqualTo(YlpFormat.Current)); Assert.That(opened.UnknownEntries, Is.Empty);
-            Assert.That(opened.Project.Sets.Select(s => (s.Id, s.Name, s.MaterialSlot)), Is.EqualTo(new[] { (a.Id, "Body", 0), (b.Id, "Hair Front", 1) }));
+            Assert.That(opened.Project.Sets.Select(s => (s.Id, s.Name, s.Material.Name)), Is.EqualTo(new[] { (a.Id, "Body", "Body"), (b.Id, "Hair Front", "Hair") }), "a renamed set keeps its material");
+            Assert.That(opened.Project.Sets.Select(s => s.Material), Is.EqualTo(new[] { a.Material, b.Material }));
             Assert.That(opened.Project.CurrentSet, Is.EqualTo(b.Id));
             Assert.That(raw.Keys.Where(k => !k.StartsWith(YlpFormat.SetsFolder, StringComparison.Ordinal)), Is.EquivalentTo(new[] { "ylp.json", "project.json", "view.json", "brush.json", "thumbnail.png" }));
-            Assert.That(Encoding(raw["view.json"]), Does.Not.Contain("materialSlot"), "the slot lives in project.json");
+            Assert.That(Encoding(raw["view.json"]), Does.Not.Contain("materialSlot"), "the material lives in project.json");
             foreach (var set in new[] { a, b })
             {
                 var files = opened.SetFiles(set.Id);
@@ -277,7 +282,7 @@ namespace Yozolab.YoluPainter.Tests
             var other = NewWindow();
             DialogsOf(other).File = dialogs.File;
             other.OpenProject();
-            Assert.That(other.TextureSets.Select(s => (s.Id, s.Name, s.MaterialSlot)), Is.EqualTo(new[] { (a.Id, "Body", 0), (b.Id, "Hair Front", 1) }), other.StatusMessage);
+            Assert.That(other.TextureSets.Select(s => (s.Id, s.Name, SlotOf(s))), Is.EqualTo(new[] { (a.Id, "Body", 0), (b.Id, "Hair Front", 1) }), other.StatusMessage);
             Assert.That(other.CurrentTextureSet.Id, Is.EqualTo(b.Id), "the current set comes back");
             Assert.That(other.IsSaved, Is.True); Assert.That(other.Preview.HasModel, Is.True, "the model comes back from view.json");
             foreach (var (mine, theirs) in new[] { a, b }.Zip(other.TextureSets, (m, t) => (m, t)))
@@ -305,7 +310,7 @@ namespace Yozolab.YoluPainter.Tests
             window.OpenProjectAt(path);
             Assert.That(window.OpenedFormat, Is.EqualTo(format), window.StatusMessage);
             var set = window.TextureSets.Single();
-            Assert.That((set.Name, set.MaterialSlot, set.Id), Is.EqualTo(("Texture Set 1", 0, set.Document.Id)), "no model: the default name, slot 0 from view.json");
+            Assert.That((set.Name, set.Material, set.Id), Is.EqualTo(("Texture Set 1", YlpMaterialRef.PendingSlot(0), set.Document.Id)), "no model: the default name, slot 0 from view.json, waiting for a model");
             Assert.That(DocumentBinary.Write(window.Document), Is.EqualTo(native));
             Assert.That(window.IsSaved, Is.True, "naming the migrated set is not an unsaved change");
             byte[] original = format == 2 ? YlpStore.Load(path).Files[YlpFormat.ImportedOriginalName] : null;
@@ -336,7 +341,7 @@ namespace Yozolab.YoluPainter.Tests
             restored.GetType().GetField("recoveryRoot", flags).SetValue(restored, window.RecoveryRoot);
             restored.GetType().GetMethod("OnEnable", flags).Invoke(restored, null);
             Assert.That(restored.StatusMessage, Does.StartWith("Recovered"));
-            Assert.That(restored.TextureSets.Select(s => (s.Id, s.Name, s.MaterialSlot)), Is.EqualTo(sets.Select(s => (s.Id, s.Name, s.MaterialSlot))));
+            Assert.That(restored.TextureSets.Select(s => (s.Id, s.Name, s.Material)), Is.EqualTo(sets.Select(s => (s.Id, s.Name, s.Material))));
             Assert.That(restored.CurrentTextureSet.Id, Is.EqualTo(sets[1].Id));
             for (int i = 0; i < 2; i++) Assert.That(DocumentBinary.Write(restored.TextureSets[i].Document), Is.EqualTo(DocumentBinary.Write(sets[i].Document)));
             Assert.That(restored.IsSaved, Is.False, "recovered work is not a saved file");
@@ -347,7 +352,7 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void ExportedImagesCarryTheTextureSetNameOnlyWhenThereAreSeveral()
         {
             var model = TextureSetModels.Prefab(folder, "Export", "Body", "Hair");
-            window.CreateProject(new NewProjectSettings { Model = model, Resolution = 512, Template = ProjectTemplate.ColorOnly, Slots = new[] { 0 } });
+            window.CreateProject(new NewProjectSettings { Model = model, Resolution = 512, Template = ProjectTemplate.ColorOnly, Materials = new[] { 0 } });
             string one = Temp(); Directory.CreateDirectory(one);
             DialogsOf(window).Folder = one; window.ExportImages();
             Assert.That(Directory.GetFiles(one).Select(Path.GetFileName), Is.EquivalentTo(new[] { "Texture_Color.png" }), window.StatusMessage);
@@ -365,7 +370,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.StatusMessage, Does.Contain("same file"));
         }
 
-        // ───────── 足す・消す・名前・スロット ─────────
+        // ───────── 足す・消す・名前・マテリアル ─────────
 
         [Test] public void RemovingATextureSetAsksFirstAndDecliningChangesNothing()
         {
@@ -380,7 +385,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.TextureSets, Is.EqualTo(sets)); Assert.That(window.CurrentTextureSet, Is.SameAs(sets[1])); Assert.That(window.IsSaved, Is.True, "declining changes nothing");
 
             // プロジェクト設定で消して名前も変える: 断れば、モデルを含めて何も変えない
-            var configure = new NewProjectSettings { Model = null, Resolution = 512, Sets = new List<TextureSetDraft> { new TextureSetDraft { Id = sets[0].Id, Name = "Skin", Slot = 0 }, new TextureSetDraft { Id = sets[2].Id, Name = "Eyes", Slot = 2 } } };
+            var configure = new NewProjectSettings { Model = null, Resolution = 512, Sets = new List<TextureSetDraft> { new TextureSetDraft { Id = sets[0].Id, Name = "Skin", Material = 0 }, new TextureSetDraft { Id = sets[2].Id, Name = "Eyes", Material = 2 } } };
             window.ApplyProjectConfiguration(configure);
             Assert.That(window.TextureSets, Is.EqualTo(sets)); Assert.That(sets[0].Name, Is.EqualTo("Body")); Assert.That(window.Preview.HasModel, Is.True); Assert.That(window.IsSaved, Is.True);
             Assert.That(window.StatusMessage, Does.Contain("nothing changed"));
@@ -388,7 +393,7 @@ namespace Yozolab.YoluPainter.Tests
             dialogs.ConfirmAnswer = true;
             configure.Model = model;
             window.ApplyProjectConfiguration(configure);
-            Assert.That(window.TextureSets.Select(s => (s.Name, s.MaterialSlot)), Is.EqualTo(new[] { ("Skin", 0), ("Eyes", 2) }));
+            Assert.That(window.TextureSets.Select(s => (s.Name, SlotOf(s))), Is.EqualTo(new[] { ("Skin", 0), ("Eyes", 2) }));
             Assert.That(window.CurrentTextureSet, Is.SameAs(sets[2]), "the removed current set hands over to the next one");
             Assert.That(window.IsSaved, Is.False, "removing and renaming are unsaved changes");
 
@@ -400,11 +405,11 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void AddingRenamingAndMovingTextureSets()
         {
             var model = TextureSetModels.Prefab(folder, "Grow", "Body", "Hair", "Eyes");
-            window.CreateProject(new NewProjectSettings { Model = model, Resolution = 1024, Template = ProjectTemplate.LilToon, NormalFormat = NormalYDirection.DirectX, Slots = new[] { 0 } });
+            window.CreateProject(new NewProjectSettings { Model = model, Resolution = 1024, Template = ProjectTemplate.LilToon, NormalFormat = NormalYDirection.DirectX, Materials = new[] { 0 } });
             var first = window.CurrentTextureSet;
-            Assert.That(() => window.AddTextureSet(0), Throws.InvalidOperationException, "a slot has at most one set");
+            Assert.That(() => window.AddTextureSet(0), Throws.InvalidOperationException, "a material has at most one set");
             var hair = window.AddTextureSet(1);
-            Assert.That((hair.Name, hair.MaterialSlot), Is.EqualTo(("Hair", 1)));
+            Assert.That((hair.Name, SlotOf(hair), hair.Material.Name), Is.EqualTo(("Hair", 1, "Hair")));
             Assert.That(window.CurrentTextureSet, Is.SameAs(hair), "the added set becomes the current one");
             Assert.That((hair.Document.Width, hair.Document.Height), Is.EqualTo((1024, 1024)), "the same size as the open set");
             Assert.That(YlpContent.UsedChannels(hair.Document), Is.EqualTo(YlpContent.UsedChannels(first.Document)), "the same channels");
@@ -413,17 +418,18 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(() => window.RenameTextureSet(hair.Id, "body"), Throws.ArgumentException, "names stay unique, ignoring case");
             Assert.That(() => window.RenameTextureSet(hair.Id, " "), Throws.ArgumentException);
             window.RenameTextureSet(hair.Id, "Hair Back");
-            Assert.That(() => window.SetTextureSetSlot(hair.Id, 0), Throws.InvalidOperationException);
-            window.SetTextureSetSlot(hair.Id, 2);
-            Assert.That(window.TextureSets.Select(s => (s.Name, s.MaterialSlot)), Is.EqualTo(new[] { ("Body", 0), ("Hair Back", 2) }));
-            // プロジェクト設定: 足す（空のセット）・スロットを入れ替える
-            var drafts = window.TextureSets.Select(s => new TextureSetDraft { Id = s.Id, Name = s.Name, Slot = s.MaterialSlot == 0 ? 2 : 0 }).ToList();
-            drafts.Add(new TextureSetDraft { Name = "Extra", Slot = 1 });
+            Assert.That(() => window.SetTextureSetMaterial(hair.Id, 0), Throws.InvalidOperationException);
+            window.SetTextureSetMaterial(hair.Id, 2);
+            Assert.That(window.TextureSets.Select(s => (s.Name, SlotOf(s), s.Material.Name)), Is.EqualTo(new[] { ("Body", 0, "Body"), ("Hair Back", 2, "Eyes") }));
+            // プロジェクト設定: 足す（空のセット）・マテリアルを入れ替える
+            var drafts = window.TextureSets.Select(s => new TextureSetDraft { Id = s.Id, Name = s.Name, Material = SlotOf(s) == 0 ? 2 : 0 }).ToList();
+            drafts.Add(new TextureSetDraft { Name = "Extra", Material = 1 });
             window.ApplyProjectConfiguration(new NewProjectSettings { Model = model, Resolution = 1024, NormalFormat = NormalYDirection.OpenGL, Sets = drafts });
-            Assert.That(window.TextureSets.Select(s => (s.Name, s.MaterialSlot)), Is.EqualTo(new[] { ("Body", 2), ("Hair Back", 0), ("Extra", 1) }));
+            Assert.That(window.TextureSets.Select(s => (s.Name, SlotOf(s), s.Material.Name)), Is.EqualTo(new[] { ("Body", 2, "Eyes"), ("Hair Back", 0, "Body"), ("Extra", 1, "Hair") }));
             Assert.That(window.TextureSets.All(s => s.Document.NormalSettings.FileDirection == NormalYDirection.OpenGL), Is.True, "the normal map format is the project's");
-            Assert.That(() => new NewProjectSettings { Resolution = 1024, Sets = new List<TextureSetDraft> { new TextureSetDraft { Name = "A", Slot = 0 }, new TextureSetDraft { Name = "a", Slot = 1 } } }.Validate(), Throws.ArgumentException);
-            Assert.That(() => new NewProjectSettings { Resolution = 1024, Sets = new List<TextureSetDraft> { new TextureSetDraft { Name = "A", Slot = 0 }, new TextureSetDraft { Name = "B", Slot = 0 } } }.Validate(), Throws.ArgumentException);
+            Assert.That(() => new NewProjectSettings { Resolution = 1024, Sets = new List<TextureSetDraft> { new TextureSetDraft { Name = "A", Material = 0 }, new TextureSetDraft { Name = "a", Material = 1 } } }.Validate(), Throws.ArgumentException);
+            Assert.That(() => new NewProjectSettings { Resolution = 1024, Sets = new List<TextureSetDraft> { new TextureSetDraft { Name = "A", Material = 0 }, new TextureSetDraft { Name = "B", Material = 0 } } }.Validate(), Throws.ArgumentException);
+            Assert.That(() => new NewProjectSettings { Resolution = 1024, Sets = new List<TextureSetDraft> { new TextureSetDraft { Name = "A", Material = -1 }, new TextureSetDraft { Name = "B", Material = -1 } } }.Validate(), Throws.Nothing, "several sets may be outside the model");
         }
 
         // ───────── メモリの予算 ─────────
@@ -472,8 +478,8 @@ namespace Yozolab.YoluPainter.Tests
             var info = YlpImporter.LoadInfo(asset);
             Assert.That(info, Is.Not.Null); Assert.That(info.error, Is.Empty);
             Assert.That(info.format, Is.EqualTo(YlpFormat.Current));
-            Assert.That(info.textureSets.Select(s => (s.name, s.materialSlot, s.width, s.height, s.current, s.fromNativeDocument)),
-                Is.EqualTo(new[] { ("Body", 0, 512, 512, false, false), ("Hair", 1, 512, 512, true, false) }));
+            Assert.That(info.textureSets.Select(s => (s.name, s.material, s.width, s.height, s.current, s.fromNativeDocument)),
+                Is.EqualTo(new[] { ("Body", "Body", 512, 512, false, false), ("Hair", "Hair", 512, 512, true, false) }));
             Assert.That(info.textureSets[0].channels, Is.EqualTo(new[] { PaintChannel.Color }));
             Assert.That(info.textureSets[1].channels, Is.EqualTo(new[] { PaintChannel.Color, PaintChannel.Emission }), "read from the set's composite images");
             Assert.That(info.channels, Is.EqualTo(info.textureSets[1].channels), "the main object describes the current set");
@@ -515,14 +521,14 @@ namespace Yozolab.YoluPainter.Tests
                 foreach (bool configure in new[] { false, true })
                 {
                     var settings = current.Clone();
-                    if (!configure) { settings.Sets = null; settings.Slots = new[] { 0, 2 }; }
+                    if (!configure) { settings.Sets = null; settings.Materials = new[] { 0, 2 }; }
                     dialog.Settings = settings; dialog.Configure = configure;
                     string path = Path.Combine(Snapshots, (configure ? "configure-" : "new-project-") + tag + ".png");
                     OffscreenGui.RenderToPng((int)NewProjectWindow.Width, (int)NewProjectWindow.Height, () => dialog.DrawContent(new Rect(0, 0, NewProjectWindow.Width, NewProjectWindow.Height)), path, PaintTheme.PanelBg);
                     Assert.That(File.Exists(path), Is.True);
                     var taken = dialog.TakeSettings();
-                    if (configure) Assert.That(taken.Sets.Select(d => (d.Id, d.Name, d.Slot)), Is.EqualTo(window.TextureSets.Select(t => (t.Id, t.Name, t.MaterialSlot))), "drawing does not change the drafts");
-                    else Assert.That(taken.Slots, Is.EqualTo(new[] { 0, 2 }), "drawing does not change the checked slots");
+                    if (configure) Assert.That(taken.Sets.Select(d => (d.Id, d.Name, d.Material)), Is.EqualTo(window.TextureSets.Select(t => (t.Id, t.Name, t.MaterialGroup))), "drawing does not change the drafts");
+                    else Assert.That(taken.Materials, Is.EqualTo(new[] { 0, 2 }), "drawing does not change the checked materials");
                 }
             }
             finally { Object.DestroyImmediate(dialog); }
@@ -534,10 +540,10 @@ namespace Yozolab.YoluPainter.Tests
             var model = TextureSetModels.Prefab(folder, "Panel", "Body", "Hair with a rather long material name", "Eyes");
             foreach (int count in new[] { 1, 3 })
             {
-                window.CreateProject(new NewProjectSettings { Model = model, Resolution = 512, Template = ProjectTemplate.LilToon, Slots = Enumerable.Range(0, count).ToArray() });
+                window.CreateProject(new NewProjectSettings { Model = model, Resolution = 512, Template = ProjectTemplate.LilToon, Materials = Enumerable.Range(0, count).ToArray() });
                 var sets = window.TextureSets.ToList();
                 for (int i = 0; i < sets.Count; i++) Flood(sets[i].Document, PaintChannel.Color, new Rgba32((byte)(60 + 60 * i), 90, (byte)(200 - 60 * i)));
-                if (count == 3) { window.SwitchTextureSet(sets[1].Id); window.SetTextureSetSlot(sets[2].Id, 7); }
+                if (count == 3) { window.SwitchTextureSet(sets[1].Id); sets[2].Material = YlpMaterialRef.Material("Gone"); window.ResolveSetMaterials(); } // モデルに無いマテリアルのセット
                 foreach (var language in new[] { PainterLanguage.English, PainterLanguage.Japanese })
                 {
                     L.OverrideLanguage(language);
@@ -561,7 +567,7 @@ namespace Yozolab.YoluPainter.Tests
             try
             {
                 bake.Attach(window);
-                Assert.That(window.MeshBakeTargets().Select(t => (t.Name, t.Slot, t.Bake, t.Fixed)), Is.EqualTo(new[] { ("Body", 0, true, false), ("Hair", 1, true, false) }), "every set, checked");
+                Assert.That(window.MeshBakeTargets().Select(t => (t.Name, t.Slots.Single(), t.Bake, t.Fixed)), Is.EqualTo(new[] { ("Body", 0, true, false), ("Hair", 1, true, false) }), "every set, checked");
                 if (Application.isBatchMode && SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null)
                     foreach (var language in new[] { PainterLanguage.English, PainterLanguage.Japanese })
                     {
@@ -575,7 +581,7 @@ namespace Yozolab.YoluPainter.Tests
                 Assert.That(sets.Select(s => s.MeshMaps.Maps.Select(m => m.Provenance.TargetSlot).Distinct().Single()), Is.EqualTo(new[] { 0, 1 }), "each set's maps are baked for its slot");
                 Assert.That(window.MeshBakeOutcome, Does.Contain("2 texture sets"));
                 // チェックを外したセットは焼かない（最後の 1 つは外せない）
-                window.SetMeshBakeTarget(0, false); window.SetMeshBakeTarget(1, false);
+                window.SetMeshBakeTarget(sets[0].Id, false); window.SetMeshBakeTarget(sets[1].Id, false);
                 Assert.That(window.MeshBakeTargets().Select(t => (t.Bake, t.Fixed)), Is.EqualTo(new[] { (false, false), (true, true) }));
                 long bodyRevision = sets[0].MeshMaps.Revision, hairRevision = sets[1].MeshMaps.Revision;
                 Assert.That(window.StartMeshBake(), Is.Null);
@@ -583,7 +589,7 @@ namespace Yozolab.YoluPainter.Tests
                 Assert.That(sets[0].MeshMaps.Revision, Is.EqualTo(bodyRevision), "an unchecked set is not baked");
                 Assert.That(sets[1].MeshMaps.Revision, Is.Not.EqualTo(hairRevision));
                 // 焼いているあいだにセットを消すと、その結果は使わない
-                window.SetMeshBakeTarget(0, true);
+                window.SetMeshBakeTarget(sets[0].Id, true);
                 Assert.That(window.StartMeshBake(), Is.Null);
                 Assert.That(window.RemoveTextureSet(sets[0].Id), Is.True);
                 PumpUntilDone();

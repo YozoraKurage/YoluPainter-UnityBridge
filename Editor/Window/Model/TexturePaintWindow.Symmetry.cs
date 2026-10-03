@@ -139,7 +139,7 @@ namespace Yozolab.YoluPainter.Editor
         void DrawMirroredBrushCursor(Vector2 mouse)
         {
             if (Event.current.type != EventType.Repaint || !ShowsBrushCursor || !HasSurfaceSymmetry || !preview.HasModel || (stroke != null && !surfaceStroke)) return;
-            if (!surfaceRect.Contains(mouse) || !preview.TryPick(surfaceRect, mouse, out var hit) || hit.MaterialSlot != materialSlot) return;
+            if (!surfaceRect.Contains(mouse) || !preview.TryPick(surfaceRect, mouse, out var hit) || !PaintsSlot(hit.MaterialSlot)) return;
             var geometry = preview.Geometry;
             float radius = Mathf.Max(.000001f, preview.Bounds.size.magnitude) * brush.radius / document.Width;
             MirrorPlane? mirror = StrokeSymmetryFrozen ? strokeMirror : symmetry ? CurrentSymmetryPlane : (MirrorPlane?)null;
@@ -154,7 +154,7 @@ namespace Yozolab.YoluPainter.Editor
                 bool duplicate = false; foreach (var old in positions) if ((old - p).magnitude <= radius * SurfaceSymmetry.OnPlaneFraction) { duplicate = true; break; }
                 if (duplicate) continue; positions.Add(p);
                 if (!geometry.TryFindClosestPoint(p, SurfaceSymmetry.SearchDistance(radius, geometry.Bounds), n,
-                    SurfaceSymmetry.MaxClosestPointNodeVisits, out var found, out _) || found.MaterialSlot != materialSlot || found.RendererIndex != hit.RendererIndex) continue;
+                    SurfaceSymmetry.MaxClosestPointNodeVisits, out var found, out _) || found.Material != hit.Material /* 同じマテリアル（テクスチャセット）なら別のメッシュでも */) continue;
                 if (preview.TryWorldToGui(surfaceRect, found.Position, out var at)) MirrorCircle(at, preview.WorldRadiusToGuiPoints(found.Position, radius), SeenFromCamera(geometry, found));
             }
         }

@@ -24,20 +24,22 @@ namespace Yozolab.YoluPainter.Editor.Preview
     public readonly struct ShapeGradientOverlay
     {
         public readonly Matrix4x4 WorldToShape; public readonly GeneratorShape Shape; public readonly Vector3 Half;
-        public readonly float Band, InverseWidth, Low, High, Softness; public readonly bool Invert; public readonly int Slot; public readonly Color Tint;
+        public readonly float Band, InverseWidth, Low, High, Softness; public readonly bool Invert; public readonly Color Tint;
+        /// <summary>重ねるマテリアルの組（<see cref="IsolatedModelPreview.MaterialGroups"/> の番号。テクスチャセット 1 つの全部のスロット）。</summary>
+        public readonly int Material;
 
-        ShapeGradientOverlay(Matrix4x4 worldToShape, GeneratorShape shape, Vector3 half, float band, float inverseWidth, float low, float high, float softness, bool invert, int slot, Color tint)
+        ShapeGradientOverlay(Matrix4x4 worldToShape, GeneratorShape shape, Vector3 half, float band, float inverseWidth, float low, float high, float softness, bool invert, int material, Color tint)
         {
-            WorldToShape = worldToShape; Shape = shape; Half = half; Band = band; InverseWidth = inverseWidth; Low = low; High = high; Softness = softness; Invert = invert; Slot = slot; Tint = tint;
+            WorldToShape = worldToShape; Shape = shape; Half = half; Band = band; InverseWidth = inverseWidth; Low = low; High = high; Softness = softness; Invert = invert; Material = material; Tint = tint;
         }
 
-        /// <summary>The overlay of a shape gradient's settings placed with the model root's pose.</summary>
-        public static ShapeGradientOverlay Of(GeneratorSettings g, Vector3 rootPosition, Quaternion rootRotation, int slot, Color tint)
+        /// <summary>The overlay of a shape gradient's settings placed with the model root's pose, on the faces of one material group.</summary>
+        public static ShapeGradientOverlay Of(GeneratorSettings g, Vector3 rootPosition, Quaternion rootRotation, int material, Color tint)
         {
             var v = g.Volume; var half = new Vector3((float)v.SizeX / 2, (float)v.SizeY / 2, (float)v.SizeZ / 2);
             float band = v.Shape == GeneratorShape.Sphere ? (float)v.Falloff * half.x : (float)v.Falloff * Mathf.Min(half.x, Mathf.Min(half.y, half.z));
             return new ShapeGradientOverlay(ShapeGizmo.WorldToShape(v, rootPosition, rootRotation), v.Shape, half, band, (float)(1 / v.SizeY),
-                (float)g.Low, (float)g.High, (float)g.Softness, g.Invert, slot, tint);
+                (float)g.Low, (float)g.High, (float)g.Softness, g.Invert, material, tint);
         }
 
         internal void Apply(Material material)

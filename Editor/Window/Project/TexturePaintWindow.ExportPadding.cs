@@ -10,7 +10,7 @@ namespace Yozolab.YoluPainter.Editor
     /// 正本・.ylp の中の合成の PNG・表示は変えない（書き出すファイルだけ）。</summary>
     public sealed partial class TexturePaintWindow
     {
-        SurfaceGeometry paddingGeometry; int paddingSlot = -1, paddingWidth, paddingHeight; bool[] paddingCoverage;
+        SurfaceGeometry paddingGeometry; string paddingSlots; int paddingWidth, paddingHeight; bool[] paddingCoverage;
 
         /// <summary>テクスチャセットの UV が覆うテクセルの印（3D ビューの形・スロット・大きさが同じなら覚えたものを使う）。モデルが無ければ null。</summary>
         internal bool[] ExportCoverage(TextureSet set)
@@ -18,12 +18,13 @@ namespace Yozolab.YoluPainter.Editor
             var geometry = preview != null && preview.HasModel ? preview.Geometry : null;
             if (geometry == null || set == null) return null;
             var d = set.Document;
-            if (!ReferenceEquals(geometry, paddingGeometry) || paddingSlot != set.MaterialSlot || paddingWidth != d.Width || paddingHeight != d.Height)
+            string slots = string.Join(",", set.Slots);
+            if (!ReferenceEquals(geometry, paddingGeometry) || paddingSlots != slots || paddingWidth != d.Width || paddingHeight != d.Height)
             {
                 double w = d.Width, h = d.Height;
-                paddingCoverage = TexturePadding.Coverage(d.Width, d.Height, geometry.Triangles.Where(t => t.MaterialSlot == set.MaterialSlot)
+                paddingCoverage = TexturePadding.Coverage(d.Width, d.Height, geometry.Triangles.Where(t => set.PaintsSlot(t.MaterialSlot)) // マテリアルを使う全部のスロット
                     .Select(t => ((double)t.UvA.x * w, (double)t.UvA.y * h, (double)t.UvB.x * w, (double)t.UvB.y * h, (double)t.UvC.x * w, (double)t.UvC.y * h)));
-                paddingGeometry = geometry; paddingSlot = set.MaterialSlot; paddingWidth = d.Width; paddingHeight = d.Height;
+                paddingGeometry = geometry; paddingSlots = slots; paddingWidth = d.Width; paddingHeight = d.Height;
             }
             return paddingCoverage;
         }
@@ -36,7 +37,7 @@ namespace Yozolab.YoluPainter.Editor
             if (padding == 0) return rgba;
             var coverage = ExportCoverage(set);
             string why = coverage == null ? L.Tr("No export padding: load the model in the 3D view so its UVs are known.")
-                : !coverage.Contains(true) ? L.Tr("No export padding for {0}: no UV triangle of its material slot.", set.Name) : null;
+                : !coverage.Contains(true) ? L.Tr("No export padding for {0}: no UV triangle of its material.", set.Name) : null;
             if (why != null) { if (notes != null && !notes.Contains(why)) notes.Add(why); return rgba; }
             var d = set.Document;
             return TexturePadding.Dilate(rgba, d.Width, d.Height, coverage, padding, PainterSettings.StrokeBudgetBytes);

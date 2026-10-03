@@ -107,7 +107,7 @@ namespace Yozolab.YoluPainter.Editor
             if (preview == null) return;
             var e = ShapeGizmoShown ? EditedShapeGradient() : null;
             var settings = e?.Settings.Generator ?? (ShapeGizmoShown ? EditedFillGradient() : null);
-            preview.ShownShapeGradient = settings == null ? (ShapeGradientOverlay?)null : ShapeGradientOverlay.Of(settings, preview.ModelRootPosition, preview.ModelRootRotation, materialSlot, ShapeOverlayTint);
+            preview.ShownShapeGradient = settings == null ? (ShapeGradientOverlay?)null : ShapeGradientOverlay.Of(settings, preview.ModelRootPosition, preview.ModelRootRotation, CurrentMaterialGroup, ShapeOverlayTint);
         }
 
         /// <summary>形の線とハンドルを 3D ビューに重ねる（Repaint のとき、3D を描いた後）。マウスの下（ドラッグ中はそのハンドル）を光らせる。</summary>

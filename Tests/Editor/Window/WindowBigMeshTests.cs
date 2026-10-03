@@ -20,7 +20,7 @@ namespace Yozolab.YoluPainter.Tests
             using (var fixture = new BigMeshFixture())
             {
                 IsolatedModelPreview loaded = null;
-                var dialog = NewProjectWindow.Open(new NewProjectSettings { Model = fixture.Root, Template = ProjectTemplate.Pbr, Resolution = 512, Slots = new[] { 0, 1 } }, false,
+                var dialog = NewProjectWindow.Open(new NewProjectSettings { Model = fixture.Root, Template = ProjectTemplate.Pbr, Resolution = 512, Materials = new[] { 0, 1 } }, false,
                     s => { window.CreateProject(s); loaded = window.Preview; });
                 try
                 {
@@ -51,7 +51,7 @@ namespace Yozolab.YoluPainter.Tests
         {
             using (var fixture = new BigMeshFixture())
             {
-                window.CreateProject(new NewProjectSettings { Model = fixture.Root, Resolution = 512, Template = ProjectTemplate.ColorOnly, Slots = new[] { 0, 1, 2 } });
+                window.CreateProject(new NewProjectSettings { Model = fixture.Root, Resolution = 512, Template = ProjectTemplate.ColorOnly, Materials = new[] { 0, 1, 2 } });
                 window.Preview.Load(fixture.Root);
                 foreach (var set in window.TextureSets) set.DisposeTextures();
                 var before = Snapshot();
@@ -84,7 +84,7 @@ namespace Yozolab.YoluPainter.Tests
                         var copy = UnityEngine.Object.Instantiate(f.sharedMesh); AssetDatabase.CreateAsset(copy, folder + "/Part" + i++ + ".asset"); f.sharedMesh = copy;
                     }
                     var prefab = PrefabUtility.SaveAsPrefabAsset(fixture.Root, folder + "/Model.prefab");
-                    var dialog = NewProjectWindow.Open(new NewProjectSettings { Model = prefab, Resolution = 512, Template = ProjectTemplate.ColorOnly, Slots = new[] { 0 } }, false, s => window.CreateProject(s));
+                    var dialog = NewProjectWindow.Open(new NewProjectSettings { Model = prefab, Resolution = 512, Template = ProjectTemplate.ColorOnly, Materials = new[] { 0 } }, false, s => window.CreateProject(s));
                     try { Repaint(dialog); dialog.Accept(); } finally { if (dialog != null) dialog.Close(); }
                     var clock = Stopwatch.StartNew();
                     while (window.Preview.IsPreparing && clock.Elapsed.TotalSeconds < 15) { window.Preview.PollPreparation(); yield return null; }
@@ -107,7 +107,7 @@ namespace Yozolab.YoluPainter.Tests
         {
             using (var fixture = new BigMeshFixture())
             {
-                window.CreateProject(new NewProjectSettings { Model = fixture.Root, Resolution = 512, Template = ProjectTemplate.ColorOnly, Slots = new[] { 0 } });
+                window.CreateProject(new NewProjectSettings { Model = fixture.Root, Resolution = 512, Template = ProjectTemplate.ColorOnly, Materials = new[] { 0 } });
                 Assert.That(window.Preview.IsPreparing, Is.True);
                 var before = Snapshot(); PaintDot(window, 100, 100);
                 Assert.That(window.IsStroking, Is.False); Assert.That(Snapshot(), Is.Not.EqualTo(before));
@@ -121,7 +121,7 @@ namespace Yozolab.YoluPainter.Tests
         {
             using (var fixture = new BigMeshFixture())
             {
-                var dialog = NewProjectWindow.Open(new NewProjectSettings { Model = fixture.Root, Resolution = 512, Template = ProjectTemplate.ColorOnly, Slots = new[] { 0 } }, false, s => window.CreateProject(s));
+                var dialog = NewProjectWindow.Open(new NewProjectSettings { Model = fixture.Root, Resolution = 512, Template = ProjectTemplate.ColorOnly, Materials = new[] { 0 } }, false, s => window.CreateProject(s));
                 try
                 {
                     Repaint(dialog);

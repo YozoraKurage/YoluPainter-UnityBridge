@@ -74,7 +74,7 @@ namespace Yozolab.YoluPainter.Tests
             var gen = window.AddGenerator(FilterTarget.Mask, GeneratorType.EdgeWear);
             BakeCurvature(window); window.PollGeneratorInputs();
             Assert.That(first.Document.GetGeneratorStatus(fill.Id, gen.Id).Active, Is.True);
-            var second = window.AddTextureSet(1);
+            var second = window.AddTextureSet(-1); // デモのキューブのマテリアルは 1 つ: モデルに無いセット
             Assert.That(window.CurrentTextureSet, Is.SameAs(second));
             Assert.That(second.Document.GeneratorInputs, Is.Not.Null.And.Not.SameAs(first.Document.GeneratorInputs), "each set has its own maps");
             var other = WornFill();

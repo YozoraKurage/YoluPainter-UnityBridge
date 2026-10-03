@@ -44,7 +44,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (preview == null || !preview.HasModel) return L.Tr("3D view: material shading. Load a model to see its materials.");
             SyncMaterialChoices();
-            var b = preview.MaterialBinding(materialSlot);
+            var b = preview.MaterialBinding(CurrentFirstSlot);
             if (b == null) return L.Tr("3D view: material shading.");
             if (!b.CanShow) return L.Tr("3D view: material shading, but this slot is shown neutral: {0}", b.Unusable);
             return L.Tr("3D view: material shading ({0}). Only the preview's copy of the material is used; the material itself is not changed.", b.Summary);
@@ -70,8 +70,8 @@ namespace Yozolab.YoluPainter.Editor
             var slots = new Dictionary<int, PreviewSlotChannels>();
             foreach (var set in textureSets)
             {
-                if (set.MaterialSlot >= preview.MaterialSlotCount || slots.ContainsKey(set.MaterialSlot)) continue;
-                var binding = preview.MaterialBinding(set.MaterialSlot);
+                if (!set.InModel) continue;
+                var binding = preview.MaterialBinding(set.FirstSlot); // 同じマテリアルなので、どのスロットでも同じ対応
                 if (binding == null || !binding.CanShow) continue;
                 bool current = set == currentSet; var d = current ? document : set.Document;
                 var used = new HashSet<PaintChannel>(YlpContent.UsedChannels(d));
@@ -82,7 +82,7 @@ namespace Yozolab.YoluPainter.Editor
                     if (c == PaintChannel.Normal) { painted.NormalOutput = current ? materialNormal : SetLighting(set); continue; }
                     painted.Composites[c] = current && c == channel ? compositor.Texture : ChannelTexture(set, d, c);
                 }
-                slots[set.MaterialSlot] = painted;
+                foreach (int slot in set.Slots) if (!slots.ContainsKey(slot)) slots[slot] = painted;
             }
             preview.SetMaterialChannels(slots);
         }

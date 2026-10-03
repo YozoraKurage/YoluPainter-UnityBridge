@@ -11,7 +11,7 @@ YoluPainter の作業ファイル `.ylp` の決まり。読み書きのコード
 | 層 | 版 | 受け持ち | 変えたときの扱い |
 |---|---|---|---|
 | 外側（zip・mimetype・manifest・名前の決まり） | manifest の 1 行目。今は **`YOLUPAINTER-YLP-3`**（`YOLUPAINTER-YLP-1`・`-2` も読む） | `YlpArchive` | 変えたら manifest の番号を上げる。古い読み手は「新しい YoluPainter で書かれた」と断る |
-| 中身の形式（エントリの並び・ylp.json・project.json・resources.json） | `ylp.json` の `format`（無ければ 1）。今は **6** | `YlpFormat` | 下の「形式を変えるとき」 |
+| 中身の形式（エントリの並び・ylp.json・project.json・resources.json） | `ylp.json` の `format`（無ければ 1）。今は **7** | `YlpFormat` | 下の「形式を変えるとき」 |
 | エントリの中身 | エントリごとの版（下の表） | 各エントリの読み手 | そのエントリの版を上げ、古い版も読めるようにする |
 
 ### 外側
@@ -71,14 +71,18 @@ PNG は RGBA8・最大 2048 ピクセル。ブラシの画像は赤チャンネ�
 | 3 | テクスチャセット（1 つのプロジェクトに複数）。根に `project.json`（セットの並びと今のセット）、正本・選択範囲・取り込んだ PSD・合成・メッシュマップはセットごとに `sets/<ID>/` の下。`view.json` の `materialSlot` は使わない。manifest は `YOLUPAINTER-YLP-2` | 根の `document.utpaint`・`selection.bin`・`imported-original.psd`・`composite/*`・`meshmap-*.bin` を `sets/<文書の ID>/` へ動かし（ID は `document.utpaint` の頭にある文書の ID なので、同じファイルはいつも同じ ID）、`view.json` の `materialSlot`（無い・読めなければ 0 にして知らせる）から 1 つのセットの `project.json` を作る。名前は仮の `Texture Set 1`（ウィンドウはモデルのマテリアルの名前に付け直す）。`view.json`・`brush.json`・`thumbnail.png`・知らないエントリは根に残す |
 | 4 | プロジェクトのリソース（全部のテクスチャセットで共通の画像。アセットのパネル）。根に `resources.json`（並び）、画素は中身ごとに 1 つの `resources/<中身の SHA-256>.png`。どちらも正本。manifest は `YOLUPAINTER-YLP-3` | なにもしない（形式 3 のファイルにはリソースが無い。`resources.json` の無いファイルはリソース無し） |
 | 5 | リソースの種類にスマートマテリアルとスマートマスク（`resources.json` の `kind` が `smartMaterial` / `smartMask`、ファイルはそのまま `resources/<ファイルの SHA-256>.ylsmart`。下の「.ylsmart」）。どちらも正本。名前の決まりは同じなので manifest は `YOLUPAINTER-YLP-3` のまま | なにもしない（形式 4 のリソースは画像だけ） |
+| 6 | リソースの種類にブラシとマテリアル、Unity のアセットの localFileId、自分の置き場の下位の階層（上の「形式 6 のリソース」）。どちらも正本 | なにもしない（並びは同じ） |
+| 7 | テクスチャセットはマテリアルごと（同じマテリアルを使うメッシュ・サブメッシュは 1 つのセット）。`project.json` の各セットの `materialSlot`（スロットの番号）をやめ、`material`（マテリアルの鍵。下）にした。メッシュマップの `.bin` は版 3（焼いたスロットの並び）。manifest は `YOLUPAINTER-YLP-3` のまま | `project.json` の各セットの `materialSlot` を `"material": { "slot": <番号> }`（まだマテリアルに結び付けていないスロットの番号）にする。ほかのエントリは変えない。どのマテリアルかは、開いたときに読んだモデルの、その番号のスロットのマテリアル（2 つのセットが同じマテリアルに落ちたら、後のセットは「モデルに無い」まま番号の鍵で残して知らせる。モデルが無ければ番号のまま） |
 
-### project.json（形式 3 から）
+### project.json（形式 3 から。この形は形式 7）
 
 ```json
 {
   "sets": [
-    { "id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0", "name": "Body", "materialSlot": 0 },
-    { "id": "11111111-2222-3333-4444-555555555555", "name": "Hair", "materialSlot": 1 }
+    { "id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0", "name": "Body", "material": { "name": "Skin", "guid": "0123456789abcdef0123456789abcdef", "fileId": 2100000 } },
+    { "id": "11111111-2222-3333-4444-555555555555", "name": "Hair", "material": { "name": "Hair" } },
+    { "id": "22222222-3333-4444-5555-666666666666", "name": "Unassigned", "material": { "unassigned": true } },
+    { "id": "33333333-4444-5555-6666-777777777777", "name": "Texture Set 1", "material": { "slot": 0 } }
   ],
   "current": "11111111-2222-3333-4444-555555555555"
 }
@@ -89,8 +93,18 @@ PNG は RGBA8・最大 2048 ピクセル。ブラシの画像は赤チャンネ�
     （同じでなくても読める）。
   - `name`（必須）: 1〜256 文字、空白だけでない、制御文字を含まない。大文字小文字を区別せずにほかのセットと重ならない（書き出す
     ファイルの名前に使う）。
-  - `materialSlot`（必須、0〜65535 の整数）: 描くマテリアルのスロット（モデルのプレビューで平らにした番号。ほかのセットと重ならない）。
-    モデルに無いスロットのセットも開ける（3D に見えないだけ）。
+  - `material`（必須、形式 7 から）: 描くマテリアル。次の 3 つの形のどれか 1 つ（2 つ以上・どれも無いものは断る）。
+    - `name`（文字列、0〜256 文字、制御文字なし）と、Unity のアセットなら `guid`（小文字の 16 進 32 文字）と `fileId`（64 ビットの整数、
+      アセットの中の localFileId。FBX に埋め込まれたマテリアルは FBX の GUID とその中の番号）。`guid` と `fileId` は揃って書く。
+    - `"unassigned": true`: モデルのマテリアルの無いスロットの全部（Substance Painter の DefaultMaterial に当たる）。
+    - `slot`（0〜65535 の整数）: まだマテリアルに結び付けていない、モデルのプレビューで平らにしたスロットの番号（形式 6 までのファイル、
+      モデル無しで作ったプロジェクト）。モデルを読んだとき、そのスロットのマテリアルに読み替える（本物のモデルなら、次の保存からマテリアルの鍵で書く）。
+    - 同じ `guid`・`fileId` の 2 つのセット、2 つの `unassigned`、同じ `slot` の 2 つのセットは断る。名前だけの鍵（アセットでないマテリアル）は
+      同じ名前が 2 つあってもよい（同じ名前の別のマテリアルがありうる）。
+    - モデルのマテリアルへの照合は、識別子（`guid` と `fileId`）→ `unassigned` → 名前（大文字小文字まで同じ、次に区別せず）→ `slot` の順で、
+      1 つのマテリアルは 1 つのセットだけが持つ。合わないセットも開ける（3D に見えないだけ。鍵は残るので、そのマテリアルを持つモデルに替えれば
+      また付く）。セットが受け持つスロット（同じマテリアルを使うレンダラー × サブメッシュの全部）は保存しない（モデルから決まる）。
+  - `materialSlot`: 形式 6 まで（0〜65535 の整数、ほかのセットと重ならない）。形式 7 では読まない（移行が `material` の `slot` にする）。
 - `current`（必須）: 今のセットの `id`（並びにあること）。
 - 知らないキーは読み飛ばす。壊れた JSON・型の違い・上の決まりに合わないもの・64 KiB を超えるものは、どれも開くのを断る
   （正本と同じく失えないものなので、既定に戻して開かない）。
@@ -209,7 +223,7 @@ PNG は RGBA8・最大 2048 ピクセル。ブラシの画像は赤チャンネ�
 | `selection.bin` | 正本 | 選択があるとき | 選択範囲。`YLSL` + 版 1 | `SelectionBinary` |
 | `imported-original.psd` | 正本 | PSD から取り込んだとき | 取り込んだ PSD の原本のバイト列（変えない） | — |
 | `composite/<チャンネル>.png` | 派生 | | そのチャンネルを使うレイヤーがあるときの合成（straight RGBA8、PNG なので外から見て上下は正しい）。Normal は Unity 向けの出力 | インポーター（大きさとチャンネルを見るだけ） |
-| `meshmap-<種類>.bin` | 派生 | | 焼いたメッシュマップと由来（スロットはそのセットのもの）。`YLPMMAP\0` + 形式の版 2（2 でアンチエイリアスの段数）、エンジンの版 2。ID マップの設定の文字列は `source=<元>;algorithm=2` と、必要ならマテリアル識別・手動色の鍵（下） | `MeshMapBinary` |
+| `meshmap-<種類>.bin` | 派生 | | 焼いたメッシュマップと由来（スロットはそのセットのマテリアルを使う全部のスロット）。`YLPMMAP\0` + 形式の版 3（2 でアンチエイリアスの段数、3 で焼いたスロットの並び: チャンネル数の後に数と昇順の番号。最初の番号は「スロット」の欄と同じ。版 1・2 はスロット 1 つとして読む。スロットが 1 つなら条件の鍵は版 2 と同じなので、前に焼いたマップは古くならない）、エンジンの版 2。ID マップの設定の文字列は `source=<元>;algorithm=2` と、必要ならマテリアル識別・手動色の鍵（下） | `MeshMapBinary` |
 
 種類の意味（`YlpFormat.EntryKind`）:
 
@@ -408,10 +422,15 @@ int 不透明度の分岐点数（2〜32）、各点の double 位置・double �
    古い読み手が読めないなら、その読み手が断る）。
 4. この文書の「版の歴史」「エントリ」の表を直す。
 5. 前の形式のフィクスチャ（`Tests/Editor/Persistence/Fixtures~/format<N>.ylp`。前の版の YoluPainter で作り、それ以後は変えない）
-   を足し、開ける・正本がバイト一致で読み書きできる・合成が正本と一致することを `YlpFormatTests` で確かめる。今あるのは形式 1・2・3・4
+   を足し、開ける・正本がバイト一致で読み書きできる・合成が正本と一致することを `YlpFormatTests` で確かめる。今あるのは形式 1・2・3・4・5
    （形式 3 は形式 4 を足す前の YoluPainter のウィンドウの保存で作った、テクスチャセット 2 つのもの。`YlpResourceFormatTests`。形式 4 は形式 5 を
-   足す前（0.0.0 の ca54ac6）のウィンドウの保存で作った、テクスチャセット 2 つ・リソース 2 つのもの。`SmartMaterialFileTests`）。
-   形式 5 のフィクスチャも旧書き手で作成したものを保持する。
+   足す前（0.0.0 の ca54ac6）のウィンドウの保存で作った、テクスチャセット 2 つ・リソース 2 つのもの。`SmartMaterialFileTests`。形式 5 は 2 つ:
+   `format5.ylp`（アセットの残りの前の書き手で作ったもの。`AssetRestFixtureTests`）と `format5-shared-materials.ylp`（マテリアルごとのセットを
+   足す前（0.2.0 の 42eef75）のウィンドウの保存で作った、1 つのメッシュの 3 つのサブメッシュ（Skin・Skin（同じマテリアル）・Hair）のテクスチャ
+   セット 3 つ・スマートマテリアル 1 つ・セットごとのメッシュマップ 2 枚のもの。`YlpTextureSetFormatTests`・`MaterialSetTests`）。形式 6 は
+   `format6.ylp`（形式 7 を足す前（0.2.0 の 9904157）のウィンドウの保存で作った、マテリアルを共有する 2 つのレンダラーのテクスチャセット 3 つ・
+   ブラシのリソース 1 つ・セットごとの Position のメッシュマップのもの。`YlpTextureSetFormatTests`）。形式 7 のフィクスチャは、次に形式を上げる人が、上げる前の
+   YoluPainter で作る。
 6. 1.0.0 より前は互換を壊す変更もありうるが、そのときも古いファイルは開けるようにし（移行の段）、新しい形式を古い版で開いたら
    理由を出して断る。
 
@@ -442,9 +461,14 @@ int 不透明度の分岐点数（2〜32）、各点の double 位置・double �
   種類 7 を版 19 と偽ると断ること、印・空の ID・名前・同じ ID・マスクの無い層・知らないチャンネルと読み方・Normal・自分の層の参照の拒否、
   消えた・上下逆の参照はそのまま開くこと。`WindowTests.AnAnchorFromThePropertiesDrivesAMaskAboveAndMovingItShowsWhy`: ウィンドウでの
   保存と開き直し（アンカーと参照と合成が同じ）。
-- `YlpTextureSetFormatTests`: project.json の読み書きと拒否、形式 3 のファイルを開く（並びに無いセットの知らせ、project.json やセットの
-  正本が無いものの拒否）、形式 2 → 3 の移行（文書の ID・view.json のスロット・読めない view.json）、文書の ID を頭から読む、manifest
-  `YLP-2` だけがセットの置き場を認める、復旧の checkpoint のセットの置き場。
+- `YlpTextureSetFormatTests`: project.json の読み書き（マテリアルの鍵の 4 つの形・64 ビットの fileId）と拒否（形式 6 までの `materialSlot`・
+  `material` の形の数・型・GUID・同じアセット・2 つの Unassigned などを含む）、形式 3 のファイルを開く（並びに無いセットの知らせ、project.json や
+  セットの正本が無いものの拒否）、形式 2 → 3 の移行（文書の ID・view.json のスロット・読めない view.json）、形式 5・6 → 7 の移行（スロットの番号の鍵、
+  同じスロット 2 つの拒否、インポーターの一覧はどちらの形も読む）、形式 5・6 のフィクスチャ（project.json のほかはバイト一致、メッシュマップは版 2 で
+  スロット 1 つ）、文書の ID を頭から読む、manifest `YLP-2` だけがセットの置き場を認める、復旧の checkpoint のセットの置き場。
+- `MaterialSetTests`（`Tests/Editor/Window/WindowMaterialSetTests.cs`）: 同じマテリアルを使うメッシュ・サブメッシュが 1 つのセット、鍵の保存と
+  照合（識別子 → 名前、名前を変えたマテリアル）、形式 5 のフィクスチャをそのスロットのモデルで開く（同じセットになる・2 つが同じマテリアルに
+  落ちたら片方を番号の鍵で残して知らせる。保存して開くと同じ）。
 - `TextureSetTests`（`Tests/Editor/Window/WindowTextureSetTests.cs`）: 2 つのセットを保存して開く・形式 1・2 のファイルを 1 つのセットとして
   開いて保存する・復旧の checkpoint から戻す・インポーターのセットの一覧。
 - `WindowTests`（`WindowYlpFormatTests.cs`）: 古い形式を開いた知らせ、保存で今の形式と書いたアプリ、退避なしで古い形式を

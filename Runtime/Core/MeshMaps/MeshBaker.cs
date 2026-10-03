@@ -46,7 +46,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             if (input == null) throw new ArgumentNullException(nameof(input));
             if (settings == null) throw new ArgumentNullException(nameof(settings));
             return MeshMapProvenance.ComputeConditionKey(kind, EngineVersion, input.Hash, input.UvChannel, settings.Width, settings.Height, settings.TargetSlot,
-                settings.Padding, settings.Antialiasing, settings.KindKey(kind), Space, Pose, settings.SourceKey(reference?.Hash));
+                settings.Padding, settings.Antialiasing, settings.KindKey(kind), Space, Pose, settings.SourceKey(reference?.Hash), settings.Targets());
         }
 
         static int Threads(MeshBakeBudget budget) => budget != null && budget.MaxDegreeOfParallelism > 0 ? budget.MaxDegreeOfParallelism : Math.Max(1, Environment.ProcessorCount);
@@ -126,10 +126,12 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
 
             // 焼き込む三角形（スロット・UV の面積）と、UV の範囲の確認。まだ大きなものは割り当てない
             var receivers = new List<int>();
+            var targets = settings.Targets(); // 昇順（null なら全部）
+            bool Targeted(int slot) => slot >= 0 && (targets == null || Array.BinarySearch(targets, slot) >= 0);
             for (int t = 0; t < triangles; t++)
             {
                 int slot = input.Slots[t];
-                if (slot < 0 || (settings.TargetSlot >= 0 && slot != settings.TargetSlot)) continue;
+                if (!Targeted(slot)) continue;
                 int k = t * 6;
                 double area = (uvs[k + 2] - uvs[k]) * (uvs[k + 5] - uvs[k + 1]) - (uvs[k + 4] - uvs[k]) * (uvs[k + 3] - uvs[k + 1]);
                 if (Math.Abs(area) * width * height < 1e-9) { report.ZeroUvAreaTriangles++; continue; }
@@ -140,7 +142,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                 receivers.Add(t);
             }
             if (receivers.Count == 0)
-                throw new MeshBakeRefusedException(settings.TargetSlot >= 0 ? "No triangle with UVs uses material slot " + settings.TargetSlot + "; nothing to bake." : "No triangle has UVs; nothing to bake.");
+                throw new MeshBakeRefusedException(targets != null ? "No triangle with UVs uses material slot " + string.Join(", ", targets) + "; nothing to bake." : "No triangle has UVs; nothing to bake.");
             long estimate = EstimateBytes(input, settings, budget, reference) + (rayTracer != null && NeedsRays(settings) ? DeferredBytes : 0);
             report.EstimatedBytes = estimate;
             if (estimate > budget.MaxBytes)
@@ -159,7 +161,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             {
                 var occluders = new List<int>();
                 for (int t = 0; t < triangles; t++)
-                    if (low.Valid[t] && (settings.Occluders == MeshOccluders.WholeModel || input.Slots[t] == settings.TargetSlot || settings.TargetSlot < 0)) occluders.Add(t);
+                    if (low.Valid[t] && (settings.Occluders == MeshOccluders.WholeModel || targets == null || Array.BinarySearch(targets, input.Slots[t]) >= 0)) occluders.Add(t);
                 low.Occluders = new MeshRayBvh(corners, occluders);
                 report.OccluderTriangles = occluders.Count;
             }
@@ -272,7 +274,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             foreach (var kind in settings.Maps)
             {
                 var provenance = new MeshMapProvenance(kind, EngineVersion, input.Hash, input.TopologyHash, input.UvChannel, width, height, settings.TargetSlot, settings.Padding,
-                    settings.Antialiasing, settings.KindKey(kind), Space, Pose, source, job.BoundsMin, job.BoundsMax);
+                    settings.Antialiasing, settings.KindKey(kind), Space, Pose, source, job.BoundsMin, job.BoundsMax, targets);
                 maps.Add(new BakedMeshMap(provenance, job.Outputs[(int)kind], job.Coverage));
             }
             report.TotalSeconds = control.Clock.Elapsed.TotalSeconds;

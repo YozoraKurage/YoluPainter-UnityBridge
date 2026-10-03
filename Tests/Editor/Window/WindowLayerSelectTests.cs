@@ -230,7 +230,7 @@ namespace Yozolab.YoluPainter.Tests
             ClickRow(b); ClickRow(c, Ctrl);
             d.SetLayerLocks(b.Id, LayerLocks.Transparency | LayerLocks.Position);
             var first = window.CurrentTextureSet;
-            window.AddTextureSet(1);
+            window.AddTextureSet(-1); // モデルが無い: マテリアルに結び付けないセット
             Assert.That(window.SelectedLayers.Count, Is.EqualTo(1));
             window.SwitchTextureSet(first.Id);
             Assert.That(window.SelectedLayers, Is.EqualTo(new[] { c.Id }), "only the painted layer, not the old selection");

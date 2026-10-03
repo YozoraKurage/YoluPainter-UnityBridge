@@ -49,7 +49,7 @@ namespace Yozolab.YoluPainter.Editor
                 PaintDocument document;
                 try{document=DocumentBinary.Read(files[YlpArchive.NativeName]);}
                 catch(InvalidDataException ex){throw new InvalidDataException("Texture set \""+info.Name+"\": "+ex.Message,ex);}
-                sets.Add(new TextureSet(info.Id,info.Name,info.MaterialSlot,document)
+                sets.Add(new TextureSet(info.Id,info.Name,info.Material,document)
                 {
                     SelectedLayer=document.Layers.Count>0?document.Layers[document.Layers.Count-1].Id:Guid.Empty,
                     ImportedOriginal=files.TryGetValue(YlpContent.ImportedOriginalName,out var original)?original:null,
@@ -167,12 +167,15 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     var state=JsonUtility.FromJson<ViewState>(System.Text.Encoding.UTF8.GetString(view));channel=(PaintChannel)state.selectedChannel;
                     var loaded=AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(state.modelAssetGuid));
-                    if(loaded!=null){model=loaded;preview.Load(model);if(sets.Count==1)materialSlot=Mathf.Clamp(materialSlot,0,Mathf.Max(0,preview.MaterialSlotCount-1));}
+                    if(loaded!=null){model=loaded;preview.Load(model);}
                     else if(!String.IsNullOrEmpty(state.modelAssetGuid))notes.Add("Model asset is unavailable; assign it explicitly.");
                 }
                 SyncCurrentSet();
+                // セットの鍵を読んだモデルのマテリアルに結び付ける（形式 5 までのスロットの番号は、そのスロットのマテリアルに読み替える。
+                // 2 つが同じマテリアルに落ちれば、片方をモデルに無いまま残して知らせる）
+                ResolveSetMaterials(notes);
                 // 形式 2 までのファイルの 1 つのセットは、移行で仮の名前になっている: モデルのマテリアルの名前（無ければ訳した既定の名前）にする
-                if(opened.Info.Format<3)foreach(var set in sets)set.Name=DefaultSetName(set.MaterialSlot,set);
+                if(opened.Info.Format<3)foreach(var set in sets)set.Name=set.MaterialGroup>=0?DefaultSetName(preview.MaterialGroups[set.MaterialGroup],set):UniqueSetName(NumberedSetName(1),set);
                 meshMapsLoadedInto.Clear();
                 foreach(var set in sets)
                 {
@@ -200,9 +203,11 @@ namespace Yozolab.YoluPainter.Editor
                 if(result.Mode!=PsdCompatibilityMode.EditableRaster){Dialogs.Inform("PSD protected: "+result.Mode,String.Join("\n",result.Diagnostics.Select(d=>d.ToString()))+"\nOriginal file was not modified. Unsupported features cannot be edited here.");return;}
                 var next=PsdBridge.Import(result);if(!ConfirmDiscard())return;
                 if(next.Layers.Count==0)next.AddLayer(L.Tr("Layer")+" 1");
-                // PSD は 1 つのテクスチャセットのプロジェクトになる（スロットは今のセットのまま）
-                int slot=currentSet!=null?materialSlot:0;
-                var set=new TextureSet(next.Id,BaseSetName(slot),slot,next){SelectedLayer=next.Layers.Last().Id,ImportedOriginal=result.CopyOriginalBytes()};
+                // PSD は 1 つのテクスチャセットのプロジェクトになる（マテリアルは今のセットのまま）
+                var like=currentSet;
+                var key=like!=null?like.Material:YlpMaterialRef.PendingSlot(0);
+                string setName=like!=null&&like.MaterialGroup>=0?BaseSetName(preview.MaterialGroups[like.MaterialGroup]):NumberedSetName(1);
+                var set=new TextureSet(next.Id,setName,key,next){SelectedLayer=next.Layers.Last().Id,ImportedOriginal=result.CopyOriginalBytes()};
                 FinishStroke(false);CancelToolDrag();
                 ReplaceProject(new[]{set},set);BindDocument();
                 ForgetProjectFile();importedPsdPath=Path.GetFullPath(path);channel=PaintChannel.Color;

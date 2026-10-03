@@ -70,6 +70,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             {
                 if (disposed || state.Revision != revision || state.Task.IsCanceled) return;
                 InstallGeometry(state.Task.GetAwaiter().GetResult(), state.Incomplete);
+                Loaded?.Invoke(); // 別スレッドの準備が済んだ: 持ち主は結び付きを作り直す
             }
             catch (Exception ex) { geometry = null; report.CanPaint = false; report.Diagnostics.Add(L.Tr("Model preparation failed: {0}", ex.Message)); }
             finally { state.Cancellation.Dispose(); }

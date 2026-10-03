@@ -58,7 +58,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                     if (exceeded) { result.Result = result.Result.Reject("Symmetry: finding a copied point exceeded the BVH work budget."); return result; }
                     result.Outcome = MirrorOutcome.NoSurface; continue;
                 }
-                if (copy.MaterialSlot != hit.MaterialSlot || copy.RendererIndex != hit.RendererIndex) { result.Outcome = MirrorOutcome.OtherSlot; continue; }
+                if (copy.Material != hit.Material) { result.Outcome = MirrorOutcome.OtherSlot; continue; } // 同じマテリアル（テクスチャセット）なら別のメッシュでも
                 result.Copies.Add(copy);
                 var used = result.Result;
                 var remaining = new SurfaceBrushBudget {

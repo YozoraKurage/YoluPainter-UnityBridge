@@ -26,7 +26,7 @@ namespace Yozolab.YoluPainter.Editor
         internal sealed class SetGeneratorInputs : IGeneratorInputs, IGeneratorModelFrame
         {
             readonly TexturePaintWindow window; readonly TextureSet set;
-            long revision, mapsRevision = long.MinValue; int slot = int.MinValue;
+            long revision, mapsRevision = long.MinValue; string slots;
             object input, highPoly; string settings; PaintDocument doc; Vector3 rootPosition; Quaternion rootRotation; bool hasRoot;
             /// <summary>窓が最後に見た文書と、その文書の <see cref="PaintDocument.GeneratorInputsRevision"/>（合成器が先に問い合わせて
             /// 変化を受け取っていても、窓の写しを作り直し損ねないように、窓は文書の版で比べる）。</summary>
@@ -42,15 +42,15 @@ namespace Yozolab.YoluPainter.Editor
                     var nowInput = window.CurrentMeshBakeInput(); var nowHigh = window.highPolyModel != null ? window.CurrentHighPolyInput() : null;
                     string nowSettings = JsonUtility.ToJson(window.meshBakeSettings);
                     bool current = set == window.currentSet;
-                    int nowSlot = current ? window.materialSlot : set.MaterialSlot;
+                    string nowSlots = string.Join(",", set.Slots); // セットが受け持つスロット（モデル・マテリアルで変わる）
                     var nowDoc = current && window.document != null ? window.document : set.Document;
                     nowSettings += ";idColours=" + (nowDoc?.IdColors.Key ?? "");
                     bool nowHasRoot = window.preview != null && window.preview.HasModel;
                     var nowRootPosition = nowHasRoot ? window.preview.ModelRootPosition : Vector3.zero; var nowRootRotation = nowHasRoot ? window.preview.ModelRootRotation : Quaternion.identity;
-                    if (set.MeshMaps.Revision != mapsRevision || !ReferenceEquals(nowInput, input) || !ReferenceEquals(nowHigh, highPoly) || nowSettings != settings || nowSlot != slot || !ReferenceEquals(nowDoc, doc)
+                    if (set.MeshMaps.Revision != mapsRevision || !ReferenceEquals(nowInput, input) || !ReferenceEquals(nowHigh, highPoly) || nowSettings != settings || nowSlots != slots || !ReferenceEquals(nowDoc, doc)
                         || nowHasRoot != hasRoot || nowRootPosition != rootPosition || nowRootRotation != rootRotation)
                     {
-                        mapsRevision = set.MeshMaps.Revision; input = nowInput; highPoly = nowHigh; settings = nowSettings; slot = nowSlot; doc = nowDoc;
+                        mapsRevision = set.MeshMaps.Revision; input = nowInput; highPoly = nowHigh; settings = nowSettings; slots = nowSlots; doc = nowDoc;
                         hasRoot = nowHasRoot; rootPosition = nowRootPosition; rootRotation = nowRootRotation;
                         revision++;
                     }
@@ -233,7 +233,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             var p = map.Provenance;
             string source = p.Source == MeshBaker.Source ? L.Tr("baked from the model") : L.Tr("baked from a high poly");
-            return MeshMapLabel(p.Kind) + " · " + p.Width + " × " + p.Height + " · " + L.Tr("slot {0}", p.TargetSlot) + " · " + source + (string.IsNullOrEmpty(p.SettingsKey) ? "" : " · " + p.SettingsKey.Replace(";", "; "))
+            return MeshMapLabel(p.Kind) + " · " + p.Width + " × " + p.Height + " · " + L.Tr("slot {0}", SlotList(p)) + " · " + source + (string.IsNullOrEmpty(p.SettingsKey) ? "" : " · " + p.SettingsKey.Replace(";", "; "))
                 + "\n" + L.Tr("Bake {0}", p.ConditionKey.Substring(0, 12) + "…");
         }
 

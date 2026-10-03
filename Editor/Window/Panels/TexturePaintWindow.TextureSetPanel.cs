@@ -4,6 +4,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using Yozolab.YoluPainter.Core;
+using Yozolab.YoluPainter.Editor.Preview;
 
 namespace Yozolab.YoluPainter.Editor
 {
@@ -106,8 +107,8 @@ namespace Yozolab.YoluPainter.Editor
                 else if (hover) PaintGui.Rounded(new Rect(row.x + 2, row.y + 2, row.width - 4, row.height - 4), PaintTheme.ControlHover, 4);
                 var thumb = new Rect(row.x + 5, row.y + 4, 22, 22);
                 if (e.type == EventType.Repaint) DrawThumbnail(thumb, SetThumbnail(set));
-                bool missing = preview.HasModel && set.MaterialSlot >= preview.MaterialSlotCount;
-                string detail = L.Tr("slot {0}", set.MaterialSlot) + " · " + set.Document.Width + (set.Document.Width == set.Document.Height ? "²" : " × " + set.Document.Height);
+                bool missing = preview.HasModel && !set.InModel;
+                string detail = set.Document.Width + (set.Document.Width == set.Document.Height ? "²" : " × " + set.Document.Height);
                 float x = thumb.xMax + 6, right = row.xMax - 6;
                 float detailWidth = PaintGui.TextWidth(detail, PaintTheme.LabelSmall);
                 bool showDetail = right - x > detailWidth + 60;
@@ -115,8 +116,8 @@ namespace Yozolab.YoluPainter.Editor
                 if (missing) { PaintGui.Icon(new Rect(right - 16, row.y, 16, row.height), "warning", PaintTheme.Warning, 14); right -= 18; }
                 var style = current ? PaintTheme.LabelBold : PaintTheme.Label;
                 PaintGui.Text(new Rect(x, row.y, Mathf.Max(0, right - x), row.height), PaintGui.Fit(set.Name, Mathf.Max(0, right - x), style, false), style, current ? Color.white : PaintTheme.Text);
-                string tip = set.Name + "\n" + L.Tr("Material slot") + ": " + SlotName(set.MaterialSlot) + "\n" + set.Document.Width + " × " + set.Document.Height
-                    + (missing ? "\n" + L.Tr("The loaded model has no material slot {0}; this texture set is not shown in 3D. Change its slot in File ▸ Project Configuration.", set.MaterialSlot) : "")
+                string tip = set.Name + "\n" + L.Tr("Material") + ": " + SetMaterialText(set) + "\n" + set.Document.Width + " × " + set.Document.Height
+                    + (missing ? "\n" + L.Tr("The loaded model does not use this texture set's material; it is not shown in 3D. Choose its material in File ▸ Project Configuration.") : "")
                     + (current ? "" : "\n" + L.Tr("Click to paint this texture set."));
                 PaintGui.Tooltip(row, tip);
                 if (e.type == EventType.MouseDown && e.button == 0 && hover && !current) clicked = set;
@@ -133,10 +134,18 @@ namespace Yozolab.YoluPainter.Editor
             if (clicked != null) { e.Use(); TryAction(() => SwitchTextureSet(clicked.Id)); }
         }
 
-        string SlotName(int slot)
+        /// <summary>セットが描くマテリアルの見せ方: 名前と使っているメッシュ（「Body（Body, Head）」）。モデルに無ければそう書き、モデルが無ければ鍵の名前。</summary>
+        internal string SetMaterialText(TextureSet set)
         {
-            var material = preview.HasModel ? preview.SourceMaterial(slot) : null;
-            return slot + (material != null ? ": " + material.name : preview.HasModel && slot >= preview.MaterialSlotCount ? " (" + L.Tr("not in this model") + ")" : "");
+            if (set == null) return "";
+            if (set.MaterialGroup >= 0 && preview != null && set.MaterialGroup < preview.MaterialGroups.Count)
+            {
+                var g = preview.MaterialGroups[set.MaterialGroup];
+                return BaseSetName(g) + (g.Meshes.Count > 0 ? " (" + string.Join(", ", g.Meshes) + ")" : "");
+            }
+            var m = set.Material;
+            string key = m.Unassigned ? L.Tr(PreviewMaterialGroup.UnassignedName) : m.IsPendingSlot ? L.Tr("slot {0}", m.Slot) : m.Name;
+            return preview != null && preview.HasModel ? key + " (" + L.Tr("not in this model") + ")" : key;
         }
 
         internal void SetChannel(PaintChannel next)

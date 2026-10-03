@@ -120,7 +120,7 @@ namespace Yozolab.YoluPainter.Tests
             resources.Restore(R3, "Mask again", ImageContent.FromPixels(b.CopyPixels(), 7, 2), Origins()[4], ResourceColorSpace.Unspecified);
             var files = new Dictionary<string, byte[]>(StringComparer.Ordinal)
             {
-                { YlpFormat.ProjectName, YlpFormat.WriteProject(new YlpProjectInfo(new[] { new YlpTextureSetInfo(A, "Body", 0) }, A)) },
+                { YlpFormat.ProjectName, YlpFormat.WriteProject(new YlpProjectInfo(new[] { new YlpTextureSetInfo(A, "Body", YlpMaterialRef.PendingSlot(0)) }, A)) },
                 { YlpFormat.SetEntry(A, YlpArchive.NativeName), Document(A) },
             };
             ResourceIndex.AddTo(files, resources);
@@ -242,9 +242,9 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(opened.Info.Format, Is.EqualTo(3)); Assert.That(opened.Upgraded, Is.True);
             Assert.That(opened.Info.SavedBy.App, Is.EqualTo("YoluPainter")); Assert.That(opened.Info.CreatedBy, Is.Not.Null);
             Assert.That(opened.UnknownEntries, Is.Empty); Assert.That(opened.Notes, Is.Empty); Assert.That(opened.Resources, Is.Empty);
-            Assert.That(opened.Files.Keys, Is.EquivalentTo(snapshot.Keys.Where(k => k != YlpFormat.InfoName)), "the step 3 → 4 moves nothing");
-            foreach (var entry in opened.Files) Assert.That(entry.Value, Is.EqualTo(snapshot[entry.Key]), entry.Key);
-            Assert.That(opened.Project.Sets.Select(s => (s.Name, s.MaterialSlot)), Is.EqualTo(new[] { ("Body", 0), ("Hair Front", 1) }));
+            Assert.That(opened.Files.Keys, Is.EquivalentTo(snapshot.Keys.Where(k => k != YlpFormat.InfoName)), "the steps 3 → 7 move nothing");
+            foreach (var entry in opened.Files) if (entry.Key != YlpFormat.ProjectName) Assert.That(entry.Value, Is.EqualTo(snapshot[entry.Key]), entry.Key + " (project.json changes in 6 → 7)");
+            Assert.That(opened.Project.Sets.Select(s => (s.Name, s.Material)), Is.EqualTo(new[] { ("Body", YlpMaterialRef.PendingSlot(0)), ("Hair Front", YlpMaterialRef.PendingSlot(1)) }));
             Assert.That(opened.Project.CurrentSet, Is.EqualTo(opened.Project.Sets[0].Id));
             foreach (var set in opened.Project.Sets)
             {
@@ -256,7 +256,7 @@ namespace Yozolab.YoluPainter.Tests
                 Assert.That(SelectionBinary.Write(SelectionBinary.Read(files[SelectionBinary.EntryName], document)), Is.EqualTo(files[SelectionBinary.EntryName]), set.Name + " selection");
                 var maps = files.Where(f => f.Key.StartsWith(MeshMapBinary.EntryPrefix, StringComparison.Ordinal)).Select(f => MeshMapBinary.Read(f.Value)).ToList();
                 Assert.That(maps.Select(m => m.Kind), Is.EquivalentTo(new[] { MeshMapKind.WorldNormal, MeshMapKind.Position }), set.Name + " mesh maps");
-                Assert.That(maps.Select(m => m.Provenance.TargetSlot), Is.All.EqualTo(set.MaterialSlot));
+                Assert.That(maps.Select(m => m.Provenance.TargetSlot), Is.All.EqualTo(set.Material.Slot));
                 bool generator = document.Layers.Any(l => l.Filters.Any(f => f.Settings.Type == FilterType.Generator) || l.Mask != null && l.Mask.Filters.Any(f => f.Settings.Type == FilterType.Generator));
                 Assert.That(generator, Is.EqualTo(set.Name == "Hair Front"), "the second set holds a Generator stage (native version 11)");
                 // Generator の段はメッシュマップを入力にしないと元を通すので、その段が変える Color はここでは比べない

@@ -24,7 +24,7 @@ namespace Yozolab.YoluPainter.Tests
         RecoveryWriter.Request Capture(PaintDocument d, ProjectResources resources = null) => new RecoveryWriter.Request
         {
             Sets = new[] { new RecoveryWriter.Set { Id = d.Id, Document = d.CaptureSnapshot() } },
-            Project = new YlpProjectInfo(new[] { new YlpTextureSetInfo(d.Id, "Set", 0) }, d.Id),
+            Project = new YlpProjectInfo(new[] { new YlpTextureSetInfo(d.Id, "Set", YlpMaterialRef.PendingSlot(0)) }, d.Id),
             Resources = ResourceIndex.Capture(resources ?? new ProjectResources()), Info = System.Text.Encoding.UTF8.GetBytes("{}"),
             Writer = new YlpWriterInfo("Test", "1", "2022.3"), Keep = 3, StorageRoot = root
         };

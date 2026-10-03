@@ -23,7 +23,7 @@ namespace Yozolab.YoluPainter.Editor
         internal void AssignToLilToon()
         {
             if(stroke!=null){message="Finish the stroke first.";return;}
-            var material=preview.SourceMaterial(materialSlot);
+            var material=preview.SourceMaterial(CurrentFirstSlot);
             string stem=(projectPath!=null?Path.GetFileNameWithoutExtension(projectPath):"Texture")+SetFileSuffix(currentSet);
             string folder=material==null?null:LilToonFolder(stem);
             if(material!=null&&folder==null){message="Choose a folder inside Assets for the lilToon textures.";return;}

@@ -1,0 +1,234 @@
+# Japanese translation for YoluPainter: texture sets per material (meshes that share a material share one texture set; the
+# unassigned slots are one set) and swapping or reloading the model while keeping the painting.
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# ── マテリアルごとのテクスチャセット ──
+
+msgid "Unassigned"
+msgstr "未割り当て"
+
+msgid "(unnamed material)"
+msgstr "（名前の無いマテリアル）"
+
+msgid "Meshes"
+msgstr "メッシュ"
+
+msgid "{0} material slot(s)"
+msgstr "マテリアルスロット {0} 個"
+
+msgid "Paint this material as a texture set"
+msgstr "このマテリアルをテクスチャセットとして描く"
+
+msgid "{0} of {1} materials become texture sets."
+msgstr "{1} 個のマテリアルのうち {0} 個がテクスチャセットになります。"
+
+msgid "Each texture set gets the template and resolution below. Meshes that share a material share its texture set."
+msgstr "どのテクスチャセットも下のテンプレートと解像度になります。マテリアルが同じメッシュは、1 つのテクスチャセットを一緒に使います。"
+
+msgid "The material this texture set paints (every mesh that uses it)"
+msgstr "このテクスチャセットが描くマテリアル（それを使う全部のメッシュ）"
+
+msgid "An empty texture set for a material without one (same size and channels as the open one)"
+msgstr "テクスチャセットの無いマテリアルに、空のテクスチャセットを足す（大きさとチャンネルは開いているものと同じ）"
+
+msgid "Two texture sets paint the same material ({0} and {1})."
+msgstr "2 つのテクスチャセット（{0} と {1}）が同じマテリアルを描いています。"
+
+msgid "The material {0} already has the texture set {1}."
+msgstr "マテリアル {0} には、もうテクスチャセット {1} があります。"
+
+msgid "Added the texture set {0} (material {1})."
+msgstr "テクスチャセット {0} を足しました（マテリアル {1}）。"
+
+msgid "Added the texture set {0}; choose its material in File ▸ Project Configuration."
+msgstr "テクスチャセット {0} を足しました。マテリアルは ファイル ▸ プロジェクト設定 で選んでください。"
+
+msgid "This face uses the material {0}, which has no texture set in this project (File ▸ Project Configuration adds one)."
+msgstr "この面はマテリアル {0} で、このプロジェクトにはそのテクスチャセットがありません（ファイル ▸ プロジェクト設定 で足せます）。"
+
+msgid "The loaded model does not use this texture set's material; it is not shown in 3D. Choose its material in File ▸ Project Configuration."
+msgstr "読み込んだモデルは、このテクスチャセットのマテリアルを使っていません。3D には見えません。ファイル ▸ プロジェクト設定 でマテリアルを選んでください。"
+
+msgid "{0} and {1} both painted material slots of {2}; {1} is kept, but it is not shown on the model. Choose its material in File ▸ Project Configuration."
+msgstr "{0} と {1} が、どちらも {2} のマテリアルスロットを描いていました。{1} は残しますが、モデルには見えません。ファイル ▸ プロジェクト設定 でマテリアルを選んでください。"
+
+msgid "No export padding for {0}: no UV triangle of its material."
+msgstr "{0} は書き出しのパディングをしません: そのマテリアルの UV の三角形がありません。"
+
+msgid "The texture set {0} paints a material the loaded model does not have."
+msgstr "テクスチャセット {0} が描くマテリアルは、読み込んだモデルにありません。"
+
+msgid "This project has one texture set: the material the document paints."
+msgstr "このプロジェクトのテクスチャセットは 1 つです（文書が描くマテリアル）。"
+
+msgid "Mesh maps are baked at the document size, for every mesh that uses this texture set's material"
+msgstr "メッシュマップは文書の大きさで、このテクスチャセットのマテリアルを使う全部のメッシュについて焼きます"
+
+# ── モデルの差し替え ──
+
+msgid "Change the model?"
+msgstr "モデルを差し替えますか？"
+
+msgid "Reload the model?"
+msgstr "モデルを読み直しますか？"
+
+msgid "Change Model"
+msgstr "差し替える"
+
+msgid "Reload"
+msgstr "読み直す"
+
+msgid "Add texture sets?"
+msgstr "テクスチャセットを足しますか？"
+
+msgid "Add"
+msgstr "足す"
+
+msgid "Don't Add"
+msgstr "足さない"
+
+msgid "Reload {0} from its asset."
+msgstr "{0} をアセットから読み直します。"
+
+msgid "Texture sets (matched by material asset, then by name):"
+msgstr "テクスチャセット（マテリアルのアセット、次に名前で対応を取ります）:"
+
+msgid "not in the new model. It is kept with its pixels and not shown on the model; choose its material in File ▸ Project Configuration."
+msgstr "新しいモデルにありません。画素ごと残しますが、モデルには見えません。マテリアルは ファイル ▸ プロジェクト設定 で選べます。"
+
+msgid "material {0}, {1}."
+msgstr "マテリアル {0}。{1}。"
+
+msgctxt "model change"
+msgid "{0}: {1}."
+msgstr "{0}: {1}。"
+
+msgid "its UVs could not be compared"
+msgstr "UV を比べられませんでした"
+
+msgid "same UVs, so it looks the same"
+msgstr "UV が同じなので見た目も同じです"
+
+msgid "the UVs differ ({0} of the old UV area is still covered): the pixels stay as they are, but they will look different on the model"
+msgstr "UV が違います（前の UV の範囲のうち {0} が重なります）。画素はそのままですが、モデルの上の見た目は変わります"
+
+msgid "… and {0} more."
+msgstr "… ほか {0} 件。"
+
+msgid "Materials of the new model without a texture set: {0}."
+msgstr "テクスチャセットの無い、新しいモデルのマテリアル: {0}。"
+
+msgid "Paths on the model:"
+msgstr "モデルの上のパス:"
+
+msgid "redrawn on the new mesh"
+msgstr "新しいメッシュに描き直します"
+
+msgid "{0} sample(s) could not be projected onto the new surface"
+msgstr "{0} か所は新しい面に投影できませんでした"
+
+msgid "kept as pixels (rasterized), because {0}"
+msgstr "画素として残します（ラスタライズ）。理由: {0}"
+
+msgid "left as it is, bound to the old model, because {0}"
+msgstr "前のモデルに結び付いたまま残します。理由: {0}"
+
+msgid "the layer is locked"
+msgstr "レイヤーがロックされています"
+
+msgid "The model is posed: the paths were matched on its posed shape. Reset the pose first to match them on the shape it was loaded with."
+msgstr "モデルにポーズを当てています。パスはポーズを当てた形で対応を取りました。読み込んだときの形で取るには、先にポーズを戻してください。"
+
+msgid "{0} baked mesh map(s) become stale; bake them again for the new model. Generators and projections that read them pass their input through until then."
+msgstr "ベイクしたメッシュマップ {0} 枚が古くなります。新しいモデルで焼き直してください。それまで、そのマップを読む Generator と投影は入力をそのまま通します。"
+
+msgid "The pose and BlendShapes start from the new model's. Shape gradients and projections keep their place relative to the model root."
+msgstr "ポーズと BlendShape は新しいモデルのものから始まります。形のグラデーションと投影は、モデルのルートに対する置き場のまま残ります。"
+
+msgid "Changing the model cannot be undone (the saved file keeps the old model until you save). The painted pixels and each texture set's undo history are kept; redrawn and rasterized paths are one undo step in their texture set. The model's assets are not changed."
+msgstr "モデルの差し替えは Undo できません（保存したファイルには、次に保存するまで前のモデルが残ります）。描いた画素と、テクスチャセットごとの Undo の履歴は残ります。描き直した・ラスタライズしたパスは、そのテクスチャセットの Undo の 1 回になります。モデルのアセットは変えません。"
+
+msgid "The new model has {0} material(s) without a texture set: {1}. Add an empty texture set for each (the size and channels of the open one)?"
+msgstr "新しいモデルに、テクスチャセットの無いマテリアルが {0} 個あります: {1}。それぞれに空のテクスチャセットを足しますか（大きさとチャンネルは開いているものと同じ）？"
+
+msgid "A project has at most {0} texture sets; only the first {1} are added."
+msgstr "1 つのプロジェクトのテクスチャセットは {0} 個までです。最初の {1} 個だけを足します。"
+
+msgid "The model was not changed; nothing changed."
+msgstr "モデルは差し替えませんでした。何も変えていません。"
+
+msgid "The model {0} could not be read; nothing changed."
+msgstr "モデル {0} を読めませんでした。何も変えていません。"
+
+msgid "The mesh-map bake was stopped because the model changed."
+msgstr "モデルが変わったので、メッシュマップのベイクを止めました。"
+
+msgid "The model changed while it was being swapped; the texture sets were matched again by their materials."
+msgstr "差し替えの途中でモデルが変わったので、テクスチャセットをマテリアルで対応させ直しました。"
+
+msgid "The paths could not be redrawn ({0}); they are kept as pixels."
+msgstr "パスを描き直せませんでした（{0}）。画素として残します。"
+
+msgid "Reloaded the model {0}."
+msgstr "モデル {0} を読み直しました。"
+
+msgid "Changed the model to {0}."
+msgstr "モデルを {0} に差し替えました。"
+
+msgid "{0} texture set(s) have other UVs; their pixels are unchanged."
+msgstr "{0} 個のテクスチャセットは UV が変わりました（画素はそのまま）。"
+
+msgid "{0} texture set(s) are not in the new model."
+msgstr "{0} 個のテクスチャセットは新しいモデルにありません。"
+
+msgid "{0} path(s) redrawn."
+msgstr "パス {0} 本を描き直しました。"
+
+msgid "{0} path(s) kept as pixels."
+msgstr "パス {0} 本を画素として残しました。"
+
+msgid "Added {0} texture set(s)."
+msgstr "テクスチャセットを {0} 個足しました。"
+
+msgid "Change the model and the texture set sizes in two steps (apply the model first); nothing changed."
+msgstr "モデルの差し替えとテクスチャセットの大きさの変更は、2 回に分けてください（先にモデルを適用）。何も変えていません。"
+
+# ── プロジェクト設定の画面 ──
+
+msgid "Reload the model from its asset when you apply (after exporting the FBX again). The texture sets stay on their materials."
+msgstr "適用するときにモデルをアセットから読み直す（FBX を書き出し直した後に）。テクスチャセットはそれぞれのマテリアルのまま。"
+
+msgid "The model is reloaded when you apply."
+msgstr "適用するとモデルを読み直します。"
+
+msgid "The model is changed when you apply."
+msgstr "適用するとモデルを差し替えます。"
+
+msgid "Texture sets keep their pixels and move to the materials below (matched by asset, then by name); you confirm the changes first."
+msgstr "テクスチャセットは画素を保ったまま、下のマテリアルに付け替わります（アセット、次に名前で対応）。先に変わる所を確かめます。"
+
+msgid "{0} not in this model."
+msgstr "{0} 個はこのモデルにありません。"
+
+msgid "{0} material(s) without a texture set."
+msgstr "テクスチャセットの無いマテリアルが {0} 個。"
+
+# ── パスの付け直しの理由 ──
+
+msgid "the path was drawn on another model"
+msgstr "パスは別のモデルに描かれています"
+
+msgid "its material is not in the new model"
+msgstr "そのマテリアルが新しいモデルにありません"
+
+msgid "point {0} refers to a triangle the model does not have"
+msgstr "点 {0} はモデルに無い三角形を指しています"
+
+msgid "finding point {0} on the new mesh took too long"
+msgstr "点 {0} を新しいメッシュの上で探すのに時間が掛かりすぎました"
+
+msgid "point {0} has no surface of its material within {1} on the new mesh"
+msgstr "点 {0} の {1} 以内に、新しいメッシュのそのマテリアルの面がありません"

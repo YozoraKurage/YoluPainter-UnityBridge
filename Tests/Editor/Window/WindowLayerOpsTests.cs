@@ -165,7 +165,7 @@ namespace Yozolab.YoluPainter.Tests
             Key(window, KeyCode.C, Ctrl);
             Assert.That(PainterClipboard.Content, Is.Not.Null, window.StatusMessage);
 
-            var hair = window.AddTextureSet(1);
+            var hair = window.AddTextureSet(-1); // モデルが無い: マテリアルに結び付けないセット
             Assert.That(window.Document, Is.SameAs(hair.Document));
             Key(window, KeyCode.V, Ctrl);
             var pasted = hair.Document.GetLayer(window.SelectedLayer);

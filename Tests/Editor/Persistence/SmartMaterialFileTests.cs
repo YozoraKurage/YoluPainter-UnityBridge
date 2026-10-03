@@ -166,7 +166,7 @@ namespace Yozolab.YoluPainter.Tests
             var d = new PaintDocument(32, 32, 16, id: A); d.AddLayer("L");
             var files = new Dictionary<string, byte[]>(StringComparer.Ordinal)
             {
-                { YlpFormat.ProjectName, YlpFormat.WriteProject(new YlpProjectInfo(new[] { new YlpTextureSetInfo(A, "Body", 0) }, A)) },
+                { YlpFormat.ProjectName, YlpFormat.WriteProject(new YlpProjectInfo(new[] { new YlpTextureSetInfo(A, "Body", YlpMaterialRef.PendingSlot(0)) }, A)) },
                 { YlpFormat.SetEntry(A, YlpArchive.NativeName), DocumentBinary.Write(d) },
             };
             ResourceIndex.AddTo(files, resources);
@@ -260,9 +260,9 @@ namespace Yozolab.YoluPainter.Tests
             var opened = YlpFormat.Open(snapshot);
             Assert.That(opened.Info.Format, Is.EqualTo(4)); Assert.That(opened.Upgraded, Is.True);
             Assert.That(opened.UnknownEntries, Is.Empty); Assert.That(opened.Notes, Is.Empty);
-            Assert.That(opened.Files.Keys, Is.EquivalentTo(snapshot.Keys.Where(k => k != YlpFormat.InfoName)), "the step 4 → 5 moves nothing");
-            foreach (var entry in opened.Files) Assert.That(entry.Value, Is.EqualTo(snapshot[entry.Key]), entry.Key);
-            Assert.That(opened.Project.Sets.Select(s => (s.Name, s.MaterialSlot)), Is.EqualTo(new[] { ("Texture Set 1", 0), ("Trim", 1) }));
+            Assert.That(opened.Files.Keys, Is.EquivalentTo(snapshot.Keys.Where(k => k != YlpFormat.InfoName)), "the steps 4 → 7 move nothing");
+            foreach (var entry in opened.Files) if (entry.Key != YlpFormat.ProjectName) Assert.That(entry.Value, Is.EqualTo(snapshot[entry.Key]), entry.Key + " (project.json changes in 6 → 7)");
+            Assert.That(opened.Project.Sets.Select(s => (s.Name, s.Material)), Is.EqualTo(new[] { ("Texture Set 1", YlpMaterialRef.PendingSlot(0)), ("Trim", YlpMaterialRef.PendingSlot(1)) }));
             var loaded = ResourceIndex.Load(opened.Files, opened.Resources);
             Assert.That(loaded.Images.Select(r => (r.Name, r.Origin.Kind)), Is.EqualTo(new[] { ("UV checker", ResourceOriginKind.BuiltIn), ("Swatch", ResourceOriginKind.Library) }));
             Assert.That(loaded.Smart, Is.Empty);

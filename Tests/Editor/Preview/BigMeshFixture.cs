@@ -10,6 +10,14 @@ namespace Yozolab.YoluPainter.Tests
     {
         internal readonly GameObject Root = new GameObject("Synthetic large model");
         readonly List<Mesh> meshes = new List<Mesh>();
+        // スロットごとに別のマテリアル（テクスチャセットはマテリアルごとなので、どのスロットも自分のセットになる）
+        readonly List<Material> materials = new List<Material>();
+        Material[] Materials(int count)
+        {
+            var list = new Material[count];
+            for (int i = 0; i < count; i++) { var m = new Material(Shader.Find("Unlit/Texture")) { name = "Synthetic material " + materials.Count, hideFlags = HideFlags.HideAndDontSave }; materials.Add(m); list[i] = m; }
+            return list;
+        }
         internal BigMeshFixture(bool skinned = false)
         {
             for (int r = 0; r < 24; r++)
@@ -38,10 +46,11 @@ namespace Yozolab.YoluPainter.Tests
                     var weights = new BoneWeight[vertices.Count]; for (int i = 0; i < weights.Length; i++) weights[i] = new BoneWeight { boneIndex0 = 0, weight0 = 1 };
                     mesh.boneWeights = weights; mesh.bindposes = new[] { Matrix4x4.identity };
                     var skin = go.AddComponent<SkinnedMeshRenderer>(); skin.sharedMesh = mesh; skin.bones = new[] { go.transform }; skin.rootBone = go.transform;
+                    skin.sharedMaterials = Materials(mesh.subMeshCount);
                 }
-                else { go.AddComponent<MeshFilter>().sharedMesh = mesh; go.AddComponent<MeshRenderer>(); }
+                else { go.AddComponent<MeshFilter>().sharedMesh = mesh; go.AddComponent<MeshRenderer>().sharedMaterials = Materials(mesh.subMeshCount); }
             }
         }
-        public void Dispose() { Object.DestroyImmediate(Root); foreach (var m in meshes) Object.DestroyImmediate(m); }
+        public void Dispose() { Object.DestroyImmediate(Root); foreach (var m in meshes) Object.DestroyImmediate(m); foreach (var m in materials) Object.DestroyImmediate(m); }
     }
 }

@@ -57,10 +57,10 @@ namespace Yozolab.YoluPainter.Editor
             if (stale) NoteRow(rows, L.Tr("These manual colours belong to another model. Reset them before editing or baking ID."), NoteKind.Warning);
             else
             {
-                if (idEditorParts == null || idEditorSlot != materialSlot)
+                if (idEditorParts == null || idEditorSlot != CurrentMaterialGroup)
                 {
                     idEditorParts = Enumerable.Range(0, index.Input.TriangleCount).Where(t => PickSlotInCurrentSet(preview.Geometry.Triangles[t].MaterialSlot))
-                        .Select(t => index.Parts[t]).Distinct().OrderBy(p => p).ToArray(); idEditorSlot = materialSlot;
+                        .Select(t => index.Parts[t]).Distinct().OrderBy(p => p).ToArray(); idEditorSlot = CurrentMaterialGroup;
                 }
                 var parts = idEditorParts;
                 if (parts.Length > 0)

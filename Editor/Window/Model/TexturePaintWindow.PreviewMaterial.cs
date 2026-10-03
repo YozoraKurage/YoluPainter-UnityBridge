@@ -68,7 +68,7 @@ namespace Yozolab.YoluPainter.Editor
             set = SetOrCurrent(set);
             string refused = MaterialChoiceRefusal() ?? PreviewMaterialRefusal(material);
             if (refused != null) { message = refused; return false; }
-            if (preview != null && preview.HasModel && material == preview.SourceMaterial(set.MaterialSlot)) return UseOriginalMaterial(set);
+            if (preview != null && preview.HasModel && material == preview.SourceMaterial(set.FirstSlot)) return UseOriginalMaterial(set);
             AssetDatabase.TryGetGUIDAndLocalFileIdentifier(material, out string guid, out long fileId);
             var choice = EnsureChoice(set);
             choice.source = PreviewMaterialSource.Material; choice.materialGuid = guid; choice.materialFileId = fileId; choice.shaderName = "";
@@ -157,7 +157,7 @@ namespace Yozolab.YoluPainter.Editor
         internal Material ViewMaterialOf(TextureSet set)
         {
             if (preview == null || !preview.HasModel || set == null) return null;
-            return ResolveChoice(set, MaterialChoice(set), out _) ?? preview.SourceMaterial(set.MaterialSlot);
+            return ResolveChoice(set, MaterialChoice(set), out _) ?? preview.SourceMaterial(set.FirstSlot);
         }
 
         /// <summary>選びのマテリアル（元のマテリアルを使うなら null）。消えていれば null と理由。</summary>
@@ -235,7 +235,7 @@ namespace Yozolab.YoluPainter.Editor
             var notes = new List<string>();
             foreach (var set in textureSets)
             {
-                if (set.MaterialSlot >= preview.MaterialSlotCount) continue;
+                if (!set.InModel) continue;
                 var choice = MaterialChoice(set);
                 var material = ResolveChoice(set, choice, out string gone);
                 if (gone != null)
@@ -244,7 +244,7 @@ namespace Yozolab.YoluPainter.Editor
                     choice.source = PreviewMaterialSource.Original; choice.materialGuid = ""; choice.materialFileId = 0; choice.shaderName = "";
                     DropMadeMaterial(set);
                 }
-                preview.SetMaterialChoice(set.MaterialSlot, material, choice?.routes);
+                foreach (int slot in set.Slots) preview.SetMaterialChoice(slot, material, choice?.routes); // マテリアルを使う全部のスロット
             }
             if (madeMaterials != null)
                 foreach (var m in madeMaterials.Where(m => m != null && !textureSets.Any(s => SetKey(s) == m.set)).ToList())
@@ -263,7 +263,7 @@ namespace Yozolab.YoluPainter.Editor
                 case PreviewMaterialSource.Shader: return L.Tr("Shader: {0}", choice.shaderName);
                 default:
                 {
-                    var own = preview != null && preview.HasModel ? preview.SourceMaterial(set.MaterialSlot) : null;
+                    var own = preview != null && preview.HasModel ? preview.SourceMaterial(set.FirstSlot) : null;
                     return own != null ? L.Tr("Own material ({0})", own.name) : L.Tr("Own material (none)");
                 }
             }

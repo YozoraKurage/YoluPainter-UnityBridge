@@ -33,7 +33,7 @@ namespace Yozolab.YoluPainter.Editor
                     EditorGUILayout.LabelField("Texture Sets", sets.Length.ToString());
                     EditorGUI.indentLevel++;
                     foreach (var set in sets)
-                        EditorGUILayout.LabelField(set.name + (set.current ? " (current)" : ""), "slot " + set.materialSlot + " · " + set.width + " x " + set.height + " · "
+                        EditorGUILayout.LabelField(set.name + (set.current ? " (current)" : ""), set.material + " · " + set.width + " x " + set.height + " · "
                             + (set.channels.Length == 0 ? "(none painted)" : string.Join(", ", set.channels.Select(c => c.ToString()))));
                     EditorGUI.indentLevel--;
                 }

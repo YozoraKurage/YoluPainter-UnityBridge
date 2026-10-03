@@ -21,7 +21,7 @@ namespace Yozolab.YoluPainter.Editor
         SurfaceGeometry cloneGeometry;
         internal bool HasSurfaceCloneSource => HasCloneSource && cloneOnSurface;
         // テクスチャセットのマテリアル集合への移行時は、この関数を共通の問い合わせに置き換える。
-        bool IsEffectSurfaceTarget(SurfaceHit hit) => hit.MaterialSlot == materialSlot;
+        bool IsEffectSurfaceTarget(SurfaceHit hit) => PaintsSlot(hit.MaterialSlot);
 
         internal bool HasCloneSource => ReferenceEquals(cloneDocument, document) && cloneWidth == document.Width && cloneHeight == document.Height && cloneLayer == selectedLayer && cloneMask == EditingMask && (!cloneOnSurface || ReferenceEquals(cloneGeometry, preview.Geometry));
         internal Vector2 CloneSource => cloneSource;

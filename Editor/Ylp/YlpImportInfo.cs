@@ -23,11 +23,12 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>取り込みのエラーの理由（成功したときは空）。</summary>
         public string error = "";
 
-        /// <summary>1 つのテクスチャセットの名前・スロット・大きさ・使っているチャンネル。</summary>
+        /// <summary>1 つのテクスチャセットの名前・マテリアル・大きさ・使っているチャンネル。</summary>
         [Serializable] internal sealed class TextureSetSummary
         {
             public string name = "";
-            public int materialSlot;
+            /// <summary>描くマテリアル（名前。マテリアルの無いスロットは Unassigned、形式 5 までのファイルや未解決は "slot n"）。</summary>
+            public string material = "";
             public int width, height;
             public PaintChannel[] channels = new PaintChannel[0];
             /// <summary>合成済みの画像が無い・使えないため、正本から読んだか。</summary>

@@ -84,7 +84,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 if (n == 1)
                 {
                     var t = geometry.Triangles[points[0].Triangle];
-                    Dab(new SurfaceHit { SnapshotRevision = geometry.SnapshotRevision, RendererIndex = t.RendererIndex, MaterialSlot = t.MaterialSlot, TriangleIndex = points[0].Triangle,
+                    Dab(new SurfaceHit { SnapshotRevision = geometry.SnapshotRevision, RendererIndex = t.RendererIndex, MaterialSlot = t.MaterialSlot, Material = t.Material, TriangleIndex = points[0].Triangle,
                         Position = positions[0], Normal = normals[0], Barycentric = new Vector3((float)(1 - points[0].U - points[0].V), (float)points[0].U, (float)points[0].V) }, points[0].Pressure);
                 }
                 else if (n > 1)

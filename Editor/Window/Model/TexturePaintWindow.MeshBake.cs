@@ -106,10 +106,11 @@ namespace Yozolab.YoluPainter.Editor
             if (refusal != null) return null;
             SyncCurrentSet();
             if (!textureSets.Contains(set)) { refusal = L.Tr("The texture set {0} is no longer in the project.", set.Name); return null; }
-            if (set.MaterialSlot >= preview.MaterialSlotCount) { refusal = L.Tr("The texture set {0} paints material slot {1}, which the loaded model does not have.", set.Name, set.MaterialSlot); return null; }
+            if (!set.InModel) { refusal = L.Tr("The texture set {0} paints a material the loaded model does not have.", set.Name); return null; }
             var d = set.Document;
             var settings = meshBakeSettings.WithIdContext(CurrentMeshBakeInput(), CurrentHighPolyInput(), d.IdColors);
-            settings.Width = d.Width; settings.Height = d.Height; settings.TargetSlot = set.MaterialSlot;
+            // マテリアルを使う全部のスロットを焼く（1 つなら前と同じ条件の鍵）
+            settings.Width = d.Width; settings.Height = d.Height; settings.TargetSlot = set.FirstSlot; settings.TargetSlots = set.Slots.Count > 1 ? set.Slots.ToArray() : null;
             try { settings.Validate(); }
             catch (ArgumentException ex) { refusal = L.Tr("Mesh maps were not baked: {0}", ex.Message); return null; }
             return new MeshBakeJob(settings, CurrentMeshBakeInput(), CurrentHighPolyInput(), new MeshBakeBudget { MaxBytes = PainterSettings.StrokeBudgetBytes },
@@ -305,7 +306,7 @@ namespace Yozolab.YoluPainter.Editor
             if (!textureSets.Contains(job.Set)) return L.Tr("the texture set");
             var d = job.Set.Document;
             if (!ReferenceEquals(d, job.Document) || d.Width != job.Settings.Width || d.Height != job.Settings.Height) return L.Tr("the document");
-            if (job.Set.MaterialSlot != job.Settings.TargetSlot) return L.Tr("the material slot");
+            if (!job.Set.Slots.SequenceEqual(job.Settings.Targets() ?? new int[0])) return L.Tr("the material slot");
             if (preview == null || !ReferenceEquals(preview.Geometry, job.Geometry)) return L.Tr("the model or its pose");
             if (!ReferenceEquals(CurrentHighPolyInput(), job.Reference)) return L.Tr("the high poly");
             return null;
@@ -336,13 +337,15 @@ namespace Yozolab.YoluPainter.Editor
         internal readonly struct MeshBakeTarget
         {
             public readonly Guid Id;
-            public readonly int Slot, Width, Height;
+            public readonly int Width, Height;
+            /// <summary>セットが受け持つスロット（モデルに無ければ空）。</summary>
+            public readonly IReadOnlyList<int> Slots;
             public readonly string Name;
             /// <summary>焼くか（一覧のチェック）。</summary>
             public readonly bool Bake;
             /// <summary>チェックを外せないか（プロジェクトにテクスチャセットが 1 つしかない・チェックしたものが最後の 1 つ）。</summary>
             public readonly bool Fixed;
-            public MeshBakeTarget(Guid id, int slot, string name, int width, int height, bool bake, bool @fixed) { Id = id; Slot = slot; Name = name; Width = width; Height = height; Bake = bake; Fixed = @fixed; }
+            public MeshBakeTarget(Guid id, IReadOnlyList<int> slots, string name, int width, int height, bool bake, bool @fixed) { Id = id; Slots = slots; Name = name; Width = width; Height = height; Bake = bake; Fixed = @fixed; }
         }
 
         /// <summary>焼くテクスチャセットの一覧（プロジェクトのセットの並び。チェックは <see cref="SetMeshBakeTarget"/>、既定は全部）。</summary>
@@ -353,14 +356,15 @@ namespace Yozolab.YoluPainter.Editor
             return textureSets.Select(s =>
             {
                 bool bake = !meshBakeSkipped.Contains(s.Id);
-                return new MeshBakeTarget(s.Id, s.MaterialSlot, s.Name, s.Document.Width, s.Document.Height, bake, textureSets.Count == 1 || bake && checkedCount == 1);
+                return new MeshBakeTarget(s.Id, s.Slots, s.Name, s.Document.Width, s.Document.Height, bake, textureSets.Count == 1 || bake && checkedCount == 1);
             }).ToList();
         }
 
-        /// <summary>スロットを描くテクスチャセットを焼くかどうかを変える。最後にチェックしたセットは外さない（焼くものが無い状態を作らない）。</summary>
-        internal void SetMeshBakeTarget(int slot, bool bake)
+        /// <summary>テクスチャセットを焼くかどうかを変える。最後にチェックしたセットは外さない（焼くものが無い状態を作らない）。</summary>
+        internal void SetMeshBakeTarget(Guid id, bool bake)
         {
-            var set = SetOfSlot(slot); if (set == null) return;
+            SyncCurrentSet();
+            var set = textureSets.FirstOrDefault(s => s.Id == id); if (set == null) return;
             if (bake) meshBakeSkipped.Remove(set.Id);
             else if (textureSets.Count(s => s != set && !meshBakeSkipped.Contains(s.Id)) > 0) meshBakeSkipped.Add(set.Id);
             Repaint(); RepaintMeshBakeWindow();
@@ -402,7 +406,8 @@ namespace Yozolab.YoluPainter.Editor
             // 焼くテクスチャセット
             var sets = new UiRows(new Rect(r.x, head.yMax, r.width, 1e6f), 8);
             PaintGui.GroupLabel(sets.Row(16), L.Tr("Texture Sets to Bake"));
-            foreach (var target in MeshBakeTargets()) DrawMeshBakeTarget(sets.Row(BakeListRow, 2), host, target, baking);
+            var targets = MeshBakeTargets();
+            for (int i = 0; i < targets.Count; i++) DrawMeshBakeTarget(sets.Row(BakeListRow, 2), host, targets[i], i, baking);
             float top = Mathf.Round(head.yMax + sets.Used + 6);
             // 左の一覧・右の設定・下の帯
             var foot = new Rect(r.x, r.yMax - BakeFooterHeight, r.width, BakeFooterHeight);
@@ -443,12 +448,12 @@ namespace Yozolab.YoluPainter.Editor
             if (overflow) PaintGui.Rounded(new Rect(viewport.xMax - 6, viewport.y + viewport.height * scroll.y / contentHeight, 4, viewport.height * viewport.height / contentHeight), PaintTheme.ControlActive, 2);
         }
 
-        void DrawMeshBakeTarget(Rect row, MeshBakeWindow host, MeshBakeTarget target, bool baking)
+        void DrawMeshBakeTarget(Rect row, MeshBakeWindow host, MeshBakeTarget target, int index, bool baking)
         {
             var check = new Rect(row.x + 4, row.y, 22, row.height);
-            bool next = PaintGui.Toggle(host.Spot("bake.set." + target.Slot, check), "", target.Bake,
-                textureSets.Count == 1 ? L.Tr("This project has one texture set: the material slot the document paints.") : target.Fixed ? L.Tr("At least one texture set stays checked.") : L.Tr("Bake this texture set"), !baking && !target.Fixed);
-            if (next != target.Bake) SetMeshBakeTarget(target.Slot, next);
+            bool next = PaintGui.Toggle(host.Spot("bake.set." + index, check), "", target.Bake,
+                textureSets.Count == 1 ? L.Tr("This project has one texture set: the material the document paints.") : target.Fixed ? L.Tr("At least one texture set stays checked.") : L.Tr("Bake this texture set"), !baking && !target.Fixed);
+            if (next != target.Bake) SetMeshBakeTarget(target.Id, next);
             string size = target.Width + " × " + target.Height;
             float sizeWidth = PaintGui.TextWidth(size, PaintTheme.LabelDim) + 4;
             PaintGui.Icon(new Rect(check.xMax + 2, row.y, 18, row.height), "texture", PaintTheme.TextDim, 15);
@@ -456,7 +461,8 @@ namespace Yozolab.YoluPainter.Editor
             bool current = target.Id == currentSet.Id;
             PaintGui.Text(new Rect(nameX, row.y, row.xMax - sizeWidth - 8 - nameX, row.height), PaintGui.Fit(target.Name, row.xMax - sizeWidth - 8 - nameX, current ? PaintTheme.LabelBold : PaintTheme.Label, false), current ? PaintTheme.LabelBold : PaintTheme.Label);
             PaintGui.Text(new Rect(row.xMax - sizeWidth, row.y, sizeWidth, row.height), size, StateStyle);
-            PaintGui.Tooltip(new Rect(nameX, row.y, row.xMax - nameX, row.height), target.Name + " · " + SlotName(target.Slot) + "\n" + L.Tr("Mesh maps are baked at the document size, for the material slot this document paints"));
+            var set = textureSets.FirstOrDefault(s => s.Id == target.Id);
+            PaintGui.Tooltip(new Rect(nameX, row.y, row.xMax - nameX, row.height), target.Name + " · " + (set != null ? SetMaterialText(set) : "") + "\n" + L.Tr("Mesh maps are baked at the document size, for every mesh that uses this texture set's material"));
         }
 
         // ───────── 左の一覧 ─────────
@@ -528,8 +534,8 @@ namespace Yozolab.YoluPainter.Editor
             // 出力
             PaintGui.GroupLabel(rows.Row(16), L.TrIn("mesh map", "Output"));
             var bakeSets = CheckedBakeSets();
-            PaintGui.ValueBox(rows.Row(), L.TrIn("mesh bake", "Size"), string.Join(", ", bakeSets.Select(t => t.Document.Width + " × " + t.Document.Height).Distinct()), BakeLabelWidth, null, L.Tr("Mesh maps are baked at the document size, for the material slot this document paints"));
-            PaintGui.ValueBox(rows.Row(), L.Tr("Texture Set"), textureSets.Count == 1 ? SlotName(materialSlot) : string.Join(", ", bakeSets.Select(t => t.Name)), BakeLabelWidth, null, null, true);
+            PaintGui.ValueBox(rows.Row(), L.TrIn("mesh bake", "Size"), string.Join(", ", bakeSets.Select(t => t.Document.Width + " × " + t.Document.Height).Distinct()), BakeLabelWidth, null, L.Tr("Mesh maps are baked at the document size, for every mesh that uses this texture set's material"));
+            PaintGui.ValueBox(rows.Row(), L.Tr("Texture Set"), textureSets.Count == 1 ? SetMaterialText(currentSet) : string.Join(", ", bakeSets.Select(t => t.Name)), BakeLabelWidth, null, null, true);
             s.Padding = PaintGui.KeepIntSlider(host.Spot("bake.padding", rows.Row()), L.TrIn("mesh map", "Padding"), s.Padding, 0, MeshBakeSettings.MaxPadding, " px", L.Tr("Texels the islands are extended into the empty space around them (never over another island)"));
             BakeChoice(host, rows.Row(), L.TrIn("mesh map", "Antialiasing"), s.Antialiasing, new[] { 1, 2, 3, 4 }, n => n == 1 ? L.Tr("None") : n + " × " + n, n => meshBakeSettings.Antialiasing = n,
                 L.Tr("Subsamples per texel side (the bake takes n² times as long)"));
@@ -601,7 +607,7 @@ namespace Yozolab.YoluPainter.Editor
             else
             {
                 var check = map.Provenance.Check(expected);
-                NoteRow(rows, L.Tr("Baked map: {0} ({1} × {2}, slot {3})", MeshMapStateName(check.State), map.Width, map.Height, map.Provenance.TargetSlot), check.State == MeshMapState.Stale ? NoteKind.Warning : NoteKind.Info);
+                NoteRow(rows, L.Tr("Baked map: {0} ({1} × {2}, slot {3})", MeshMapStateName(check.State), map.Width, map.Height, SlotList(map.Provenance)), check.State == MeshMapState.Stale ? NoteKind.Warning : NoteKind.Info);
                 if (check.State == MeshMapState.Stale) NoteRow(rows, L.Tr("{0} is stale and is not used: {1} Bake again to update it.", MeshMapLabel(kind), string.Join(" ", check.Reasons).Replace(";", "; ")), NoteKind.Warning);
                 else if (check.State == MeshMapState.Unverified) NoteRow(rows, L.Tr("No model is loaded, so the maps cannot be checked against it."), NoteKind.Info);
             }

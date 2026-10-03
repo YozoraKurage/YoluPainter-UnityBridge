@@ -23,6 +23,8 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         public int Width { get; }
         public int Height { get; }
         public int TargetSlot { get; }
+        /// <summary>焼いたスロットの並び（昇順。テクスチャセットのマテリアルを使うスロットの全部）。全部のスロットを焼いたなら空。</summary>
+        public IReadOnlyList<int> TargetSlots { get; }
         public int Padding { get; }
         /// <summary>テクセルあたり n×n のサブサンプル。</summary>
         public int Antialiasing { get; }
@@ -38,24 +40,31 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         public string ConditionKey { get; }
 
         internal MeshMapProvenance(MeshMapKind kind, int engineVersion, string meshHash, string topologyHash, int uvChannel, int width, int height, int targetSlot, int padding,
-            int antialiasing, string settingsKey, string space, string pose, string source, double[] boundsMin, double[] boundsMax)
+            int antialiasing, string settingsKey, string space, string pose, string source, double[] boundsMin, double[] boundsMax, int[] targetSlots = null)
         {
+            var slots = targetSlots != null && targetSlots.Length > 0 ? (int[])targetSlots.Clone() : targetSlot >= 0 ? new[] { targetSlot } : new int[0];
+            if (slots.Length > 0 && slots[0] != targetSlot) throw new ArgumentException("The target slot must be the first of the target slots.", nameof(targetSlots));
+            TargetSlots = Array.AsReadOnly(slots);
             Antialiasing = antialiasing;
             Kind = kind; EngineVersion = engineVersion; MeshHash = meshHash ?? ""; TopologyHash = topologyHash ?? ""; UvChannel = uvChannel; Width = width; Height = height;
             TargetSlot = targetSlot; Padding = padding; SettingsKey = settingsKey ?? ""; Space = space ?? ""; Pose = pose ?? ""; Source = source ?? "";
             this.boundsMin = (double[])boundsMin.Clone(); this.boundsMax = (double[])boundsMax.Clone();
-            ConditionKey = ComputeConditionKey(kind, engineVersion, MeshHash, uvChannel, width, height, targetSlot, padding, antialiasing, SettingsKey, Space, Pose, Source);
+            ConditionKey = ComputeConditionKey(kind, engineVersion, MeshHash, uvChannel, width, height, targetSlot, padding, antialiasing, SettingsKey, Space, Pose, Source, slots);
         }
+
+        static string Slots(IReadOnlyList<int> slots) => slots.Count == 0 ? "(all)" : string.Join(", ", slots);
 
         /// <summary>位置のマップの正規化に使った境界箱（スナップショットの空間）。</summary>
         public double BoundsMin(int axis) => boundsMin[axis];
         public double BoundsMax(int axis) => boundsMax[axis];
 
+        /// <summary>スロットが 2 つ以上なら並びも鍵に入れる（1 つなら前と同じ鍵: マテリアルごとのセットにする前に焼いたマップが古くならない）。</summary>
         internal static string ComputeConditionKey(MeshMapKind kind, int engineVersion, string meshHash, int uvChannel, int width, int height, int targetSlot,
-            int padding, int antialiasing, string settingsKey, string space, string pose, string source)
+            int padding, int antialiasing, string settingsKey, string space, string pose, string source, IReadOnlyList<int> targetSlots = null)
         {
             string text = "kind=" + kind + "\nengine=" + engineVersion + "\nmesh=" + meshHash + "\nuv=" + uvChannel + "\nsize=" + width + "x" + height
-                + "\nslot=" + targetSlot + "\npadding=" + padding + "\nantialiasing=" + antialiasing + "\nsettings=" + settingsKey + "\nspace=" + space + "\npose=" + pose + "\nsource=" + source + "\n";
+                + "\nslot=" + targetSlot + "\npadding=" + padding + "\nantialiasing=" + antialiasing + "\nsettings=" + settingsKey + "\nspace=" + space + "\npose=" + pose + "\nsource=" + source + "\n"
+                + (targetSlots != null && targetSlots.Count > 1 ? "slots=" + string.Join(",", targetSlots) + "\n" : "");
             using (var sha = SHA256.Create())
             {
                 var hex = new StringBuilder(64);
@@ -77,7 +86,13 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                 reasons.Add(Source == MeshBaker.Source ? "baked without a high-poly reference; one is chosen now." : expected.ReferenceHash == null ? "baked from a high-poly reference; none is chosen now."
                     : "the high-poly reference or its projection settings changed since the bake.");
             if (Width != expected.Width || Height != expected.Height) reasons.Add("baked at " + Width + "×" + Height + ", the document is " + expected.Width + "×" + expected.Height + ".");
-            if (TargetSlot != expected.TargetSlot) reasons.Add("baked for material slot " + TargetSlot + ", the document targets slot " + expected.TargetSlot + ".");
+            var wantedSlots = expected.Targets();
+            // モデルが無ければスロットは比べない（照合できないので Unverified）
+            if (expected.MeshHash == null) { }
+            else if (expected.TargetSlot < -1 && (expected.TargetSlots == null || expected.TargetSlots.Length == 0)) reasons.Add("the texture set's material is not in the loaded model.");
+            else if (!TargetSlots.SequenceEqual(wantedSlots))
+                reasons.Add(TargetSlots.Count <= 1 && wantedSlots.Length <= 1 ? "baked for material slot " + TargetSlot + ", the document targets slot " + expected.TargetSlot + "."
+                    : "baked for material slots " + Slots(TargetSlots) + ", the texture set paints slots " + Slots(wantedSlots) + ".");
             if (UvChannel != expected.UvChannel) reasons.Add("baked from UV" + UvChannel + ", the document uses UV" + expected.UvChannel + ".");
             if (expected.Settings != null)
             {
