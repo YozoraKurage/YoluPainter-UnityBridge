@@ -772,3 +772,6 @@ msgstr "カラー比較（明）"
 msgctxt "blend mode"
 msgid "Pass Through"
 msgstr "通過"
+
+msgid "Reduced preview"
+msgstr "縮小表示"

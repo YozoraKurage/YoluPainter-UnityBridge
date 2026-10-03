@@ -59,6 +59,10 @@ namespace Yozolab.YoluPainter.Editor
             /// <summary>CPU の処理（合成・ブラシ・塗りつぶし・変形・フィルター・選択範囲など。Core の CoreParallelism）に使うスレッドの上限。
             /// -1 は自動（論理プロセッサの数）、1 は並列にしない。</summary>
             public int cpuThreads = Automatic;
+            /// <summary>表示の合成（2D の表示と 3D のプレビュー）に 1 回の描画で使う時間の目安（ms）。残りは次の描画に回し、見えている所から
+            /// 少しずつ合成する（窓を止めない。ストロークの所は時間に関わらずその回に出す）。0 は分けない（変わった所を 1 回で全部合成する。
+            /// 以前の動き）。この項目の無い以前のファイルは既定。保存・書き出しの合成には関わらない。</summary>
+            public int displayFrameBudgetMs = DefaultDisplayFrameBudgetMs;
         }
 
         public static readonly int[] Resolutions = { 256, 512, 1024, 2048, 4096 };
@@ -75,6 +79,8 @@ namespace Yozolab.YoluPainter.Editor
         public const int MaxGpuCacheMiB = 16384;
         /// <summary>CPU のスレッドの上限に入れられる最大の数（論理プロセッサの数より多くてもよい。多すぎると遅くなるだけ）。</summary>
         public const int MaxCpuThreads = 1024;
+        /// <summary>表示の合成の 1 回の描画の時間（ms）の既定と上限。</summary>
+        public const int DefaultDisplayFrameBudgetMs = 10, MaxDisplayFrameBudgetMs = 100;
         /// <summary>この GPU のメモリ（MiB）。テストは差し替える。</summary>
         internal static int? GraphicsMemoryMiBOverride;
         public static int GraphicsMemoryMiB => GraphicsMemoryMiBOverride ?? Math.Max(256, SystemInfo.graphicsMemorySize);
@@ -152,6 +158,8 @@ namespace Yozolab.YoluPainter.Editor
         public static CompositorBackend DisplayCompositing { get { Load(); return personal.displayCompositing; } }
         /// <summary>CPU のスレッドの上限の設定（-1 = 自動）。</summary>
         public static int CpuThreads { get { Load(); return personal.cpuThreads; } }
+        /// <summary>表示の合成に 1 回の描画で使う時間（ms。0 = 分けない）。</summary>
+        public static int DisplayFrameBudgetMs { get { Load(); return personal.displayFrameBudgetMs; } }
         /// <summary>このマシンの論理プロセッサの数（自動のときのスレッドの数）。テストは差し替える。</summary>
         internal static int? ProcessorCountOverride;
         public static int ProcessorCount => ProcessorCountOverride ?? Math.Max(1, Environment.ProcessorCount);
@@ -242,6 +250,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (fix) p.displayCompositing = defaultsPersonal.displayCompositing;
             }
             if (p.cpuThreads != Automatic) Range(ref p.cpuThreads, 1, MaxCpuThreads, Automatic, "CPU threads (-1 = automatic)");
+            Range(ref p.displayFrameBudgetMs, 0, MaxDisplayFrameBudgetMs, defaultsPersonal.displayFrameBudgetMs, "Display compositing time per frame (ms, 0 = no limit)");
             if (p.brushImportFolder == null && fix) p.brushImportFolder = "";
             if (s.projectBrushFolder == null && fix) s.projectBrushFolder = "";
             if (p.brushFolder == null && fix) p.brushFolder = "";

@@ -188,6 +188,34 @@ namespace Yozolab.YoluPainter.Tests
             finally { PainterSettings.ProjectRoot = project; CoreParallelism.MaxDegreeOfParallelism = 0; }
         }
 
+        /// <summary>表示の合成に 1 回の描画で使う時間: 既定 10 ms、保存して読み直せる、範囲外（負・100 ms 超）は保存を断り読み込みで既定に
+        /// 直す、0 は分けない（以前の動き）。この項目の無い以前のファイルは既定で、知らせも無い。</summary>
+        [Test] public void TheCompositingTimePerFrameIsSavedAndRangeChecked()
+        {
+            Assert.That(PainterSettings.DisplayFrameBudgetMs, Is.EqualTo(PainterSettings.DefaultDisplayFrameBudgetMs));
+            Assert.That(PainterSettings.DefaultDisplayFrameBudgetMs, Is.EqualTo(10));
+            var personal = PainterSettings.PersonalSettings; personal.displayFrameBudgetMs = 4;
+            PainterSettings.Save(null, personal);
+            Assert.That(File.ReadAllText(PainterSettings.PersonalPath), Does.Contain("\"displayFrameBudgetMs\": 4"));
+            PainterSettings.ProjectRoot = project; // 読み直す
+            Assert.That(PainterSettings.DisplayFrameBudgetMs, Is.EqualTo(4));
+            foreach (int bad in new[] { -1, PainterSettings.MaxDisplayFrameBudgetMs + 1 })
+            {
+                personal.displayFrameBudgetMs = bad;
+                Assert.That(() => PainterSettings.Save(null, personal), Throws.ArgumentException.With.Message.Contains("Display compositing time per frame"), bad.ToString());
+            }
+            Assert.That(PainterSettings.DisplayFrameBudgetMs, Is.EqualTo(4), "a refused save changes nothing");
+            personal.displayFrameBudgetMs = 0; PainterSettings.Save(null, personal);
+            Assert.That(PainterSettings.DisplayFrameBudgetMs, Is.Zero, "0 = no limit");
+            File.WriteAllText(PainterSettings.PersonalPath, "{\"schema\":1,\"displayFrameBudgetMs\":-7,\"recoveryIntervalSeconds\":30}");
+            PainterSettings.ProjectRoot = project;
+            Assert.That(PainterSettings.DisplayFrameBudgetMs, Is.EqualTo(PainterSettings.DefaultDisplayFrameBudgetMs)); Assert.That(PainterSettings.RecoveryIntervalSeconds, Is.EqualTo(30));
+            Assert.That(PainterSettings.Warnings, Has.Some.Contains("Display compositing time per frame"));
+            File.WriteAllText(PainterSettings.PersonalPath, "{\"schema\":1,\"recoveryIntervalSeconds\":20}");
+            PainterSettings.ProjectRoot = project;
+            Assert.That(PainterSettings.DisplayFrameBudgetMs, Is.EqualTo(PainterSettings.DefaultDisplayFrameBudgetMs)); Assert.That(PainterSettings.Warnings, Is.Empty);
+        }
+
         [Test] public void TheSettingsPageListsThreadChoicesUpToThisMachine()
         {
             PainterSettings.ProcessorCountOverride = 12;

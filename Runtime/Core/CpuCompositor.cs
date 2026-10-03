@@ -298,13 +298,34 @@ namespace Yozolab.YoluPainter.Core
         public static void CompositeRegions(PaintDocument document, PaintChannel channel, IReadOnlyList<CompositeJob> jobs)
         {
             if (document == null) throw new ArgumentNullException(nameof(document));
+            var plan = CheckJobs(document, channel, jobs, document.Width, document.Height);
+            Run(document, channel, plan, jobs, false, 1);
+        }
+
+        /// <summary><see cref="CompositeRegions"/> on the grid that keeps one pixel of every step × step square: sampled pixel (sx, sy) is
+        /// exactly the composite at (sx·step + step/2, sy·step + step/2) — every operation is per pixel and filters are evaluated at full
+        /// size before the sample is taken (a cheap preview of a large canvas, 1/step² of the work of compositing it all). Job regions,
+        /// pixels and backdrops are in the sampled grid, (width / step) × (height / step). step must divide the tile size and the
+        /// document's width and height.</summary>
+        public static void CompositeSampledRegions(PaintDocument document, PaintChannel channel, int step, IReadOnlyList<CompositeJob> jobs)
+        {
+            if (document == null) throw new ArgumentNullException(nameof(document));
+            if (step < 1 || document.TileSize % step != 0 || document.Width % step != 0 || document.Height % step != 0)
+                throw new ArgumentOutOfRangeException(nameof(step), "The step must divide the tile size and the document's width and height.");
+            var plan = CheckJobs(document, channel, jobs, document.Width / step, document.Height / step);
+            Run(document, channel, plan, jobs, false, step);
+        }
+
+        /// <summary>Checks jobs for a grid of width × height, looks at the generator inputs and returns the plan.</summary>
+        static List<StackEntry> CheckJobs(PaintDocument document, PaintChannel channel, IReadOnlyList<CompositeJob> jobs, int width, int height)
+        {
             PaintLayer.ValidateChannel(channel);
             if (jobs == null) throw new ArgumentNullException(nameof(jobs));
             var arrays = new HashSet<byte[]>(ReferenceComparer.Instance);
             foreach (var job in jobs)
             {
                 if (job == null) throw new ArgumentNullException(nameof(jobs), "A job is null.");
-                if (job.Width < 0 || job.Height < 0 || job.X < 0 || job.Y < 0 || (long)job.X + job.Width > document.Width || (long)job.Y + job.Height > document.Height)
+                if (job.Width < 0 || job.Height < 0 || job.X < 0 || job.Y < 0 || (long)job.X + job.Width > width || (long)job.Y + job.Height > height)
                     throw new ArgumentOutOfRangeException(nameof(jobs), "A job's region is outside the document.");
                 long bytes = (long)job.Width * job.Height * 4;
                 if (job.Pixels == null || job.Pixels.Length < bytes) throw new ArgumentException("A job's pixels are missing or too short.", nameof(jobs));
@@ -330,7 +351,7 @@ namespace Yozolab.YoluPainter.Core
             var plan = Plan(document, channel);
             foreach (var job in jobs)
                 if (job.Start > plan.Count || job.CaptureAt > plan.Count) throw new ArgumentOutOfRangeException(nameof(jobs), "Start or CaptureAt is past the plan's " + plan.Count + " entries.");
-            Run(document, channel, plan, jobs, false);
+            return plan;
         }
 
         public static byte[] CompositeRegion(PaintDocument document, PaintChannel channel, int x, int y, int width, int height)
@@ -342,7 +363,7 @@ namespace Yozolab.YoluPainter.Core
             var bytes = new byte[checked(width * height * 4)];
             if (width == 0 || height == 0) return bytes;
             document.PollGeneratorInputs(); // Generator が読むメッシュマップが変わっていれば、新しいマップで合成する
-            Run(document, channel, Plan(document, channel), new[] { new CompositeJob(x, y, width, height, bytes) }, true);
+            Run(document, channel, Plan(document, channel), new[] { new CompositeJob(x, y, width, height, bytes) }, true, 1);
             return bytes;
         }
 
@@ -386,6 +407,8 @@ namespace Yozolab.YoluPainter.Core
             public readonly PaintLayer Layer; public readonly byte[][] Pixels, Mask; public readonly bool[] Present; public readonly RasterMask MaskSource;
             public readonly double Opacity; public readonly double[] MaskFactor;
             readonly byte[][] ownPixels, ownMask;
+            /// <summary>The sampled tile (<see cref="CompositeSampledRegions"/>) per slot, made by <see cref="PrepareSampling"/>.</summary>
+            byte[][] sampledPixels, sampledMask;
             /// <summary>Read in place: the raster surface without active filters, and the mask's surface without mask filters.</summary>
             readonly SparseTileSurface surface, maskSurface;
             /// <summary>An unfiltered fill layer's tile (null: the fill has no colour in this channel or it is transparent).</summary>
@@ -454,6 +477,29 @@ namespace Yozolab.YoluPainter.Core
             }
             /// <summary>True when reading the tile goes through a filter stack (the filter engine's cache is single-threaded).</summary>
             public bool Filtered { get { return ownPixels != null || ownMask != null; } }
+            /// <summary>Calling thread: the per-slot buffers of the sampled tile (sampledBytes each).</summary>
+            public void PrepareSampling(int slots, int sampledBytes)
+            {
+                if (Pixels != null) { sampledPixels = new byte[slots][]; for (int k = 0; k < slots; k++) sampledPixels[k] = new byte[sampledBytes]; }
+                if (Mask != null) { sampledMask = new byte[slots][]; for (int k = 0; k < slots; k++) sampledMask[k] = new byte[sampledBytes]; }
+            }
+            /// <summary>After <see cref="Load"/>: replaces the loaded tile (and mask) of slot by its sample (one pixel of every step × step
+            /// square, at step/2 in each). The surface's own arrays are only read.</summary>
+            public void Sample(int slot, int tile, int step)
+            {
+                if (!Present[slot]) return;
+                if (Pixels != null && Pixels[slot] != null) { Decimate(Pixels[slot], sampledPixels[slot], tile, step); Pixels[slot] = sampledPixels[slot]; }
+                if (Mask != null && Mask[slot] != null) { Decimate(Mask[slot], sampledMask[slot], tile, step); Mask[slot] = sampledMask[slot]; }
+            }
+            static void Decimate(byte[] source, byte[] sampled, int tile, int step)
+            {
+                // 4 バイトの画素を 1 つの int として写す（Mono でバイトずつより数倍速い）。並びは同じバイト
+                var from = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, int>(source.AsSpan(0, tile * tile * 4));
+                var to = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, int>(sampled.AsSpan());
+                int size = tile / step, half = step / 2;
+                for (int y = 0; y < size; y++)
+                    for (int x = 0, s = (y * step + half) * tile + half, d = y * size; x < size; x++, s += step, d++) to[d] = from[s];
+            }
         }
         /// <summary>The plan with tile buffers per layer, mirroring StackEntry. Per-layer facts the pixel loop asks for are read once.</summary>
         sealed class Node
@@ -462,7 +508,8 @@ namespace Yozolab.YoluPainter.Core
             public bool Adjustment, Group, PassesThrough; public LayerBlendMode Mode, AdjustmentMode; public AdjustmentSettings Settings;
             /// <summary>The separable blend of Mode for every pair of bytes (null for the other modes).</summary>
             public double[] Table;
-            public static Node[] Build(IReadOnlyList<StackEntry> plan, PaintChannel channel, int tileBytes, int slots, SharedTiles shared)
+            /// <param name="sampledBytes">0, or the bytes of a sampled tile (<see cref="CompositeSampledRegions"/>).</param>
+            public static Node[] Build(IReadOnlyList<StackEntry> plan, PaintChannel channel, int tileBytes, int slots, SharedTiles shared, int sampledBytes = 0)
             {
                 var nodes = new Node[plan.Count];
                 for (int i = 0; i < plan.Count; i++)
@@ -470,13 +517,25 @@ namespace Yozolab.YoluPainter.Core
                     var e = plan[i]; var layer = e.Base;
                     nodes[i] = new Node
                     {
-                        Entry = e, Tile = new LayerTile(layer, channel, tileBytes, slots, shared), Children = Build(e.Children, channel, tileBytes, slots, shared), Clips = Build(e.ClipEntries, channel, tileBytes, slots, shared),
+                        Entry = e, Tile = new LayerTile(layer, channel, tileBytes, slots, shared), Children = Build(e.Children, channel, tileBytes, slots, shared, sampledBytes), Clips = Build(e.ClipEntries, channel, tileBytes, slots, shared, sampledBytes),
                         Adjustment = layer.Kind == LayerKind.Adjustment, Group = layer.IsGroup, PassesThrough = e.PassesThrough,
                         Mode = ModeOf(layer), AdjustmentMode = layer.BlendMode, Settings = layer.Adjustment,
                     };
                     if (channel != PaintChannel.Normal) nodes[i].Table = SeparableTable(nodes[i].Mode);
+                    if (sampledBytes > 0) nodes[i].Tile.PrepareSampling(slots, sampledBytes);
                 }
                 return nodes;
+            }
+            /// <summary>After <see cref="Load"/> of nodes [from, to): replaces every loaded tile by its sample (the same nodes Load read).</summary>
+            public static void Sample(Node[] nodes, int from, int to, int slot, int tile, int step)
+            {
+                for (int i = from; i < to; i++)
+                {
+                    var n = nodes[i];
+                    n.Tile.Sample(slot, tile, step);
+                    if (n.Group) Sample(n.Children, 0, n.Children.Length, slot, tile, step);
+                    if (n.Tile.Present[slot]) Sample(n.Clips, 0, n.Clips.Length, slot, tile, step);
+                }
             }
             /// <summary>Loads the tiles of nodes [from, to) into slot; returns true when any raster or fill pixels are present below
             /// them. present is set when any of them has anything at all (an adjustment counts).</summary>
@@ -726,9 +785,11 @@ namespace Yozolab.YoluPainter.Core
         // Same per-pixel arithmetic as CompositePixel, but each layer's tile is read once instead of one dictionary lookup per pixel
         // per layer. Tiles are independent: they are loaded into their own slots and their pixels computed on worker threads; every
         // output pixel depends only on its own inputs, so the bytes do not depend on the number of threads or the order.
-        static void Run(PaintDocument document, PaintChannel channel, List<StackEntry> plan, IReadOnlyList<CompositeJob> jobs, bool fresh)
+        // step > 1 (CompositeSampledRegions): the jobs are in the sampled grid, whose tiles are (tile / step)² and stand for the same tile
+        // coordinates; each loaded tile is replaced by its sample before the same per-pixel evaluation.
+        static void Run(PaintDocument document, PaintChannel channel, List<StackEntry> plan, IReadOnlyList<CompositeJob> jobs, bool fresh, int step)
         {
-            int tile = document.TileSize, tileBytes = checked(tile * tile * 4);
+            int full = document.TileSize, tileBytes = checked(full * full * 4), tile = full / step;
             var items = new List<Item>(); var coords = new HashSet<TileCoord>(); long area = 0;
             for (int j = 0; j < jobs.Count; j++)
             {
@@ -742,7 +803,7 @@ namespace Yozolab.YoluPainter.Core
             int degree = CoreParallelism.Degree, layerCount = Math.Max(1, CountEntries(plan)), buffers = CountOwnBuffers(plan, channel);
             if (area * layerCount < ParallelMinimumWork) degree = 1;
             int slots = (int)Math.Max(1, Math.Min(Math.Min(items.Count, degree), buffers == 0 ? int.MaxValue : ParallelBufferBytes / ((long)buffers * tileBytes)));
-            var nodes = Node.Build(plan, channel, tileBytes, slots, shared);
+            var nodes = Node.Build(plan, channel, tileBytes, slots, shared, step > 1 ? tile * tile * 4 : 0);
             Node.PrepareUniform(nodes, coords);
             // 読み込みもワーカーで: フィルターを通る層が無ければ、読むのは面のタイルそのもの（書き換えは無い）。フィルターのキャッシュは
             // このスレッドからだけ触る。
@@ -754,11 +815,12 @@ namespace Yozolab.YoluPainter.Core
             if (concurrentLoad && items.Count >= 2 * slots)
             {
                 // タイルが十分あれば、ワーカーごとに自分の枠で「読む → 計算する」をタイルごとに続ける（段ごとの待ち合わせが無い）
-                var scratches = new RectScratch[slots]; for (int k = 0; k < slots; k++) scratches[k] = new RectScratch(needs, tileBytes);
+                var scratches = new RectScratch[slots]; for (int k = 0; k < slots; k++) scratches[k] = new RectScratch(needs, tile * tile * 4);
                 CoreParallelism.ForWorkers(items.Count, slots, (worker, i) =>
                 {
                     var item = items[i]; var job = jobs[item.Job];
                     bool pixels = Node.Load(nodes, job.Start, nodes.Length, channel, item.Coord, worker, out bool present);
+                    if (step > 1) Node.Sample(nodes, job.Start, nodes.Length, worker, full, step);
                     Compute(nodes, job, item.Coord, tile, worker, job.Start == 0 ? pixels : present, 0, tile, normal, scratches[worker], fresh, kernels);
                 });
                 return;
@@ -767,8 +829,8 @@ namespace Yozolab.YoluPainter.Core
             for (int first = 0; first < items.Count; first += slots)
             {
                 int count = Math.Min(slots, items.Count - first), batch = first;
-                if (concurrentLoad) CoreParallelism.For(count, degree, k => { var job = jobs[items[batch + k].Job]; bool p = Node.Load(nodes, job.Start, nodes.Length, channel, items[batch + k].Coord, k, out bool present); any[k] = job.Start == 0 ? p : present; });
-                else for (int k = 0; k < count; k++) { var job = jobs[items[batch + k].Job]; bool p = Node.Load(nodes, job.Start, nodes.Length, channel, items[batch + k].Coord, k, out bool present); any[k] = job.Start == 0 ? p : present; }
+                if (concurrentLoad) CoreParallelism.For(count, degree, k => { var job = jobs[items[batch + k].Job]; bool p = Node.Load(nodes, job.Start, nodes.Length, channel, items[batch + k].Coord, k, out bool present); if (step > 1) Node.Sample(nodes, job.Start, nodes.Length, k, full, step); any[k] = job.Start == 0 ? p : present; });
+                else for (int k = 0; k < count; k++) { var job = jobs[items[batch + k].Job]; bool p = Node.Load(nodes, job.Start, nodes.Length, channel, items[batch + k].Coord, k, out bool present); if (step > 1) Node.Sample(nodes, job.Start, nodes.Length, k, full, step); any[k] = job.Start == 0 ? p : present; }
                 // 行の束に分けて計算する（タイルが少ないときもスレッドが余らないように）
                 int chunks = Math.Max(1, Math.Min(tile / 8, (degree + count - 1) / count)), rowsPerChunk = (tile + chunks - 1) / chunks, workers = Math.Min(degree, count * chunks);
                 if (chunkScratches == null || chunkScratches.Length < workers || scratchRows < rowsPerChunk)

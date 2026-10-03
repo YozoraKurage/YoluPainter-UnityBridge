@@ -33,6 +33,7 @@ namespace Yozolab.YoluPainter.Editor
             if(Event.current.type==EventType.Repaint) DrawCanvasPathMarkers(view);
             DrawCanvasBrushCursor(view,pointer);
             GUI.EndClip();
+            DrawCompositingBadge(); // 縮小表示の印（Compositing.cs）
             if(rotateKeyHeld||canvasRotating) EditorGUIUtility.AddCursorRect(canvasRect,MouseCursor.RotateArrow);
         }
         /// <summary>GUI の座標をキャンバスの画素座標（左下原点、範囲外も返す）に。表示の回転・反転・拡大・パンを逆にたどる。</summary>

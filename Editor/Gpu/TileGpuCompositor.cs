@@ -20,6 +20,27 @@ namespace Yozolab.YoluPainter.Editor
         Cpu = 2,
     }
 
+    /// <summary>表示の合成を何回かの <see cref="TileGpuCompositor.Update(PaintDocument, PaintChannel, CompositeSchedule)"/> に分けるときの
+    /// 指示（ウィンドウが描くたびに作る）。1 回に使う時間・急ぎの印・先に合成する範囲。保存・書き出しなどの正本には関わらない。</summary>
+    internal sealed class CompositeSchedule
+    {
+        /// <summary>1 回の Update に使ってよい時間（ms）。超えたら残りのブロックは次の Update に回す（判断はブロックの合間なので、
+        /// ブロック 1 つ分（CPU の経路は 1 回にまとめて合成する見込みの誤差の分）は超え得る）。無限大なら全部（引数の無い Update と同じ）。
+        /// 0 以下でも 1 回に 1 ブロックは進める。</summary>
+        public double BudgetMilliseconds = double.PositiveInfinity;
+        /// <summary>ストロークの最中: 予定のうち印の付いたブロック（描いた所）を、予算に関わらずこの回に出す（筆の跡が遅れない）。</summary>
+        public bool Urgent;
+        /// <summary>2D の表示に見えている文書の範囲（画素、左下原点）。掛かるブロックを先に、真ん中に近い順に。null なら 2D の表示は無い。</summary>
+        public RectInt? Visible;
+        /// <summary>3D ビューに映り得るタイル（今のスロットの UV が掛かるタイル）。2D の範囲の次に。null なら 3D ビューは無い。</summary>
+        public ISet<TileCoord> ModelTiles;
+        /// <summary>スライダーなどのドラッグの最中で、表示が全解像度を要らないとき（2D の拡大率・3D の大きさから）の間引きの幅（2 か 4。
+        /// 1 なら使わない）。前の回で終わらなかった変更が続くあいだ、待っているタイルをこの幅で間引いた正確な合成
+        /// （CpuCompositor.CompositeSampledRegions）で先に全部見せ、全解像度は残りの時間で続ける（Krita の Instant Preview と同じ考え。
+        /// CPU の経路だけ）。</summary>
+        public int PreviewStep = 1;
+    }
+
     /// <summary>Bounded layer residency on the GPU. Recomposites only what the document reports as changed
     /// (PaintDocument.TryGetChangedTiles), in work blocks of several document tiles, and keeps a bounded, LRU-evicted set of
     /// GPU copies (uploaded layer/mask blocks and the composite below the first changed layer) so that dragging a layer's
@@ -48,6 +69,12 @@ namespace Yozolab.YoluPainter.Editor
     /// 丸ごと変わっていればブロックで）小さな Texture2D に載せて CopyTexture（無ければ描き込み）で写す。グラフィックスデバイスや
     /// RenderTexture が使えなければ、CPU 側の 1 枚の Texture2D に全面を載せ直す（<see cref="CompositePath.CpuFrame"/>）。どの経路でも表示の
     /// 画素は CPU の正本とバイト単位で同じ。</para>
+    /// <para>表示の合成は何回かの Update に分けられる（<see cref="CompositeSchedule"/>。GIMP の表示と同じ考え: 変わった所に印を付けるだけで、
+    /// 見えている所から、1 回の時間を決めて少しずつ）。変更記録のタイルを「予定」（ブロックごとの変わったタイル）に入れ、急ぎ（ストローク）→
+    /// 2D で見えている所 → 3D ビューの UV の所 → 残り、同じ組では長く待っている順に、ブロック単位で合成する。合成はいつもその時の文書から
+    /// するので、古い値の仕事は残らない（スライダーを動かし続けても、待っているブロックは最新の値で合成される）。ブロックは丸ごと合成して
+    /// から表示へ写すので、表示のブロックは前の絵か新しい絵のどちらか（途中の合成は出ない）。別の文書・チャンネルに替わったら予定・署名・
+    /// 写しを捨て、表示を透明にしてから合成し直す。<see cref="CompositePath.CpuFrame"/>（全面を載せ直す）は分けずに全部をする。</para>
     /// </remarks>
     internal sealed class TileGpuCompositor : IDisposable
     {
@@ -95,11 +122,8 @@ namespace Yozolab.YoluPainter.Editor
         readonly Dictionary<(long, long), Resident> residents = new Dictionary<(long, long), Resident>();
         /// <summary><see cref="CompositePath.CpuFrame"/> の全面の画素（<see cref="CompositePath.CpuTiles"/> は全面を持たない）。</summary>
         byte[] cpuPixels;
-        /// <summary>CPU の経路の表示に、前回までの合成が全部入っているか（false なら次は全面）。</summary>
-        bool cpuValid;
         /// <summary>載せ台から表示の RenderTexture へ CopyTexture で写せるか（false なら TileComposite の写しのパスで描き込む）。</summary>
         bool copyStageToDisplay;
-        readonly HashSet<TileCoord> previous = new HashSet<TileCoord>();
         public Texture Texture => composite != null ? (Texture)composite : cpuFallback;
         public string Backend { get; private set; } = "Not initialized";
         string gpuBackend;
@@ -113,9 +137,10 @@ namespace Yozolab.YoluPainter.Editor
         internal int LastSentTileCount { get; private set; }
         /// <summary>直近の Update が CPU の経路で呼んだ CompositeRegions の回数（置き場 <see cref="CpuWaveBlocks"/> 個ぶんごとに 1 回）。</summary>
         internal int LastCpuCompositeCalls { get; private set; }
-        /// <summary>直近の Update が CPU の経路で全部のブロックを透明から合成し直したか（変更記録が使えないとき）。</summary>
+        /// <summary>直近の Update が変更記録を使えず（初めて・別の文書かチャンネル）、表示を透明にして中身のあるブロックを全部予定に入れたか。</summary>
         internal bool LastCpuFullFrame { get; private set; }
-        /// <summary>Tiles whose composite the last Update refreshed (the change journal's tiles), for diagnostics and tests.</summary>
+        /// <summary>Tiles whose composite the last Update refreshed (the change journal's tiles of the blocks it composited), for
+        /// diagnostics and tests.</summary>
         public int LastUpdatedTileCount { get; private set; }
         /// <summary>The last Update composited this many tiles on the CPU on the GPU path (groups nested deeper than the
         /// level limit, or <see cref="CompositeGroupsOnCpu"/>). Diagnostics/tests.</summary>
@@ -167,10 +192,16 @@ namespace Yozolab.YoluPainter.Editor
             allowGpu = true; this.allowCopyTexture = allowCopyTexture; preference = backend;
         }
 
-        public void Update(PaintDocument doc, PaintChannel channel)
+        /// <summary>今の文書の合成を全部表示に入れる（予定に残っていた仕事も含めて、この 1 回で終える）。</summary>
+        public void Update(PaintDocument doc, PaintChannel channel) => Update(doc, channel, null);
+
+        /// <summary>表示の合成を、schedule の時間の中で優先する所から進める（null なら全部）。残りは次の Update で続ける。表示のブロックは
+        /// いつも前の絵か新しい絵のどちらか。</summary>
+        /// <returns>表示が今の文書の合成をすべて表しているか（false なら予定が残っている: <see cref="HasPendingWork"/>）。</returns>
+        public bool Update(PaintDocument doc, PaintChannel channel, CompositeSchedule schedule)
         {
             Ensure(doc);
-            try { UpdateTiles(doc,channel); }
+            try { UpdateTiles(doc, channel, schedule); }
             catch (Exception ex)
             {
                 bool wasGpu = Path == CompositePath.Gpu;
@@ -178,8 +209,9 @@ namespace Yozolab.YoluPainter.Editor
                 cpuFallback=new Texture2D(width,height,TextureFormat.RGBA32,false,true){hideFlags=HideFlags.HideAndDontSave,filterMode=FilterMode.Bilinear};
                 Path = CompositePath.CpuFrame; FellBackToCpu |= wasGpu;
                 Backend=(wasGpu ? "CPU composite fallback after GPU failure: " : "CPU composite fallback after a display failure: ")+ex.Message+"; the whole frame is uploaded to the display texture"+KernelsNote();
-                UpdateTiles(doc,channel);
+                UpdateTiles(doc, channel, schedule);
             }
+            return pending.Count == 0;
         }
 
         /// <summary>残した写し（GPU の経路はアップロードしたブロックと下の写し、CPU の経路はメモリの下の写しと置き場）をすべて捨てる。
@@ -189,67 +221,336 @@ namespace Yozolab.YoluPainter.Editor
             foreach (var r in residents.Values) DestroyTexture(r.Texture);
             residents.Clear();
             foreach (var b in blocks.Values) { Release(b.Below); b.Below = null; b.BelowIndex = 0; }
-            foreach (var b in cpuBlocks.Values) { b.Below = null; b.BelowIndex = 0; }
+            foreach (var b in cpuBlocks.Values) { b.Below = null; b.BelowIndex = 0; b.BelowVersion++; b.Sampled = null; }
             cpuPool.Clear();
             ResidentBytes = 0;
         }
 
-        void UpdateTiles(PaintDocument doc,PaintChannel channel)
+        // ───────────── 予定（表示の合成を何回かに分ける） ─────────────
+
+        /// <summary>まだ表示に入れていない変更のあるブロック: 変わったタイル、透明から合成し直すか、急ぎか、いつから待っているか。</summary>
+        sealed class PendingBlock
         {
-            var dirty = new HashSet<TileCoord>();
-            bool incremental = ReferenceEquals(doc, lastDocument) && channel == lastChannel && doc.TryGetChangedTiles(channel, lastSerial, dirty);
-            // 中身のあるタイル（変更記録が使えないとき、前回あって今は無いタイルも消すため）。CPU の経路はそのとき全面を合成し直すので、
-            // 差分のときは数えない（4096²・10 層で 1 回 0.9 ms）
-            HashSet<TileCoord> occupied = null;
-            if (Path == CompositePath.Gpu || !incremental)
-            {
-                occupied = new HashSet<TileCoord>();
-                foreach (var layer in doc.Layers)
-                    foreach (var coord in layer.EnumerateContentTiles(channel)) occupied.Add(coord);
-            }
-            if (!incremental) { dirty.Clear(); dirty.UnionWith(previous); dirty.UnionWith(occupied); }
-            LastUpdatedTileCount = dirty.Count; LastCpuTileCount = 0;
+            public int Bx, By, Since, Rank; public long Distance; public bool Full, Urgent;
+            public readonly HashSet<TileCoord> Tiles = new HashSet<TileCoord>();
+        }
+        readonly Dictionary<long, PendingBlock> pending = new Dictionary<long, PendingBlock>();
+        /// <summary>表示に入れていない変更が残っている（次の Update で続ける）。</summary>
+        public bool HasPendingWork => pending.Count > 0;
+        /// <summary>予定に残っているブロックの数（診断・テスト用）。</summary>
+        internal int PendingBlockCount => pending.Count;
+        /// <summary>直近の Update が合成したブロック（署名が同じで飛ばしたものも含む）の、合成した順（診断・テスト用）。</summary>
+        internal IReadOnlyList<(int bx, int by)> LastProcessedBlocks => lastProcessed;
+        readonly List<(int bx, int by)> lastProcessed = new List<(int bx, int by)>();
+        /// <summary>直近の Update にかかった時間（ms。GPU の経路は命令を出し終えるまで）。</summary>
+        internal double LastUpdateMilliseconds { get; private set; }
+        /// <summary>今、間引いた合成（<see cref="CompositeSchedule.PreviewStep"/>）を見せているタイルの数（全解像度が来るまで）。</summary>
+        internal int PreviewTileCount => previewed.Count;
+        /// <summary>間引いた合成を見せているときの幅（見せていなければ 0）。</summary>
+        internal int PreviewStepShown => previewed.Count > 0 ? previewTextureStep : 0;
+        /// <summary>直近の Update が間引いた合成を作り直したか、とそれにかかった時間（ms）。</summary>
+        internal bool LastPreviewed { get; private set; }
+        internal double LastPreviewMilliseconds { get; private set; }
+        /// <summary>CPU の経路の見込み（直前までの実測の指数平均。<see cref="CpuCostMeasured"/> が false ならまだ無い）: 合成の 1 単位
+        /// （画素 × 重ねる項目の数。写しから始める領域は写しを読む分の 1 を足す）あたりの時間と、表示へ送る 1 画素あたりの時間（ms）。
+        /// 合成はワーカーが並列に、送るのはメインスレッドがするので、分けて測る。</summary>
+        internal double CpuMillisecondsPerLayerPixel { get; private set; }
+        internal double CpuMillisecondsPerSentPixel { get; private set; }
+        internal bool CpuCostMeasured { get; private set; }
+        /// <summary>テスト用: 時間の測り方（ms を返す）。null なら Stopwatch。替えると CPU の経路の見込みは測り直す。</summary>
+        internal Func<double> ClockForTests { get => clockForTests; set { clockForTests = value; CpuCostMeasured = false; CpuMillisecondsPerLayerPixel = CpuMillisecondsPerSentPixel = cpuMsPerBlock = previewMsPerSample = 0; } }
+        Func<double> clockForTests;
+        /// <summary>テスト用: ブロックを 1 つ合成し終えるたびに呼ぶ（CPU の経路は 1 回にまとめた合成の直後、表示へ送る前に、そのブロックの
+        /// 数だけ）。</summary>
+        internal Action<int, int> BlockCompositedForTests;
+
+        void UpdateTiles(PaintDocument doc, PaintChannel channel, CompositeSchedule schedule)
+        {
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var clock = ClockForTests;
+            double started = clock != null ? clock() : 0;
+            double Elapsed() => clock != null ? clock() - started : stopwatch.Elapsed.TotalMilliseconds;
+            updateIndex++;
+            LastUpdatedTileCount = LastCpuTileCount = 0;
             LastBlockCount = LastSkippedBlockCount = LastBelowReuseCount = LastResidentHitCount = LastUploadCount = 0;
-            LastSentTileCount = LastCpuCompositeCalls = LastCpuJobCount = 0; LastCpuFullFrame = false;
+            LastSentTileCount = LastCpuCompositeCalls = LastCpuJobCount = 0; lastProcessed.Clear();
 
-            if (Path != CompositePath.Gpu) UpdateCpu(doc, channel, dirty, incremental);
-            else
+            var dirty = new HashSet<TileCoord>();
+            bool frameLost = Path == CompositePath.CpuFrame && (cpuPixels == null || cpuPixels.Length != width * height * 4);
+            if (frameLost) cpuPixels = new byte[width * height * 4];
+            bool incremental = !frameLost && ReferenceEquals(doc, lastDocument) && channel == lastChannel && doc.TryGetChangedTiles(channel, lastSerial, dirty);
+            LastCpuFullFrame = !incremental;
+            if (!incremental)
             {
-                updateIndex++;
-                // Normal チャンネルはシェーダーがベクトルとして合成する（CpuCompositor → NormalMaps と同じ式）
-                material.SetFloat("_NormalChannel", channel == PaintChannel.Normal ? 1 : 0);
-                // 別の文書・チャンネルの署名と下の写しは使えない（アップロードしたブロックは面ごとなので、そのまま使える）
-                if (!ReferenceEquals(doc, lastDocument) || channel != lastChannel) ClearBlockStates();
-                var plan = CpuCompositor.Plan(doc, channel);
-                int needed = LevelsNeeded(plan);
-                bool tooDeep = needed > NestedLevelLimit;
-                Backend = gpuBackend + (tooDeep ? "; groups nested " + needed + " levels deep exceed the GPU limit of " + NestedLevelLimit + ", so the tiles they touch composite on the CPU" : "");
-                var dirtyBlocks = new HashSet<long>();
-                foreach (var coord in dirty) dirtyBlocks.Add(BlockKey(coord.X / blockTiles, coord.Y / blockTiles));
-                // Graphics.Blit は書き込み先を RenderTexture.active に残すので、呼び出し側の状態を戻す
-                var active = RenderTexture.active;
-                try
-                {
-                    foreach (var key in dirtyBlocks)
-                    {
-                        int bx = (int)(key & 0xffffffff), by = (int)(key >> 32);
-                        if ((tooDeep || CompositeGroupsOnCpu) && GroupTouchesBlock(plan, channel, bx, by)) CompositeBlockWithCpuGroups(doc, plan, channel, bx, by);
-                        else CompositeBlock(plan, channel, bx, by);
-                    }
-                }
-                finally { RenderTexture.active = active; }
-                TrimIdle();
+                // 初めて・別の文書かチャンネル: 前の予定・署名・写しは使えない。表示を透明にして（前の文書の絵と混ぜない）、中身のあるタイル
+                // （塗りつぶしと調整はキャンバス全面）のブロックを全部、透明から合成する予定にする
+                pending.Clear(); ClearBlockStates(); ClearCpuBlocks(); ClearDisplay();
+                dirty.Clear();
+                foreach (var layer in doc.Layers) foreach (var coord in layer.EnumerateContentTiles(channel)) dirty.Add(coord);
             }
-
-            if (occupied != null) { previous.Clear(); previous.UnionWith(occupied); }
+            // 変更記録はここで読み終える（このあとの合成で Generator の入力が見直されて増えた変更は、次の Update が拾う）
             lastDocument = doc; lastChannel = channel; lastSerial = doc.ChangeSerial;
+            bool urgent = schedule != null && schedule.Urgent;
+            foreach (var coord in dirty) Mark(coord, !incremental, urgent);
+
+            double budget = schedule == null || Path == CompositePath.CpuFrame ? double.PositiveInfinity
+                : double.IsNaN(schedule.BudgetMilliseconds) ? 0 : schedule.BudgetMilliseconds;
+            LastPreviewed = false; LastPreviewMilliseconds = 0;
+            if (!incremental) previewed.Clear(); // 表示は透明にした
+            int step = schedule == null ? 1 : schedule.PreviewStep;
+            // 間引いた合成を先に見せる: ドラッグの最中（step > 1）、前の回で終わらなかった（1 回では揃わない変更）、文書がその後また
+            // 変わった、全解像度で揃えるのに予算か間引いた合成の 4 回分以上かかる見込み（PreviewPays）、のすべてのとき。マウスを
+            // 止めているあいだは作り直さず、時間を全解像度に回す
+            if (step > 1 && pending.Count > 0 && !lastFinished && doc.ChangeSerial != previewSerial && CanPreview(step) && PreviewPays(step, budget))
+            {
+                double t0 = Elapsed();
+                long samples = Preview(doc, channel, step);
+                LastPreviewed = true; LastPreviewMilliseconds = Elapsed() - t0;
+                if (samples > 0)
+                {
+                    double rate = LastPreviewMilliseconds / samples;
+                    previewMsPerSample = previewMsPerSample > 0 ? .5 * previewMsPerSample + .5 * rate : rate;
+                }
+            }
+            if (pending.Count > 0)
+            {
+                var order = Ordered(schedule);
+                if (Path == CompositePath.Gpu) RunGpu(doc, channel, order, budget, Elapsed);
+                else RunCpu(doc, channel, order, budget, Elapsed);
+            }
+            if (Path == CompositePath.CpuFrame && (lastProcessed.Count > 0 || !incremental)) UploadFrame();
+            if (Path == CompositePath.Gpu) TrimIdle(); else TrimIdleCpu();
+            if (previewed.Count == 0 && step <= 1) ReleasePreview(); // ドラッグが終わって全解像度が揃った
+            lastFinished = pending.Count == 0;
+            LastUpdateMilliseconds = stopwatch.Elapsed.TotalMilliseconds;
+        }
+
+        void Mark(TileCoord coord, bool full, bool urgent)
+        {
+            if (coord.X < 0 || coord.Y < 0 || coord.X >= TilesX || coord.Y >= TilesY) return;
+            int bx = coord.X / blockTiles, by = coord.Y / blockTiles; long key = BlockKey(bx, by);
+            if (!pending.TryGetValue(key, out var p)) pending.Add(key, p = new PendingBlock { Bx = bx, By = by, Since = updateIndex });
+            p.Tiles.Add(coord); p.Full |= full; p.Urgent |= urgent;
+        }
+
+        /// <summary>予定のブロックを合成する順に並べる: 急ぎ（ストローク）→ 2D で見えている所 → 3D ビューの UV の所 → 残り。同じ組では
+        /// 長く待っている順（スライダーを動かし続けても、どのブロックもいずれ新しくなる）、同じなら見ている所の真ん中に近い順。
+        /// 指示が無ければ行の順。</summary>
+        List<PendingBlock> Ordered(CompositeSchedule schedule)
+        {
+            var list = new List<PendingBlock>(pending.Values);
+            var visible = schedule?.Visible; var model = schedule?.ModelTiles;
+            long cx = visible.HasValue ? (long)visible.Value.x * 2 + visible.Value.width : width, cy = visible.HasValue ? (long)visible.Value.y * 2 + visible.Value.height : height;
+            foreach (var p in list)
+            {
+                int x0 = p.Bx * blockSize, y0 = p.By * blockSize, x1 = Math.Min(x0 + blockSize, width), y1 = Math.Min(y0 + blockSize, height);
+                p.Rank = schedule == null ? 3 : p.Urgent ? 0
+                    : visible.HasValue && x0 < visible.Value.xMax && visible.Value.x < x1 && y0 < visible.Value.yMax && visible.Value.y < y1 ? 1
+                    : model != null && TouchesModel(model, p.Bx, p.By) ? 2 : 3;
+                long dx = x0 + x1 - cx, dy = y0 + y1 - cy; p.Distance = schedule == null ? 0 : dx * dx + dy * dy;
+            }
+            list.Sort((a, b) =>
+                a.Rank != b.Rank ? a.Rank.CompareTo(b.Rank) : a.Since != b.Since ? a.Since.CompareTo(b.Since) : a.Distance != b.Distance ? a.Distance.CompareTo(b.Distance)
+                : a.By != b.By ? a.By.CompareTo(b.By) : a.Bx.CompareTo(b.Bx));
+            return list;
+        }
+        bool TouchesModel(ISet<TileCoord> model, int bx, int by)
+        {
+            for (int ty = by * blockTiles; ty < Math.Min((by + 1) * blockTiles, TilesY); ty++)
+                for (int tx = bx * blockTiles; tx < Math.Min((bx + 1) * blockTiles, TilesX); tx++) if (model.Contains(new TileCoord(tx, ty))) return true;
+            return false;
+        }
+        /// <summary>表示を透明にする（別の文書・チャンネルに替わったとき）。</summary>
+        void ClearDisplay()
+        {
+            if (composite != null) Clear(composite);
+            if (cpuPixels != null) Array.Clear(cpuPixels, 0, cpuPixels.Length);
+        }
+        void Finished(PendingBlock p)
+        {
+            pending.Remove(BlockKey(p.Bx, p.By)); LastUpdatedTileCount += p.Tiles.Count; lastProcessed.Add((p.Bx, p.By));
+            if (previewed.Count > 0) previewed.ExceptWith(p.Tiles); // 全解像度で送る（間引いた合成のタイルは予定のタイルに入っている）
+        }
+
+        // ───────────── 間引いた合成（ドラッグの最中の速い見せ方） ─────────────
+
+        Texture2D previewTexture; byte[] previewPixels; Material previewMaterial; int previewTextureStep;
+        /// <summary>表示が間引いた合成を見せているタイル（全解像度が来るまで予定に残っている）。</summary>
+        readonly HashSet<TileCoord> previewed = new HashSet<TileCoord>();
+        /// <summary>最後に間引いた合成を作ったときの文書の変更の通し番号。</summary>
+        long previewSerial = -1;
+        /// <summary>前の Update が予定を全部終えたか（終えていなければ、続く変更は間引いた合成で先に見せる）。</summary>
+        bool lastFinished = true;
+
+        /// <summary>CPU の経路の見込み: 全解像度のブロック 1 つの時間と、間引いた合成の 1 標本の時間（ms。指数平均。0 はまだ無い）。</summary>
+        double cpuMsPerBlock, previewMsPerSample;
+        /// <summary>間引いた合成が割に合うか: 待っているブロックを全解像度で揃える見込みが、1 回の予算と間引いた合成 1 回の見込みの大きい方の
+        /// 4 倍以上（それより早く揃うなら、間引いた絵を挟まずに全解像度を少しずつ出すほうが良い。4096²・10 層の真ん中の層で
+        /// 全解像度約 150 ms・間引き 1/4 約 16 ms は使い、2048² の約 30 ms は使わない。VALIDATION）。全解像度の見込みがまだ無ければ使わない。</summary>
+        bool PreviewPays(int step, double budget)
+        {
+            if (cpuMsPerBlock <= 0) return false;
+            double full = pending.Count * cpuMsPerBlock, samples = 0;
+            foreach (var p in pending.Values) samples += (double)Math.Min(blockSize, width - p.Bx * blockSize) * Math.Min(blockSize, height - p.By * blockSize) / ((double)step * step);
+            double preview = samples * previewMsPerSample;
+            return full >= 4 * Math.Max(double.IsPositiveInfinity(budget) ? 0 : budget, preview);
+        }
+
+        /// <summary>この幅で間引いて見せられるか: CPU で合成して表示の RenderTexture へ送る経路で、幅がタイル・文書の幅と高さを割り切り、
+        /// 拡大して描く TileComposite の写しのパスが使える。</summary>
+        bool CanPreview(int step)
+        {
+            if (Path != CompositePath.CpuTiles || composite == null || step < 2 || tileSize % step != 0 || width % step != 0 || height % step != 0) return false;
+            if (material == null && previewMaterial == null)
+            {
+                var shader = Shader.Find(ShaderName);
+                if (!ShaderHealth.IsUsable(shader)) return false;
+                previewMaterial = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+                previewMaterial.SetTexture("_LayerTex", Texture2D.blackTexture);
+            }
+            return true;
+        }
+
+        /// <summary>予定のブロックの全部を、step で間引いた正確な合成（各ブロックの下の写しが今も使えればそこから）で作り、待っている
+        /// タイルへ拡大して描く。予定と署名・写しの記憶は変えない（全解像度はあとで普通に合成する）。</summary>
+        /// <returns>合成した標本の数。</returns>
+        long Preview(PaintDocument doc, PaintChannel channel, int step)
+        {
+            int gw = width / step, gh = height / step;
+            if (previewTexture == null || previewTextureStep != step || previewTexture.width != gw || previewTexture.height != gh)
+            {
+                ReleasePreviewTexture();
+                previewTexture = new Texture2D(gw, gh, TextureFormat.RGBA32, false, true) { hideFlags = HideFlags.HideAndDontSave, filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp };
+                previewPixels = new byte[gw * gh * 4]; previewTextureStep = step;
+            }
+            var plan = CpuCompositor.Plan(doc, channel);
+            var jobs = new List<CpuCompositor.CompositeJob>(pending.Count);
+            foreach (var p in pending.Values)
+            {
+                int x0 = p.Bx * blockSize, y0 = p.By * blockSize, bw = Math.Min(blockSize, width - x0), bh = Math.Min(blockSize, height - y0);
+                int sx = x0 / step, sy = y0 / step, sw = bw / step, sh = bh / step;
+                int start = 0; byte[] below = null;
+                if (!p.Full && cpuBlocks.TryGetValue(BlockKey(p.Bx, p.By), out var state) && state.Sigs != null && state.Below != null && state.BelowIndex > 0)
+                {
+                    // 下の写しは、その下の項目の署名がどれも前と同じなら今も正しい（PlanCpuBlock の usable と同じ規則）
+                    int k = state.BelowIndex, same = 0;
+                    if (k <= Math.Min(state.Sigs.Length, plan.Count))
+                        while (same < k && string.Equals(state.Sigs[same], Signature(plan[same], channel, p.Bx, p.By), StringComparison.Ordinal)) same++;
+                    if (same == k) { start = k; below = SampledBelow(state, bw, bh, step); state.LastUsed = updateIndex; }
+                }
+                long key = BlockKey(p.Bx, p.By);
+                if (!previewBlocks.TryGetValue(key, out var pixels) || pixels.Length != sw * sh * 4) previewBlocks[key] = pixels = new byte[sw * sh * 4]; // 回ごとに作らない
+                // 領域は間引いた格子の上（ブロックの原点 / step から）
+                jobs.Add(below == null ? new CpuCompositor.CompositeJob(sx, sy, sw, sh, pixels) : new CpuCompositor.CompositeJob(sx, sy, sw, sh, pixels, start, below, 0, sw * 4));
+            }
+            CpuCompositor.CompositeSampledRegions(doc, channel, step, jobs);
+            foreach (var j in jobs) for (int row = 0; row < j.Height; row++) Buffer.BlockCopy(j.Pixels, row * j.Width * 4, previewPixels, ((j.Y + row) * gw + j.X) * 4, j.Width * 4);
+            previewTexture.LoadRawTextureData(previewPixels); previewTexture.Apply(false, false);
+            // 待っているタイルへ拡大して描く（ブロックのタイルが全部待っていればブロックで 1 つ。全部を 1 回の描画で）
+            var rects = new List<RectInt>();
+            foreach (var p in pending.Values)
+            {
+                int tx0 = p.Bx * blockTiles, ty0 = p.By * blockTiles, tx1 = Math.Min(tx0 + blockTiles, TilesX), ty1 = Math.Min(ty0 + blockTiles, TilesY);
+                if (p.Tiles.Count == (tx1 - tx0) * (ty1 - ty0)) rects.Add(new RectInt(tx0 * tileSize, ty0 * tileSize, Math.Min(tx1 * tileSize, width) - tx0 * tileSize, Math.Min(ty1 * tileSize, height) - ty0 * tileSize));
+                else foreach (var t in p.Tiles) rects.Add(new RectInt(t.X * tileSize, t.Y * tileSize, Math.Min(tileSize, width - t.X * tileSize), Math.Min(tileSize, height - t.Y * tileSize)));
+                previewed.UnionWith(p.Tiles);
+            }
+            DrawPreview(rects);
+            previewSerial = doc.ChangeSerial;
+            long samples = 0; foreach (var j in jobs) samples += (long)j.Width * j.Height;
+            return samples;
+        }
+        /// <summary>間引いた合成のブロックごとの置き場（ドラッグのあいだ使い回す）。</summary>
+        readonly Dictionary<long, byte[]> previewBlocks = new Dictionary<long, byte[]>();
+        /// <summary>ブロックの下の写しを step で間引いたもの。写しが同じあいだは残す（予算に余りがあれば。無ければその回だけ作る）。</summary>
+        byte[] SampledBelow(CpuBlock state, int bw, int bh, int step)
+        {
+            if (state.Sampled != null && state.SampledVersion == state.BelowVersion && state.SampledStep == step) return state.Sampled;
+            int sw = bw / step, sh = bh / step, half = step / 2; long bytes = 4L * sw * sh;
+            if (state.Sampled != null && state.Sampled.Length != bytes) ReleaseSampled(state);
+            var sampled = state.Sampled;
+            if (sampled == null)
+            {
+                sampled = new byte[bytes];
+                if (ResidentBytes + bytes <= ResidentBudgetBytes) { state.Sampled = sampled; ResidentBytes += bytes; }
+            }
+            // 画素（4 バイト）を int として写す（Buffer.BlockCopy を画素ごとに呼ぶと 4096² で 50 ms ほどかかった）
+            var from = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, int>(state.Below.AsSpan(0, bw * bh * 4));
+            var to = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, int>(sampled.AsSpan());
+            for (int y = 0; y < sh; y++)
+                for (int x = 0, f = (y * step + half) * bw + half, t = y * sw; x < sw; x++, f += step, t++) to[t] = from[f];
+            if (ReferenceEquals(sampled, state.Sampled)) { state.SampledVersion = state.BelowVersion; state.SampledStep = step; }
+            return sampled;
+        }
+        void ReleaseSampled(CpuBlock b) { if (b.Sampled == null) return; ResidentBytes -= b.Sampled.Length; b.Sampled = null; }
+        /// <summary>間引いた合成の矩形（文書の画素）を、表示の同じ所へ拡大して描く（点の補間なので、step × step の画素が同じ色）。</summary>
+        void DrawPreview(List<RectInt> rects)
+        {
+            if (rects.Count == 0) return;
+            var m = material ?? previewMaterial; var old = RenderTexture.active;
+            try
+            {
+                RenderTexture.active = composite;
+                GL.PushMatrix(); GL.LoadPixelMatrix(0, width, 0, height);
+                m.SetTexture("_MainTex", previewTexture); m.SetPass(1);
+                GL.Begin(GL.QUADS);
+                foreach (var r in rects)
+                {
+                    float u0 = r.x / (float)width, v0 = r.y / (float)height, u1 = r.xMax / (float)width, v1 = r.yMax / (float)height;
+                    GL.TexCoord2(u0, v0); GL.Vertex3(r.x, r.y, 0);
+                    GL.TexCoord2(u0, v1); GL.Vertex3(r.x, r.yMax, 0);
+                    GL.TexCoord2(u1, v1); GL.Vertex3(r.xMax, r.yMax, 0);
+                    GL.TexCoord2(u1, v0); GL.Vertex3(r.xMax, r.y, 0);
+                }
+                GL.End(); GL.PopMatrix();
+            }
+            finally { RenderTexture.active = old; m.SetTexture("_MainTex", null); }
+        }
+        void ReleasePreviewTexture() { DestroyTexture(previewTexture); previewTexture = null; previewPixels = null; previewTextureStep = 0; previewBlocks.Clear(); }
+        /// <summary>間引いた合成の置き場を手放す（見せているタイルが無くなってドラッグも終わったとき、Dispose）。</summary>
+        void ReleasePreview()
+        {
+            ReleasePreviewTexture();
+            foreach (var b in cpuBlocks.Values) ReleaseSampled(b);
+        }
+
+        /// <summary>GPU の経路: 予定のブロックを順に 1 つずつ合成し、時間を過ぎたら残りを次へ回す（急ぎのブロックと、1 回目の 1 つは必ず）。</summary>
+        void RunGpu(PaintDocument doc, PaintChannel channel, List<PendingBlock> order, double budget, Func<double> elapsed)
+        {
+            // Normal チャンネルはシェーダーがベクトルとして合成する（CpuCompositor → NormalMaps と同じ式）
+            material.SetFloat("_NormalChannel", channel == PaintChannel.Normal ? 1 : 0);
+            var plan = CpuCompositor.Plan(doc, channel);
+            int needed = LevelsNeeded(plan);
+            bool tooDeep = needed > NestedLevelLimit;
+            Backend = gpuBackend + (tooDeep ? "; groups nested " + needed + " levels deep exceed the GPU limit of " + NestedLevelLimit + ", so the tiles they touch composite on the CPU" : "");
+            // Graphics.Blit は書き込み先を RenderTexture.active に残すので、呼び出し側の状態を戻す
+            var active = RenderTexture.active;
+            try
+            {
+                foreach (var p in order)
+                {
+                    if (lastProcessed.Count > 0 && !p.Urgent && elapsed() >= budget) break;
+                    if ((tooDeep || CompositeGroupsOnCpu) && GroupTouchesBlock(plan, channel, p.Bx, p.By)) CompositeBlockWithCpuGroups(doc, plan, channel, p.Bx, p.By);
+                    else CompositeBlock(plan, channel, p.Bx, p.By);
+                    Finished(p);
+                    BlockCompositedForTests?.Invoke(p.Bx, p.By);
+                }
+            }
+            finally { RenderTexture.active = active; }
         }
         // ───────────── CPU の経路 ─────────────
 
         /// <summary>CPU の経路のブロックの記憶（GPU の <see cref="BlockState"/> と同じ考え）: 前回の最上段の署名と、下の写し（最上段の項目
         /// [0, BelowIndex) の合成。ブロックの画素の行を詰めて並べたもの）。Below があっても BelowIndex が 0 なら中身は使えない（配列だけ
         /// 使い回す）。</summary>
-        sealed class CpuBlock { public string[] Sigs; public byte[] Below; public int BelowIndex; public int LastUsed; }
+        sealed class CpuBlock
+        {
+            public string[] Sigs; public byte[] Below; public int BelowIndex; public int LastUsed;
+            /// <summary>下の写しの中身が変わるたびに増える（間引いた写し Sampled が古いかを見る）。</summary>
+            public int BelowVersion;
+            /// <summary>間引いた合成の下地: Below を SampledStep で間引いたもの（SampledVersion の写しの）。</summary>
+            public byte[] Sampled; public int SampledVersion, SampledStep;
+        }
         readonly Dictionary<long, CpuBlock> cpuBlocks = new Dictionary<long, CpuBlock>();
         /// <summary>CPU の経路で 1 回の合成に渡す領域の置き場（ブロック 1 つ分の配列。<see cref="CpuWaveBlocks"/> 個まで使い回す）。</summary>
         readonly List<byte[]> cpuPool = new List<byte[]>();
@@ -266,60 +567,69 @@ namespace Yozolab.YoluPainter.Editor
             public int Start;
             /// <summary>下の写しを取り直す（ブロック全体を合成して State.Below へ）。</summary>
             public int CaptureAt = -1; public byte[] Capture;
+            /// <summary>表示へ送るタイル（ブロックの変わったタイル。null なら領域の全部）。</summary>
+            public HashSet<TileCoord> Send;
         }
 
-        /// <summary>CPU の正本の式（Core の CompositeRegions）で、変わったタイルを合成して表示へ送る。GPU の経路と同じく、ブロックごとに
+        /// <summary>CPU の正本の式（Core の CompositeRegions）で、予定のブロックを合成して表示へ送る。GPU の経路と同じく、ブロックごとに
         /// 最上段の項目の署名を覚え、前回と最初に違う項目より下の合成結果（下の写し）を予算の内側で残し、次からはそこから上だけを合成する
         /// （レイヤーの不透明度・合成モード・表示を変える、上の層に描くなど）。GPU と違い、写しから始めるときは変わったタイルだけを合成する。
-        /// 変更記録が使えない（別の文書・チャンネル）ときは全部のブロックを合成し直す。表示の画素はどの場合も CPU の正本とバイト単位で同じ。</summary>
-        void UpdateCpu(PaintDocument doc, PaintChannel channel, HashSet<TileCoord> dirty, bool incremental)
+        /// 時間を分けるときは、何ブロックかを 1 回の CompositeRegions にまとめ（並列に合成するため）、直前までの実測の見込み
+        /// （<see cref="CpuMillisecondsPerLayerPixel"/>・<see cref="CpuMillisecondsPerSentPixel"/>）が残りの時間に収まるところまでを 1 回に入れる。表示の画素はどの場合も CPU の正本と
+        /// バイト単位で同じ。</summary>
+        void RunCpu(PaintDocument doc, PaintChannel channel, List<PendingBlock> order, double budget, Func<double> elapsed)
         {
-            bool full = !incremental || !cpuValid;
-            updateIndex++;
-            if (!ReferenceEquals(doc, lastDocument) || channel != lastChannel) ClearCpuBlocks();
-            if (Path == CompositePath.CpuFrame && (cpuPixels == null || cpuPixels.Length != width * height * 4)) { cpuPixels = new byte[width * height * 4]; full = true; }
+            bool limited = !double.IsPositiveInfinity(budget);
             var plan = CpuCompositor.Plan(doc, channel);
-            // ブロックごとの変わったタイル（全部のときは null = ブロックの全タイル）
-            var byBlock = new SortedDictionary<long, List<TileCoord>>();
-            if (full)
+            int next = 0;
+            while (next < order.Count)
             {
-                for (int by = 0; by * blockTiles < TilesY; by++) for (int bx = 0; bx * blockTiles < TilesX; bx++) byBlock.Add(BlockOrder(bx, by), null);
-            }
-            else
-            {
-                foreach (var t in dirty)
+                if (limited && lastProcessed.Count > 0 && !order[next].Urgent && elapsed() >= budget) break;
+                // 1 回の合成に入れるブロック: 急ぎは全部、ほかは見込みが残りの時間に収まるうち（収まらなくなった 1 つまで。どの回も
+                // 少なくとも 1 つ）。見込みがまだ無ければ 1 つだけ入れて測る
+                var jobs = new List<CpuJob>(); var taken = new List<PendingBlock>(); double predicted = 0;
+                double remaining = budget - elapsed();
+                while (next < order.Count)
                 {
-                    if (t.X < 0 || t.Y < 0 || t.X >= TilesX || t.Y >= TilesY) continue;
-                    long key = BlockOrder(t.X / blockTiles, t.Y / blockTiles);
-                    if (!byBlock.TryGetValue(key, out var list)) byBlock.Add(key, list = new List<TileCoord>());
-                    list.Add(t);
+                    var p = order[next];
+                    if (limited && !p.Urgent && taken.Count > 0 && (!CpuCostMeasured || predicted >= remaining)) break;
+                    int from = jobs.Count;
+                    PlanCpuBlock(plan, channel, p, jobs);
+                    for (int i = from; i < jobs.Count; i++)
+                        predicted += LayerPixels(jobs[i], plan.Count) * CpuMillisecondsPerLayerPixel + (double)jobs[i].W * jobs[i].H * CpuMillisecondsPerSentPixel;
+                    taken.Add(p); Finished(p); next++;
                 }
-                if (byBlock.Count == 0) return;
+                // 置き場の大きさごとに分けて合成し、終わった分から表示へ送る。合成と送りの時間を分けて測り、見込みを直す
+                double composite = 0, send = 0, layerPixels = 0, pixels = 0;
+                for (int i = 0; i < jobs.Count;)
+                {
+                    int end = i; long bytes = 0;
+                    while (end < jobs.Count && (end == i || bytes + (long)jobs[end].W * jobs[end].H * 4 <= (long)CpuWaveBlocks * BlockBytes)) { bytes += (long)jobs[end].W * jobs[end].H * 4; end++; }
+                    var (c, t) = RunCpuWave(doc, channel, jobs, i, end, elapsed);
+                    composite += c; send += t;
+                    for (int k = i; k < end; k++) { layerPixels += LayerPixels(jobs[k], plan.Count); pixels += (double)jobs[k].W * jobs[k].H; }
+                    i = end;
+                }
+                if (taken.Count > 0)
+                {
+                    double perBlock = (composite + send) / taken.Count;
+                    cpuMsPerBlock = cpuMsPerBlock > 0 ? .5 * cpuMsPerBlock + .5 * perBlock : perBlock;
+                }
+                if (layerPixels > 0)
+                {
+                    double perLayerPixel = composite / layerPixels, perPixel = send / pixels;
+                    if (CpuCostMeasured) { CpuMillisecondsPerLayerPixel = .5 * CpuMillisecondsPerLayerPixel + .5 * perLayerPixel; CpuMillisecondsPerSentPixel = .5 * CpuMillisecondsPerSentPixel + .5 * perPixel; }
+                    else { CpuMillisecondsPerLayerPixel = perLayerPixel; CpuMillisecondsPerSentPixel = perPixel; CpuCostMeasured = true; }
+                }
             }
-            var jobs = new List<CpuJob>();
-            foreach (var pair in byBlock)
-            {
-                int bx = (int)(pair.Key % BlockColumns), by = (int)(pair.Key / BlockColumns);
-                PlanCpuBlock(doc, plan, channel, bx, by, pair.Value, full, jobs);
-            }
-            // 置き場の大きさごとに分けて合成し、終わった分から表示へ送る
-            for (int i = 0; i < jobs.Count;)
-            {
-                int end = i; long bytes = 0;
-                while (end < jobs.Count && (end == i || bytes + (long)jobs[end].W * jobs[end].H * 4 <= (long)CpuWaveBlocks * BlockBytes)) { bytes += (long)jobs[end].W * jobs[end].H * 4; end++; }
-                RunCpuWave(doc, channel, jobs, i, end, full ? null : dirty);
-                i = end;
-            }
-            if (Path == CompositePath.CpuFrame) UploadFrame();
-            cpuValid = true; LastCpuFullFrame = full;
-            TrimIdleCpu();
         }
-        int BlockColumns => (TilesX + blockTiles - 1) / blockTiles;
-        long BlockOrder(int bx, int by) => (long)by * BlockColumns + bx;
+        /// <summary>見込みの合成の単位: 画素 × 重ねる項目の数（写しから始める領域は、写しを読む分の 1 を足す）。</summary>
+        static double LayerPixels(CpuJob job, int entries) => (double)job.W * job.H * (entries - job.Start + (job.Start > 0 ? 1 : 0));
 
-        /// <summary>ブロック 1 つで何をどこから合成するかを決めて jobs に足す。</summary>
-        void PlanCpuBlock(PaintDocument doc, List<CpuCompositor.StackEntry> plan, PaintChannel channel, int bx, int by, List<TileCoord> tiles, bool full, List<CpuJob> jobs)
+        /// <summary>予定のブロック 1 つで何をどこから合成するかを決めて jobs に足す（ブロックの署名と写しの記憶はここで進める）。</summary>
+        void PlanCpuBlock(List<CpuCompositor.StackEntry> plan, PaintChannel channel, PendingBlock p, List<CpuJob> jobs)
         {
+            int bx = p.Bx, by = p.By; var tiles = p.Tiles; bool full = p.Full; int first0 = jobs.Count;
             long key = BlockKey(bx, by);
             if (!cpuBlocks.TryGetValue(key, out var state)) cpuBlocks.Add(key, state = new CpuBlock());
             state.LastUsed = updateIndex;
@@ -327,7 +637,9 @@ namespace Yozolab.YoluPainter.Editor
             for (int i = 0; i < plan.Count; i++) sigs[i] = Signature(plan[i], channel, bx, by);
             int n = sigs.Length, first = state.Sigs == null ? 0 : FirstDifference(state.Sigs, sigs);
             bool known = !full && state.Sigs != null;
-            if (known && first == n && state.Sigs.Length == n) { LastSkippedBlockCount++; state.Sigs = sigs; return; } // 合成は前と同じ
+            // 合成は前と同じ（ただし間引いた合成を見せているタイルがあれば、全解像度で送り直す）
+            bool shown = previewed.Count > 0 && previewed.Overlaps(tiles);
+            if (known && first == n && state.Sigs.Length == n && !shown) { LastSkippedBlockCount++; state.Sigs = sigs; return; }
             LastBlockCount++;
             int k = state.Below != null ? state.BelowIndex : 0;
             bool usable = known && k > 0 && k <= first;
@@ -349,7 +661,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 // 写しを最初に違う項目の下へ取り直す: ブロック全体を（使える写しがあればそこから）合成する
                 var job = NewJob(state, bx, by, whole, usable ? k : 0);
-                job.CaptureAt = first; job.Capture = state.Below; state.BelowIndex = 0; // 取り終えるまで使えない
+                job.CaptureAt = first; job.Capture = state.Below; state.BelowIndex = 0; state.BelowVersion++; // 取り終えるまで使えない
                 jobs.Add(job);
                 if (usable) LastBelowReuseCount++;
             }
@@ -362,6 +674,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (usable) LastBelowReuseCount++;
             }
             state.Sigs = sigs;
+            for (int i = first0; i < jobs.Count; i++) jobs[i].Send = full ? null : tiles;
         }
         CpuJob NewJob(CpuBlock state, int bx, int by, TileRect r, int start)
         {
@@ -374,8 +687,10 @@ namespace Yozolab.YoluPainter.Editor
             int bx0 = bx * blockSize, by0 = by * blockSize, bw = Math.Min(blockSize, width - bx0);
             for (int row = 0; row < h; row++) Buffer.BlockCopy(state.Below, ((y - by0 + row) * bw + (x - bx0)) * 4, region, row * w * 4, w * 4);
         }
-        void RunCpuWave(PaintDocument doc, PaintChannel channel, List<CpuJob> jobs, int from, int to, HashSet<TileCoord> dirty)
+        /// <summary>jobs[from, to) を 1 回の CompositeRegions で合成し、表示へ送る。戻り値は合成と送りにかかった時間（ms）。</summary>
+        (double composite, double send) RunCpuWave(PaintDocument doc, PaintChannel channel, List<CpuJob> jobs, int from, int to, Func<double> elapsed)
         {
+            double t0 = elapsed();
             var core = new List<CpuCompositor.CompositeJob>(to - from);
             for (int i = from; i < to; i++)
             {
@@ -398,14 +713,21 @@ namespace Yozolab.YoluPainter.Editor
             }
             CpuCompositor.CompositeRegions(doc, channel, core);
             LastCpuCompositeCalls++; LastCpuJobCount += to - from;
+            if (BlockCompositedForTests != null)
+            {
+                var seen = new HashSet<(int, int)>();
+                for (int i = from; i < to; i++) if (seen.Add((jobs[i].Bx, jobs[i].By))) BlockCompositedForTests(jobs[i].Bx, jobs[i].By);
+            }
+            double t1 = elapsed();
             for (int i = from; i < to; i++)
             {
                 var j = jobs[i];
-                if (j.CaptureAt >= 0) j.State.BelowIndex = j.CaptureAt;
-                if (Path == CompositePath.CpuTiles) SendRegion(j.Pixels, j.X, j.Y, j.W, j.Rect, dirty);
+                if (j.CaptureAt >= 0) { j.State.BelowIndex = j.CaptureAt; j.State.BelowVersion++; }
+                if (Path == CompositePath.CpuTiles) SendRegion(j.Pixels, j.X, j.Y, j.W, j.Rect, j.Send);
                 else for (int row = 0; row < j.H; row++) Buffer.BlockCopy(j.Pixels, row * j.W * 4, cpuPixels, ((j.Y + row) * width + j.X) * 4, j.W * 4);
                 ReturnCpu(j.Pixels); j.Pixels = null;
             }
+            return (t1 - t0, elapsed() - t1);
         }
         byte[] RentCpu()
         {
@@ -435,8 +757,8 @@ namespace Yozolab.YoluPainter.Editor
             }
             return true;
         }
-        void ReleaseBelow(CpuBlock b) { if (b.Below == null) return; ResidentBytes -= b.Below.Length; b.Below = null; b.BelowIndex = 0; }
-        static void InvalidateBelow(CpuBlock b) { b.BelowIndex = 0; }
+        void ReleaseBelow(CpuBlock b) { ReleaseSampled(b); if (b.Below == null) return; ResidentBytes -= b.Below.Length; b.Below = null; b.BelowIndex = 0; b.BelowVersion++; }
+        static void InvalidateBelow(CpuBlock b) { b.BelowIndex = 0; b.BelowVersion++; }
         void TrimIdleCpu()
         {
             int limit = updateIndex - IdleUpdatesBeforeRelease;
@@ -1188,8 +1510,12 @@ namespace Yozolab.YoluPainter.Editor
             for (int i = 0; i < transientLayer.Length; i++) { DestroyTexture(transientLayer[i]); DestroyTexture(transientMask[i]); transientLayer[i] = transientMask[i] = null; }
             for (int i = 0; i < tileStage.Length; i++) { DestroyTexture(tileStage[i]); DestroyTexture(blockStage[i]); tileStage[i] = blockStage[i] = null; }
             DestroyTexture(tileUpload); DestroyTexture(cpuFallback);
-            tileBuffer = null; blockBuffer = null; cpuPixels = null; material = null; tileUpload = null; cpuFallback = null; composite = null; cpuTile = null; previous.Clear();
-            lastDocument = null; lastSerial = -1; blockSize = blockTiles = 0; cpuValid = false;
+            tileBuffer = null; blockBuffer = null; cpuPixels = null; material = null; tileUpload = null; cpuFallback = null; composite = null; cpuTile = null;
+            pending.Clear(); // 残った予定は捨てる（文書を持ち続けない）
+            ReleasePreviewTexture(); previewed.Clear(); previewSerial = -1; lastFinished = true;
+            if (previewMaterial != null) UnityEngine.Object.DestroyImmediate(previewMaterial);
+            previewMaterial = null;
+            lastDocument = null; lastSerial = -1; blockSize = blockTiles = 0;
         }
     }
 }

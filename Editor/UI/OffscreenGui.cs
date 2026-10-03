@@ -81,6 +81,7 @@ namespace Yozolab.YoluPainter.Editor
         public static void RenderWindow(TexturePaintWindow window, int width, int height, string path, Vector2? mouse = null)
         {
             window.LayoutOverride = new Rect(0, 0, width, height);
+            window.FinishDisplayCompositing(); // 1 回だけ描くので、時間で区切った表示の合成の残りを先に終える
             var onGui = typeof(TexturePaintWindow).GetMethod("OnGUI", BindingFlags.NonPublic | BindingFlags.Instance);
             RenderToPng(width, height, () => onGui.Invoke(window, null), path, PaintTheme.WindowBg, mouse);
         }

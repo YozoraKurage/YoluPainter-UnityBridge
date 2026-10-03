@@ -52,8 +52,14 @@ namespace Yozolab.YoluPainter.Tests
         static Vector2 At(TexturePaintWindow w, int x, int y)
         { Repaint(w); return w.PixelToGui(x, y); }
 
+        /// <summary>描画を 1 回送る。描画ウィンドウの表示の合成は 1 回の描画の時間で区切られ、残りは次の描画に回るので、合成器に仕事が
+        /// 残っていれば揃うまで描画を送る（試験は全部が揃った表示を見る。区切られ方そのものは WindowProgressiveCompositingTests）。</summary>
         static void Repaint(EditorWindow w)
-        { EditorShaderCompiler.TolerateErrorLogsIfBroken(); w.SendEvent(new Event { type = EventType.Repaint }); }
+        {
+            EditorShaderCompiler.TolerateErrorLogsIfBroken(); w.SendEvent(new Event { type = EventType.Repaint });
+            if (w is TexturePaintWindow painter)
+                for (int i = 0; i < 10000 && painter.Compositor != null && painter.Compositor.HasPendingWork; i++) w.SendEvent(new Event { type = EventType.Repaint });
+        }
 
         /// <summary>SendEvent の座標はタブを含むホスト側の座標として扱われ、ウィンドウに届く前にタブの
         /// 高さぶん引かれる。実際のマウス入力と同じ位置に届くよう、その分を足して送る。</summary>

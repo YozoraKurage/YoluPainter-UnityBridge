@@ -125,6 +125,19 @@ namespace Yozolab.YoluPainter.Editor
                 (int)p.displayCompositing, CompositingNames, CompositingValues);
             EditorGUILayout.LabelField(" ", CompositingNote(p.displayCompositing, gpuUnavailable), EditorStyles.wordWrappedMiniLabel);
             p.cpuThreads = ThreadsPopup(p.cpuThreads);
+            p.displayFrameBudgetMs = FrameBudgetPopup(p.displayFrameBudgetMs);
+        }
+        internal static readonly int[] FrameBudgetChoices = { 0, 4, 6, 8, 10, 12, 16, 25, 33, 50 };
+        static int FrameBudgetPopup(int value)
+        {
+            var values = FrameBudgetChoices.Contains(value) ? FrameBudgetChoices : FrameBudgetChoices.Concat(new[] { value }).OrderBy(v => v).ToArray();
+            var names = values.Select(v => new GUIContent(v == 0 ? "No limit (all at once)" : v + " ms" + (v == PainterSettings.DefaultDisplayFrameBudgetMs ? " (default)" : ""))).ToArray();
+            return EditorGUILayout.IntPopup(new GUIContent("Compositing time per frame",
+                "How long one repaint of the window may spend compositing the layers for the 2D view and the 3D preview. What does not fit is composited " +
+                "in the next repaints, a block of about 512 pixels at a time: first where a stroke is, then what the 2D view shows, then what the 3D " +
+                "preview's UVs use. Until a block is ready it keeps its previous picture, so the window does not freeze on a large canvas (a layer's " +
+                "opacity on a 4K canvas with many layers, switching channels or texture sets). The part of a stroke is always shown in the same repaint. " +
+                "No limit composites everything in one repaint (the window waits). Saving, exporting and the eyedropper never use the display."), value, names, values);
         }
         internal static string CompositingNote(CompositorBackend choice, string gpuUnavailable)
         {

@@ -191,7 +191,7 @@ namespace Yozolab.YoluPainter.Editor
             // 合成（GPU への転送と合成、Normal の出力、3D のプレビューの更新）は描くときだけ。入力のイベント（ストローク中の MouseDrag
             // など）のたびに合成すると 1 回の処理が重くなり、OS がマウスの移動をまとめて届く点がまばらになる。表示の前には必ず
             // Repaint が来るので、その間の変更はまとめて 1 回で合成する。
-            if(e.type==EventType.Repaint && (repaintPixels || renderedRevision!=document.Revision)) RefreshPreviewTextures();
+            if(e.type==EventType.Repaint && DisplayNeedsCompositing) RefreshDisplayForFrame(); // 時間で区切る。残りは次の描画へ（Compositing.cs）
             LayoutShell();
             PaintGui.Fill(WindowRect,PaintTheme.WindowBg);
             if(canvasRect.width>0) DrawCanvas();
@@ -206,10 +206,12 @@ namespace Yozolab.YoluPainter.Editor
             HandleCanvasInput(e);
         }
 
-        /// <summary>合成し直して、2D の表示と 3D のプレビュー（全部のテクスチャセットとその照明）に入れる（Repaint から。テストも呼ぶ）。</summary>
-        internal void RefreshPreviewTextures()
+        /// <summary>合成し直して、2D の表示と 3D のプレビュー（全部のテクスチャセットとその照明）に入れる（テストが呼ぶ。表示の合成を全部終える）。</summary>
+        internal void RefreshPreviewTextures() => RefreshPreviewTextures(null);
+        /// <summary>schedule の時間の中で合成する（Repaint から。null なら全部）。</summary>
+        void RefreshPreviewTextures(CompositeSchedule schedule)
         {
-            TryAction(()=> { compositor.Update(document,channel); UpdateNormalOutput(); ShowTextureSets(); });
+            TryAction(()=> { compositor.Update(document,channel,schedule); UpdateNormalOutput(); ShowTextureSets(); });
             TryAction(UpdatePreviewLighting);
             TryAction(ShowMaterialChannels);
             lastComposite=EditorApplication.timeSinceStartup; CompositeCount++;
