@@ -756,14 +756,14 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>モデルのローカルの axis に直交し、ルートから offset（シーンの単位）ずらした対称の面。</summary>
         public MirrorPlane SymmetryPlane(SymmetryAxis axis, float offset) => MirrorPlane.FromModel(ModelRootPosition, ModelRootRotation, axis, offset);
         /// <summary><see cref="BuildSurfaceDabs"/> に、対称の面で映した側のダブを合わせたもの（<see cref="SurfaceSymmetry"/>）。</summary>
-        public SymmetricSurfaceDab BuildSymmetricSurfaceDabs(SurfaceHit hit, MirrorPlane plane, float radiusWorld, int width, int height, float hardness = 0.8f, SurfaceVisibilityCache cache = null)
+        public SymmetricSurfaceDab BuildSymmetricSurfaceDabs(SurfaceHit hit, MirrorPlane plane, float radiusWorld, int width, int height, float hardness = 0.8f, SurfaceVisibilityCache cache = null, bool ignoreVisibility = false)
         {
             if (!CanPaint)
             {
                 var refused = new SurfaceDabResult { Diagnostic = "Load a complete supported static mesh snapshot before surface painting." };
                 return new SymmetricSurfaceDab { Original = refused, Result = refused, Outcome = MirrorOutcome.OnPlane };
             }
-            return SurfaceSymmetry.Build(geometry, hit, plane, radiusWorld, width, height, preview.camera.transform.position, hardness, BrushBudget, cache);
+            return SurfaceSymmetry.Build(geometry, hit, plane, radiusWorld, width, height, preview.camera.transform.position, hardness, BrushBudget, cache, ignoreVisibility);
         }
         /// <summary>今のカメラの位置（プレビューの空間。最後に描いた・当たりを調べた矩形での位置）。</summary>
         public Vector3 CameraPosition => preview != null ? preview.camera.transform.position : Vector3.zero;

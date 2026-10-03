@@ -28,6 +28,7 @@ namespace Yozolab.YoluPainter.Editor
                 if(document.Selection!=null){EnsureSelectionOverlay(); GUI.DrawTexture(image,selectionOverlay,ScaleMode.StretchToFill,true);}
             }
             finally{if(turned)GL.PopMatrix();}
+            DrawCanvasSymmetryAxes(view);
             DrawUvWireframe(view); // 今のテクスチャセットの UV（Canvas/TexturePaintWindow.UvWireframe.cs）
             DrawPolygonFillOutline(view); // ポリゴン塗りつぶしのポインタの下の範囲の輪郭（Tools/TexturePaintWindow.PolygonFill.cs）
             if(toolDragging&&Event.current.type==EventType.Repaint) DrawToolPreview(view);

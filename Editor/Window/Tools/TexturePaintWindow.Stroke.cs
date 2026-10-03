@@ -48,6 +48,7 @@ namespace Yozolab.YoluPainter.Editor
                         // チャンネルはストロークの中で有効にする（ストロークと同じ 1 回の Undo。取消で戻る）
                         stroke=document.BeginMaterialStroke(selectedLayer,StrokeChannels(),GetBrush());
                     }
+                    strokeCanvasSymmetry=surfaceStroke ? null : CanvasSymmetryNow();
                     effectSurfaceIsland=-1;
                     previousPointer=e.mousePosition; previousPressure=Pressure(e); surfaceHasBefore=surfaceHasHeld=false;
                     PaintAt(e.mousePosition,previousPressure); GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive);
@@ -152,7 +153,7 @@ namespace Yozolab.YoluPainter.Editor
                 if(commit) { bool changed=stroke.Commit(); if(changed && tool==PaintTool.Clone) { cloneOffset=cloneStrokeOffset; cloneOffsetValid=true; } } else stroke.Cancel();
             }
             catch(Exception ex){message=ex.Message;stroke.Cancel();}
-            finally{stroke.Dispose();stroke=null;GUIUtility.hotControl=0;repaintPixels=true;surfaceHasHeld=surfaceHasBefore=false;surfaceVisibility=null;EndPolygonFillDrag();}
+            finally{stroke.Dispose();stroke=null;GUIUtility.hotControl=0;repaintPixels=true;surfaceHasHeld=surfaceHasBefore=false;surfaceVisibility=null;strokeMirror=null;strokeRadial=null;strokeCanvasSymmetry=null;EndPolygonFillDrag();}
         }
         /// <summary>今の 3D のストロークのあいだ覚えておく、テクセルの見え方（ストロークが終われば捨てる）。</summary>
         Preview.SurfaceVisibilityCache surfaceVisibility;

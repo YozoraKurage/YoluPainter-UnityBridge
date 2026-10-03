@@ -178,7 +178,7 @@ YoluPainter の作業ファイル `.ylp` の決まり。読み書きのコード
 | `resources/<content>.png` | 正本 | 並びにあるとき | リソースの画素（上のとおり。形式 4 から） | `ResourceIndex.Load` |
 | `resources/<content>.ylsmart` | 正本 | 並びにあるとき | スマートマテリアル・スマートマスクのファイル（上のとおり。形式 5 から） | `ResourceIndex.Load`・`SmartMaterialFile` |
 | `view.json` | 状態 | | モデル（GUID）・選んだチャンネル（形式 2 までの `materialSlot` は書かない・読まない） | ウィンドウ |
-| `brush.json` | 状態 | | ブラシの設定。`schema` 1〜3（2 で筆先・ゆらぎ・紙の質感、3 でダイナミクス。schema 3 のまま、マテリアルで塗る組と値 `material`・`materialChannels`・`materialEmission`・`materialRoughness`・`materialMetallic`・`materialHeight`・`materialNormalX/Y` を足した: 無い古いファイルはオフで読み、古い読み手は読み飛ばして今のチャンネル 1 つで塗る。知らないチャンネルの印・範囲の外の値は読まずに既定に戻して知らせる） | ウィンドウ |
+| `brush.json` | 状態 | | ブラシの設定。`schema` 1〜3（2 で筆先・ゆらぎ・紙の質感、3 でダイナミクス。schema 3 のまま、マテリアルで塗る組と値 `material`・`materialChannels`・`materialEmission`・`materialRoughness`・`materialMetallic`・`materialHeight`・`materialNormalX/Y` を足した: 無い古いファイルはオフで読み、古い読み手は読み飛ばして今のチャンネル 1 つで塗る。知らないチャンネルの印・範囲の外の値は読まずに既定に戻して知らせる） 対称も schema 3 の追加項目: `symmetry3D`・`symmetryAxis`・`symmetryOffset`（鏡映）、`radialSymmetry3D`・`radialSymmetryAxis`・`radialSymmetryCount`（放射状）、`symmetryIgnoreVisibility`・`symmetryAxesShown`、`canvasSymmetry`（0 なし / 1 縦 / 2 横 / 3 両方 / 4 放射状）・`canvasSymmetryX/Y`（中心の 0〜1 の比率）・`canvasSymmetryCount`。数は 2〜16、軸は 0 X / 1 Y / 2 Z。古いファイルは対称オフ、中心 0.5、数 2、可視性無視オフ。古い読み手は追加項目を読み飛ばす。プリセットも同じ項目。正本の画素・版と .ylp の形式は変更しない。 | ウィンドウ |
 | `thumbnail.png` | 派生 | | 今のセットの Color（無ければ最初のチャンネル。どのチャンネルも使っていなければ並びの最初の描いたセット）の合成を長辺 256 px 以下に縮めたもの | インポーター |
 
 テクスチャセットごと（`sets/<id>/` の下。形式 2 までは同じ名前で根にあった）:

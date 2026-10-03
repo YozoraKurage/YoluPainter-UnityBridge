@@ -35,6 +35,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public int CandidatePixels { get; internal set; }
         public int VisibilityRays { get; internal set; }
         public int RayTriangleTests { get; internal set; }
+        public int VisitedTriangles { get; internal set; }
+        public long RayNodeVisits { get; internal set; }
         internal SurfaceDabResult Reject(string message)
         {
             Pixels.Clear();
@@ -292,7 +294,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <see cref="BuildSurfaceDabsReference"/> at any degree of parallelism (Core's CoreParallelism).
         /// </summary>
         public SurfaceDabResult BuildSurfaceDabs(SurfaceHit hit, float radiusWorld, int width, int height, Vector3 cameraPosition,
-            float hardness = 0.8f, SurfaceBrushBudget budget = null, SurfaceVisibilityCache cache = null)
+            float hardness = 0.8f, SurfaceBrushBudget budget = null, SurfaceVisibilityCache cache = null, bool ignoreVisibility = false)
         {
             var result = new SurfaceDabResult();
             if (hit.SnapshotRevision != SnapshotRevision || hit.TriangleIndex < 0 || hit.TriangleIndex >= triangles.Length)
@@ -311,10 +313,11 @@ namespace Yozolab.YoluPainter.Editor.Preview
             while (queue.Count > 0 && stop == null)
             {
                 int triangleIndex = queue.Dequeue(); var t = triangles[triangleIndex];
-                if (++processed > budget.MaxTriangles) { stop = "Surface dab exceeded the triangle budget. No pixels were changed; reduce the brush radius."; break; }
+                result.VisitedTriangles = ++processed;
+                if (processed > budget.MaxTriangles) { stop = "Surface dab exceeded the triangle budget. No pixels were changed; reduce the brush radius."; break; }
                 if (t.RendererIndex != hit.RendererIndex || t.MaterialSlot != hit.MaterialSlot || t.Bounds.SqrDistance(hit.Position) > radiusSquared) continue;
                 if ((ClosestPoint(hit.Position, t) - hit.Position).sqrMagnitude > radiusSquared) continue;
-                if (Vector3.Dot(t.Normal, cameraPosition - (t.A + t.B + t.C) / 3) <= 0) continue;
+                if (ignoreVisibility ? Vector3.Dot(t.Normal, hit.Normal) <= 0 : Vector3.Dot(t.Normal, cameraPosition - (t.A + t.B + t.C) / 3) <= 0) continue;
                 foreach (int neighbor in adjacency[triangleIndex]) if (visited.Add(neighbor)) queue.Enqueue(neighbor);
                 if (!UvFootprintBounds(t, hit.Position, radiusWorld, out var uvMin, out var uvMax)) continue;
                 int minX = Mathf.Max(0, Mathf.CeilToInt(uvMin.x * width - 0.5f));
@@ -335,6 +338,22 @@ namespace Yozolab.YoluPainter.Editor.Preview
                     if (normalizedDistance >= 1) continue;
                     candidates.Add(new DabCandidate { Triangle = triangleIndex, X = x, Y = y, Bary = bary, Position = position, Distance = normalizedDistance, CandidatesSoFar = result.CandidatePixels });
                 }
+            }
+
+            // 対称先の足跡はカメラから独立。連結・同じスロット・法線の向き・候補画素の予算は守る。
+            if (ignoreVisibility)
+            {
+                if (stop != null) return result.Reject(stop);
+                var merged = new Dictionary<int, float>();
+                foreach (var candidate in candidates)
+                {
+                    float coverage = candidate.Distance <= hardness || hardness >= .9999f ? 1 : 1 - Mathf.SmoothStep(0, 1, (candidate.Distance - hardness) / (1 - hardness));
+                    int key = candidate.Y * width + candidate.X;
+                    if (!merged.TryGetValue(key, out float old) || coverage > old) merged[key] = coverage;
+                }
+                var sorted = new List<int>(merged.Keys); sorted.Sort();
+                foreach (int key in sorted) result.Pixels.Add(new SurfacePixel(key % width, key / width, merged[key]));
+                return result;
             }
 
             // 2・3. 可視のレイを組ごとに並列に撃ち、組ごとに並びのとおりに予算を数えて受け入れる。予算を超える所が見つかればすぐ断る
@@ -387,6 +406,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 var o = outcomes[i - chunkStart];
                 if (o.Skipped) continue;
                 tests += o.Tests; visits += o.Visits;
+                result.RayNodeVisits = visits;
                 bool exceeded = o.Exceeded || tests > budget.MaxRayTriangleTests || visits > budget.MaxRayNodeVisits;
                 result.RayTriangleTests = (int)Math.Min(tests, (long)budget.MaxRayTriangleTests + 1);
                 if (exceeded) return result.Reject("Surface visibility exceeded the BVH work budget. No pixels were changed; reduce the radius or simplify overlapping geometry.");

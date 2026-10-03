@@ -18,7 +18,7 @@ namespace Yozolab.YoluPainter.Core
         long effectScratchBytes;
         bool effectHasPosition;
         double effectX, effectY, effectOffsetX, effectOffsetY;
-        void EnsureEffectBudget(long bytes) => document.EnsureStrokeBudget(checked(bytes + effectScratchBytes));
+        void EnsureEffectBudget(long bytes) => document.EnsureStrokeBudget(checked(bytes + effectScratchBytes + symmetryScratchBytes));
         void ReleaseEffectDab() { effectFrames = null; effectScratchBytes = 0; }
 
         bool PrepareEffectDab(int minX, int maxX, int minY, int maxY, double x, double y)
@@ -42,7 +42,7 @@ namespace Yozolab.YoluPainter.Core
             if (x1 < x0 || y1 < y0) return false;
             long cells = checked((long)(x1 - x0 + 1) * (y1 - y0 + 1));
             long bytes = checked(targets.Length * (cells * 4 + (radius > 0 ? (long)(x1 - x0 + 2) * (y1 - y0 + 2) * 32 : 0)));
-            document.EnsureStrokeBudget(checked(rollbackBytes + bytes)); effectScratchBytes = bytes;
+            document.EnsureStrokeBudget(checked(rollbackBytes + bytes + symmetryScratchBytes)); effectScratchBytes = bytes;
             effectFrames = new EffectFrame[targets.Length];
             for (int k = 0; k < targets.Length; k++)
             {

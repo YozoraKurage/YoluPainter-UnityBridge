@@ -29,6 +29,10 @@ For mesh-derived dabs, `ApplyPixel(x, y, coverage, pressure)` accepts already-co
 
 Direct `SparseTileSurface.SetPixel`, `ImportTile` and `Clear` are import/administrative mutations, intentionally clearing document history. Call `ClearHistory` after constructing an imported document. `GetChannel` creates an absent empty enabled channel; `TryGetChannel` is the side-effect-free query. A disabled existing channel remains disabled and its pixels are retained.
 
+2D の対称は `BrushSettings.CanvasSymmetry`（`CanvasSymmetrySettings`）で指定する。`Vertical` / `Horizontal` / `Both` は画素座標の中心の縦・横の線、`Radial` は中心のまわりの 2〜16 個。画素の中心は整数 + 0.5、画面の回転・反転は Core の入力に含めない。各筆先の写しを逆にたどって覆いを評価し、画素ごとの最大値へ合併してから 1 回適用する。設定と乱数はストロークで凍結、筆先・デュアルブラシ・入り抜き・選択範囲・透明部分のロック・複数チャンネルとマスクは通常の契約を守る。紙の質感は文書の画素座標に固定する。ぼかしは合併した足跡の読み元を先に凍結する。指先・クローンはコピーごとの読み元と方向を持たないため、対称との併用を開始前に断る。
+
+対称の足跡の辞書と整列キーは 1 画素あたり 96 バイト + 256 バイトの公称一時領域としてストローク予算に含める。候補の外接矩形の合計は 1 ダブにつき 4,194,304 画素まで、超えると割当て前に全取消。ぼかしの読み元は全コピーの外接矩形なので、離れたコピーでも追加メモリを要する。現在の対称の画素処理は主スレッドで行い、大きいブラシでの応答時間は保証しない。対称なしの既存の並列経路は変えない。
+
 ## Memory contracts
 
 `SourceBudgetBytes` defaults to 256 MiB; `ActiveStrokeBudgetBytes` defaults to 64 MiB; undo/redo payload defaults to 64 MiB. Tile expansion, rollback capture and undo restoration preflight their budgets. Refused strokes restore previous pixels rather than retrying allocations. `HistoryTrimming` fires before dropping exact old commands, reporting the number of payload bytes discarded.

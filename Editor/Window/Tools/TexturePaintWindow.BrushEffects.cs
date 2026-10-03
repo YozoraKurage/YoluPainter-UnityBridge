@@ -42,7 +42,8 @@ namespace Yozolab.YoluPainter.Editor
         bool PrepareBrushEffectStroke(Vector2 pointer, bool onSurface)
         {
             if (onSurface && tool == PaintTool.Clone) { message = L.Tr("Clone Stamp uses the 2D canvas. A UV offset cannot identify the source across 3D seams."); return false; }
-            if (onSurface && tool == PaintTool.Smudge && symmetry) { message = L.Tr("Smudge in 3D uses UV motion within one island. Turn off mirror symmetry or use the 2D canvas."); return false; }
+            if ((onSurface ? HasSurfaceSymmetry : brush.canvasSymmetry != CanvasSymmetryMode.None) && (tool == PaintTool.Smudge || tool == PaintTool.Clone))
+            { message = L.Tr("Smudge and Clone need a separate source and motion for each symmetry copy. Turn off symmetry to use them."); return false; }
             if (tool == PaintTool.Clone)
             {
                 if (!HasCloneSource) { message = L.Tr("Alt-click the 2D canvas to set a clone source on this layer or mask first."); return false; }

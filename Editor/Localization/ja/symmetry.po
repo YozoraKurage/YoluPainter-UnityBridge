@@ -56,11 +56,66 @@ msgstr "シンメトリー: 3D のブラシのストロークを、モデルの�
 
 # ── 映した側を塗らなかったときの知らせ ──
 
-msgid "Symmetry: no surface of the model at the mirrored point; only this side was painted."
-msgstr "シンメトリー: 映した点の近くにモデルの面が無いので、こちら側だけ塗りました。"
+msgid "Symmetry: some copies have no surface nearby and were skipped."
+msgstr "シンメトリー: 近くに面の無い対称先は塗っていません。"
 
-msgid "Symmetry: the mirrored point is on another texture set; only this side was painted."
-msgstr "シンメトリー: 映した点は別のテクスチャセットの面なので、こちら側だけ塗りました。"
+msgid "Symmetry: some copies are on another texture set and were skipped."
+msgstr "シンメトリー: 別のテクスチャセットにある対称先は塗っていません。"
 
-msgid "Symmetry: the mirrored side cannot be seen from this view and was not painted. Turn the model so that both sides are visible."
-msgstr "シンメトリー: 映した側はこの向きからは見えないので塗っていません。両側が見えるようにモデルを回してください。"
+msgid "Symmetry: some copies cannot be seen from this view and were skipped. Enable Ignore visibility to paint hidden symmetry copies."
+msgstr "シンメトリー: この向きから見えない対称先は塗っていません。見えない側にも塗るには「可視性を無視」を有効にしてください。"
+
+msgid "Reflect dabs across the model root's plane, within the active texture set."
+msgstr "モデルのルートを基準にした面で、今のテクスチャセットの中へダブを映します。"
+
+msgid "Radial 3D strokes"
+msgstr "3D のストロークを放射状に描く"
+
+msgid "Copies"
+msgstr "対称の数"
+
+msgid "Ignore visibility"
+msgstr "可視性を無視"
+
+msgid "Symmetry copies paint back-facing and occluded surfaces. The original dab still paints visible surfaces only."
+msgstr "対称先では裏側や隠れた面にも塗ります。元のダブは見える面だけを塗ります。"
+
+msgid "Show symmetry axes"
+msgstr "対称の軸を表示"
+
+msgid "Copies stay on this texture set. Mirror and radial symmetry combine up to N × 2 copies; overlaps use the largest coverage."
+msgstr "対称先も今のテクスチャセットに限ります。鏡映と放射状を合わせると最大 N × 2 個。重なりは大きいほうの覆いで塗ります。"
+
+msgid "2D canvas symmetry"
+msgstr "2D キャンバスの対称"
+
+msgid "Off"
+msgstr "なし"
+
+msgid "Vertical"
+msgstr "縦"
+
+msgid "Horizontal"
+msgstr "横"
+
+msgid "Both"
+msgstr "両方"
+
+msgid "Center X"
+msgstr "中心 X"
+
+msgid "Center Y"
+msgstr "中心 Y"
+
+msgid "Canvas center"
+msgstr "キャンバスの中心"
+
+msgid "Axes use document pixels, independent of canvas view rotation and flip. Smudge and Clone cannot be combined with symmetry."
+msgstr "軸は文書の画素の座標です。表示の回転・反転には依存しません。指先とクローンは対称と併用できません。"
+
+msgid "Smudge and Clone need a separate source and motion for each symmetry copy. Turn off symmetry to use them."
+msgstr "指先とクローンには対称先ごとの読み元と移動方向が必要です。使うには対称を切ってください。"
+
+msgctxt "Symmetry"
+msgid "Radial"
+msgstr "放射状"

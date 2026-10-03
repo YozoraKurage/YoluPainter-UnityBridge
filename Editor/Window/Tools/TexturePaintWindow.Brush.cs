@@ -40,6 +40,7 @@ namespace Yozolab.YoluPainter.Editor
             if(b.schema<2){b.roundness=1;b.textureScale=1;b.count=1;b.randomSeedPerStroke=true;b.schema=2;}
             UpgradeBrushState(b);
             ValidateMaterial(b);
+            ValidateSymmetryState(b);
             if (b.blurRadius < 1 || b.blurRadius > 64 || float.IsNaN(b.smudgeStrength) || b.smudgeStrength < 0 || b.smudgeStrength > 1) throw new InvalidDataException("Unsupported pixel effect brush settings");
             return b;
         }
@@ -53,7 +54,7 @@ namespace Yozolab.YoluPainter.Editor
             SizeJitter=brush.sizeJitter, AngleJitter=brush.angleJitter, RoundnessJitter=brush.roundnessJitter, OpacityJitter=brush.opacityJitter, FlowJitter=brush.flowJitter,
             Scatter=brush.scatter, Count=brush.count, TextureDepth=brush.textureDepth, TextureScale=brush.textureScale,
             Seed=brush.randomSeedPerStroke ? seeds.Next() : 0, Stabilizer=brush.stabilizer, TaperIn=brush.taperIn, TaperOut=brush.taperOut,
-            CurveInterpolation=true }; // 入力の点の間を曲線で結ぶ（速く描いて点がまばらでも線が角張らない）。設定に出さず、いつも使う
+            CanvasSymmetry=surfaceStroke ? null : CanvasSymmetryNow(), CurveInterpolation=true }; // 入力の点の間を曲線で結ぶ（速く描いて点がまばらでも線が角張らない）。設定に出さず、いつも使う
         /// <summary>プリセットの設定を今のブラシに写す。色は今のまま残す（チャンネルの値として選んだものだから）。</summary>
         internal void ApplyPreset(Core.BrushPreset preset)
         {
@@ -67,6 +68,7 @@ namespace Yozolab.YoluPainter.Editor
                 stabilizer=assist.Item1, taperIn=assist.Item2, taperOut=assist.Item3 }; // 補正と入り抜きは描き手の設定として残す
             CopyPresetDynamics(s,secondary);
             brush.blurRadius=previous.blurRadius; brush.smudgeStrength=previous.smudgeStrength; brush.cloneAligned=previous.cloneAligned;
+            CopySymmetry(previous,brush);
             CopyMaterial(previous,brush); // マテリアル（塗るチャンネルと値）は描画色と同じく描き手のものとして残す
         }
         void SavePreset(){string p=Dialogs.SaveFile("Save brush",Application.dataPath,"brush","json");if(!String.IsNullOrEmpty(p))TryAction(()=>File.WriteAllText(p,JsonUtility.ToJson(brush,true)));}

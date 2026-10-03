@@ -125,7 +125,7 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>Tiles taken over, summed over the channels the stroke paints.</summary>
         public int ChangedTileCount { get { int n = 0; foreach (var t in targets) n += t.Before.Count; return n; } }
         /// <summary>Rollback payload of the stroke: every channel's tile copies, the shared coverage and the scratch it keeps.</summary>
-        public long RollbackBytes { get { return rollbackBytes + effectScratchBytes; } }
+        public long RollbackBytes { get { return rollbackBytes + effectScratchBytes + symmetryScratchBytes; } }
         /// <summary>How many surfaces the stroke paints (1 for a channel or a mask).</summary>
         public int TargetCount { get { return targets.Length; } }
         internal BrushStroke(PaintDocument document, SparseTileSurface surface, BrushSettings settings, bool keepAlpha = false)
@@ -406,6 +406,23 @@ namespace Yozolab.YoluPainter.Core
             double angle = dual.Angle * Math.PI / 180, cos = Math.Cos(angle), sin = Math.Sin(angle);
             double aspectX = 1, aspectY = 1;
             if (dual.Tip != null) { if (dual.Tip.Width >= dual.Tip.Height) aspectY = dual.Tip.Height / (double)dual.Tip.Width; else aspectX = dual.Tip.Width / (double)dual.Tip.Height; }
+            if (settings.CanvasSymmetry != null && settings.CanvasSymmetry.Enabled)
+            {
+                var s = new DabShape { X = x, Y = y, Radius = radius, Cos = cos, Sin = sin, Roundness = dual.Roundness,
+                    AspectX = aspectX, AspectY = aspectY, Hardness = dual.Hardness, Tip = dual.Tip };
+                VisitSymmetricPixels(s, extent, (px, py, coverage) =>
+                {
+                    var coord = new TileCoord(px / tileSize, py / tileSize);
+                    if (!dualCoverage.TryGetValue(coord, out var values))
+                    {
+                        long next = rollbackBytes + 64 + (long)tileSize * tileSize * 4;
+                        EnsureEffectBudget(next); values = new float[tileSize * tileSize]; dualCoverage.Add(coord, values); rollbackBytes = next;
+                    }
+                    int local = (py % tileSize) * tileSize + px % tileSize;
+                    values[local] = Math.Max(values[local], (float)coverage);
+                });
+                return;
+            }
             int tile = tileSize;
             float[] cells = null; int cellsX = int.MinValue, cellsY = int.MinValue; // 今いるタイルの溜まり（タイルが変わったときだけ引く）
             for (int py = minY; py <= maxY; py++)
@@ -474,6 +491,7 @@ namespace Yozolab.YoluPainter.Core
             s.Textured = settings.Texture != null && settings.TextureDepth > 0;
             s.Plain = angle == 0 && roundness == 1;
             s.Hardness = settings.Hardness; s.Pressure = pressure; s.OpacityScale = opacityScale; s.FlowScale = flowScale;
+            if (settings.CanvasSymmetry != null && settings.CanvasSymmetry.Enabled) return SymmetricDab(s, extent);
             if (minX > maxX || minY > maxY) return false;
             if (!PrepareEffectDab(minX, maxX, minY, maxY, x, y)) return false;
             int tile = tileSize, tx0 = minX / tile, ty0 = minY / tile, columns = maxX / tile - tx0 + 1, rows = maxY / tile - ty0 + 1;
@@ -796,7 +814,7 @@ namespace Yozolab.YoluPainter.Core
         }
         private void ReleaseScratch()
         {
-            ReleaseEffectDab();
+            ReleaseEffectDab(); symmetryScratchBytes = 0;
             foreach (var t in targets) t.Before.Clear();
             strokeTiles.Clear(); passChanged.Clear(); cursor.Reset(); rollbackBytes = 0; curvePieces.Clear(); curvePoints = 0;
             if (dual != null) { dualCoverage.Clear(); dualPending.Clear(); }

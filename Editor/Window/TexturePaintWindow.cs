@@ -71,6 +71,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void OnEnable()
         {
+            MigrateSymmetryState();
             minSize = new Vector2(980,640); wantsMouseMove = true; wantsMouseEnterLeaveWindow = true; L.LanguageChanged += Repaint; PainterToolIcons.Changed += Repaint;
             compositor = CreateCompositor(); preview = new IsolatedModelPreview(); ApplyPreviewFrameRate(); // 3D を描く回数の上限（Model/TexturePaintWindow.RedrawRate.cs）
             if (materialEdits == null) materialEdits = new PreviewMaterialEdits();
@@ -207,7 +208,7 @@ namespace Yozolab.YoluPainter.Editor
             if(canvasRect.width>0) DrawCanvas();
             if(surfaceRect.width>0 && e.type==EventType.Repaint)
             {
-                PaintGui.Fill(surfaceRect,PaintTheme.CanvasBg); SyncSymmetryPlane(); SyncShapeOverlay(); SyncEnvironment(); preview.Render(surfaceRect); NoteDisplayProblems(); DrawPathMarkers(); DrawShapeGizmo(pointerAtStart);
+                PaintGui.Fill(surfaceRect,PaintTheme.CanvasBg); SyncSymmetryPlane(); SyncShapeOverlay(); SyncEnvironment(); preview.Render(surfaceRect); NoteDisplayProblems(); DrawRadialSymmetryAxis(); DrawPathMarkers(); DrawShapeGizmo(pointerAtStart);
                 // 3D の描画（PreviewRenderUtility）の後はイベントのマウスの位置が (0,0) になっているので、外枠のマウスの乗った見た目のために戻す
                 if(Event.current!=null) Event.current.mousePosition=pointerAtStart;
             }
