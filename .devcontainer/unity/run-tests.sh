@@ -285,6 +285,7 @@ if [[ "$UNITY_RUNNER" != 0 ]]; then
     if ! python3 "$SCRIPT_DIR/sync-package.py" "$stage" "$pkg" --checksum | sed 's/^/    /'; then
       warn "台 $UNITY_RUNNER のパッケージ同期に失敗した（結果無し）"; exit 3
     fi
+    python3 "$SCRIPT_DIR/guard-gpu-bake.py" "$pkg"  # 古い枝でも台では GPU のベイクを止める（2026-10-04 のつなぎ）
     rm -rf "$stage"; echo "commit $SHA" > "$RUNNERS_HOME/$UNITY_RUNNER/source.txt"
     what="コミット ${SHA:0:12}"
   else
@@ -292,6 +293,7 @@ if [[ "$UNITY_RUNNER" != 0 ]]; then
     if ! python3 "$SCRIPT_DIR/sync-package.py" "$from" "$pkg" --checksum | sed 's/^/    /'; then
       warn "台 $UNITY_RUNNER のパッケージ同期に失敗した（結果無し）"; exit 3
     fi
+    python3 "$SCRIPT_DIR/guard-gpu-bake.py" "$pkg"  # 古い枝でも台では GPU のベイクを止める（2026-10-04 のつなぎ）
     echo "folder $from" > "$RUNNERS_HOME/$UNITY_RUNNER/source.txt"
     what="フォルダ $from"
   fi

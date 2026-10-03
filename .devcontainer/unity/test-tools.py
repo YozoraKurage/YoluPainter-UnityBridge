@@ -68,7 +68,7 @@ class Fixture:
         self.scripts = self.root / 'scripts'
         self.scripts.mkdir()
         for name in ('run-tests.sh', 'runners.sh', 'test-daemon.sh', 'daemon-lock.sh',
-                     'unity-do.sh', 'exec-method.sh', 'sync-package.py', 'summarize-results.js'):
+                     'unity-do.sh', 'exec-method.sh', 'sync-package.py', 'summarize-results.js', 'guard-gpu-bake.py'):
             shutil.copy2(SCRIPTS / name, self.scripts / name)
         self.source = self.root / 'source'
         self.source.mkdir()
