@@ -1,0 +1,66 @@
+# Japanese translation for YoluPainter: symmetry in the 3D view (the Brush tool's Symmetry section, the 3D view header
+# toggle and the notes when the mirrored side is not painted).
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# ── プロパティの欄（ブラシ ▸ シンメトリー） ──
+
+msgid "Symmetry"
+msgstr "シンメトリー"
+
+msgid "Mirror 3D strokes"
+msgstr "3D のストロークを対称に描く"
+
+msgid "Each dab painted in the 3D view is painted again at its mirror image across the plane below (like Substance Painter's mirror symmetry). 2D canvas strokes are not mirrored."
+msgstr "3D ビューで置いたダブを、下の設定の面で映した所にも塗ります（Substance Painter のミラーのシンメトリーと同じ考え方）。2D キャンバスのストロークは映しません。"
+
+msgid "Axis"
+msgstr "軸"
+
+msgid "The plane is perpendicular to the model's local {0} axis"
+msgstr "面はモデルのローカルの {0} 軸に直交します"
+
+msgid "Center"
+msgstr "中心"
+
+msgid "Where the plane is: the distance from the model's origin along the axis, in scene units. Drag to change it (Shift: ×10), or click to type."
+msgstr "面の位置: モデルの原点から軸の向きに測った距離（シーンの単位）。ドラッグで変え（Shift で 10 倍）、クリックで数値を打てます。"
+
+msgid "Model origin"
+msgstr "モデルの原点"
+
+msgid "Put the plane through the model's origin (its root object)"
+msgstr "面をモデルの原点（ルートのゲームオブジェクトの位置）に通します"
+
+msgid "Bounds center"
+msgstr "バウンズの中心"
+
+msgid "Put the plane through the middle of the model's bounding box"
+msgstr "面をモデルのバウンディングボックスの中央に通します"
+
+msgid "Show the plane"
+msgstr "面を表示"
+
+msgid "Shows the symmetry plane faintly in the 3D view"
+msgstr "対称の面を 3D ビューに薄く表示します"
+
+msgid "The mirrored dab lands on the nearest surface of this texture set. Like every 3D dab, it only paints what the camera can see."
+msgstr "映したダブは、このテクスチャセットのいちばん近い面に置きます。ほかの 3D のダブと同じく、カメラから見える所にだけ塗ります。"
+
+# ── 3D ビューの見出し ──
+
+msgid "Symmetry: mirror 3D brush strokes across the model's plane (set the axis in the Brush tool's Symmetry section)"
+msgstr "シンメトリー: 3D のブラシのストロークを、モデルの対称の面で映した所にも描きます（軸はブラシツールのシンメトリーの欄で選びます）"
+
+# ── 映した側を塗らなかったときの知らせ ──
+
+msgid "Symmetry: no surface of the model at the mirrored point; only this side was painted."
+msgstr "シンメトリー: 映した点の近くにモデルの面が無いので、こちら側だけ塗りました。"
+
+msgid "Symmetry: the mirrored point is on another texture set; only this side was painted."
+msgstr "シンメトリー: 映した点は別のテクスチャセットの面なので、こちら側だけ塗りました。"
+
+msgid "Symmetry: the mirrored side cannot be seen from this view and was not painted. Turn the model so that both sides are visible."
+msgstr "シンメトリー: 映した側はこの向きからは見えないので塗っていません。両側が見えるようにモデルを回してください。"

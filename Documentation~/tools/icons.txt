@@ -1,0 +1,100 @@
+# アイコンの対応表: <使う名前> <セット> <そのセットの名前>
+# fluent   = Microsoft Fluent UI System Icons（MIT。24 px の regular、ツールは filled も）
+# phosphor = Phosphor Icons（MIT。regular、ツールは fill も）
+# UI のアイコンは Editor/UI/Icons/<使う名前>.png（白・48 px）。tools/ で始まるものはツールのアイコン（Editor/UI/Icons/Tools/<id>.png と
+# 選択中の <id>_selected.png）で、利用者やプラグインが差し替えられる（Editor/UI/PainterToolIcons.cs）。4 列目は選択中の版の太さ
+# （既定は fluent の filled・phosphor の fill。塗ると形が分からなくなるものは bold）。
+add fluent add
+arrow_drop_down fluent chevron_down
+auto_awesome fluent sparkle
+blur_on fluent blur
+brush fluent image
+check fluent checkmark
+chevron_right fluent chevron_right
+colorize fluent eyedropper
+contrast fluent circle_half_fill
+conversion_path fluent pen
+delete fluent delete
+deployed_code fluent cube
+deselect fluent select_all_off
+expand_less fluent chevron_up
+expand_more fluent chevron_down
+flip fluent flip_horizontal
+folder fluent folder
+folder_open fluent folder_open
+format_color_fill fluent paint_bucket
+invert_colors fluent shape_exclude
+keyboard_arrow_down fluent arrow_down_right
+layers fluent layer
+light_mode fluent weather_sunny
+link_off fluent link_dismiss
+opacity fluent drop
+palette fluent color
+restart_alt fluent arrow_reset
+rotate_90_degrees_cw fluent arrow_rotate_clockwise
+select_all fluent select_all_on
+splitscreen_right fluent split_vertical
+square fluent image
+color_square fluent square
+stylus fluent inking_tool
+swap_horiz fluent arrow_swap
+uv_wireframe phosphor polygon
+texture fluent data_area
+3d_rotation fluent hexagon
+tune fluent options
+view_in_ar fluent cube
+vignette fluent image_circle
+visibility fluent eye
+visibility_off fluent eye_off
+warning fluent warning
+settings fluent settings
+save fluent save
+info fluent info
+tools/brush phosphor paint-brush
+tools/eraser fluent eraser
+tools/fill fluent paint_bucket
+tools/gradient phosphor gradient
+tools/select-rectangle fluent select_object
+tools/select-ellipse phosphor circle-dashed bold
+tools/lasso fluent lasso
+tools/magic-wand fluent wand
+tools/move fluent arrow_move
+tools/path fluent pen
+tools/eyedropper fluent eyedropper
+tools/polygon-fill fluent triangle
+tools/id-select phosphor swatches
+
+# ── プロパティの欄のレイヤー・チャンネル側（レイヤーマスク・フィルター・メッシュマップ・ポーズ）で足したもの ──
+close fluent dismiss
+search fluent search
+target fluent target
+sync fluent arrow_sync
+local_fire_department fluent fire
+grid_on fluent grid
+accessibility fluent accessibility
+animation fluent video_clip
+
+# ---- プロパティの欄のツールの設定（TexturePaintWindow.ToolPanels.cs など） ----
+paint_brush fluent paint_brush
+ink_stroke fluent ink_stroke
+data_scatter fluent data_scatter
+grid_dots fluent grid_dots
+content_copy fluent copy
+flip_vertical fluent flip_vertical
+rotate_90_degrees_ccw fluent arrow_rotate_counterclockwise
+import fluent arrow_import
+transform fluent resize
+
+# ---- レイヤーのロック（Window/Layers/TexturePaintWindow.LayerSelection.cs）。UI のアイコンも 4 列目で太さを選べる（既定は regular） ----
+lock fluent lock_closed
+lock_filled fluent lock_closed filled
+lock_transparency fluent transparency_square
+arrow_move fluent arrow_move
+# ── アセットのパネル（Editor/Window/Panels/TexturePaintWindow.AssetsPanel.cs） ──
+library fluent library
+shapes fluent shapes
+
+# 指先・クローン・ぼかし（既存の MIT アイコンセット）
+tools/blur fluent blur
+tools/smudge fluent hand_draw
+tools/clone phosphor stamp

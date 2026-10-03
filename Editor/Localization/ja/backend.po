@@ -1,0 +1,11 @@
+# Japanese translation for YoluPainter: the display compositing backend (GPU / CPU) in the window.
+# Project Settings ▸ YoluPainter の画面は英語だけなので、ここには窓に出る文字だけを置く。
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# ── ステータスバー（GPU を使うつもりだったのに使えず、CPU で合成しているとき。理由はツールチップ） ──
+
+msgid "CPU compositing (GPU unavailable)"
+msgstr "CPU で合成（GPU を使えない）"

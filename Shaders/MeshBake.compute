@@ -1,0 +1,151 @@
+// mesh map のベイクの AO・ベントノーマル・厚みのレイ（Core の MeshBaker.Job.TraceJob と同じ式を float で）。
+// 1 スレッドが 1 サンプル（MeshBakeRayJob）の全部のレイを飛ばす。BVH は CPU で作ったもの（MeshRayBvh.Flatten）をそのまま使う。
+#pragma kernel Trace
+
+#define STACK 96
+#define INF 1e30
+
+struct Job { float3 o; int ignore; float3 n; int scene; float3 g; float shift; float rc; float rs; float2 pad; };
+struct Result { float ao; float3 bent; float thickness; int rays; float2 pad; };
+struct Node { float3 mn; int first; float3 mx; int count; };
+struct Tri { float3 a; int original; float3 e1; float eps; float3 e2; float pad; };
+
+StructuredBuffer<Job> _Jobs;
+RWStructuredBuffer<Result> _Results;
+StructuredBuffer<Node> _Nodes;
+StructuredBuffer<Tri> _Tris;
+StructuredBuffer<float4> _AoDirs;   // u1, cos φ, sin φ
+StructuredBuffer<float4> _ThDirs;
+uint _JobCount, _JobOffset, _AoCount, _ThCount;
+int _NodeBase0, _NodeBase1, _TriBase0, _TriBase1, _NodeCount0, _NodeCount1;
+float _AoCos2, _ThCos2, _AoMax, _ThMax, _RayOffset, _Grazing;
+int _AoAnyHit, _AoIgnoreBack, _WantAo, _WantThickness;
+
+bool Box(Node nd, bool3 positive, float3 inv, float3 oi, float limit, out float enter)
+{
+    float3 nearP = positive ? nd.mn : nd.mx, farP = positive ? nd.mx : nd.mn;
+    float3 tn = nearP * inv - oi, tf = farP * inv - oi;
+    float t0 = max(max(tn.x, tn.y), max(tn.z, 0.0));
+    float t1 = min(min(tf.x, tf.y), min(tf.z, limit));
+    enter = t0;
+    return t0 <= t1;
+}
+
+// 当たった距離（当たらなければ INF）。ignore は元の三角形の番号。
+float TraceRay(int scene, float3 o, float3 d, float tMax, int ignore, bool anyHit, bool ignoreBack)
+{
+    int nodeBase = scene == 0 ? _NodeBase0 : _NodeBase1, triBase = scene == 0 ? _TriBase0 : _TriBase1;
+    int nodeCount = scene == 0 ? _NodeCount0 : _NodeCount1;
+    if (nodeCount == 0) return INF;
+    if (d.x == 0) d.x = 1e-30; if (d.y == 0) d.y = 1e-30; if (d.z == 0) d.z = 1e-30;
+    float3 inv = 1.0 / d, oi = o * inv;
+    bool3 positive = inv >= 0;
+    float best = tMax; bool found = false;
+    float enter;
+    if (!Box(_Nodes[nodeBase], positive, inv, oi, best, enter)) return INF;
+    int stackNode[STACK]; float stackT[STACK]; int sp = 0; int node = 0;
+    [loop] for (;;)
+    {
+        Node nd = _Nodes[nodeBase + node];
+        bool next = false;
+        if (nd.count > 0)
+        {
+            [loop] for (int t = nd.first; t < nd.first + nd.count; t++)
+            {
+                Tri tr = _Tris[triBase + t];
+                float3 q0 = cross(d, tr.e2);
+                float det = dot(tr.e1, q0);
+                if (det > -tr.eps && det < tr.eps) continue;
+                if (ignoreBack && det < 0) continue;
+                float invDet = 1.0 / det; float3 s = o - tr.a;
+                float u = dot(s, q0) * invDet;
+                if (u < 0 || u > 1) continue;
+                float3 q = cross(s, tr.e1);
+                float v = dot(d, q) * invDet;
+                if (v < 0 || u + v > 1) continue;
+                float hit = dot(tr.e2, q) * invDet;
+                if (hit <= 0 || hit >= best || tr.original == ignore) continue;
+                best = hit; found = true;
+                if (anyHit) return best;
+            }
+        }
+        else
+        {
+            int l = nd.first; float l0, r0;
+            bool hl = Box(_Nodes[nodeBase + l], positive, inv, oi, best, l0);
+            bool hr = Box(_Nodes[nodeBase + l + 1], positive, inv, oi, best, r0);
+            if (hl && hr)
+            {
+                // 近い方へ進み、遠い方は入る距離と一緒に積む
+                if (sp < STACK) { stackNode[sp] = l0 <= r0 ? l + 1 : l; stackT[sp] = l0 <= r0 ? r0 : l0; sp++; }
+                node = l0 <= r0 ? l : l + 1; next = true;
+            }
+            else if (hl) { node = l; next = true; }
+            else if (hr) { node = l + 1; next = true; }
+        }
+        if (next) continue;
+        bool popped = false;
+        [loop] while (sp > 0)
+        {
+            sp--;
+            if (stackT[sp] < best) { node = stackNode[sp]; popped = true; break; }
+        }
+        if (!popped) return found ? best : INF;
+    }
+    return INF;
+}
+
+[numthreads(64, 1, 1)]
+void Trace(uint3 id : SV_DispatchThreadID)
+{
+    uint index = id.x + _JobOffset;
+    if (index >= _JobCount) return;
+    Job job = _Jobs[index];
+    float3 n = job.n, g = job.g;
+    // 法線のまわりの正規直交基底（Duff ほか 2017）
+    float sgn = n.z >= 0 ? 1.0 : -1.0, a = -1.0 / (sgn + n.z), bb = n.x * n.y * a;
+    float3 tv = float3(1 + sgn * n.x * n.x * a, sgn * bb, -sgn * n.x), qv = float3(bb, sgn + n.y * n.y * a, -n.y);
+    Result r = (Result)0;
+    if (_WantAo)
+    {
+        float3 o = job.o + g * _RayOffset;
+        float occlusion = 0; float3 bent = 0; int valid = 0;
+        [loop] for (uint j = 0; j < _AoCount; j++)
+        {
+            float4 dirs = _AoDirs[j];
+            float u1 = dirs.x + job.shift; if (u1 >= 1) u1 -= 1;
+            float cos2 = 1 - u1 * (1 - _AoCos2), cosT = sqrt(cos2), sinT = cos2 < 1 ? sqrt(1 - cos2) : 0;
+            float cp = dirs.y * job.rc - dirs.z * job.rs, sp2 = dirs.z * job.rc + dirs.y * job.rs;
+            float3 d = tv * (sinT * cp) + qv * (sinT * sp2) + n * cosT;
+            if (dot(d, g) <= _Grazing) continue; // 面の下へ向かうレイは環境を見ない
+            valid++;
+            float hit = TraceRay(job.scene, o, d, _AoMax, job.ignore, _AoAnyHit != 0, _AoIgnoreBack != 0);
+            if (hit < INF) occlusion += _AoAnyHit != 0 ? 1 : 1 - hit / _AoMax;
+            else bent += d;
+        }
+        r.rays += valid;
+        r.ao = valid > 0 ? 1 - occlusion / valid : 1;
+        float bl = length(bent);
+        r.bent = bl > 1e-12 ? bent / bl : n;
+    }
+    if (_WantThickness)
+    {
+        float3 o = job.o - g * _RayOffset;
+        float distance = 0; int valid = 0;
+        [loop] for (uint j = 0; j < _ThCount; j++)
+        {
+            float4 dirs = _ThDirs[j];
+            float u1 = dirs.x + job.shift; if (u1 >= 1) u1 -= 1;
+            float cos2 = 1 - u1 * (1 - _ThCos2), cosT = sqrt(cos2), sinT = cos2 < 1 ? sqrt(1 - cos2) : 0;
+            float cp = dirs.y * job.rc - dirs.z * job.rs, sp2 = dirs.z * job.rc + dirs.y * job.rs;
+            float3 d = tv * (sinT * cp) + qv * (sinT * sp2) - n * cosT; // 内向き
+            if (-dot(d, g) <= _Grazing) continue;
+            valid++;
+            float hit = TraceRay(job.scene, o, d, _ThMax, job.ignore, false, false);
+            distance += hit < _ThMax ? hit : _ThMax;
+        }
+        r.rays += valid;
+        r.thickness = valid > 0 ? distance / valid / _ThMax : 1;
+    }
+    _Results[index] = r;
+}

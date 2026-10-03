@@ -1,0 +1,12 @@
+# Japanese translation for YoluPainter: the redraw rate shown in the status bar (View menu), to check that the 3D view is drawn only
+# when its picture changes.
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Redraw Rate in the Status Bar"
+msgstr "描き直しの回数をステータスバーに出す"
+
+msgid "Redraws {0}/s · 3D {1}/s"
+msgstr "描き直し {0} 回/秒・3D {1} 回/秒"

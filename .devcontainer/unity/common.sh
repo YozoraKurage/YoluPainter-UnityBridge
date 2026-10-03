@@ -6,9 +6,19 @@ set -euo pipefail
 readonly UNITY_BIN="${UNITY_PATH:-/opt/unity}/Editor/Unity"
 readonly UNITY_EDITOR="/usr/bin/unity-editor" # xvfb-run + -batchmode を被せたラッパー
 
-# テストプロジェクトは名前付きボリュームの中に置く。/workspace (ホストの 9p
-# バインド) に置くと Library/ の I/O で桁違いに遅くなる。
-UNITY_PROJECT="${DAERD_UNITY_PROJECT:-$HOME/unity-testproject}"
+# テストの台（runner）。0 は今までのテストプロジェクト（名前付きボリューム。パッケージは file:/workspace を
+# 直接読む）。1 以上は $RUNNERS_HOME/<番号>/project で、パッケージは台の中の写し（pkg。依頼のたびに作業ツリー
+# かコミットから同期する。run-tests.sh）を読むので、ほかの作業者の書きかけやテスト中の保存の影響を受けない。
+# 台の番号は YOLUPAINTER_RUNNER（各スクリプトの --runner N）、台とモードの一覧は runners.conf、作るのは runners.sh。
+# テストプロジェクトは /workspace（ホストの 9p バインド）に置かない。Library/ の I/O で桁違いに遅くなる。
+UNITY_RUNNER="${YOLUPAINTER_RUNNER:-0}"
+[[ "$UNITY_RUNNER" =~ ^[0-9]+$ ]] || { echo "エラー: YOLUPAINTER_RUNNER は台の番号（0 以上の整数）: $UNITY_RUNNER" >&2; exit 2; }
+readonly UNITY_RUNNER
+readonly RUNNERS_HOME="${YOLUPAINTER_RUNNERS_HOME:-$HOME/unity-runners}"
+# 0 の置き場は YOLUPAINTER_UNITY_PROJECT（devcontainer が設定する）で変えられる。台 1 以上はそれに依らない。
+runner_project() { if [[ "$1" == 0 ]]; then echo "${YOLUPAINTER_UNITY_PROJECT:-$HOME/unity-testproject}"; else echo "$RUNNERS_HOME/$1/project"; fi; }
+runner_package() { echo "$RUNNERS_HOME/$1/pkg"; }
+UNITY_PROJECT="$(runner_project "$UNITY_RUNNER")"
 readonly UNITY_PROJECT
 
 # 再ビルドを跨いで .ulf を残しておく置き場（ボリューム）
@@ -28,6 +38,36 @@ readonly SCRIPT_DIR
 
 # パッケージ本体（= このリポジトリ）
 readonly PACKAGE_ROOT="/workspace"
+
+# WSL2 の GPU（/dev/dxg）が見えていれば、Mesa の d3d12 ドライバで OpenGL を実 GPU に通す
+# （Unity → OpenGL → Mesa d3d12 → D3D12 → Windows の GPU ドライバ）。Linux 版 Unity は D3D11 を
+# 使えないので API は OpenGL のままだが、llvmpipe（CPU 描画）よりずっと実機に近い。
+# /dev/dxg が無い環境で d3d12 を強制すると OpenGL ごと起動しなくなるので、あるときだけ有効にする。
+# YOLUPAINTER_GPU=0 で llvmpipe に戻せる。
+if [[ "${YOLUPAINTER_GPU:-1}" != 0 && -e /dev/dxg && -d /usr/lib/wsl/lib ]]; then
+  export GALLIUM_DRIVER=d3d12
+  export LD_LIBRARY_PATH="/usr/lib/wsl/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  # Dockerfile でビルドした新しい Mesa（d3d12 が OpenGL 4.6 を出す）があれば優先する。
+  # システムの Mesa 23.2 は 4.2 止まりで、Unity が CopyTexture と compute shader を無効にする。
+  # YOLUPAINTER_MESA=system でシステムの Mesa に戻せる。
+  if [[ "${YOLUPAINTER_MESA:-bundled}" != system && -f /opt/mesa-d3d12/lib/libGLX_mesa.so.0 ]]; then
+    # Mesa 24.2 の libGLX_mesa は libgallium を直接リンクするので、DRI ドライバの置き場は要らない。
+    export LD_LIBRARY_PATH="/opt/mesa-d3d12/lib:$LD_LIBRARY_PATH"
+    export __GLX_VENDOR_LIBRARY_NAME=mesa
+  fi
+  # 複数の GPU があるときは MESA_D3D12_DEFAULT_ADAPTER_NAME（部分一致）で選べる。
+fi
+
+# runners.conf の台の番号（0 を除く）とモード
+runner_numbers() { sed -n 's/^\([0-9][0-9]*\)[[:space:]].*/\1/p' "$SCRIPT_DIR/runners.conf" 2>/dev/null; }
+runner_conf_mode() { sed -n "s/^$1[[:space:]][[:space:]]*\([a-z-]*\).*/\1/p" "$SCRIPT_DIR/runners.conf" 2>/dev/null | head -1; }
+# 台の常駐 Unity の今のモード（gui / batch-gl / batch）。動いていなければ down。
+runner_live_mode() {
+  local pidf; pidf="$(runner_project "$1")/TestDaemon/daemon.pid"
+  [[ -f "$pidf" ]] && kill -0 "$(cat "$pidf")" 2>/dev/null || { echo down; return; }
+  local args; args="$(ps -o args= -p "$(cat "$pidf")" 2>/dev/null)"
+  if [[ "$args" == *-nographics* ]]; then echo batch; elif [[ "$args" == *-batchmode* ]]; then echo batch-gl; else echo gui; fi
+}
 
 info()  { printf '\033[36m==>\033[0m %s\n' "$*"; }
 warn()  { printf '\033[33m警告:\033[0m %s\n' "$*" >&2; }

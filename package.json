@@ -1,0 +1,20 @@
+{
+  "name": "net.yozolab.yolupainter",
+  "version": "0.0.0",
+  "displayName": "YoluPainter",
+  "description": "Experimental editor-only sparse-tile texture authoring. No production compatibility claims.",
+  "unity": "2022.3",
+  "author": {
+    "name": "Yozolab"
+  },
+  "keywords": [
+    "texture",
+    "painting",
+    "editor",
+    "prototype"
+  ],
+  "dependencies": {
+    "com.unity.burst": "1.8.7",
+    "com.unity.mathematics": "1.2.6"
+  }
+}

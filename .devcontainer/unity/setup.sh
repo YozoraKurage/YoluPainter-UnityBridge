@@ -2,7 +2,7 @@
 # テスト用 Unity プロジェクトを用意する。postCreateCommand から呼ばれるほか、
 # 手で何度実行しても同じ状態になる（冪等）。
 #
-# プロジェクト本体はボリューム側 ($DAERD_UNITY_PROJECT) に置き、このリポジトリは
+# プロジェクト本体はボリューム側 ($YOLUPAINTER_UNITY_PROJECT) に置き、このリポジトリは
 # ローカルパッケージ (file:/workspace) として参照させる。リポジトリ側には
 # Library/ も Assets/ も作らない。
 
@@ -85,9 +85,42 @@ check_editor() {
     || warn "Unity の Data ディレクトリが読めないかもしれない（権限を確認すること）"
 }
 
+# temp~/ に .ulf が置いてあれば取り込む。ボリュームを作り直した直後（再ビルド・ボリューム名の変更）でも、
+# ユーザーが手元に持っている .ulf から手作業なしで戻せるようにする。
+install_license_from_drop() {
+  have_license && return 0
+  local ulf
+  ulf="$(ls "$PACKAGE_ROOT"/temp~/*.ulf 2>/dev/null | head -1 || true)"
+  [[ -n "$ulf" ]] || return 0
+  info "temp~/ の $(basename "$ulf") からライセンスを取り込む"
+  "$SCRIPT_DIR/activate-license.sh" --install "$ulf" || warn "ライセンスの取り込みに失敗した"
+}
+
+# vpm-packages.txt のパッケージをテストプロジェクトに入れる（vrc-get）。入っているものは飛ばす。
+install_vpm_packages() {
+  local list="$SCRIPT_DIR/vpm-packages.txt" vrc
+  [[ -f "$list" ]] || return 0
+  vrc="$(command -v vrc-get || echo "$HOME/.local/bin/vrc-get")"
+  [[ -x "$vrc" ]] || { warn "vrc-get が無いので VPM パッケージを入れられない"; return 0; }
+  local kind value
+  while read -r kind value; do
+    case "$kind" in
+      repo)
+        "$vrc" repo list 2>/dev/null | grep -qF "$value" || "$vrc" repo add "$value" >/dev/null 2>&1 \
+          || warn "VPM リポジトリを登録できなかった: $value" ;;
+      package)
+        local id="${value%@*}"
+        if [[ -d "$UNITY_PROJECT/Packages/$id" ]]; then continue; fi
+        info "VPM パッケージを入れる: $value"
+        ( cd "$UNITY_PROJECT" && "$vrc" install "$id" "${value#*@}" -y >/dev/null ) || warn "入れられなかった: $value" ;;
+    esac
+  done < <(grep -vE '^\s*(#|$)' "$list")
+}
+
 main() {
   check_editor
   restore_license
+  install_license_from_drop
   scaffold_project
   check_drop_dir
   install_x11tools
@@ -98,6 +131,7 @@ main() {
     return 0
   fi
 
+  install_vpm_packages
   warmup
 }
 

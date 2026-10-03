@@ -1,0 +1,159 @@
+# Japanese translation for YoluPainter: texture sets (the Texture Set panel, adding/removing/renaming sets in New Project and
+# Project Configuration, switching, the 3D view, baking several sets, exporting per set).
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# ── テクスチャセットのパネル ──
+
+msgid "slot {0}"
+msgstr "スロット {0}"
+
+msgid "Material slot"
+msgstr "マテリアルスロット"
+
+msgid "not in this model"
+msgstr "このモデルに無い"
+
+msgid "Click to paint this texture set."
+msgstr "押すとこのテクスチャセットを描きます。"
+
+msgid "The loaded model has no material slot {0}; this texture set is not shown in 3D. Change its slot in File ▸ Project Configuration."
+msgstr "読み込んだモデルにマテリアルスロット {0} がありません。このテクスチャセットは 3D に見えません。ファイル ▸ プロジェクト設定 でスロットを変えてください。"
+
+msgid "Project Configuration: add, remove or rename texture sets, change their material slots or the model"
+msgstr "プロジェクト設定: テクスチャセットを足す・消す・名前を変える、マテリアルスロットやモデルを変える"
+
+msgid "Texture set: {0}."
+msgstr "テクスチャセット: {0}。"
+
+# ── 3D ビュー ──
+
+msgid "This face belongs to the texture set {0}. Double-click it, or switch in the Texture Set panel, to paint it."
+msgstr "この面はテクスチャセット {0} のものです。描くには、面をダブルクリックするか、テクスチャセットのパネルで切り替えてください。"
+
+msgid "This face uses material slot {0}, which has no texture set in this project (File ▸ Project Configuration adds one)."
+msgstr "この面はマテリアルスロット {0} で、このプロジェクトにはそのテクスチャセットがありません（ファイル ▸ プロジェクト設定 で足せます）。"
+
+# ── 足す・消す・名前 ──
+
+msgid "A project has at most {0} texture sets."
+msgstr "1 つのプロジェクトのテクスチャセットは {0} までです。"
+
+msgid "A project keeps at least one texture set."
+msgstr "プロジェクトには少なくとも 1 つのテクスチャセットが要ります。"
+
+msgid "Material slot {0} already has the texture set {1}."
+msgstr "マテリアルスロット {0} にはもうテクスチャセット {1} があります。"
+
+msgid "Another texture set is already named {0}."
+msgstr "{0} という名前のテクスチャセットがもうあります。"
+
+msgid "Added the texture set {0} (material slot {1})."
+msgstr "テクスチャセット {0} を足しました（マテリアルスロット {1}）。"
+
+msgid "Remove texture set?"
+msgstr "テクスチャセットを消しますか？"
+
+msgid "Remove texture sets?"
+msgstr "テクスチャセットを消しますか？"
+
+msgid "Remove"
+msgstr "消す"
+
+msgid "{0} will be removed with all of its layers, history and baked mesh maps. This cannot be undone (the saved file keeps it until you save)."
+msgstr "{0} を、そのレイヤー・履歴・ベイクしたメッシュマップごと消します。元に戻せません（保存したファイルには、次に保存するまで残ります）。"
+
+msgid "The texture set was not removed."
+msgstr "テクスチャセットは消しませんでした。"
+
+msgid "Removed the texture set {0}."
+msgstr "テクスチャセット {0} を消しました。"
+
+msgid "The project configuration was not applied; nothing changed."
+msgstr "プロジェクト設定は適用しませんでした。何も変わっていません。"
+
+# ── 新規プロジェクト・プロジェクト設定のダイアログ ──
+
+msgid "Texture Sets"
+msgstr "テクスチャセット"
+
+msgid "Material slots"
+msgstr "マテリアルスロット"
+
+msgid "One texture set (no model yet)."
+msgstr "テクスチャセットは 1 つです（まだモデルがありません）。"
+
+msgid "Paint this material slot as a texture set"
+msgstr "このマテリアルスロットをテクスチャセットとして描く"
+
+msgid "{0} of {1} material slots become texture sets."
+msgstr "{1} 個のマテリアルスロットのうち {0} 個がテクスチャセットになります。"
+
+msgid "Each texture set gets the template and resolution below."
+msgstr "どのテクスチャセットも下のテンプレートと解像度になります。"
+
+msgid "Choose at least one texture set."
+msgstr "テクスチャセットを少なくとも 1 つ選んでください。"
+
+msgid "A new, empty texture set"
+msgstr "新しい空のテクスチャセット"
+
+msgid "Texture set name"
+msgstr "テクスチャセットの名前"
+
+msgid "The material slot this texture set paints"
+msgstr "このテクスチャセットが描くマテリアルスロット"
+
+msgid "Remove this texture set (asked again when you apply; its work is lost)"
+msgstr "このテクスチャセットを消す（適用するときにもう一度確かめます。その作業は消えます）"
+
+msgid "Add Texture Set"
+msgstr "テクスチャセットを足す"
+
+msgid "An empty texture set for an unused material slot (same size and channels as the open one)"
+msgstr "使っていないマテリアルスロットの空のテクスチャセット（大きさとチャンネルは今のセットと同じ）"
+
+msgid "Every texture set needs a name (at most {0} characters, no control characters)."
+msgstr "どのテクスチャセットにも名前が要ります（{0} 文字まで、制御文字は使えません）。"
+
+msgid "Two texture sets are named {0}."
+msgstr "{0} という名前のテクスチャセットが 2 つあります。"
+
+msgid "Two texture sets paint material slot {0}."
+msgstr "マテリアルスロット {0} を描くテクスチャセットが 2 つあります。"
+
+msgid "New project for {0} with {1} texture sets."
+msgstr "{0} の新規プロジェクトです（テクスチャセット {1} 個）。"
+
+# ── ベイク ──
+
+msgid "Check at least one texture set to bake."
+msgstr "ベイクするテクスチャセットを少なくとも 1 つチェックしてください。"
+
+msgid "At least one texture set stays checked."
+msgstr "少なくとも 1 つのテクスチャセットはチェックしたままにします。"
+
+msgid "Bake this texture set"
+msgstr "このテクスチャセットをベイク"
+
+msgid "The texture set {0} is no longer in the project."
+msgstr "テクスチャセット {0} はもうプロジェクトにありません。"
+
+msgid "The texture set {0} paints material slot {1}, which the loaded model does not have."
+msgstr "テクスチャセット {0} が描くマテリアルスロット {1} は、読み込んだモデルにありません。"
+
+msgid "Texture set {0}/{1}: {2}"
+msgstr "テクスチャセット {0}/{1}: {2}"
+
+msgid "Baked the mesh maps of {0} texture sets."
+msgstr "{0} 個のテクスチャセットのメッシュマップをベイクしました。"
+
+msgid "the texture set"
+msgstr "テクスチャセット"
+
+# ── 書き出し ──
+
+msgid "Nothing was exported: texture sets {0} would write the same file {1}. Rename one in File ▸ Project Configuration."
+msgstr "何も書き出していません: テクスチャセット {0} が同じファイル {1} に書くことになります。ファイル ▸ プロジェクト設定 でどれかの名前を変えてください。"

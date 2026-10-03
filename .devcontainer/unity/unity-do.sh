@@ -7,6 +7,8 @@
 #   unity-do.sh console [error|warning|log ...] [--limit N] [--full] [--clear]
 #                                         コンソールの内容（既定: 全種別・末尾 50 件・1 行目だけ）
 #   unity-do.sh compile [--force]         再コンパイルしてエラー本文を表示（--force は全アセンブリ）
+#   unity-do.sh --runner 1 run -e '…'     テストの台を選ぶ（既定は台 0。runners.conf）
+#   unity-do.sh --runner 1 --source ~/wt run -e '…'   台 1 以上で、このフォルダのパッケージに同期してから
 #
 # 断片はメソッド本体として扱う（`return x;` で値を返す。先頭の using 行はそのまま
 # 使える）。System / System.Linq / UnityEngine / UnityEditor 等は取り込み済み。
@@ -15,9 +17,20 @@
 # 終了コード: 0=成功 / 1=実行時エラー / 3=コンパイルエラー / 5=デーモンが止まっていた。
 # デーモン専用でコールドへのフォールバックは無い — 先に test-daemon.sh start。
 
+# --runner N: テストの台を選ぶ（既定は台 0。台 1 以上では run と compile の前に、パッケージの写しを /workspace の
+# 作業ツリーに同期する）
+# --source DIR: 台 1 以上で、/workspace の代わりにこのフォルダ（自分の worktree など）を同期する
+while [[ "${1:-}" == --runner || "${1:-}" == --source ]]; do
+  if [[ "$1" == --runner ]]; then export YOLUPAINTER_RUNNER="${2:?--runner に台の番号が要る}"; else export YOLUPAINTER_SOURCE="${2:?--source にフォルダが要る}"; fi
+  shift 2
+done
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 readonly DAEMON_DIR="$UNITY_PROJECT/TestDaemon"
+# 依頼の受け口（snippet-in.cs / request.json / done）は 1 つしか無いので、同時に走る依頼
+# （複数のエージェントや run-tests.sh）を 1 本ずつ通す（daemon-lock.sh）。
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/daemon-lock.sh"
+acquire_daemon_client_lock
 daemon_alive() {
   [[ -f "$DAEMON_DIR/daemon.pid" ]] \
     && kill -0 "$(cat "$DAEMON_DIR/daemon.pid")" 2>/dev/null
@@ -59,7 +72,13 @@ case "$cmd" in
   *) die "不明なコマンド: $cmd" ;;
 esac
 
-daemon_alive || die "デーモンが起動していない。先に test-daemon.sh start"
+daemon_alive || die "デーモンが起動していない。先に test-daemon.sh start（台 1 以上は runners.sh start）"
+[[ -z "${YOLUPAINTER_SOURCE:-}" || "$UNITY_RUNNER" != 0 ]] || die "--source は台 1 以上でだけ使える（--runner N も付ける）"
+if [[ "$UNITY_RUNNER" != 0 && ( "$op" == snippet || "$op" == compile ) ]]; then
+  from="${YOLUPAINTER_SOURCE:-$PACKAGE_ROOT}"
+  python3 "$SCRIPT_DIR/sync-package.py" "$from" "$(runner_package "$UNITY_RUNNER")" --checksum | sed 's/^/    /' >&2
+  echo "folder $from" > "$RUNNERS_HOME/$UNITY_RUNNER/source.txt"
+fi
 case "$arg" in *'"'* | *'\'* ) die 'arg に " と \ は使えない' ;; esac
 
 rm -f "$DAEMON_DIR/done" "$DAEMON_DIR/exec-result.txt"

@@ -1,0 +1,6 @@
+# テストプロジェクトに入れる VPM パッケージ。setup.sh が vrc-get で入れる（入っていれば何もしない）。
+# パッケージ本体（YoluPainter）はこれらに依存しない。連携の検証用。
+#   repo <URL>        vrc-get にリポジトリを登録する
+#   package <id@ver>  版を固定して入れる
+repo https://lilxyzw.github.io/vpm-repos/vpm.json
+package jp.lilxyzw.liltoon@2.3.4

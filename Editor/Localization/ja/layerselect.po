@@ -1,0 +1,139 @@
+# Japanese translation for YoluPainter: selecting several layers and layer locks (Window/Layers/TexturePaintWindow.LayerSelection.cs,
+# the lock refusals in TexturePaintWindow.LayerOps.cs, the Layer menu).
+# 語は Photoshop の日本語版に合わせる（透明ピクセルをロック・画像ピクセルをロック・位置をロック・すべてをロック・レイヤーを非表示）。
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# ── 複数選択の操作 ──
+
+msgid "Delete Layers"
+msgstr "レイヤーを削除"
+
+msgid "Duplicate Layers"
+msgstr "レイヤーを複製"
+
+msgid "Hide Layers"
+msgstr "レイヤーを非表示"
+
+msgid "Show Layers"
+msgstr "レイヤーを表示"
+
+msgid "Deleted {0} layers."
+msgstr "{0} 枚のレイヤーを削除しました。"
+
+msgid "Duplicated {0} layers."
+msgstr "{0} 枚のレイヤーを複製しました。"
+
+msgid "Grouped {0} layers."
+msgstr "{0} 枚のレイヤーをグループにしました。"
+
+msgid "Hid {0} layers."
+msgstr "{0} 枚のレイヤーを非表示にしました。"
+
+msgid "Showed {0} layers."
+msgstr "{0} 枚のレイヤーを表示しました。"
+
+msgid "At least one layer must remain. Keep one layer out of the selection."
+msgstr "レイヤーは少なくとも 1 枚残します。どれか 1 枚を選択から外してください。"
+
+msgid "Only layers in the same group can be grouped together. Move them into one group first."
+msgstr "同じグループの中のレイヤーどうししかグループにできません。先に同じグループへ移してください。"
+
+msgid "Only layers in the same group can be merged together. Move them into one group first."
+msgstr "同じグループの中のレイヤーどうししか結合できません。先に同じグループへ移してください。"
+
+msgid "Select a group to ungroup it."
+msgstr "解除するグループを選んでください。"
+
+# ── ロック ──
+
+# レイヤーのパネルの見出しの 2 行目の「ロック:」
+msgid "Lock"
+msgstr "ロック"
+
+msgid "Lock Layers"
+msgstr "レイヤーをロック"
+
+msgid "Lock Transparent Pixels"
+msgstr "透明ピクセルをロック"
+
+msgid "Lock Image Pixels"
+msgstr "画像ピクセルをロック"
+
+msgid "Lock Position"
+msgstr "位置をロック"
+
+msgid "Lock All"
+msgstr "すべてをロック"
+
+msgid "Lock transparent pixels: painting keeps each pixel's transparency and changes only its colour"
+msgstr "透明ピクセルをロック: 描いても各画素の透明度は変わらず、色だけが変わる"
+
+msgid "Lock image pixels: the layer's pixels cannot be changed (it can still be moved and its mask painted)"
+msgstr "画像ピクセルをロック: レイヤーの画素を変えられない（移動とマスクの描画はできる）"
+
+msgid "Lock position: the layer cannot be moved or transformed"
+msgstr "位置をロック: レイヤーを移動・変形できない"
+
+msgid "Lock all: pixels, position and the layer's settings"
+msgstr "すべてをロック: 画素・位置・レイヤーの設定"
+
+msgid "in effect through Lock all or a locked group"
+msgstr "すべてのロックか、ロックしたグループから効いている"
+
+msgid "Locked: {0}."
+msgstr "ロックしました: {0}。"
+
+msgid "Unlocked: {0}."
+msgstr "ロックを外しました: {0}。"
+
+# 行の右端の錠のツールチップ
+msgid "Locked"
+msgstr "すべてをロック"
+
+msgid "Locked: {0}"
+msgstr "ロック: {0}"
+
+msgid "by its group"
+msgstr "グループのロック"
+
+# ロックの種類の名前（「ロックしました: …」に入る）
+msgid "transparent pixels"
+msgstr "透明ピクセル"
+
+msgid "image pixels"
+msgstr "画像ピクセル"
+
+msgid "position"
+msgstr "位置"
+
+msgid "all"
+msgstr "すべて"
+
+# ── ロックで断ったとき（{0} は「“名前”」か「グループ“名前”」）──
+
+msgid "“{0}”"
+msgstr "「{0}」"
+
+msgid "The group “{0}”"
+msgstr "グループ「{0}」"
+
+msgid "{0} has its transparent pixels locked: this would change their transparency. Unlock transparent pixels to erase, cut, draw a path or move a selected part."
+msgstr "{0} は透明ピクセルがロックされています。この操作では画素の透明度が変わります。消す・カット・パス・選択範囲の中の移動には、透明ピクセルのロックを外してください。"
+
+msgid "{0} has its image pixels locked. Unlock it to change its pixels."
+msgstr "{0} は画像ピクセルがロックされています。画素を変えるにはロックを外してください。"
+
+msgid "{0} has its position locked. Unlock it to move or transform it."
+msgstr "{0} は位置がロックされています。移動・変形するにはロックを外してください。"
+
+msgid "{0} is locked. Unlock it to change it."
+msgstr "{0} はすべてロックされています。変えるにはロックを外してください。"
+
+msgid "Nothing was changed."
+msgstr "何も変えていません。"
+
+msgid "The transparent pixels are locked, so only the colours were baked: each pixel kept its transparency."
+msgstr "透明ピクセルがロックされているので、色だけを焼き込みました（各画素の透明度はそのまま）。"

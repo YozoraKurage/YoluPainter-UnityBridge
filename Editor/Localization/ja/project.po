@@ -1,0 +1,101 @@
+# Japanese translation for YoluPainter: New Project / Project Configuration.
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "New Project"
+msgstr "新規プロジェクト"
+
+msgid "Project Configuration"
+msgstr "プロジェクト設定"
+
+msgid "Project Configuration…"
+msgstr "プロジェクト設定…"
+
+msgid "Template"
+msgstr "テンプレート"
+
+msgid "PBR (all channels)"
+msgstr "PBR（すべてのチャンネル）"
+
+msgid "lilToon (Color, Normal, Emission)"
+msgstr "lilToon（カラー・ノーマル・エミッション）"
+
+msgid "Color only"
+msgstr "カラーのみ"
+
+msgid "Channels"
+msgstr "チャンネル"
+
+msgid "Mesh"
+msgstr "メッシュ"
+
+msgid "None (paint in 2D; choose a model later)"
+msgstr "なし（2D で描き、モデルは後で選ぶ）"
+
+msgid "A scene object (its meshes are copied, the object is not changed)"
+msgstr "シーン上のオブジェクト（メッシュを写すだけで、オブジェクトは変えない）"
+
+msgid "Texture set (material)"
+msgstr "テクスチャセット"
+
+msgid "The material slot this project paints"
+msgstr "このプロジェクトが描くマテリアルのスロット"
+
+msgid "Document"
+msgstr "ドキュメント"
+
+msgid "Resolution"
+msgstr "解像度"
+
+msgid "Normal map format"
+msgstr "ノーマルマップの形式"
+
+msgid "OpenGL (Y+, Unity)"
+msgstr "OpenGL（Y+、Unity）"
+
+msgid "DirectX (Y−)"
+msgstr "DirectX（Y−）"
+
+msgid "Unity reads normal maps as OpenGL. The format is used when exporting files."
+msgstr "Unity は OpenGL の形式で読みます。この形式はファイルの書き出しに使います。"
+
+msgid "Bake mesh maps after creating"
+msgstr "作成後にメッシュマップをベイクする"
+
+msgid "Normal, position, AO, curvature and thickness from the model"
+msgstr "モデルから法線・位置・AO・曲率・厚みを焼く"
+
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgid "Apply"
+msgstr "適用"
+
+msgid "Create"
+msgstr "作成"
+
+msgid "Triangles"
+msgstr "三角形"
+
+msgid "Texture sets"
+msgstr "テクスチャセット"
+
+msgid "{0} note(s) while loading"
+msgstr "読み込みの注意 {0} 件"
+
+msgid "Finish the stroke first."
+msgstr "先にストロークを終えてください。"
+
+msgid "New project for {0} ({1})."
+msgstr "{0}（{1}）の新規プロジェクトを作りました。"
+
+msgid "New project without a model. Choose one in Texture Set or File ▸ Project Configuration."
+msgstr "モデル無しの新規プロジェクトです。テクスチャセットか ファイル ▸ プロジェクト設定 でモデルを選んでください。"
+
+msgid "Project configuration applied."
+msgstr "プロジェクト設定を適用しました。"
+
+msgid "slot"
+msgstr "スロット"

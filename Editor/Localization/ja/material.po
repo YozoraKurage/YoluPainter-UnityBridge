@@ -1,0 +1,392 @@
+# Japanese translation for YoluPainter: the material view of the 3D preview (neutral / material shading, the channel → property
+# mapping and its notes) and the Material panel (the material's properties, preview-only changes, Apply to Material).
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# ── 3D ビューの描き方 ──
+
+msgid "Neutral Shading"
+msgstr "中立の表示"
+
+msgid "Material Shading"
+msgstr "マテリアルの表示"
+
+msgid "Neutral shading: the painted channel on a neutral surface"
+msgstr "中立の表示: 描いているチャンネルを中立の面に見せる"
+
+msgid "Material shading: the source material's shader with the painted maps (only a preview copy; the material itself is not changed)"
+msgstr "マテリアルの表示: 元のマテリアルのシェーダーで、描いたマップを入れて見せる（プレビューの複製だけで、マテリアルそのものは変えない）"
+
+msgid "Shown neutral:"
+msgstr "中立で見せているもの:"
+
+msgid "3D view: neutral shading (the painted channel on a neutral surface)."
+msgstr "3D ビュー: 中立の表示（描いているチャンネルを中立の面に見せる）。"
+
+msgid "3D view: material shading. Load a model to see its materials."
+msgstr "3D ビュー: マテリアルの表示。モデルを読み込むとそのマテリアルで見せます。"
+
+msgid "3D view: material shading."
+msgstr "3D ビュー: マテリアルの表示。"
+
+msgid "3D view: material shading, but this slot is shown neutral: {0}"
+msgstr "3D ビュー: マテリアルの表示。ただしこのスロットは中立で見せています: {0}"
+
+msgid "3D view: material shading ({0}). Only the preview's copy of the material is used; the material itself is not changed."
+msgstr "3D ビュー: マテリアルの表示（{0}）。使うのはプレビュー用のマテリアルの複製だけで、マテリアルそのものは変えません。"
+
+# ── チャンネルとプロパティの対応 ──
+
+msgid "This material slot has no source material (the demo cube or an unassigned slot), so it is shown neutral."
+msgstr "このマテリアルスロットには元のマテリアルがありません（デモのキューブか、割り当ての無いスロット）。中立で見せます。"
+
+msgid "The project uses a scriptable render pipeline ({0}); the preview draws with the built-in pipeline, so {1} cannot be shown. Shown neutral."
+msgstr "このプロジェクトはスクリプタブルレンダーパイプライン（{0}）を使っています。プレビューはビルトインのパイプラインで描くので {1} は見せられません。中立で見せます。"
+
+msgid "lilToon's forward pass {0} cannot be used: {1}"
+msgstr "lilToon のフォワードパス {0} が使えません: {1}"
+
+msgid "lilToon {0} is not verified for this material, so only the main texture is used: {1}"
+msgstr "このマテリアルの lilToon {0} は確かめていないので、メインのテクスチャだけを使います: {1}"
+
+msgid "this shader has no main texture ([MainTexture] or _MainTex)."
+msgstr "このシェーダーにはメインのテクスチャ（[MainTexture] か _MainTex）がありません。"
+
+msgid "not shown, because the mapping of this shader is not verified (only Color goes into the main texture)."
+msgstr "このシェーダーの対応は確かめていないので見せません（メインのテクスチャに入るのはカラーだけ）。"
+
+msgid "The material has no shader."
+msgstr "マテリアルにシェーダーがありません。"
+
+msgid "The shader is missing or failed to compile (Hidden/InternalErrorShader)."
+msgstr "シェーダーが無いか、コンパイルに失敗しています（Hidden/InternalErrorShader）。"
+
+msgid "The shader {0} has compile errors."
+msgstr "シェーダー {0} にコンパイルエラーがあります。"
+
+msgid "The shader {0} is not supported on this graphics device."
+msgstr "シェーダー {0} はこのグラフィックスデバイスで使えません。"
+
+msgid "Neutral (the source shader cannot be shown)"
+msgstr "中立（元のシェーダーでは見せられない）"
+
+msgid "A shader named Standard at {0} is not the built-in Standard shader, so its mapping is not used."
+msgstr "{0} の Standard という名前のシェーダーはビルトインの Standard ではないので、その対応は使いません。"
+
+msgid "The built-in Standard shader in this Unity has no {0} of the expected type, so its mapping is not used."
+msgstr "この Unity のビルトインの Standard には、思っている型の {0} が無いので、その対応は使いません。"
+
+msgid "The built-in Standard shader in this Unity does not declare _BumpMap as [Normal], so its mapping is not used."
+msgstr "この Unity のビルトインの Standard は _BumpMap を [Normal] としていないので、その対応は使いません。"
+
+msgid "The built-in Standard shader in this Unity has no keyword {0}, so its mapping is not used."
+msgstr "この Unity のビルトインの Standard にはキーワード {0} が無いので、その対応は使いません。"
+
+msgid "Standard (built-in)"
+msgstr "Standard（ビルトイン）"
+
+msgid "this Standard material reads the smoothness from the albedo alpha (_SmoothnessTextureChannel), not from _MetallicGlossMap."
+msgstr "この Standard のマテリアルは平滑度をアルベドのアルファから読みます（_SmoothnessTextureChannel）。_MetallicGlossMap からではありません。"
+
+msgid "Main texture only ({0})"
+msgstr "メインのテクスチャだけ（{0}）"
+
+msgid "As the material is (no main texture)"
+msgstr "マテリアルのまま（メインのテクスチャなし）"
+
+msgid "The material view of this slot failed: {0}"
+msgstr "このスロットのマテリアルの表示に失敗しました: {0}"
+
+msgid "The preview's channel packing shader ({0}) cannot be used here, so the material view is unavailable; shown neutral."
+msgstr "プレビューのチャンネルを詰め直すシェーダー（{0}）がここでは使えないので、マテリアルの表示はできません。中立で見せます。"
+
+# ── 見せ方の注意 ──
+
+msgid "{0}: {1} is off on this material, so the painted {0} does not show. Turn it on in the Material panel to see it (only the preview changes)."
+msgstr "{0}: このマテリアルでは {1} が切れているので、描いた{0}は見えません。マテリアルの欄で入れると見えます（変わるのはプレビューだけ）。"
+
+msgid "{0}: the keyword {1} is off on this material, so the painted {0} does not show."
+msgstr "{0}: このマテリアルではキーワード {1} が切れているので、描いた{0}は見えません。"
+
+msgid "{0}: lilToon's shader setting strips {1}, so the painted {0} does not show (YoluPainter does not change lilToon's settings)."
+msgstr "{0}: lilToon のシェーダー設定が {1} を外しているので、描いた{0}は見えません（YoluPainter は lilToon の設定を変えません）。"
+
+msgid "{0}: {1} is 0 (black) on this material, so the painted {0} has no visible effect."
+msgstr "{0}: このマテリアルでは {1} が 0（黒）なので、描いた{0}は見た目に効きません。"
+
+msgid "{0}: the material tiles or offsets {1} (scale {2}, offset {3}); the preview shows it like the material does, while the brush paints UV0 directly."
+msgstr "{0}: このマテリアルは {1} をタイリング・オフセットしています（スケール {2}、オフセット {3}）。プレビューはマテリアルどおりに見せますが、ブラシは UV0 にそのまま描きます。"
+
+# ── マテリアルの欄 ──
+
+msgid "This material slot has no source material (the demo cube or an unassigned slot). Load a model to see and adjust its material."
+msgstr "このマテリアルスロットには元のマテリアルがありません（デモのキューブか、割り当ての無いスロット）。モデルを読み込むと、そのマテリアルを見て調整できます。"
+
+msgid "Load a model to see and adjust its material."
+msgstr "モデルを読み込むと、そのマテリアルを見て調整できます。"
+
+msgid "Show the material in the Project window"
+msgstr "マテリアルをプロジェクトウィンドウで示す"
+
+msgid "Shader"
+msgstr "シェーダー"
+
+msgid "3D view"
+msgstr "3D ビュー"
+
+msgid "Show This Material in 3D"
+msgstr "このマテリアルで 3D に見せる"
+
+msgid "Material shading: the 3D view draws a preview copy of this material with the painted maps. Off: neutral shading."
+msgstr "マテリアルの表示: 3D ビューは、このマテリアルのプレビュー用の複製に描いたマップを入れて描きます。切ると中立の表示。"
+
+msgid "Filter properties"
+msgstr "プロパティを絞り込む"
+
+msgid "Show the properties whose name or description contains this"
+msgstr "名前か説明にこの文字を含むプロパティを見せる"
+
+msgid "The changes show in the 3D view with material shading."
+msgstr "変えた値は、3D ビューをマテリアルの表示にすると見えます。"
+
+msgid "{0} notes on how the 3D view shows this material"
+msgstr "3D ビューの見せ方の注意 {0} 件"
+
+msgid "No changes"
+msgstr "変更なし"
+
+msgid "{0} changed in the preview only (not applied)"
+msgstr "{0} 件をプレビューだけで変更（未反映）"
+
+msgid "Revert All"
+msgstr "全部元に戻す"
+
+msgid "Put every property of this material back to the material's own value (the preview only)"
+msgstr "このマテリアルのプロパティを全部マテリアルの値に戻す（プレビューだけ）"
+
+msgid "Reverted {0} change(s); the preview shows the material's own values again."
+msgstr "{0} 件の変更を元に戻しました。プレビューはマテリアルの値に戻っています。"
+
+msgid "Apply to Material…"
+msgstr "マテリアルに反映…"
+
+msgid "Write the changed values into the material itself, after listing them (Unity's Undo reverts it)"
+msgstr "変えた値を一覧で確かめてから、マテリアルそのものに書き込む（Unity の元に戻すで戻せます）"
+
+msgid "No property matches the filter."
+msgstr "絞り込みに合うプロパティがありません。"
+
+msgid "painted {0}"
+msgstr "描いた{0}"
+
+msgid "The material view puts the painted {0} here (the material keeps {1})."
+msgstr "マテリアルの表示では、ここに描いた{0}を入れます（マテリアルは {1} のまま）。"
+
+msgid "Back to the material's own value"
+msgstr "マテリアルの値に戻す"
+
+# ── マテリアルに反映 ──
+
+msgid "Not applied: {0}"
+msgstr "反映しませんでした: {0}"
+
+msgid "Cannot apply to the material"
+msgstr "マテリアルに反映できません"
+
+msgid "Apply to the material?"
+msgstr "マテリアルに反映しますか？"
+
+msgid "Not applied; the material is unchanged."
+msgstr "反映しませんでした。マテリアルは変わっていません。"
+
+msgid "Applied {0} change(s) to {1}. Unity's Undo (Edit ▸ Undo) reverts the material."
+msgstr "{1} に {0} 件の変更を反映しました。Unity の元に戻す（Edit ▸ Undo）でマテリアルを戻せます。"
+
+msgid "keyword {0} {1}"
+msgstr "キーワード {0} を{1}"
+
+msgid "on"
+msgstr "入れる"
+
+msgid "off"
+msgstr "切る"
+
+msgid "Material: {0}"
+msgstr "マテリアル: {0}"
+
+msgid "These values are written to the material (Unity's Undo reverts them):"
+msgstr "次の値をマテリアルに書き込みます（Unity の元に戻すで戻せます）:"
+
+msgid "Not applied:"
+msgstr "反映しないもの:"
+
+msgid "Nothing else on the material, its textures or the model is changed."
+msgstr "マテリアルのほかの値・テクスチャ・モデルは変えません。"
+
+msgid "This material slot has no source material."
+msgstr "このマテリアルスロットには元のマテリアルがありません。"
+
+msgid "The material is part of {0} (an imported model or a built-in asset), which Unity re-creates or does not save. Extract the material (the model's Materials tab) and use the extracted one."
+msgstr "このマテリアルは {0}（インポートしたモデルかビルトインのアセット）の一部で、Unity が作り直すか保存しません。マテリアルを取り出して（モデルの Materials タブ）、取り出したものを使ってください。"
+
+msgid "The material {0} is not open for editing (version control)."
+msgstr "マテリアル {0} は編集できる状態ではありません（バージョン管理）。"
+
+msgid "{0}: the material's shader no longer has this property with the same type."
+msgstr "{0}: マテリアルのシェーダーに、同じ型のこのプロパティがもうありません。"
+
+msgid "Nothing to apply: no property of this material was changed in the Material panel."
+msgstr "反映するものがありません: マテリアルの欄でこのマテリアルのプロパティを変えていません。"
+
+msgid "The material changed since the list was made; nothing was applied. Try again."
+msgstr "一覧を作った後にマテリアルが変わったので、何も反映しませんでした。もう一度試してください。"
+
+# ── 未反映の変更の知らせ ──
+
+msgid "Discarded {0} preview-only material change(s) of materials that are not in this model (they were never applied)."
+msgstr "このモデルに無いマテリアルの、プレビューだけの変更 {0} 件を捨てました（反映はしていません）。"
+
+msgid "The Material panel still has {0} change(s) that are only in the preview (not applied to the material)."
+msgstr "マテリアルの欄に、プレビューだけの変更が {0} 件残っています（マテリアルには反映していません）。"
+
+msgid "{0} preview-only material change(s) were not applied to the material and are discarded: {1}"
+msgstr "プレビューだけのマテリアルの変更 {0} 件は、マテリアルに反映されないまま捨てられます: {1}"
+
+# ── 擬似的なシーン（カメラ・照明・背景） ──
+
+msgid "Scene: camera views, the light, the ambient and the background of the 3D view (the preview only)"
+msgstr "シーン: 3D ビューのカメラの向き・光・環境光・背景（プレビューだけ）"
+
+msgid "Camera"
+msgstr "カメラ"
+
+msgctxt "camera"
+msgid "Front"
+msgstr "前"
+
+msgctxt "camera"
+msgid "Back"
+msgstr "後ろ"
+
+msgctxt "camera"
+msgid "Left"
+msgstr "左"
+
+msgctxt "camera"
+msgid "Right"
+msgstr "右"
+
+msgctxt "camera"
+msgid "Top"
+msgstr "上"
+
+msgid "Fit to Model"
+msgstr "全体を映す"
+
+msgid "From the +Z side, where a Unity character faces"
+msgstr "+Z の側（Unity のキャラクターが向く側）から"
+
+msgid "From the character's left (−X)"
+msgstr "キャラクターの左（−X）から"
+
+msgid "From the character's right (+X)"
+msgstr "キャラクターの右（+X）から"
+
+msgid "Keep the angle and frame the whole model"
+msgstr "向きはそのまま、モデル全体が入るようにする"
+
+msgid "Lighting"
+msgstr "照明"
+
+msgctxt "light"
+msgid "Default"
+msgstr "既定"
+
+msgid "From the View"
+msgstr "視点から"
+
+msgctxt "light"
+msgid "View"
+msgstr "視点"
+
+msgctxt "light"
+msgid "Left"
+msgstr "左"
+
+msgctxt "light"
+msgid "Right"
+msgstr "右"
+
+msgctxt "light"
+msgid "Above"
+msgstr "上"
+
+msgid "From the Left"
+msgstr "左から"
+
+msgid "From the Right"
+msgstr "右から"
+
+msgid "From Behind (Rim)"
+msgstr "後ろから（リム）"
+
+msgctxt "light"
+msgid "Rim"
+msgstr "リム"
+
+msgid "From Above"
+msgstr "上から"
+
+msgid "The light comes from the camera, a little from above"
+msgstr "光はカメラの側から、少し上から当たる"
+
+msgid "From behind the model, for the outline"
+msgstr "モデルの後ろから（輪郭を見る）"
+
+msgid "The light, its strength and the ambient back to the default"
+msgstr "光・強さ・環境光を既定に戻す"
+
+msgid "Direction"
+msgstr "向き"
+
+msgid "Where the light comes from, around the model (world)"
+msgstr "光がモデルのまわりのどこから来るか（ワールド）"
+
+msgctxt "light"
+msgid "Height"
+msgstr "高さ"
+
+msgid "How high the light is (90° is straight above)"
+msgstr "光の高さ（90° で真上）"
+
+msgid "Intensity"
+msgstr "強さ"
+
+msgid "The strength of the light (1 is the default)"
+msgstr "光の強さ（1 が既定）"
+
+msgid "Light color"
+msgstr "光の色"
+
+msgid "Ambient"
+msgstr "環境光"
+
+msgid "The light on the shaded side"
+msgstr "影の側の明るさ"
+
+msgid "Background"
+msgstr "背景"
+
+msgid "Reset Scene"
+msgstr "シーンを元に戻す"
+
+msgid "The light, the ambient and the background back to the default (the camera stays)"
+msgstr "光・環境光・背景を既定に戻す（カメラはそのまま）"
+
+msgid "Scene Settings…"
+msgstr "シーンの設定…"
+
+msgid "Only the preview; the scene's lights are not changed."
+msgstr "プレビューだけ。シーンのライトは変えません。"

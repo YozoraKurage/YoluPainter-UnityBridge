@@ -1,0 +1,7 @@
+{
+  "name": "Yozolab.YoluPainter.Api",
+  "rootNamespace": "Yozolab.YoluPainter.Api",
+  "references": ["Yozolab.YoluPainter.Core"],
+  "includePlatforms": ["Editor"],
+  "autoReferenced": true
+}

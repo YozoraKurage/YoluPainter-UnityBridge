@@ -1,0 +1,213 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Globalization;
+using Yozolab.YoluPainter.Core.MeshMaps;
+using Yozolab.YoluPainter.Core.Shelf;
+
+namespace Yozolab.YoluPainter.Core
+{
+    /// <summary>How a fill layer's images are laid onto the texture set (Substance Painter's fill Projection). Values are stored in
+    /// the native format; append only.</summary>
+    public enum FillProjectionMode { Uv = 0, Triplanar = 1, Planar = 2, Spherical = 3, Cylindrical = 4 }
+
+    /// <summary>What a projected image does outside its 0..1 square: repeats, or continues its edge pixels. Values are stored in the
+    /// native format; append only.</summary>
+    public enum FillWrap { Repeat = 0, Clamp = 1 }
+
+    /// <summary>How an image resource's stored values are turned into a channel's values (<see cref="FillImageColor.ConversionFor"/>).</summary>
+    public enum FillImageConversion
+    {
+        /// <summary>The values are used as stored.</summary>
+        None = 0,
+        /// <summary>A data image (linear) in a colour channel: each colour value is encoded to sRGB (IEC 61966-2-1).</summary>
+        LinearToSrgb = 1,
+    }
+
+    /// <summary>
+    /// How a fill layer's images (one per channel, <see cref="PaintLayer.FillImages"/>) are laid onto the texture set. One per fill
+    /// layer; every image channel of the layer uses it. Immutable; checked when made.
+    /// <para>Per pixel (x, y) of a W × H texture set, with the image's level-0 size w × h:</para>
+    /// <list type="number">
+    /// <item>Base coordinates (s, t):
+    /// <list type="bullet">
+    /// <item>Uv: (s, t) = ((x + 0.5) / W, (y + 0.5) / H), the pixel centre in the UV square.</item>
+    /// <item>The other modes read the texel's point on the model from the baked Position map (back to the snapshot space with the bake's
+    /// bounding box, then into the model root's space with the document's <see cref="GeneratorModelFrame"/>, as the shape gradient does)
+    /// and place it in <see cref="Placement"/>'s space: l = Rᵀ (p − centre), R the placement's rotation (Unity's Euler order),
+    /// S = its sizes. Planar: (s, t) = (l_x / S_x + 0.5, l_y / S_y + 0.5), the image on the placement's −Z face seen from −Z (projected
+    /// through the whole model; the back shows it mirrored). Spherical: s = atan2(l_x, −l_z) / 2π + 0.5 (0.5 faces −Z, the seam is at
+    /// +Z), t = asin(l_y / |l|) / π + 0.5 (the centre itself reads (0.5, 0.5)); sizes are not used. Cylindrical: s as spherical about
+    /// the placement's Y axis, t = l_y / S_y + 0.5. Triplanar: three planar projections along the placement's axes, each read the
+    /// right way round from outside the face the normal points to (+X: (l_z, l_y), −X: (−l_z, l_y), +Y: (l_x, l_z), −Y: (−l_x, l_z),
+    /// +Z: (−l_x, l_y), −Z: (l_x, l_y), each divided by the sizes of those axes and + 0.5), mixed by the weights
+    /// wᵢ = max(0, |nᵢ| − (1 − <see cref="BlendWidth"/>) · maxⱼ |nⱼ|) / Σ, n the baked world normal (WorldNormal map) turned into the
+    /// placement's space: BlendWidth 0 takes only the axis the surface faces most, 1 mixes in proportion to |nᵢ|.</item>
+    /// </list></item>
+    /// <item>The UV transform (all modes): (s′, t′) = Tiles ⊙ (R(−Rotation) ((s, t) − 0.5) + 0.5) + Offset, so the image turns
+    /// counter-clockwise by <see cref="Rotation"/> degrees about the square's centre, then repeats Tiles times from the origin and
+    /// shifts by Offset (in image squares).</item>
+    /// <item>Sampling: texel coordinates (s′ w − 0.5, t′ h − 0.5), <see cref="Wrap"/> per axis, bilinear over premultiplied alpha.
+    /// Minified pixels read a mipmap (each level halves the one before with an area average over premultiplied alpha; see
+    /// <see cref="FillImageColor"/>) chosen from the pixel's footprint ρ (the longer of the two columns of ∂(s′ w, t′ h)/∂(x, y), from the
+    /// UV transform in Uv mode and from the neighbouring texels' points elsewhere, taking the neighbour on each axis that is nearer on
+    /// the model): ρ ≤ 1 reads level 0, otherwise levels ⌊log₂ ρ⌋ and the next mixed by the fraction (trilinear). No anisotropic
+    /// filtering. A pixel read only from equal texels is that texel; a result whose alpha rounds to 0 keeps the weighted average colour
+    /// of the transparent texels it read (transparent pixels keep RGB). Rounded half up to 8 bits once.</item>
+    /// </list>
+    /// Pixels whose Position (or, for triplanar, normal) texel is empty keep the channel's fill value, and so does the whole layer while
+    /// a map it needs is missing, stale or of another size, or the image is not in the project
+    /// (<see cref="PaintDocument.GetFillImageStatus"/> says why). Formulas are this tool's native definitions; they are not claimed to
+    /// match Substance Painter's projections.
+    /// </summary>
+    public sealed class FillProjection : IEquatable<FillProjection>
+    {
+        public const double MinTiles = 1e-3, MaxTiles = 1e4, MaxOffset = 1e4, MaxRotation = 360;
+        /// <summary>Version of the formulas above. Stored with the projection; a reader refuses versions it does not implement.</summary>
+        public const int AlgorithmVersion = 1;
+        /// <summary>A unit box at the model root (the placement a new layer starts with before the window fits it to the model).</summary>
+        public static readonly ShapeVolume DefaultPlacement = new ShapeVolume(GeneratorShape.Box, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0);
+        /// <summary>UV, repeated once, no offset or rotation.</summary>
+        public static readonly FillProjection Default = new FillProjection(FillProjectionMode.Uv, FillWrap.Repeat, 1, 1, 0, 0, 0, .3, DefaultPlacement);
+
+        public FillProjectionMode Mode { get; }
+        public FillWrap Wrap { get; }
+        /// <summary>How many times the image repeats across the projected square on each axis (a fraction enlarges it).</summary>
+        public double TileU { get; }
+        public double TileV { get; }
+        /// <summary>Shift in image squares (after Tiles).</summary>
+        public double OffsetU { get; }
+        public double OffsetV { get; }
+        /// <summary>Degrees the image turns counter-clockwise about the projected square's centre.</summary>
+        public double Rotation { get; }
+        /// <summary>Triplanar: 0 = hard switch to the axis the surface faces most, 1 = mixed in proportion to the normal's components.</summary>
+        public double BlendWidth { get; }
+        /// <summary>Where the projection is in the model root's space (centre, rotation in Euler degrees, sizes in scene units): the box
+        /// the 3D view's gizmo moves. Always a <see cref="GeneratorShape.Box"/> with falloff 0; the Uv mode does not use it (kept).</summary>
+        public ShapeVolume Placement { get; }
+
+        public FillProjection(FillProjectionMode mode, FillWrap wrap, double tileU, double tileV, double offsetU, double offsetV, double rotation, double blendWidth, ShapeVolume placement)
+        {
+            Mode = mode; Wrap = wrap; TileU = tileU; TileV = tileV; OffsetU = offsetU; OffsetV = offsetV; Rotation = rotation; BlendWidth = blendWidth; Placement = placement;
+            string why = Refusal(); if (why != null) throw new ArgumentOutOfRangeException("projection", why);
+        }
+
+        public FillProjection WithMode(FillProjectionMode mode) => new FillProjection(mode, Wrap, TileU, TileV, OffsetU, OffsetV, Rotation, BlendWidth, Placement);
+        public FillProjection WithWrap(FillWrap wrap) => new FillProjection(Mode, wrap, TileU, TileV, OffsetU, OffsetV, Rotation, BlendWidth, Placement);
+        public FillProjection WithTiles(double u, double v) => new FillProjection(Mode, Wrap, u, v, OffsetU, OffsetV, Rotation, BlendWidth, Placement);
+        public FillProjection WithOffset(double u, double v) => new FillProjection(Mode, Wrap, TileU, TileV, u, v, Rotation, BlendWidth, Placement);
+        public FillProjection WithRotation(double degrees) => new FillProjection(Mode, Wrap, TileU, TileV, OffsetU, OffsetV, degrees, BlendWidth, Placement);
+        public FillProjection WithBlendWidth(double value) => new FillProjection(Mode, Wrap, TileU, TileV, OffsetU, OffsetV, Rotation, value, Placement);
+        /// <summary>Another placement (its shape and falloff are set to a box with falloff 0).</summary>
+        public FillProjection WithPlacement(ShapeVolume value)
+            => new FillProjection(Mode, Wrap, TileU, TileV, OffsetU, OffsetV, Rotation, BlendWidth, new ShapeVolume(GeneratorShape.Box, value.CenterX, value.CenterY, value.CenterZ,
+                value.RotationX, value.RotationY, value.RotationZ, value.SizeX, value.SizeY, value.SizeZ, 0));
+
+        /// <summary>True for the modes that read the baked mesh maps (all but Uv).</summary>
+        public bool ReadsMeshMaps => Mode != FillProjectionMode.Uv;
+        /// <summary>The mesh maps the mode reads, in a fixed order (none for Uv).</summary>
+        public IReadOnlyList<MeshMapKind> UsedMaps
+            => Mode == FillProjectionMode.Uv ? new MeshMapKind[0] : Mode == FillProjectionMode.Triplanar ? new[] { MeshMapKind.Position, MeshMapKind.WorldNormal } : new[] { MeshMapKind.Position };
+
+        /// <summary>Why the values cannot be used, or null.</summary>
+        public string Refusal()
+        {
+            var c = CultureInfo.InvariantCulture;
+            if (!Enum.IsDefined(typeof(FillProjectionMode), Mode)) return "Unknown projection " + (int)Mode + ".";
+            if (!Enum.IsDefined(typeof(FillWrap), Wrap)) return "Unknown wrap " + (int)Wrap + ".";
+            foreach (double v in new[] { TileU, TileV, OffsetU, OffsetV, Rotation, BlendWidth }) if (double.IsNaN(v) || double.IsInfinity(v)) return "The projection's values must be finite.";
+            if (!(TileU >= MinTiles && TileU <= MaxTiles && TileV >= MinTiles && TileV <= MaxTiles)) return "Tiling must be " + MinTiles.ToString(c) + " to " + MaxTiles.ToString(c) + ".";
+            if (Math.Abs(OffsetU) > MaxOffset || Math.Abs(OffsetV) > MaxOffset) return "The offset must be within ±" + MaxOffset.ToString(c) + ".";
+            if (Math.Abs(Rotation) > MaxRotation) return "The rotation must be within ±" + MaxRotation.ToString(c) + "°.";
+            if (BlendWidth < 0 || BlendWidth > 1) return "The blend width must be 0..1.";
+            if (Placement.Shape != GeneratorShape.Box || Placement.Falloff != 0) return "A projection's placement is a box without falloff.";
+            return Placement.Refusal();
+        }
+
+        public bool Equals(FillProjection other)
+        {
+            return other != null && Mode == other.Mode && Wrap == other.Wrap && TileU == other.TileU && TileV == other.TileV && OffsetU == other.OffsetU && OffsetV == other.OffsetV
+                && Rotation == other.Rotation && BlendWidth == other.BlendWidth && Placement.Equals(other.Placement);
+        }
+        public override bool Equals(object obj) => Equals(obj as FillProjection);
+        public override int GetHashCode() { unchecked { return ((int)Mode * 397) ^ ((int)Wrap << 4) ^ TileU.GetHashCode() ^ (TileV.GetHashCode() * 7) ^ (OffsetU.GetHashCode() * 13) ^ (Rotation.GetHashCode() * 31) ^ (Placement.GetHashCode() * 3); } }
+        public override string ToString()
+            => string.Format(CultureInfo.InvariantCulture, "{0} {1} tiles ({2:0.###}, {3:0.###}) offset ({4:0.###}, {5:0.###}) rotation {6:0.#} blend {7:0.##} at {8}", Mode, Wrap, TileU, TileV, OffsetU, OffsetV, Rotation, BlendWidth, Placement);
+    }
+
+    /// <summary>How an image's values are read into a channel, as Substance Painter does. The data channels (Roughness, Metallic, Height,
+    /// Normal) take the image's values as stored whatever its <see cref="ResourceColorSpace"/>: a data image keeps its values even when it
+    /// was imported into Unity as sRGB. The colour channels (Color, Emission) hold sRGB-encoded colour, so an image marked as data
+    /// (linear) is encoded to sRGB there; colour (sRGB) and unspecified images (image files) are used as stored. Scalar channels
+    /// (Roughness, Metallic, Height) take the Rec. 709 luminance of the stored colour, ⌊(2126 R + 7152 G + 722 B + 5000) / 10000⌋, into
+    /// R = G = B, so grey images are unchanged. Alpha is never converted.</summary>
+    public static class FillImageColor
+    {
+        public static bool IsColorChannel(PaintChannel channel) => channel == PaintChannel.Color || channel == PaintChannel.Emission;
+        public static bool IsScalarChannel(PaintChannel channel) => channel == PaintChannel.Roughness || channel == PaintChannel.Metallic || channel == PaintChannel.Height;
+
+        public static FillImageConversion ConversionFor(ResourceColorSpace space, PaintChannel channel)
+            => IsColorChannel(channel) && space == ResourceColorSpace.Linear ? FillImageConversion.LinearToSrgb : FillImageConversion.None;
+        /// <summary>The scalar channels read the luminance into R, G and B.</summary>
+        public static bool UsesLuminance(PaintChannel channel) => IsScalarChannel(channel);
+
+        static readonly byte[] toSrgb = MakeTable();
+        /// <summary>The conversion of one 8-bit colour value (alpha is not converted).</summary>
+        public static byte Convert(FillImageConversion conversion, byte value) => conversion == FillImageConversion.LinearToSrgb ? toSrgb[value] : value;
+        internal static byte[] Table(FillImageConversion conversion) => conversion == FillImageConversion.LinearToSrgb ? toSrgb : null;
+        static byte[] MakeTable()
+        {
+            var t = new byte[256];
+            for (int i = 0; i < 256; i++)
+            {
+                double c = i / 255.0;
+                t[i] = MathUtil.ToByte(c <= 0.0031308 ? 12.92 * c : 1.055 * Math.Pow(c, 1 / 2.4) - 0.055);
+            }
+            return t;
+        }
+        /// <summary>The luminance the scalar channels read (integer Rec. 709 weights, exact for grey).</summary>
+        public static byte Luminance(byte r, byte g, byte b) => (byte)((2126 * r + 7152 * g + 722 * b + 5000) / 10000);
+    }
+
+    /// <summary>What a fill layer's image channel shows now: the image it reads (or why it cannot), how its values are converted, and
+    /// whether the projection has an effect (<see cref="Active"/>). When it is not active the channel shows its fill value.</summary>
+    public sealed class FillImageStatus
+    {
+        public Guid ResourceId { get; }
+        /// <summary>The resource, or null when the project has no image with that ID (or no resources are connected).</summary>
+        public ImageResource Image { get; }
+        public bool Active { get; }
+        /// <summary>Why the channel shows its fill value instead of the image, or null.</summary>
+        public string Reason { get; }
+        public FillImageConversion Conversion { get; }
+        public bool Luminance { get; }
+        /// <summary>The mipmap levels (1 = only the image itself) and the bytes they hold beyond the image (0 when not bound).</summary>
+        public int MipLevels { get; }
+        public long MipBytes { get; }
+        internal FillImageStatus(Guid id, ImageResource image, string reason, FillImageConversion conversion, bool luminance, int levels, long bytes)
+        { ResourceId = id; Image = image; Reason = reason; Active = reason == null; Conversion = conversion; Luminance = luminance; MipLevels = levels; MipBytes = bytes; }
+    }
+
+    /// <summary>A fill layer's images: per channel, the ID of a project image resource whose projected pixels replace the channel's
+    /// fill value (which stays as the value shown where the image cannot be used). The projection is per layer.</summary>
+    public sealed partial class PaintLayer
+    {
+        readonly Dictionary<PaintChannel, Guid> fillImages = new Dictionary<PaintChannel, Guid>();
+        ReadOnlyDictionary<PaintChannel, Guid> fillImagesView;
+        /// <summary>Fill layers: the image resource each image channel reads (a channel here always has a fill value too). Empty for
+        /// other kinds.</summary>
+        public IReadOnlyDictionary<PaintChannel, Guid> FillImages => fillImagesView ?? (fillImagesView = new ReadOnlyDictionary<PaintChannel, Guid>(fillImages));
+        /// <summary>Fill layers: how the images are laid onto the texture set. <see cref="FillProjection.Default"/> for other kinds.</summary>
+        public FillProjection Projection { get; internal set; } = FillProjection.Default;
+        /// <summary>Changes (to a value unique within the document) whenever what the fill's channels show may change: a value, an image,
+        /// the projection, or the image a resource ID resolves to. Evaluated tiles are stamped with it.</summary>
+        internal long FillRevision { get; set; }
+        public bool HasFillImage(PaintChannel channel) => fillImages.ContainsKey(channel);
+        internal void SetFillImageInternal(PaintChannel channel, Guid? id) { if (id.HasValue) fillImages[channel] = id.Value; else fillImages.Remove(channel); }
+        /// <summary>True when the layer's pixels in the channel are evaluated (by its filters, or a fill's projected image) rather than read
+        /// as stored: the compositors then read <see cref="CopyOutputTile"/> and its <see cref="OutputStamp"/>.</summary>
+        public bool HasEvaluatedOutput(PaintChannel channel) => HasActiveFilters(channel) || Kind == LayerKind.Fill && fillImages.ContainsKey(channel);
+        /// <summary>A fill whose projection reads the baked mesh maps (and has an image to project).</summary>
+        internal bool ReadsMeshMapsForFill => Kind == LayerKind.Fill && fillImages.Count > 0 && Projection.ReadsMeshMaps;
+    }
+}

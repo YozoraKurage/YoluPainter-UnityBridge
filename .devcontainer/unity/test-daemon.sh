@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
-# DaerD 常駐 Unity: テストと Editor 操作を、起動費を払わずに依頼できるようにする。
+# YoluPainter 常駐 Unity: テストと Editor 操作を、起動費を払わずに依頼できるようにする。
 #
-#   test-daemon.sh start [--batch]   受け口をインストールして常駐 Unity を起動
+#   test-daemon.sh start [--batch|--batch-gl]   受け口をインストールして常駐 Unity を起動
 #   test-daemon.sh stop              行儀よく終了（応答が無ければ kill）
 #   test-daemon.sh status            生死・モード・ハートビートの鮮度
-#   test-daemon.sh restart [--batch]
+#   test-daemon.sh restart [--batch|--batch-gl]
 #
 # 既定は GUI モード（xvfb の仮想画面上で、-batchmode を付けずに起動する）。
 # batchmode と -nographics が禁じていた Play モード・EditorWindow・描画が使える。
 # --batch は GL が動かない環境向けの従来起動。
+# --batch-gl は -batchmode だけ付けて -nographics は付けず xvfb に載せる。EditorWindow は
+# 描けないが、OpenGL のデバイスがあるのでシェーダー・RenderTexture・GPU 読み戻しが動く。
+# この devcontainer では GUI モードだけシェーダーのインクルード解決が壊れる（組み込みの
+# HLSLSupport.cginc すら開けずマゼンタになる、2026-10-02 実測・原因未特定）ので、
+# シェーダーや GPU の結果を見る試験は --batch-gl で回す。
 #
 # コンパイルエラーがある状態で開くと（実測 2026-09-15）、GUI は「Enter Safe Mode?」の
 # ダイアログで主スレッドが止まり（受け口も鼓動も動かない）、batchmode は
@@ -22,20 +27,23 @@
 # （どちらのモードでも同じ受け口が動く）。常駐している間、同じプロジェクトを別の Unity
 # で開くことはできない。パッケージの出し入れ（SDK 剥がし等）をしたら restart するのが安全。
 
+# --runner N: テストの台を選ぶ（既定は台 0。台 1 以上は runners.sh がまとめて扱う）
+if [[ "${1:-}" == --runner ]]; then export YOLUPAINTER_RUNNER="${2:?--runner に台の番号が要る}"; shift 2; fi
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 readonly DAEMON_DIR="$UNITY_PROJECT/TestDaemon"
 readonly PID_FILE="$DAEMON_DIR/daemon.pid"
-readonly RECEIVER_SRC="$SCRIPT_DIR/daemon/DaerDTestDaemon.cs"
-readonly RECEIVER_DST="$UNITY_PROJECT/Assets/DaerDTestDaemon/Editor/DaerDTestDaemon.cs"
+readonly RECEIVER_SRC="$SCRIPT_DIR/daemon/YoluPainterTestDaemon.cs"
+readonly RECEIVER_DST="$UNITY_PROJECT/Assets/YoluPainterTestDaemon/Editor/YoluPainterTestDaemon.cs"
 readonly DAEMON_LOG="$UNITY_LOG_DIR/daemon.log"
 
-MODE="${DAERD_DAEMON_MODE:-gui}"   # gui | batch
+MODE="${YOLUPAINTER_DAEMON_MODE:-gui}"   # gui | batch | batch-gl
 
 parse_mode() {
   for a in "$@"; do
     case "$a" in
       --batch) MODE=batch ;;
+      --batch-gl) MODE=batch-gl ;;
       --gui)   MODE=gui ;;
       *) die "不明な引数: $a" ;;
     esac
@@ -67,13 +75,20 @@ install_receiver() {
 }
 
 launch() {
+  # 依頼のロック（client.lock）を常駐 Unity に引き継がせない（daemon-lock.sh）
+  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/daemon-lock.sh"
+  close_inherited_daemon_lock
   if [[ "$MODE" == batch ]]; then
     nohup "$UNITY_EDITOR" -batchmode -nographics \
       -projectPath "$UNITY_PROJECT" -logFile "$DAEMON_LOG" \
       >/dev/null 2>&1 &
+  elif [[ "$MODE" == batch-gl ]]; then
+    # ラッパーが xvfb と -batchmode を被せる。-nographics を付けないので GL デバイスが付く。
+    nohup "$UNITY_EDITOR" -projectPath "$UNITY_PROJECT" -logFile "$DAEMON_LOG" \
+      >/dev/null 2>&1 &
   else
     # unity-editor ラッパーは必ず -batchmode を足すので、本体を直接 xvfb に載せる。
-    nohup xvfb-run -a -s "-screen 0 ${DAERD_XVFB_SCREEN:-1920x1080x24}" \
+    nohup xvfb-run -a -s "-screen 0 ${YOLUPAINTER_XVFB_SCREEN:-1920x1080x24}" \
       "$UNITY_BIN" -projectPath "$UNITY_PROJECT" -logFile "$DAEMON_LOG" \
       >/dev/null 2>&1 &
   fi
@@ -138,6 +153,19 @@ wait_ready() {
   return 1
 }
 
+# GUI モードで取り込まれたシェーダーは、インクルード失敗のエラーごと Library に残ることがある
+# （2026-10-02 実測）。batch-gl ではインクルードが正しく解決されるので、エラーを抱えたプロジェクト内の
+# シェーダーだけ取り込み直す。本当にソースが壊れているシェーダーは取り込み直してもエラーのまま残る。
+reimport_broken_shaders() {
+  local out
+  out="$("$SCRIPT_DIR/unity-do.sh" run -e 'var fixedOnes=new List<string>();
+foreach(var guid in AssetDatabase.FindAssets("t:Shader",new[]{"Assets","Packages"})){var path=AssetDatabase.GUIDToAssetPath(guid);var sh=AssetDatabase.LoadAssetAtPath<Shader>(path);
+if(sh!=null&&ShaderUtil.ShaderHasError(sh)){AssetDatabase.ImportAsset(path,ImportAssetOptions.ForceUpdate|ImportAssetOptions.ForceSynchronousImport);fixedOnes.Add(path+(ShaderUtil.ShaderHasError(AssetDatabase.LoadAssetAtPath<Shader>(path))?" (still broken)":""));}}
+return fixedOnes.Count==0?"none":string.Join(", ",fixedOnes);' 2>&1 | sed -n 's/^=> //p')" || true
+  [[ -n "$out" && "$out" != none ]] && info "エラーを抱えていたシェーダーを取り込み直した: $out"
+  return 0
+}
+
 start() {
   if pid_alive; then
     info "既に起動している (PID $(cat "$PID_FILE"))"
@@ -158,6 +186,7 @@ start() {
   wait_ready || rc=$?
   if [[ $rc -eq 0 ]]; then
     info "デーモン準備完了 (PID $(cat "$PID_FILE"))"
+    [[ "$MODE" == batch-gl ]] && reimport_broken_shaders
     return 0
   fi
   if [[ $rc -eq 2 ]]; then
@@ -214,7 +243,9 @@ status() {
   if pid_alive; then
     local pid mode="GUI"
     pid="$(cat "$PID_FILE")"
-    ps -o args= -p "$pid" 2>/dev/null | grep -q -- '-batchmode' && mode="batch"
+    local args; args="$(ps -o args= -p "$pid" 2>/dev/null)"
+    if [[ "$args" == *-nographics* ]]; then mode="batch"
+    elif [[ "$args" == *-batchmode* ]]; then mode="batch-gl"; fi
     info "起動中 (PID $pid、${mode} モード、ハートビート $(beat_age) 秒前)"
   else
     info "停止中"

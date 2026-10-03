@@ -1,4 +1,4 @@
-# DaerD の DevContainer。
+# YoluPainter の DevContainer。
 #
 # ベースは game-ci の Unity Editor イメージ。Unity 本体 (/opt/unity/Editor/Unity)、
 # 必要な共有ライブラリ、xvfb、`unity-editor` ラッパー、そして固定 machine-id が
@@ -10,6 +10,18 @@
 
 ARG UNITY_VERSION=2022.3.22f1
 ARG UNITY_IMAGE_VERSION=3
+
+# --- 新しい Mesa（d3d12）を別ステージでビルドする ------------------------------------------
+# 22.04 の Mesa 23.2 の d3d12 は OpenGL 4.2 止まりで、Unity が CopyTexture と compute shader を
+# 無効にする。ビルド道具を最終イメージに残さないよう別ステージにし、成果物の /opt/mesa-d3d12
+# だけを持ち込む。ビルドに失敗してもイメージは作れる（BUILD_FAILED が残るだけ）。
+FROM ubuntu:22.04 AS mesa-builder
+ARG MESA_VERSION=24.2.8
+ENV DEBIAN_FRONTEND=noninteractive
+COPY mesa/build-mesa-d3d12.sh /tmp/build-mesa-d3d12.sh
+RUN MESA_VERSION="${MESA_VERSION}" bash /tmp/build-mesa-d3d12.sh
+
+# --- 本体 ---------------------------------------------------------------------------------
 FROM unityci/editor:ubuntu-${UNITY_VERSION}-base-${UNITY_IMAGE_VERSION}
 
 # FROM をまたぐと ARG は消えるので、使う分だけ宣言し直して ENV に焼く。
@@ -47,6 +59,12 @@ RUN apt-get -q update \
   # xwd (x11-apps) を使う。test-daemon.sh 参照。
   xdotool \
   x11-apps \
+  # GPU が通っているかの確認（gpu-check.sh の glxinfo）。
+  mesa-utils \
+  # UI の見た目の確認: ウィンドウを batch-gl でオフスクリーンに描いたとき日本語が出るフォント
+  # （Editor/UI/OffscreenGui.cs）と、アイコンの SVG を PNG にする rsvg-convert（Documentation~/tools/fetch-icons.sh）。
+  fonts-noto-cjk \
+  librsvg2-bin \
   # VS Code / Claude Code が LANG=en_US.UTF-8 を送ってくるのに、ベースイメージには
   # C.UTF-8 しか無くて毎コマンド setlocale 警告が出る。生成しておく。
   && sed -i 's/^# *\(en_US.UTF-8\)/\1/' /etc/locale.gen && locale-gen \
@@ -54,6 +72,9 @@ RUN apt-get -q update \
        ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone; \
      fi \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# WSL2 の GPU 用の Mesa（common.sh が /dev/dxg のあるときだけ使う。システムの Mesa は置き換えない）。
+COPY --from=mesa-builder /opt/mesa-d3d12 /opt/mesa-d3d12
 
 # Node.js 20 (NodeSource)。ベースが Ubuntu なので node イメージの代わりに自前で入れる。
 RUN mkdir -p /etc/apt/keyrings \
@@ -88,6 +109,10 @@ ARG USERNAME=node
 # 揃えるため。
 RUN groupadd --gid 1000 "$USERNAME" \
   && useradd --uid 1000 --gid 1000 --shell /bin/zsh --create-home "$USERNAME"
+
+# 開発用コンテナなので node にパスワードなしの sudo を許す（apt で道具を足す、ドライバを試す等）。
+RUN echo "$USERNAME ALL=(root) NOPASSWD:ALL" > "/etc/sudoers.d/$USERNAME" \
+  && chmod 0440 "/etc/sudoers.d/$USERNAME"
 
 # bash 履歴の永続化
 RUN mkdir /commandhistory \

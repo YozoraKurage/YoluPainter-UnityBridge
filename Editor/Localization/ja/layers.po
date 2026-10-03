@@ -1,0 +1,640 @@
+# Japanese translation for YoluPainter: Properties ▸ layer and channel sections (layer, layer mask, filters, Normal, mesh maps, pose).
+# メッシュマップの設定の語はベイクの窓（bake.po）でも使う。窓だけの語は bake.po に置く。
+# 一般的な語（半径・強さなど）は msgctxt で場面を分ける（ほかの画面の表と同じキーにしないため）。
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# ── レイヤー（種類・チャンネル・塗りつぶし・調整） ──
+
+msgid "Fill Layer"
+msgstr "塗りつぶしレイヤー"
+
+msgid "Adjustment Layer"
+msgstr "調整レイヤー"
+
+msgid "Off: this layer is left out of the selected channel (what it holds there is kept)."
+msgstr "オフ: このレイヤーを選んだチャンネルの合成から外します（そのチャンネルの中身は残ります）。"
+
+msgid "Fill Value"
+msgstr "塗りつぶしの値"
+
+msgid "Click to choose the fill color"
+msgstr "クリックで塗りつぶしの色を選ぶ"
+
+msgid "Remove this channel's value (the fill then leaves the channel as it is)"
+msgstr "このチャンネルの値を外す（このチャンネルでは塗りつぶしが何もしなくなります）"
+
+msgid "Add a Value for This Channel"
+msgstr "このチャンネルに値を追加"
+
+msgid "The fill starts with the brush color"
+msgstr "ブラシの色で始めます"
+
+msgid "A fill covers the whole canvas. Paint its mask to choose where it shows."
+msgstr "塗りつぶしはキャンバス全体を覆います。どこに出すかはマスクを描いて決めます。"
+
+msgctxt "adjustment"
+msgid "Hue"
+msgstr "色相"
+
+msgctxt "adjustment"
+msgid "Saturation"
+msgstr "彩度"
+
+msgctxt "adjustment"
+msgid "Lightness"
+msgstr "明度"
+
+msgid "Inverts the colour of everything below."
+msgstr "下にあるものすべての色を反転します。"
+
+msgid "Applies to the layers below."
+msgstr "下のレイヤーに効きます。"
+
+msgid "{0} does not apply to the {1} channel."
+msgstr "{0}は{1}のチャンネルには効きません。"
+
+msgctxt "levels"
+msgid "Input"
+msgstr "入力"
+
+msgctxt "levels"
+msgid "Output"
+msgstr "出力"
+
+msgctxt "levels"
+msgid "Black"
+msgstr "黒"
+
+msgctxt "levels"
+msgid "White"
+msgstr "白"
+
+msgctxt "levels"
+msgid "Gamma"
+msgstr "ガンマ"
+
+msgid "Input values at or below this become black"
+msgstr "この値以下の入力は黒になります"
+
+msgid "Input values at or above this become white"
+msgstr "この値以上の入力は白になります"
+
+msgid "Midtones: above 1 brightens, below 1 darkens"
+msgstr "中間調: 1 より大きいと明るく、小さいと暗くなります"
+
+# ── レイヤーマスク ──
+
+msgid "A mask hides parts of the layer; it is shared by all channels"
+msgstr "マスクはレイヤーの一部を隠します。すべてのチャンネルで共通です"
+
+msgid "Paint on Mask"
+msgstr "マスクに描く"
+
+msgid "Brush strokes go to the mask: paint hides, erase reveals"
+msgstr "ブラシでマスクを描きます。描くと隠れ、消すと現れます"
+
+msgctxt "mask"
+msgid "Density"
+msgstr "濃度"
+
+msgid "How strongly the mask hides (0 %: as if there were no mask)"
+msgstr "マスクが隠す強さ（0 % でマスクが無いのと同じ）"
+
+msgctxt "mask"
+msgid "Enabled"
+msgstr "有効"
+
+msgid "Off: the layer shows as if it had no mask (the mask is kept)"
+msgstr "オフ: マスクが無いものとして表示します（マスクは残ります）"
+
+msgctxt "mask"
+msgid "Invert"
+msgstr "反転"
+
+msgid "Swap what the mask hides and reveals"
+msgstr "マスクで隠す所と見せる所を入れ替えます"
+
+msgid "One mask for all channels."
+msgstr "マスクはすべてのチャンネルで共通です。"
+
+# ── フィルター ──
+
+msgid "Filters"
+msgstr "フィルター"
+
+msgid "Added {0} to the mask (non-destructive: the painted pixels are unchanged)."
+msgstr "マスクに{0}を追加しました（非破壊: 描いた画素は変わりません）。"
+
+msgid "Added {0} to the {1} pixels (non-destructive: the painted pixels are unchanged)."
+msgstr "{1}の画素に{0}を追加しました（非破壊: 描いた画素は変わりません）。"
+
+msgid "Baked the filters into the layer's pixels (one undo step); the filter stack is now empty."
+msgstr "フィルターをレイヤーの画素に焼き込みました（Undo 1 回で戻せます）。フィルターは空になりました。"
+
+msgid "The layer has no filters to bake."
+msgstr "このレイヤーには焼き込むフィルターがありません。"
+
+msgid "Destructive: writes the filtered result into the layer (and mask) and empties the stacks. One undo step."
+msgstr "破壊的: フィルターの結果をレイヤー（とマスク）の画素に書き込み、フィルターを空にします。Undo 1 回で戻せます。"
+
+msgid "Layer pixels"
+msgstr "レイヤーの画素"
+
+msgid "Mask (all channels)"
+msgstr "マスク（全チャンネル共通）"
+
+msgid "Add a filter on the pixels"
+msgstr "画素にフィルターを追加"
+
+msgid "Add a filter on the mask"
+msgstr "マスクにフィルターを追加"
+
+msgid "No filters"
+msgstr "フィルターなし"
+
+msgid "Turn the filter off"
+msgstr "フィルターを無効にする"
+
+msgid "Turn the filter on"
+msgstr "フィルターを有効にする"
+
+msgid "Click to show or hide the settings"
+msgstr "クリックで設定を開く・閉じる"
+
+msgid "Move up (applied later)"
+msgstr "上へ（後から掛かる）"
+
+msgid "Move down (applied earlier)"
+msgstr "下へ（先に掛かる）"
+
+msgid "Remove the filter"
+msgstr "フィルターを削除"
+
+msgctxt "filter"
+msgid "Radius"
+msgstr "半径"
+
+msgctxt "filter"
+msgid "Amount"
+msgstr "量"
+
+msgctxt "filter"
+msgid "Threshold"
+msgstr "しきい値"
+
+msgctxt "filter"
+msgid "Seed"
+msgstr "シード"
+
+msgctxt "filter"
+msgid "Strength"
+msgstr "強さ"
+
+msgid "Reach in pixels (standard deviation ≈ radius / 3)"
+msgstr "届く範囲（画素。標準偏差 ≈ 半径 / 3）"
+
+msgid "How much the edges are strengthened"
+msgstr "輪郭を強める量"
+
+msgid "Differences smaller than this (0–255) are left alone"
+msgstr "これより小さな差（0〜255）はそのままにします"
+
+msgid "The same seed gives the same noise. Drag to change, click to type."
+msgstr "同じシードからは同じノイズができます。ドラッグで変え、クリックで入力します。"
+
+msgid "Uses the whole layer (global)."
+msgstr "レイヤー全体を見て処理します。"
+
+msgid "No settings."
+msgstr "設定はありません。"
+
+msgid "How much of the filtered result is mixed in"
+msgstr "フィルターの結果を混ぜる量"
+
+msgid "Not applied to the {0} channel."
+msgstr "{0}のチャンネルには掛かりません。"
+
+# ── ノーマル（Height → Normal・ブラシの傾き） ──
+
+msgid "Height → Normal"
+msgstr "ハイト → ノーマル"
+
+msgid "Add the normal derived from the Height channel under the painted Normal layers in the Normal output (preview, .ylp texture, exports). It is regenerated from Height, never painted into a layer."
+msgstr "ノーマルの出力（プレビュー・.ylp のテクスチャ・書き出し）で、描いたノーマルのレイヤーの下にハイトのチャンネルから作った法線を足します。ハイトから毎回作り直し、レイヤーには描きません。"
+
+msgctxt "normal output"
+msgid "Strength"
+msgstr "強さ"
+
+msgid "Texels of rise for the full height range (0 → 1). Negative turns bumps into dents."
+msgstr "ハイトの全範囲（0 → 1）で何テクセル分盛り上がるか。マイナスにすると凸が凹になります。"
+
+msgctxt "normal output"
+msgid "Edges"
+msgstr "端"
+
+msgctxt "normal output"
+msgid "Clamp"
+msgstr "クランプ"
+
+msgid "Wrap (tiling)"
+msgstr "ラップ（タイル）"
+
+msgid "Clamp: the slope at the canvas edge uses the edge texel. Wrap: it reads the opposite edge (tiling textures)."
+msgstr "クランプ: キャンバスの端の傾きは端のテクセルで求めます。ラップ: 反対側の端を読みます（タイルするテクスチャ）。"
+
+msgid "File Y"
+msgstr "ファイルの Y"
+
+msgid "Green direction of Normal images written by Export Images / PNG / PSD. Unity uses OpenGL (Y+); the .ylp texture and the preview always do."
+msgstr "画像の書き出し・PNG・PSD で書くノーマルの画像の緑の向き。Unity は OpenGL（Y+）で、.ylp のテクスチャとプレビューは常に OpenGL です。"
+
+msgid "Height also shapes the Normal output. Switch to the Normal channel to see it."
+msgstr "ハイトはノーマルの出力にも効きます。見るにはノーマルのチャンネルに切り替えてください。"
+
+msgid "Show output"
+msgstr "出力を表示"
+
+msgid "On: the Normal output (renormalized, flat where unpainted, Height → Normal included). Off: the painted Normal layers with transparency."
+msgstr "オン: ノーマルの出力（正規化し、描いていない所は平ら、ハイト → ノーマル込み）。オフ: 描いたノーマルのレイヤーを透明のまま。"
+
+msgid "{0} has no meaning for normals: in the Normal channel this layer replaces what is below, like Normal. Use Overlay to add it as detail (reoriented normal mapping)."
+msgstr "{0}は法線には意味がありません。ノーマルのチャンネルでは、このレイヤーは「通常」のように下を置き換えます。細部として足すにはオーバーレイを使ってください（法線の向きを合わせて合成します）。"
+
+msgid "Adjustments change the encoded values of the Normal channel (not the vectors); the output renormalizes them."
+msgstr "調整レイヤーはノーマルのチャンネルの値（ベクトルではなく色の値）を変えます。出力では正規化し直します。"
+
+msgid "Brush value (normal)"
+msgstr "ブラシの値（法線）"
+
+msgctxt "normal brush"
+msgid "Tilt X"
+msgstr "傾き X"
+
+msgctxt "normal brush"
+msgid "Tilt Y"
+msgstr "傾き Y"
+
+msgid "The brush value as a normal: +1 leans right"
+msgstr "ブラシの値を法線で選びます: +1 で右に傾く"
+
+msgid "+1 leans up (OpenGL / Unity)"
+msgstr "+1 で上に傾く（OpenGL / Unity）"
+
+msgid "Flat brush value (128, 128, 255): paints a flat normal"
+msgstr "平らな値（128, 128, 255）に戻す: 平らな法線を描きます"
+
+msgid "Height → Normal on: the Normal output now has the normal derived from Height under the painted Normal layers (nothing is painted into a layer)."
+msgstr "ハイト → ノーマルをオンにしました: ノーマルの出力に、描いたノーマルのレイヤーの下でハイトから作った法線が入ります（レイヤーには何も描きません）。"
+
+msgid "Height → Normal off: the Normal output is the painted Normal layers only."
+msgstr "ハイト → ノーマルをオフにしました: ノーマルの出力は描いたノーマルのレイヤーだけです。"
+
+msgid "Normal files (Export Images / PNG / PSD) are now written in {0} order. The .ylp texture and the preview stay OpenGL (Unity)."
+msgstr "ノーマルのファイル（画像の書き出し・PNG・PSD）を {0} の向きで書きます。.ylp のテクスチャとプレビューは OpenGL（Unity）のままです。"
+
+# ── メッシュマップのベイク ──
+
+msgid "{0} stale"
+msgstr "{0} 件が古い"
+
+msgctxt "mesh map"
+msgid "Output"
+msgstr "出力"
+
+msgid "{0} × {1} · slot {2}"
+msgstr "{0} × {1} · スロット {2}"
+
+msgid "Mesh maps are baked at the document size, for the material slot this document paints"
+msgstr "メッシュマップはドキュメントの大きさで、このドキュメントが描くマテリアルスロットについてベイクします"
+
+msgid "Maps to Bake"
+msgstr "ベイクするマップ"
+
+msgctxt "mesh map"
+msgid "Normal (world)"
+msgstr "ワールド法線"
+
+msgctxt "mesh map"
+msgid "Position"
+msgstr "位置"
+
+msgctxt "mesh map"
+msgid "Ambient occlusion"
+msgstr "アンビエントオクルージョン"
+
+msgctxt "mesh map short"
+msgid "AO"
+msgstr "AO"
+
+msgctxt "mesh map"
+msgid "Curvature"
+msgstr "曲率"
+
+msgctxt "mesh map"
+msgid "Thickness"
+msgstr "厚み"
+
+msgctxt "mesh map"
+msgid "Normal (tangent)"
+msgstr "接空間法線"
+
+msgctxt "mesh map"
+msgid "ID"
+msgstr "ID"
+
+msgctxt "mesh map"
+msgid "Bent normal"
+msgstr "ベントノーマル"
+
+msgctxt "mesh map"
+msgid "Padding"
+msgstr "パディング"
+
+msgid "Texels the islands are extended into the empty space around them (never over another island)"
+msgstr "UV アイランドをまわりの空きへ広げるテクセル数（ほかのアイランドには重ねません）"
+
+msgctxt "mesh map"
+msgid "Antialiasing"
+msgstr "アンチエイリアス"
+
+msgid "Subsamples per texel side (the bake takes n² times as long)"
+msgstr "1 テクセルの辺あたりのサンプル数（ベイクに n² 倍の時間がかかります）"
+
+msgctxt "mesh map"
+msgid "Occluders"
+msgstr "遮蔽物"
+
+msgid "Which faces block AO and thickness rays"
+msgstr "AO と厚みのレイをさえぎる面"
+
+msgid "Whole model"
+msgstr "モデル全体"
+
+msgid "This slot only"
+msgstr "このスロットだけ"
+
+msgid "Use the GPU for rays"
+msgstr "レイを GPU で計算"
+
+msgid "Ambient occlusion, bent normal and thickness rays run in a compute shader (same formulas, float precision). Falls back to the CPU when the GPU cannot."
+msgstr "アンビエントオクルージョン・ベントノーマル・厚みのレイをコンピュートシェーダーで計算します（同じ式、float の精度）。GPU が使えないときは CPU で計算します。"
+
+msgid "High Poly (optional)"
+msgstr "高ポリ（任意）"
+
+msgid "None (drop a high poly here)"
+msgstr "なし（高ポリをここにドロップ）"
+
+msgid "A second model whose detail is projected onto this one (meshes are read only; nothing is instantiated or changed)"
+msgstr "細部をこのモデルへ投影するもう一つのモデル（メッシュを読むだけで、インスタンス化も変更もしません）"
+
+msgid "Stop using the high poly"
+msgstr "高ポリを外す"
+
+msgctxt "mesh map"
+msgid "Frontal"
+msgstr "前方距離"
+
+msgctxt "mesh map"
+msgid "Rear"
+msgstr "後方距離"
+
+msgid "Max frontal distance: how far outside the low poly the high poly is searched (relative to the bounding-box diagonal)"
+msgstr "最大前方距離: 低ポリの外側のどこまで高ポリを探すか（バウンディングボックスの対角線に対する割合）"
+
+msgid "Max rear distance: how far inside the low poly the high poly is searched"
+msgstr "最大後方距離: 低ポリの内側のどこまで高ポリを探すか"
+
+msgid "Average normals"
+msgstr "法線を平均化"
+
+msgid "Project along normals averaged over hard edges (a cage without gaps)"
+msgstr "ハードエッジで平均した法線に沿って投影します（すき間の無いケージ）"
+
+msgid "Match by name"
+msgstr "名前で対応付け"
+
+msgid "Project 'part_low' only onto 'part_high' (or 'part')"
+msgstr "'part_low' には 'part_high'（または 'part'）だけを投影します"
+
+msgid "Not readable"
+msgstr "読めません"
+
+msgid "Triangles read from the high poly"
+msgstr "高ポリから読んだ三角形の数"
+
+msgid "Read the high poly's meshes again (after editing them)"
+msgstr "高ポリのメッシュを読み直す（編集したあとに）"
+
+msgctxt "mesh map"
+msgid "Rays"
+msgstr "レイ数"
+
+msgid "Rays per texel (more is smoother and slower)"
+msgstr "テクセルあたりのレイの数（多いほど滑らかで遅い）"
+
+msgctxt "mesh map"
+msgid "Distance"
+msgstr "距離"
+
+msgid "Max distance, relative to the model's bounding-box diagonal"
+msgstr "最大距離（モデルのバウンディングボックスの対角線に対する割合）"
+
+msgctxt "mesh map"
+msgid "Spread"
+msgstr "広がり"
+
+msgid "180° = the whole hemisphere"
+msgstr "180° で半球全体"
+
+msgid "Ignore back faces"
+msgstr "裏面を無視"
+
+msgid "Rays pass through faces seen from behind"
+msgstr "裏から見た面はレイが通り抜けます"
+
+msgctxt "mesh map"
+msgid "Falloff"
+msgstr "減衰"
+
+msgid "Linear: nearer occluders darken more"
+msgstr "リニア: 近い遮蔽物ほど暗くします"
+
+msgctxt "mesh map"
+msgid "Radius"
+msgstr "半径"
+
+msgid "Edges within this distance count (relative to the bounding-box diagonal). Larger = wider, softer edges"
+msgstr "この距離の中の辺を数えます（バウンディングボックスの対角線に対する割合）。大きいほど広く柔らかい縁になります"
+
+msgid "Max distance, relative to the bounding-box diagonal; thicker parts read 1"
+msgstr "最大距離（バウンディングボックスの対角線に対する割合）。これより厚い所は 1 になります"
+
+msgid "Colors from"
+msgstr "色分けの元"
+
+msgid "What gets its own colour in the ID map"
+msgstr "ID マップで色を分ける単位"
+
+msgctxt "mesh map"
+msgid "Material slot"
+msgstr "マテリアルスロット"
+
+msgid "Vertex color"
+msgstr "頂点カラー"
+
+msgid "UV island"
+msgstr "UV アイランド"
+
+msgid "Bake Mesh Maps"
+msgstr "メッシュマップをベイク"
+
+msgid "Bake the checked maps from the loaded model. The model, its materials and textures are not changed."
+msgstr "チェックしたマップを読み込んだモデルからベイクします。モデル・マテリアル・テクスチャは変えません。"
+
+msgid "Load a model in Texture Set (or 3D ▸ Demo Cube) to bake."
+msgstr "ベイクするには、テクスチャセットでモデルを読み込んでください（または 3D ▸ デモのキューブ）。"
+
+msgid "Baked Maps"
+msgstr "ベイク済みのマップ"
+
+msgctxt "mesh map"
+msgid "current"
+msgstr "最新"
+
+msgctxt "mesh map"
+msgid "stale"
+msgstr "古い"
+
+msgctxt "mesh map"
+msgid "unverified"
+msgstr "未確認"
+
+msgctxt "mesh map"
+msgid "missing"
+msgstr "なし"
+
+msgid "{0} is stale and is not used: {1} Bake again to update it."
+msgstr "{0}は古いので使いません: {1} もう一度ベイクすると更新されます。"
+
+msgid "No model is loaded, so the maps cannot be checked against it."
+msgstr "モデルを読み込んでいないので、マップがモデルに合っているか確かめられません。"
+
+msgid "Show on canvas"
+msgstr "重ねて表示"
+
+msgid "Read-only overlay; nothing is painted"
+msgstr "表示だけの重ね合わせです。何も描きません"
+
+msgid "UV coverage"
+msgstr "UV のカバー範囲"
+
+msgid "Overlay opacity"
+msgstr "重ねる不透明度"
+
+msgctxt "mesh map"
+msgid "Baked"
+msgstr "ベイク済み"
+
+msgid "Overlapping UVs"
+msgstr "UV の重なり"
+
+msgid "These mesh maps are not in the saved file yet. Save keeps them in the .ylp (they are not part of Undo)."
+msgstr "このメッシュマップはまだ保存したファイルに入っていません。保存すると .ylp に入ります（Undo の対象ではありません）。"
+
+msgid "Clear Mesh Maps"
+msgstr "メッシュマップを消去"
+
+msgid "Remove the baked maps (derived data; the layers do not change)"
+msgstr "ベイクしたマップを消します（派生データで、レイヤーは変わりません）"
+
+msgid "Cleared the mesh maps (derived data; nothing in the layers changed)."
+msgstr "メッシュマップを消しました（派生データで、レイヤーは何も変わっていません）。"
+
+msgid "Load a model (or the demo cube) before baking mesh maps."
+msgstr "メッシュマップをベイクする前にモデル（またはデモのキューブ）を読み込んでください。"
+
+msgid "Mesh maps are baked only from a complete static snapshot that can be painted; this one is incomplete (see the load diagnostics)."
+msgstr "メッシュマップは、描ける完全な静的スナップショットからだけベイクします。このスナップショットは不完全です（読み込みの診断を見てください）。"
+
+msgid "Mesh maps were not baked: {0}"
+msgstr "メッシュマップをベイクしませんでした: {0}"
+
+msgid "the high poly has no readable mesh."
+msgstr "高ポリに読めるメッシュがありません。"
+
+msgid "The mesh-map bake hit its time limit; the previous maps are unchanged."
+msgstr "メッシュマップのベイクが時間の上限に達しました。前のマップはそのままです。"
+
+msgid "The mesh-map bake was canceled; the previous maps are unchanged."
+msgstr "メッシュマップのベイクを取り消しました。前のマップはそのままです。"
+
+msgid "Baked {0} at {1}×{2} for slot {3} (rays: {4}): {5}. Mesh maps are derived data, not layers; Save keeps them in the .ylp."
+msgstr "{0}を {1}×{2}、スロット {3} でベイクしました（レイ: {4}）: {5}。メッシュマップはレイヤーではない派生データで、保存すると .ylp に入ります。"
+
+msgid "Baking mesh maps"
+msgstr "メッシュマップをベイク中"
+
+msgid "Preparing…"
+msgstr "準備中…"
+
+# ── ポーズとブレンドシェイプ ──
+
+msgid "Pose & BlendShapes"
+msgstr "ポーズとブレンドシェイプ"
+
+msgid "Filter BlendShapes"
+msgstr "ブレンドシェイプを絞り込む"
+
+msgid "Show BlendShapes whose name contains this"
+msgstr "名前にこの文字を含むブレンドシェイプだけを出します"
+
+msgid "This model has no BlendShapes."
+msgstr "このモデルにはブレンドシェイプがありません。"
+
+msgid "No BlendShape matches the filter."
+msgstr "絞り込みに合うブレンドシェイプはありません。"
+
+msgid "… {0} more; narrow the filter."
+msgstr "…ほか {0} 件。絞り込んでください。"
+
+msgid "Animation Clip"
+msgstr "アニメーションクリップ"
+
+msgid "None (drop a clip here)"
+msgstr "なし（クリップをここにドロップ）"
+
+msgid "An animation clip to pose the bones with: Generic clips follow bone paths, Humanoid clips use the model's Avatar"
+msgstr "ボーンにポーズを付けるアニメーションクリップ。Generic のクリップはボーンのパスで、Humanoid のクリップはモデルの Avatar で当てます"
+
+msgid "Stop using the clip"
+msgstr "クリップを外す"
+
+msgctxt "pose"
+msgid "Time"
+msgstr "時間"
+
+msgid "The moment of the clip to pose with (seconds)"
+msgstr "ポーズに使うクリップの時刻（秒）"
+
+msgid "Pose from Clip"
+msgstr "クリップでポーズ"
+
+msgid "Pose the preview with the clip at this time"
+msgstr "この時刻のクリップでプレビューにポーズを付けます"
+
+msgid "Reset Pose"
+msgstr "ポーズを戻す"
+
+msgid "Back to the pose and BlendShapes the model had when it was loaded"
+msgstr "読み込んだときのポーズとブレンドシェイプに戻します"
+
+msgid "Finish the stroke before changing the pose."
+msgstr "ポーズを変える前にストロークを終えてください。"
+
+msgid "Pose applied to the preview (the model itself is unchanged). Painting follows the posed surface; the texture stays in UV space."
+msgstr "プレビューにポーズを当てました（モデルそのものは変わりません）。描くとポーズを付けた面に沿い、テクスチャは UV 空間のままです。"

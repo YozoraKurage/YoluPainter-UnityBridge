@@ -1,0 +1,28 @@
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using NUnit.Framework;
+using Yozolab.YoluPainter.Editor;
+
+namespace Yozolab.YoluPainter.Tests
+{
+    /// <summary>run-tests.sh --both は GUI の台で Tests/Editor/Support/GuiOnlyFixtures.txt のクラスだけを回す。batch-gl で飛ばす（GUI でしか
+    /// 回らない）テストのクラスが一覧から漏れると、そのテストはどの台でも回らなくなるので、ソースから探して一覧と比べる。</summary>
+    public sealed class GuiOnlyFixturesTests
+    {
+        [Test] public void EveryTestThatSkipsInBatchModeIsListedForTheGuiRunner()
+        {
+            string tests = PackagePaths.Physical("Tests/Editor");
+            var listed = File.ReadAllLines(Path.Combine(tests, "Support", "GuiOnlyFixtures.txt"))
+                .Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith("#")).ToHashSet();
+            // 「batch-gl なら飛ばす」: Application.isBatchMode が真のとき Assert.Ignore（! の付いた逆の条件は数えない）
+            var guard = new Regex(@"(?<!!)Application\.isBatchMode\s*\)\s*Assert\.Ignore");
+            var missing = Directory.GetFiles(tests, "*.cs", SearchOption.AllDirectories)
+                .Where(f => guard.IsMatch(File.ReadAllText(f)))
+                .SelectMany(f => Regex.Matches(File.ReadAllText(f), @"\bclass\s+(\w+Tests)\b").Cast<Match>().Select(m => m.Groups[1].Value))
+                .Distinct().Where(c => !listed.Contains(c)).ToList();
+            Assert.That(missing, Is.Empty, "classes that skip in batch mode but are not in GuiOnlyFixtures.txt (they would run on no runner with --both)");
+            Assert.That(listed, Does.Contain("WindowTests"));
+        }
+    }
+}

@@ -1,0 +1,391 @@
+# Japanese translation for YoluPainter: the tool part of the Properties panel
+# (Editor/Window/Tools: TexturePaintWindow.ToolPanels.cs, .Stroke.cs, .BrushDynamics.cs, .Paths.cs; Editor/Window/Model: .Surface3D.cs).
+# Terms follow the Japanese Photoshop brush settings and CLIP STUDIO PAINT (手ぶれ補正, 入り抜き).
+# Short generic words carry a msgctxt (brush, selection, transform, path, 3D pick) so that they never collide with
+# another catalog in this folder and can be translated for the narrow panel.
+msgid ""
+msgstr ""
+"Project-Id-Version: YoluPainter\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+# ---- section titles ----
+
+msgid "Stabilizer & Taper"
+msgstr "手ぶれ補正・入り抜き"
+
+msgid "Jitter & Scatter"
+msgstr "ジッター・散布"
+
+msgid "Dual Brush"
+msgstr "デュアルブラシ"
+
+msgid "Color Dynamics"
+msgstr "色の変化"
+
+msgid "Fade & Pen Tilt"
+msgstr "フェード・ペンの傾き"
+
+# ---- brush ----
+
+msgid "The value this channel is painted with"
+msgstr "このチャンネルに描く値"
+
+msgid "The tip comes with the brush preset. Choose a preset or import brushes to change it."
+msgstr "先端はブラシプリセットに含まれます。変えるにはプリセットを選ぶか、ブラシを読み込んでください。"
+
+msgid "Rotation of the tip"
+msgstr "先端の回転"
+
+msgid "Squashes the tip along its angle (100% keeps its shape)"
+msgstr "先端を角度の向きにつぶす（100% で元の形）"
+
+msgid "Distance between dabs, in % of the diameter"
+msgstr "描点の間隔（直径に対する %）"
+
+msgctxt "brush"
+msgid "Follow direction"
+msgstr "進行方向"
+
+msgid "Turns the tip with the direction of the stroke (added to the angle)"
+msgstr "ストロークの進む向きに合わせて先端を回す（角度に足す）"
+
+msgctxt "brush"
+msgid "Pen pressure"
+msgstr "筆圧"
+
+msgctxt "brush"
+msgid "Curve"
+msgstr "カーブ"
+
+msgid "Pen pressure (left to right) becomes the pressure the brush uses (bottom to top). Click to add a point and drag it; right-click or drag a point out of the box to remove it."
+msgstr "ペンの筆圧（左から右）を、ブラシが使う筆圧（下から上）に変えます。クリックで点を足してドラッグで動かし、右クリックか枠の外へドラッグして点を消します。"
+
+msgid "Common pressure curves"
+msgstr "よく使う筆圧のカーブ"
+
+msgctxt "pressure curve"
+msgid "Reset to linear"
+msgstr "線形に戻す"
+
+msgctxt "pressure curve"
+msgid "Soft"
+msgstr "柔らかい"
+
+msgctxt "pressure curve"
+msgid "Hard"
+msgstr "硬い"
+
+msgctxt "pressure curve"
+msgid "S-curve"
+msgstr "S 字"
+
+msgctxt "brush"
+msgid "Preset"
+msgstr "プリセット"
+
+msgid "Stabilizer"
+msgstr "手ぶれ補正"
+
+msgid "The brush trails the pointer by this string length, smoothing shaky lines (Krita's / Lazy Nezumi's pulled string). The line is finished to the pointer when you lift. 2D canvas only."
+msgstr "ブラシがこの長さの糸でポインターに引っ張られて付いてくるので、線の揺れが滑らかになります（Krita や Lazy Nezumi の引っ張る糸）。離すとポインターの位置まで線を描き切ります。2D キャンバスだけ。"
+
+msgid "Taper in"
+msgstr "入り"
+
+msgid "The brush grows from nothing over this much stroke length."
+msgstr "描き始めからこの長さで、ブラシが 0 から大きくなります（入り）。"
+
+msgid "Taper out"
+msgstr "抜き"
+
+msgid "The brush shrinks to nothing over the last this much stroke length. That part appears when the stroke ends."
+msgstr "描き終わりのこの長さで、ブラシが 0 まで小さくなります（抜き）。その部分はストロークを終えたときに現れます。"
+
+msgctxt "brush"
+msgid "Jitter"
+msgstr "ジッター"
+
+msgid "Each dab varies at random by up to this much"
+msgstr "描点ごとに、この値までランダムに変える"
+
+msgid "How far the dabs spread across the stroke, in % of the diameter"
+msgstr "描点をストロークの横へ散らす量（直径に対する %）"
+
+msgid "Dabs placed at every spacing step"
+msgstr "間隔ごとに置く描点の数"
+
+msgctxt "brush"
+msgid "Depth"
+msgstr "深さ"
+
+msgctxt "brush"
+msgid "Scale"
+msgstr "比率"
+
+msgid "Paper texture: built-in grains, or the textures of imported brushes (Photoshop .pat / .abr patterns)"
+msgstr "紙の質感: 組み込みの粒子か、読み込んだブラシのテクスチャ（Photoshop の .pat / .abr のパターン）"
+
+msgctxt "brush"
+msgid "Round"
+msgstr "円形"
+
+msgid "Same as the main tip"
+msgstr "メインの先端と同じ"
+
+msgctxt "brush"
+msgid "Built-in"
+msgstr "組み込み"
+
+# ---- dual brush ----
+
+msgid "Use a dual brush"
+msgstr "デュアルブラシを使う"
+
+msgid "A second tip along the same path masks the main tip (2D canvas)"
+msgstr "同じ道筋に置く 2 つ目の先端で、メインの先端を切り抜く（2D キャンバス）"
+
+msgid "This tip is not in this Unity project; a round tip is used instead."
+msgstr "この先端はこの Unity プロジェクトにありません。代わりに円形の先端で描きます。"
+
+msgctxt "brush"
+msgid "Mode"
+msgstr "モード"
+
+msgid "How the second tip's coverage combines with the main tip's"
+msgstr "2 つ目の先端の濃さとメインの先端の濃さの合わせ方"
+
+msgid "Diameter of the second tip"
+msgstr "2 つ目の先端の直径"
+
+msgid "Hardness of the round second tip (an image tip keeps its own edge)"
+msgstr "円形の 2 つ目の先端の硬さ（画像の先端は自分の縁のまま）"
+
+# ---- color dynamics ----
+
+msgid "Color dynamics apply to the Color and Emission channels only; a mask is painted with the exact value."
+msgstr "色の変化はカラーとエミッションのチャンネルだけに効きます。マスクは指定した値のまま描きます。"
+
+msgid "Color dynamics apply to the Color and Emission channels only; this channel is painted with the exact value."
+msgstr "色の変化はカラーとエミッションのチャンネルだけに効きます。このチャンネルは指定した値のまま描きます。"
+
+msgid "The second color for foreground/background jitter"
+msgstr "描画色・背景色のジッターで使う 2 つ目の色"
+
+msgctxt "brush"
+msgid "Fg/Bg jitter"
+msgstr "描画色・背景色のジッター"
+
+msgid "Each dab mixes toward the background color by a random amount up to this"
+msgstr "描点ごとに、この値までのランダムな量だけ背景色に近づける"
+
+msgctxt "brush"
+msgid "Hue"
+msgstr "色相"
+
+msgid "The hue moves by up to ± this × 180°"
+msgstr "色相を最大 ±（この値 × 180°）動かす"
+
+msgctxt "brush"
+msgid "Saturation"
+msgstr "彩度"
+
+msgid "HSV saturation moves by up to ± this"
+msgstr "HSV の彩度を最大 ± この値だけ動かす"
+
+msgctxt "brush"
+msgid "Brightness"
+msgstr "明るさ"
+
+msgid "HSV value moves by up to ± this"
+msgstr "HSV の明度を最大 ± この値だけ動かす"
+
+msgctxt "brush"
+msgid "Purity"
+msgstr "純度"
+
+msgid "-100% gray … 0 unchanged … 100% fully saturated"
+msgstr "-100% で灰色 … 0 で変化なし … 100% で最も鮮やか"
+
+msgid "Apply per tip"
+msgstr "描点ごとに適用"
+
+msgid "A new color for every dab (2D canvas). Off: one color per stroke. The 3D brush always uses one color per stroke."
+msgstr "描点ごとに色を変える（2D キャンバス）。オフならストロークごとに 1 色。3D のブラシは常にストロークごとに 1 色です。"
+
+# ---- fade & pen tilt ----
+
+msgid "Fade (steps, 0 = off)"
+msgstr "フェード（ステップ数、0 でオフ）"
+
+msgid "The value falls from full to nothing over this many dabs from the start of the stroke. Drag sideways or click to type."
+msgstr "描き始めからこのステップ数（描点の数）で、値が最大から 0 まで下がります。左右にドラッグするか、クリックして数値を入力。"
+
+msgid "The size fades out over this many dabs"
+msgstr "このステップ数で直径が 0 になる"
+
+msgid "The opacity fades out over this many dabs"
+msgstr "このステップ数で不透明度が 0 になる"
+
+msgid "The flow fades out over this many dabs"
+msgstr "このステップ数で流量が 0 になる"
+
+msgid "Pen tilt (upright = full)"
+msgstr "ペンの傾き（直立で最大）"
+
+msgid "From Unity's Event.tilt. A mouse reports no tilt, so these change nothing for it. Not yet checked with a real pen."
+msgstr "Unity の Event.tilt を使います。マウスには傾きが無いので変化しません。実際のペンではまだ確かめていません。"
+
+msgid "The more the pen leans, the smaller the tip"
+msgstr "ペンを傾けるほど先端を小さくする"
+
+msgid "The more the pen leans, the lower the opacity"
+msgstr "ペンを傾けるほど不透明度を下げる"
+
+msgid "The more the pen leans, the lower the flow"
+msgstr "ペンを傾けるほど流量を下げる"
+
+msgid "Turns the tip toward the direction the pen leans"
+msgstr "ペンの傾いた向きに先端を回す"
+
+# ---- 3D pick ----
+
+msgctxt "3D pick"
+msgid "Region"
+msgstr "範囲"
+
+msgid "What a click on the model in the 3D view selects or fills (the polygon fill (4) uses the same setting)"
+msgstr "3D ビューでモデルをクリックしたときに選ぶ・塗る範囲（ポリゴン塗りつぶし（4）も同じ設定を使う）"
+
+msgctxt "3D pick"
+msgid "Triangle"
+msgstr "三角形"
+
+msgctxt "3D pick"
+msgid "UV Island"
+msgstr "UV アイランド"
+
+msgctxt "3D pick"
+msgid "Mesh Part"
+msgstr "メッシュの塊"
+
+# ---- modify selection ----
+
+msgctxt "selection"
+msgid "Radius"
+msgstr "半径"
+
+msgid "Radius for Grow, Shrink, Border and Feather (as GIMP's Select menu)"
+msgstr "拡張・縮小・境界線・ぼかしの半径（GIMP の選択メニューと同じ考え方）"
+
+msgctxt "selection"
+msgid "Edge lock"
+msgstr "端を固定"
+
+msgid "Selected areas continue outside the canvas (Shrink, Border and Feather do not pull away from the canvas edge)"
+msgstr "選択範囲がキャンバスの外へ続いているものとして扱う（縮小・境界線・ぼかしでキャンバスの端から離れない）"
+
+msgid "Largest amount within a circle of the radius"
+msgstr "半径の円の中の最大値で広げる"
+
+msgid "Smallest amount within a circle of the radius"
+msgstr "半径の円の中の最小値で狭める"
+
+msgid "A band around the edge: Grow minus Shrink"
+msgstr "縁に沿った帯（拡張したものから縮小したものを除いた範囲）"
+
+msgid "Soften the edge (Gaussian blur, σ = radius / 3.5)"
+msgstr "境界をぼかす（ガウスぼかし、σ = 半径 / 3.5）"
+
+msgid "Hard edge: at least half selected becomes fully selected"
+msgstr "境界をくっきりさせる（半分以上選ばれた画素を完全に選ぶ）"
+
+msgid "Make a selection first."
+msgstr "先に選択範囲を作ってください。"
+
+# ---- transform ----
+
+# "10 px" の間は改行しない空白（U+00A0）
+msgid "Drag or arrow keys (Shift: 10 px) move the layer and its mask, or the selected pixels with the selection."
+msgstr "ドラッグか矢印キー（Shift で 10 px）で、レイヤーとそのマスクを動かします。選択範囲があれば、選択した画素と選択範囲を動かします。"
+
+msgid "Numeric transform"
+msgstr "数値で変形"
+
+msgid "Horizontal offset (px, + is right)"
+msgstr "横の移動量（px、+ で右へ）"
+
+msgid "Vertical offset (px, + is up)"
+msgstr "縦の移動量（px、+ で上へ）"
+
+msgid "Horizontal scale (%; a negative value flips)"
+msgstr "横の比率（%、負の値で反転）"
+
+msgid "Vertical scale (%; a negative value flips)"
+msgstr "縦の比率（%、負の値で反転）"
+
+msgid "Counter-clockwise, about the centre of what moves"
+msgstr "動かすものの中心を軸に、反時計回り"
+
+msgctxt "transform"
+msgid "Reset"
+msgstr "リセット"
+
+msgid "Back to no change"
+msgstr "変形しない値に戻す"
+
+msgid "Bilinear smooths, Nearest keeps hard pixels. Whole-pixel moves, 90° turns and flips copy pixels exactly either way."
+msgstr "バイリニアは滑らかに、ニアレストネイバーは画素の角を保って補間します。整数画素の移動、90° の回転、反転はどちらでも画素をそのまま写します。"
+
+msgctxt "transform"
+msgid "Apply"
+msgstr "適用"
+
+msgid "Transform by these numbers (one undo step)"
+msgstr "この数値で変形する（1 回の取り消しで戻せる）"
+
+# ---- path ----
+
+msgid "Click the model in the 3D view or the 2D canvas to add points; drag a point to move it; Delete removes the last point. The layer is redrawn from the path each time."
+msgstr "3D ビューのモデルか 2D キャンバスをクリックして点を追加。点はドラッグで移動、Delete で最後の点を削除。そのたびにパスからレイヤーを描き直します。"
+
+msgid "Canvas path: {0} point(s) on {1}"
+msgstr "2D のパス: {0} 点（{1}）"
+
+msgid "Path on the model: {0} point(s) on {1}"
+msgstr "モデル上のパス: {0} 点（{1}）"
+
+msgid "This path was drawn on another model snapshot (different triangles or UVs). Load that model to edit it, or rasterize it."
+msgstr "このパスは別のモデルのスナップショット（三角形か UV が違う）で描かれています。編集するにはそのモデルを読み込むか、ラスタライズしてください。"
+
+msgctxt "path"
+msgid "Use Brush"
+msgstr "ブラシを適用"
+
+msgid "Redraw the path with the current brush"
+msgstr "今のブラシでパスを描き直す"
+
+msgctxt "path"
+msgid "Redraw"
+msgstr "再描画"
+
+msgid "Redraw on the current pose"
+msgstr "今のポーズで描き直す"
+
+msgctxt "path"
+msgid "Rasterize"
+msgstr "ラスタライズ"
+
+msgid "Keep the pixels and remove the path, so the layer can be painted"
+msgstr "画素を残してパスを外し、レイヤーに描けるようにする"
+
+msgid "Path redrawn with the current brush."
+msgstr "今のブラシでパスを描き直しました。"
+
+msgid "Path redrawn."
+msgstr "パスを描き直しました。"
+
+msgid "Rasterized: the layer keeps its pixels and can be painted."
+msgstr "ラスタライズしました。レイヤーは画素を残し、描けるようになりました。"

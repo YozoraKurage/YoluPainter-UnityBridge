@@ -1,0 +1,64 @@
+# Japanese translation for YoluPainter: the Polygon Fill tool (Editor/Window/Tools/TexturePaintWindow.PolygonFill.cs and its
+# options bar in Shell/TexturePaintWindow.Shell.cs). Terms follow Substance 3D Painter's Japanese UI (ポリゴン塗りつぶし).
+# The region names (Triangle, Mesh Part, UV Island, Material) are shared with the 3D pick in tools.po.
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# ── ツールの帯とオプションバー ──
+
+msgid "Polygon Fill"
+msgstr "ポリゴン塗りつぶし"
+
+msgid "What a click or drag fills: the triangle, the connected mesh part, the UV island or the whole material of this texture set"
+msgstr "クリック・ドラッグで塗る範囲: 三角形、つながったメッシュの塊、UV アイランド、このテクスチャセットのマテリアル全体"
+
+msgctxt "polygon fill"
+msgid "Paint"
+msgstr "塗る"
+
+msgctxt "polygon fill"
+msgid "Erase"
+msgstr "消す"
+
+msgid "White (show)"
+msgstr "白（見せる）"
+
+msgid "Black (hide)"
+msgstr "黒（隠す）"
+
+msgid "Fill with the foreground color and the opacity"
+msgstr "描画色と不透明度で塗る"
+
+msgid "Erase to transparent"
+msgstr "透明にする"
+
+msgid "Fill the mask with white (shows the layer)"
+msgstr "マスクを白で塗る（レイヤーを見せる）"
+
+msgid "Fill the mask with black (hides the layer)"
+msgstr "マスクを黒で塗る（レイヤーを隠す）"
+
+msgid "Click or drag over the model or its UVs; one undo when you let go."
+msgstr "モデルか UV の上をクリック・ドラッグ。離すと 1 回の取り消しにまとまる"
+
+msgid "Mask: white shows, black hides (X swaps). Click or drag; one undo when you let go."
+msgstr "マスク: 白は見せ、黒は隠す（X で入れ替え）。クリック・ドラッグ。離すと 1 回の取り消しにまとまる"
+
+# ── ステータスバー ──
+
+msgid "Load a model (or the demo cube) to fill its polygons on the 3D view or its UVs on the 2D canvas."
+msgstr "モデル（かデモのキューブ）を読み込むと、3D ビューでポリゴンを、2D キャンバスで UV を塗れます。"
+
+msgid "Filled {0} × {1}."
+msgstr "{0} × {1} を塗りました。"
+
+msgid "Erased {0} × {1}."
+msgstr "{0} × {1} を消しました。"
+
+msgid "No triangle of this texture set under the pointer."
+msgstr "ポインタの下にこのテクスチャセットの三角形がありません。"
+
+msgid "Nothing to fill there."
+msgstr "そこには塗るものがありません。"

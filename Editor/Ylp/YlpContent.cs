@@ -1,0 +1,115 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using Yozolab.YoluPainter.Core;
+using Yozolab.YoluPainter.Core.Persistence;
+
+namespace Yozolab.YoluPainter.Editor
+{
+    /// <summary>.ylp に入れる中身の約束（書く側のウィンドウと読む側のインポーターで共有する）。形式 3 から、正本・合成・選択範囲・取り込んだ PSD・
+    /// メッシュマップはテクスチャセットごとに sets/&lt;ID&gt;/ の下（<see cref="YlpFormat.SetEntry"/>）に置き、根には project.json（セットの並び）・
+    /// view.json・brush.json・thumbnail.png を置く。下の名前はセットの下の名前（thumbnail.png だけは根）。
+    /// <list type="bullet">
+    /// <item>document.utpaint: ネイティブ正本（唯一の正本）</item>
+    /// <item>composite/&lt;チャンネル&gt;.png: そのチャンネルを使うレイヤーがあるときの合成結果。straight RGBA8、PNG なので外から見ても
+    /// 上下は正しい。正本から作った派生物で、読み込み時の正本にはしない。Normal は Unity 向けの出力（<see cref="Image"/>）</item>
+    /// <item>thumbnail.png（根）: 今のテクスチャセットの Color（無ければ最初のチャンネル）の合成を長辺 256px 以下に縮めたもの</item>
+    /// <item>view.json / brush.json / imported-original.psd（PSD から取り込んだときの原本のバイト列）</item>
+    /// <item>selection.bin: 選択範囲（Core の SelectionBinary。選択が無ければ入れない。読めなければ選択なしで開いて知らせる）</item>
+    /// <item>meshmap-&lt;種類&gt;.bin: ベイクした mesh map と由来（Core の MeshMapBinary。派生物で、読めなければ焼き直す。
+    /// 知らない版のウィンドウは読み飛ばし、そのウィンドウで保存し直すと落ちる）</item>
+    /// </list></summary>
+    internal static class YlpContent
+    {
+        public const string ThumbnailName = YlpFormat.ThumbnailName, ViewName = YlpFormat.ViewName, BrushName = YlpFormat.BrushName, ImportedOriginalName = YlpFormat.ImportedOriginalName;
+
+        /// <summary>保存したアプリとして ylp.json に書く記録（パッケージの版と Unity の版）。</summary>
+        public static YlpWriterInfo Writer => new YlpWriterInfo("YoluPainter", PackagePaths.Version, Application.unityVersion);
+        public const int ThumbnailSize = 256;
+
+        public static string CompositeName(PaintChannel channel) => YlpArchive.CompositeFolder + channel + ".png";
+        public static bool TryParseComposite(string entry, out PaintChannel channel)
+        {
+            channel = default;
+            if (entry == null || !entry.StartsWith(YlpArchive.CompositeFolder, StringComparison.Ordinal) || !entry.EndsWith(".png", StringComparison.Ordinal)) return false;
+            string name = entry.Substring(YlpArchive.CompositeFolder.Length, entry.Length - YlpArchive.CompositeFolder.Length - 4);
+            return Enum.TryParse(name, false, out channel) && Enum.IsDefined(typeof(PaintChannel), channel) && channel.ToString() == name;
+        }
+        /// <summary>色として扱うチャンネル（sRGB）。他はデータ（リニア）。</summary>
+        public static bool IsColor(PaintChannel channel) => channel == PaintChannel.Color || channel == PaintChannel.Emission;
+
+        /// <summary>どれかのレイヤーが使っているチャンネル（列挙の順）。Height → Normal が有効で Height を使っていれば Normal も。</summary>
+        public static List<PaintChannel> UsedChannels(PaintDocument document)
+        {
+            return Enum.GetValues(typeof(PaintChannel)).Cast<PaintChannel>().Where(c => document.Layers.Any(l => l.IsChannelEnabled(c)) || c == PaintChannel.Normal && NormalMaps.DerivesNormal(document)).ToList();
+        }
+        /// <summary>Unity に渡すチャンネルの画像（左下原点の straight RGBA8）。Normal は <see cref="NormalMaps.Output"/>（OpenGL の向き・
+        /// 不透明・塗っていない所は平ら・Height → Normal 込み）、他はレイヤーの合成。</summary>
+        public static byte[] Image(PaintDocument document, PaintChannel channel)
+        { return channel == PaintChannel.Normal ? NormalMaps.Output(document) : document.Composite(channel); }
+        /// <summary>ほかのツール向けのファイルに書く画像。Normal は文書の設定の Y の向き（<see cref="NormalMaps.FileOutput"/>）。</summary>
+        public static byte[] FileImage(PaintDocument document, PaintChannel channel)
+        { return channel == PaintChannel.Normal ? NormalMaps.FileOutput(document) : document.Composite(channel); }
+
+        /// <summary>合成済み PNG（と、thumbnail なら <see cref="ThumbnailName"/> のサムネイル）。</summary>
+        public static Dictionary<string, byte[]> Composites(PaintDocument document, bool thumbnail = true)
+        {
+            var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+            var channels = UsedChannels(document);
+            foreach (var channel in channels) files.Add(CompositeName(channel), EncodePng(Image(document, channel), document.Width, document.Height));
+            if (thumbnail && channels.Count > 0) files.Add(ThumbnailName, Thumbnail(document));
+            return files;
+        }
+
+        /// <summary>Color（無ければ最初に使っているチャンネル）の合成のサムネイルの PNG。どのチャンネルも使っていなければ null。</summary>
+        public static byte[] Thumbnail(PaintDocument document)
+        {
+            var channels = UsedChannels(document);
+            if (channels.Count == 0) return null;
+            var main = channels.Contains(PaintChannel.Color) ? PaintChannel.Color : channels[0];
+            return Thumbnail(Image(document, main), document.Width, document.Height);
+        }
+
+        /// <summary>左下原点の RGBA8 を PNG に。</summary>
+        public static byte[] EncodePng(byte[] rgba, int width, int height)
+        {
+            var texture = new Texture2D(width, height, TextureFormat.RGBA32, false, true);
+            try { texture.LoadRawTextureData(rgba); texture.Apply(false, false); return texture.EncodeToPNG(); }
+            finally { UnityEngine.Object.DestroyImmediate(texture); }
+        }
+
+        /// <summary>箱フィルタで長辺 <see cref="ThumbnailSize"/> 以下に縮める（アルファで重み付けし、透明画素の色を混ぜない）。</summary>
+        static byte[] Thumbnail(byte[] rgba, int width, int height)
+        {
+            var (pixels, w, h) = Box(rgba, width, height, ThumbnailSize);
+            return EncodePng(pixels, w, h);
+        }
+
+        /// <summary>左下原点の straight RGBA8 を、整数分の 1 の箱フィルタで長辺 maxSide 以下に縮める（アルファで重み付けし、透明画素の色を
+        /// 混ぜない）。収まっていればそのまま返す。</summary>
+        public static (byte[] rgba, int width, int height) Shrink(byte[] rgba, int width, int height, int maxSide)
+            => Math.Max(width, height) <= maxSide ? (rgba, width, height) : Box(rgba, width, height, maxSide);
+
+        /// <summary><see cref="Shrink"/> の箱フィルタ（収まっていても通す。透明画素の RGB は 0 になる）。</summary>
+        static (byte[] rgba, int width, int height) Box(byte[] rgba, int width, int height, int maxSide)
+        {
+            int step = Math.Max(1, (Math.Max(width, height) + maxSide - 1) / maxSide);
+            int w = Math.Max(1, width / step), h = Math.Max(1, height / step);
+            var result = new byte[w * h * 4];
+            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++)
+            {
+                long r = 0, g = 0, b = 0, a = 0; int n = 0;
+                for (int sy = y * step; sy < Math.Min(height, (y + 1) * step); sy++) for (int sx = x * step; sx < Math.Min(width, (x + 1) * step); sx++)
+                {
+                    int i = (sy * width + sx) * 4; int alpha = rgba[i + 3];
+                    r += rgba[i] * alpha; g += rgba[i + 1] * alpha; b += rgba[i + 2] * alpha; a += alpha; n++;
+                }
+                int o = (y * w + x) * 4;
+                if (a > 0) { result[o] = (byte)(r / a); result[o + 1] = (byte)(g / a); result[o + 2] = (byte)(b / a); }
+                result[o + 3] = (byte)(a / Math.Max(1, n));
+            }
+            return (result, w, h);
+        }
+    }
+}

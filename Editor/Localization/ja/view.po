@@ -1,0 +1,58 @@
+# Japanese translation for YoluPainter: the 2D canvas view (rotating and flipping the view: the View menu, the marks in the
+# 2D view's header, the shortcut help and the refusal during a stroke).
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# ── 表示メニュー ──
+
+msgid "Rotate View Left"
+msgstr "表示を左に回転"
+
+msgid "Rotate View Right"
+msgstr "表示を右に回転"
+
+msgid "Reset Rotation"
+msgstr "回転を戻す"
+
+msgid "Flip View Horizontally"
+msgstr "表示を左右反転"
+
+# ── 2D ビューの見出しの印 ──
+
+msgid "The view is rotated. Click to reset the rotation (Shift+R)."
+msgstr "表示を回転しています。押すと回転を戻します（Shift+R）。"
+
+msgid "The view is flipped horizontally. Click to flip it back (H)."
+msgstr "表示を左右反転しています。押すと元に戻します（H）。"
+
+# ── 断るとき ──
+
+msgid "The view does not rotate or flip during a stroke or a drag."
+msgstr "ストロークやドラッグの最中は、表示を回転・反転できません。"
+
+# ── ショートカットの一覧 ──
+
+msgid "2D view: - / ^ (or =) rotate 15° · R + drag rotates (with Shift in 15° steps) · Shift + middle drag rotates · Shift+R resets the rotation · H flips horizontally · Ctrl+0 also resets the rotation"
+msgstr "2D ビュー: - / ^（か =）で 15° 回転 · R を押したままドラッグで回転（Shift で 15° 刻み）· Shift + 中ボタンのドラッグで回転 · Shift+R で回転を戻す · H で左右反転 · Ctrl+0 でも回転を戻す"
+
+# ── 並べる表示の入れ替えと境目、UV のワイヤーフレーム ──
+
+msgid "Swap 2D and 3D"
+msgstr "2D と 3D を入れ替え"
+
+msgid "Swap 2D and 3D (left and right)"
+msgstr "2D と 3D の左右を入れ替え"
+
+msgid "UV Wireframe"
+msgstr "UV ワイヤーフレーム"
+
+msgid "UV wireframe: load a model to see its UVs on the canvas"
+msgstr "UV ワイヤーフレーム: モデルを読み込むと、キャンバスに UV を重ねて表示します"
+
+msgid "UV wireframe: the model has more than {0} UV edges, so they are not drawn"
+msgstr "UV ワイヤーフレーム: モデルの UV の辺が {0} 本を超えるので表示しません"
+
+msgid "UV wireframe of this texture set on the 2D canvas"
+msgstr "このテクスチャセットの UV を 2D キャンバスに重ねて表示"
