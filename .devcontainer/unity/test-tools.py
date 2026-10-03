@@ -76,7 +76,7 @@ class Fixture:
         (self.source / 'README.md').write_text('仮のパッケージ\n')
         self.runners = self.root / 'runners'
         self.processes = []
-        self.env = dict(os.environ, YOLUPAINTER_GPU='0', TOOL_TEST_PLAN=json.dumps(plan or {}))
+        self.env = dict(os.environ, YOLUPAINTER_GPU='0', TOOL_TEST_PLAN=json.dumps(plan or {}), YOLUPAINTER_ALLOW_PLAIN_FULL='1')  # 担当の全件を断る決まりは道具の試験では外す
         for key in ('YOLUPAINTER_LOCK_HELD', 'YOLUPAINTER_DAEMON_SWITCHING', 'YOLUPAINTER_RUNNER',
                     'YOLUPAINTER_FULL_RUN', 'YOLUPAINTER_SOURCE', 'YOLUPAINTER_TEST_GROUP'):
             self.env.pop(key, None)
@@ -191,6 +191,18 @@ class ToolTests(unittest.TestCase):
         f = Fixture(**kwargs)
         self.addCleanup(f.close)
         return f
+
+    def test_plain_full_run_is_refused_for_agents(self):
+        # 担当の絞り込みの無い全件は終了コード 6 で断り、--priority・--release・--full と絞り込みは断らない（2026-10-03 の決まり）
+        f = self.fixture()
+        f.server(2)
+        env = {'YOLUPAINTER_ALLOW_PLAIN_FULL': ''}
+        rc, out = f.run('run-tests.sh', '--mode', 'gui', '--source', str(f.source), env=env)
+        self.assertEqual(6, rc, out)
+        self.assertIn('担当の全件は回さない', out)
+        for args in (['--filter', 'X'], ['--priority'], ['--release'], ['--full']):
+            rc, out = f.run('run-tests.sh', '--mode', 'gui', '--source', str(f.source), *args, env=env)
+            self.assertNotEqual(6, rc, (args, out))
 
     def test_shards_exit_codes_and_missing_summary(self):
         cases = [({}, 0), ({'gui:A': 'missing'}, 3), ({'gui:A': 'fail'}, 1),

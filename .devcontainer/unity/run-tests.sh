@@ -92,7 +92,7 @@ IS_FULL_RUN=0
 [[ ( -z "$FILTER" && -z "$CATEGORY" ) || -n "${YOLUPAINTER_FULL_RUN:-}" ]] && IS_FULL_RUN=1
 # 担当の全件は回さない（2026-10-03 ユーザーと決めた: 全件は統合のときに 1 回だけ。担当と統合で同じ全件を二重に回して台を取り合っていた）。
 # 担当は絞り込みと core-tests.sh まで。統合は --priority（指揮役）、どうしても要るときは --full。組に分けた子（YOLUPAINTER_FULL_RUN）は親が決めた分
-if [[ $IS_FULL_RUN == 1 && $PRIORITY == 0 && $FULL == 0 && -z "${YOLUPAINTER_FULL_RUN:-}" && -z "${YOLUPAINTER_LOCK_HELD:-}" ]]; then
+if [[ $IS_FULL_RUN == 1 && $PRIORITY == 0 && $FULL == 0 && -z "${YOLUPAINTER_FULL_RUN:-}" && -z "${YOLUPAINTER_LOCK_HELD:-}" && -z "${YOLUPAINTER_ALLOW_PLAIN_FULL:-}" ]]; then  # 道具の試験（test-tools.py）は YOLUPAINTER_ALLOW_PLAIN_FULL で外す
   printf '\033[33m回さない:\033[0m 担当の全件は回さない決まり（全件は統合のときに指揮役が 1 回だけ回す）。自分に関係する試験を --filter で絞って回し、Core は core-tests.sh で。報告には「全件は未実施（統合で回す）」と書く。（終了コード 6）\n' >&2
   exit 6
 fi
