@@ -35,6 +35,7 @@
 | 1 | `~/unity-runners/1/project` | 台の中の写し `~/unity-runners/1/pkg` | batch-gl（`runners.conf`） |
 | 2 | `~/unity-runners/2/project` | 台の中の写し `~/unity-runners/2/pkg` | GUI（`runners.conf`） |
 | 3 | `~/unity-runners/3/project` | 台の中の写し `~/unity-runners/3/pkg` | batch-gl（`runners.conf`。計測やエージェントの worktree 用に足した） |
+| 4 | `~/unity-runners/4/project` | 台の中の写し `~/unity-runners/4/pkg` | GUI（`runners.conf`。GUI の依頼が詰まったので足した） |
 
 ```sh
 .devcontainer/unity/runners.sh setup        # 台 1・2 を作る（台 0 から設定とパッケージを写し、コールドで取り込む。1 台 40 秒ほど）
@@ -57,6 +58,8 @@
   `temp~`・`.git`・`.devcontainer`・`.github` は写さない）。テストの最中にほかの作業者が保存しても、その回には入らない。
 - `--sha` と `--source` は台 1 以上だけ（台 0 は `/workspace` を直接読むので選べない）。どの台が何を回したかは出力の 1 行目に出る。
 - 空いている台は、台ごとの依頼のロック（`TestDaemon/client.lock`）を取り合って決める。全部が埋まっていれば空くのを待つ。
+- GUI の台では、窓のテストが CPU で表示を合成するので、続けて実行されるテストの塊で常駐の鼓動が 3 分を超えて止まることがある。そのため GUI の台では、
+  鼓動が止まったと判断するまで 15 分、全体の待ちの上限を 40 分にしている（batch-gl は 3 分と 15 分）。GUI の全件は 14 分ほどかかる。
 - `switch-daemon.sh gui -- …` は、GUI の台が動いていれば台 0 を切り替えずにその台で回す（切り替えの数分を待たない）。
 - 台 1 以上のプロジェクトは名前付きボリュームではないので、コンテナを作り直すと消える（`runners.sh setup` で作り直す）。台 0 の Library は
   写さない（開いている Unity の Library を写すと、データベースが壊れた写しになり得る）。台 0 の Assets（`ZZ_UserAssets` を含む）も写さない。

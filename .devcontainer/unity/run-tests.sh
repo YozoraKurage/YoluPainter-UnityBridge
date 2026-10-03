@@ -162,14 +162,18 @@ if daemon_alive; then
   # 「生きている」と答える — ネイティブのダイアログが出るとそうなり、デーモン自身の
   # 見張りも同じ主スレッドなので code 5 すら返せない(2026-09-18 実測、22 分無音)。
   # 鼓動は 2 秒ごとなので、この閾値は「長いテストフレーム」より十分に長く取る。
-  readonly BEAT_STALE=180
+  # GUI の台では窓のテストが CPU で表示を合成するので、続けて実行されるテストの塊で鼓動が 3 分を超えて止まることがある（台 2 の全件で
+  # 2026-10-03 に 3 回。デーモンは 14 分で最後まで回し切っていたのに、依頼側が先に打ち切っていた）。GUI の台では 15 分待つ。
+  # 全体の待ちの上限も、GUI の台の全件（14 分ほど）が収まるよう 40 分に（batch-gl は 15 分のまま）
+  if [[ "$(runner_live_mode "$UNITY_RUNNER")" == gui ]]; then BEAT_STALE=900; WAIT_LIMIT=2400; else BEAT_STALE=180; WAIT_LIMIT=900; fi
+  readonly BEAT_STALE WAIT_LIMIT
   beat_age() {
     local f="$DAEMON_DIR/alive"
     [[ -f "$f" ]] || { echo 99999; return; }
     echo $(( $(date +%s) - $(stat -c %Y "$f") ))
   }
   stalled=0
-  for _ in $(seq 1 900); do
+  for _ in $(seq 1 "$WAIT_LIMIT"); do
     sleep 1
     [[ -f "$DAEMON_DIR/done" ]] && break
     daemon_alive || break
@@ -184,7 +188,7 @@ if daemon_alive; then
     # ここに来るのはそれすら回らない状態。全件は正当に長い — GUI 常駐ではテストが起こす
     # ドメインリロードで実行がやり直され、実測 8 分超になった(2026-09-16)。短くしない。
     # 勝手に殺してコールドへ落ちると常駐とロック衝突するので、ここでは状況を言って止まるだけ。
-    warn "デーモンは生きているが 15 分応答が無い。test-daemon.sh restart を検討 (ログ: $UNITY_LOG_DIR/daemon.log)"
+    warn "デーモンは生きているが $(( WAIT_LIMIT / 60 )) 分応答が無い。test-daemon.sh restart を検討 (ログ: $UNITY_LOG_DIR/daemon.log)"
     exit 1
   fi
   if [[ -f "$DAEMON_DIR/done" ]]; then
