@@ -95,7 +95,7 @@ namespace Yozolab.YoluPainter.Editor
             if (IsOpen(entry.Root)) throw new IOException(L.Tr("This checkpoint belongs to an open window."));
             if (!dialogs.Confirm(L.Tr("Discard recovery checkpoint?"), L.Tr("Discard all recovery generations for {0}? This cannot be undone. The saved .ylp is kept.", entry.Title), L.Tr("Discard checkpoint"), L.Tr("Cancel"))) return false;
             string current = Path.Combine(entry.Root, "current");
-            if (File.Exists(current) && File.ReadAllText(current).Trim() != entry.Generation) throw new IOException(L.Tr("The checkpoint changed; refresh the list before discarding it."));
+            if (File.Exists(current) && File.ReadAllText(current).Trim() != entry.Generation) throw new IOException(L.Tr("The checkpoint changed."));
             Delete(entry.Root); return true;
         }
     }

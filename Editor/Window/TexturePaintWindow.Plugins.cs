@@ -35,7 +35,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>プラグインのコマンドを走らせる（ストロークの最中は走らせない）。失敗はステータスバーに出す。</summary>
         internal void RunPluginCommand(PainterPluginRegistry.Command command)
         {
-            if (stroke != null) { message = L.Tr("Finish the stroke first."); return; }
+            if (stroke != null) { message = L.Tr("A stroke is in progress."); return; }
             CancelToolDrag();
             string error = PainterPluginRegistry.Run(command, Session);
             if (error != null) message = L.Tr("The plugin command {0} failed: {1}", command.Path, error);
@@ -119,7 +119,7 @@ namespace Yozolab.YoluPainter.Editor
             public void ShowMessage(string message) { if (w != null) { w.message = message ?? ""; w.Repaint(); } }
 
             static void RequireChannel(PaintChannel channel) { if (!Enum.IsDefined(typeof(PaintChannel), channel)) throw new ArgumentOutOfRangeException(nameof(channel)); }
-            void RequireEditable() { if (w == null || w.stroke != null) throw new InvalidOperationException("Finish the stroke first."); }
+            void RequireEditable() { if (w == null || w.stroke != null) throw new InvalidOperationException("A stroke is in progress."); }
             void Changed() { w.repaintPixels = true; w.Repaint(); }
         }
     }

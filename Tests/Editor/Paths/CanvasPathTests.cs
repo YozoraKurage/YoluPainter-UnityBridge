@@ -68,7 +68,7 @@ namespace Yozolab.YoluPainter.Tests
             var surface = new SurfacePath(Guid.NewGuid(), PaintChannel.Color, "model", new PathBrush(), new PathPoint[0]);
             Assert.That(() => d.SetPath(l.Id, surface, new SparseTileSurface(Size, Size, 16)), Throws.InvalidOperationException.With.Message.Contains("kind of its path"));
             var other = d.AddLayer("other");
-            Assert.That(() => d.SetCanvasPath(other.Id, new CanvasPath(Guid.NewGuid(), PaintChannel.Metallic, Brush(), new CanvasPoint[0])), Throws.InvalidOperationException.With.Message.Contains("Enable"));
+            Assert.That(() => d.SetCanvasPath(other.Id, new CanvasPath(Guid.NewGuid(), PaintChannel.Metallic, Brush(), new CanvasPoint[0])), Throws.InvalidOperationException.With.Message.Contains("not enabled"));
             d.Rasterize(l.Id);
             using (var s = d.BeginStroke(l.Id, PaintChannel.Color, new BrushSettings())) s.Cancel();
         }

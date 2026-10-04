@@ -121,7 +121,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if(p.x<0||p.y<0||p.x>=document.Width||p.y>=document.Height)return;
             var layer=document.GetLayer(selectedLayer);
-            if(!EditingMask&&layer.Kind!=LayerKind.Raster)throw new InvalidOperationException("Fill paints pixels: select a paint layer, or edit the layer's mask.");
+            if(!EditingMask&&layer.Kind!=LayerKind.Raster)throw new InvalidOperationException(L.Tr("Only a paint layer or a mask can be filled."));
             var b=GetBrush();
             if(!EditingMask)document.EnsurePixelsEditable(selectedLayer,b.Erase); // ロックで断るなら、チャンネルを有効にする前に
             if(!EditingMask&&!brush.material&&!layer.IsChannelEnabled(channel))document.SetChannelEnabled(selectedLayer,channel,true);
@@ -139,7 +139,7 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     if(click)return;
                     var layer=document.GetLayer(selectedLayer);
-                    if(!EditingMask&&layer.Kind!=LayerKind.Raster)throw new InvalidOperationException("A gradient paints pixels: select a paint layer.");
+                    if(!EditingMask&&layer.Kind!=LayerKind.Raster)throw new InvalidOperationException(L.Tr("Only a paint layer or a mask takes a gradient."));
                     var c=GetBrush(); var to=(Color32)gradientTo;
                     var g=new GradientSettings{Shape=gradientShape,X0=a.x,Y0=a.y,X1=b.x,Y1=b.y,From=c.Color,To=new Rgba32(to.r,to.g,to.b,to.a),Opacity=brush.opacity};
                     if(EditingMask)
@@ -170,7 +170,7 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     if(moveMode==MoveMode.Move){var d=MoveDelta(); if(d!=Vector2Int.zero)MoveBy(d.x,d.y); break;}
                     var t=DragTransform(); if(t.IsIdentity)break;
-                    if(Math.Abs(t.Determinant)<1e-6)throw new InvalidOperationException("That would scale to nothing; drag the handle less far.");
+                    if(Math.Abs(t.Determinant)<1e-6)throw new InvalidOperationException(L.Tr("That would scale to nothing."));
                     bool changed=TransformTargets(t,moveResampling);
                     message=!changed?"Nothing changed.":moveMode==MoveMode.Rotate?"Rotated "+DragAngle().ToString("0.#",System.Globalization.CultureInfo.InvariantCulture)+"°.":"Scaled.";
                     repaintPixels=true;break;

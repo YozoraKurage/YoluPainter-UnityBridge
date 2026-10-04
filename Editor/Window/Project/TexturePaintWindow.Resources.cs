@@ -96,7 +96,7 @@ namespace Yozolab.YoluPainter.Editor
 
         // ───────── 取り込み ─────────
 
-        void RequireNoStrokeForResources() { if (stroke != null || toolDragging) throw new InvalidOperationException(L.Tr("Finish the stroke first.")); }
+        void RequireNoStrokeForResources() { if (stroke != null || toolDragging) throw new InvalidOperationException(L.Tr("A stroke is in progress.")); }
 
         /// <summary>取り込む前に、画素の量で予算を確かめる（大きな画像を読んでから断らない）。同じ中身が既にあれば通るはずだが、読む前には
         /// 分からないので、予算に収まらなければ断る。</summary>
@@ -246,7 +246,7 @@ namespace Yozolab.YoluPainter.Editor
         /// </summary>
         internal Guid PlaceResourceAsLayer(Guid id)
         {
-            if (stroke != null) throw new InvalidOperationException(L.Tr("Finish the stroke first."));
+            if (stroke != null) throw new InvalidOperationException(L.Tr("A stroke is in progress."));
             var image = ImageResources.Get(id);
             long bytes = (long)document.Width * document.Height * 4;
             if (bytes > PainterSettings.StrokeBudgetBytes)
@@ -395,7 +395,7 @@ namespace Yozolab.YoluPainter.Editor
                 return L.Tr("Updated {0} resource(s) from their sources.", updated) + (note != null ? " " + note : "");
             }
             foreach (var r in changed) KeepResourceCopy(r.Id);
-            return L.Tr("{0} resource(s) changed in their source; the copies in this project are kept (Assets panel ▸ Update to take the new pixels).", changed.Count) + (note != null ? " " + note : "");
+            return L.Tr("{0} resource(s) changed in their source; the copies in this project are kept.", changed.Count) + (note != null ? " " + note : "");
         }
 
         /// <summary>リソースの出どころを人に見せる短い文。</summary>

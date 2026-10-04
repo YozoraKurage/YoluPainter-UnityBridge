@@ -26,7 +26,7 @@ namespace Yozolab.YoluPainter.Tests
             var blur = window.AddFilter(FilterTarget.Content, FilterSettings.GaussianBlur(12));
             Assert.That(blur, Is.Not.Null, window.StatusMessage);
             Assert.That(blur.Channels, Is.EqualTo(new[] { PaintChannel.Color }), "the window adds it to the channel on screen");
-            Assert.That(window.StatusMessage, Does.Contain("non-destructive"));
+            Assert.That(window.StatusMessage, Does.StartWith("Added"));
             Assert.That(d.CompositePixel(PaintChannel.Color, 205, 250).A, Is.LessThan(255)); Assert.That(d.CompositePixel(PaintChannel.Color, 195, 250).A, Is.GreaterThan(0));
             AssertShows(window, d.Composite(PaintChannel.Color), "blurred");
             Assert.That(layer.GetPixel(PaintChannel.Color, 200, 250), Is.EqualTo(new Rgba32(230, 20, 20, 255)), "the painted pixels are unchanged");

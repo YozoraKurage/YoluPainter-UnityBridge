@@ -132,7 +132,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                 if (TargetSlot != TargetSlots[0]) throw new ArgumentException("The target slot must be the first of the target slots.", nameof(TargetSlot));
             }
             if (Padding < 0 || Padding > MaxPadding) throw new ArgumentOutOfRangeException(nameof(Padding), "Padding must be 0–" + MaxPadding + " texels.");
-            if (Maps == null || Maps.Length == 0) throw new ArgumentException("Choose at least one mesh map to bake.", nameof(Maps));
+            if (Maps == null || Maps.Length == 0) throw new ArgumentException("No mesh map is chosen to bake.", nameof(Maps));
             foreach (var kind in Maps) if (!Enum.IsDefined(typeof(MeshMapKind), kind)) throw new ArgumentOutOfRangeException(nameof(Maps), "Unknown mesh map kind " + (int)kind + ".");
             if (Maps.Distinct().Count() != Maps.Length) throw new ArgumentException("A mesh map kind is listed twice.", nameof(Maps));
             if (!Enum.IsDefined(typeof(MeshOccluders), Occluders)) throw new ArgumentOutOfRangeException(nameof(Occluders));

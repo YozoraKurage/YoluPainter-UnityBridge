@@ -22,11 +22,11 @@ namespace Yozolab.YoluPainter.Editor
 
         internal void AssignToLilToon()
         {
-            if(stroke!=null){message="Finish the stroke first.";return;}
+            if(stroke!=null){message="A stroke is in progress.";return;}
             var material=preview.SourceMaterial(CurrentFirstSlot);
             string stem=(projectPath!=null?Path.GetFileNameWithoutExtension(projectPath):"Texture")+SetFileSuffix(currentSet);
             string folder=material==null?null:LilToonFolder(stem);
-            if(material!=null&&folder==null){message="Choose a folder inside Assets for the lilToon textures.";return;}
+            if(material!=null&&folder==null){message=L.Tr("No folder inside Assets was chosen for the lilToon textures.");return;}
             var plan=LilToonAssignment.Plan(document,material,folder,stem);
             if(!plan.CanApply){message="lilToon: "+String.Join(" ",plan.Refusals);Dialogs.Inform("Cannot assign to lilToon",plan.Describe());return;}
             if(!ConfirmInactiveGenerators(new[]{(currentSet.Name,document)}))return; // マップの無い Generator を効きなしで書き出さない（確かめる）

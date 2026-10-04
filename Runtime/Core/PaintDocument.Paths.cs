@@ -108,9 +108,9 @@ namespace Yozolab.YoluPainter.Core
         void ValidatePathTarget(PaintLayer layer, EditablePath path)
         {
             if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException("Only paint layers can be drawn by a path.");
-            if (path.Material == null && !layer.IsChannelEnabled(path.Channel)) throw new InvalidOperationException("Enable the path's channel on the layer first.");
-            if (layer.Path != null && layer.Path.Channel != path.Channel) throw new InvalidOperationException("A layer's path keeps its channel; rasterize it before drawing another channel.");
-            if (layer.Path != null && layer.Path.GetType() != path.GetType()) throw new InvalidOperationException("A layer keeps the kind of its path (on the model or on the canvas); rasterize it first.");
+            if (path.Material == null && !layer.IsChannelEnabled(path.Channel)) throw new InvalidOperationException("The path's channel is not enabled on the layer.");
+            if (layer.Path != null && layer.Path.Channel != path.Channel) throw new InvalidOperationException("A layer's path keeps its channel.");
+            if (layer.Path != null && layer.Path.GetType() != path.GetType()) throw new InvalidOperationException("A layer keeps the kind of its path (on the model or on the canvas).");
             RefuseLockedPath(layer);
         }
 
@@ -140,7 +140,7 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>パスで描かれた層は、手で塗る・塗りつぶす・変形すると次の描き直しで消えるので断る。</summary>
         internal static void RefusePathLayer(PaintLayer layer)
         {
-            if (layer.Path != null) throw new InvalidOperationException("This layer is drawn by a path. Edit the path, or rasterize the layer to paint on it.");
+            if (layer.Path != null) throw new InvalidOperationException("This layer is drawn by a path.");
         }
     }
 }

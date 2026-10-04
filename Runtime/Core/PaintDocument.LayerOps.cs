@@ -245,7 +245,7 @@ namespace Yozolab.YoluPainter.Core
                 }));
             }
             if (layer.Kind == LayerKind.Group || layer.Kind == LayerKind.Adjustment)
-                throw new LayerOpException(LayerOpRefusal.NoPixels, layer.Kind == LayerKind.Group ? "A group has no pixels to copy. Select a layer inside it, or use Copy Merged." : "An adjustment layer has no pixels to copy.");
+                throw new LayerOpException(LayerOpRefusal.NoPixels, layer.Kind == LayerKind.Group ? "A group has no pixels to copy." : "An adjustment layer has no pixels to copy.");
             return CopyRegion(ClipboardSource.Layer, channel, maxBytes, coords => ReadTiles(coords, (coord, tile) => layer.CopyTile(channel, coord, tile)));
         }
 
@@ -267,10 +267,10 @@ namespace Yozolab.YoluPainter.Core
             {
                 if (layer.Kind != LayerKind.Raster)
                     throw new LayerOpException(layer.Kind == LayerKind.Fill ? LayerOpRefusal.NotPaintLayer : LayerOpRefusal.NoPixels,
-                        layer.Kind == LayerKind.Fill ? "A fill layer is generated from its value and cannot be cut. Copy it, or paint on its mask." : "This layer has no pixels to cut.");
-                if (layer.Path != null) throw new LayerOpException(LayerOpRefusal.PathLayer, "This layer is drawn by a path. Edit the path, or rasterize the layer to cut from it.");
+                        layer.Kind == LayerKind.Fill ? "A fill layer is generated from its value and cannot be cut." : "This layer has no pixels to cut.");
+                if (layer.Path != null) throw new LayerOpException(LayerOpRefusal.PathLayer, "This layer is drawn by a path.");
             }
-            if (!fromMask && !layer.IsChannelEnabled(channel)) throw new InvalidOperationException("Enable the channel before cutting from it.");
+            if (!fromMask && !layer.IsChannelEnabled(channel)) throw new InvalidOperationException("The channel is not enabled on this layer.");
             if (fromMask) RefuseLockedAttributes(layer); else RefuseLockedPixels(layer, erase: true); // 写す前に断る（クリップボードも変えない）
             var copied = CopyPixels(layerId, channel, fromMask, maxBytes);
             if (fromMask) FillMask(layerId, 1, null, reveal: true);

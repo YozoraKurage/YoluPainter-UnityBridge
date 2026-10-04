@@ -224,7 +224,7 @@ namespace Yozolab.YoluPainter.Tests
                 Assert.That(edits.Count, Is.Zero); Assert.That(inspector.Copy.GetFloat("_Glossiness"), Is.EqualTo(source.GetFloat("_Glossiness")));
                 inspector.Retry(); inspector.Inspect(edits, (editor, properties) => inspector.Copy.shader = Shader.Find("Unlit/Color"));
                 Assert.That(inspector.Copy.shader, Is.SameAs(source.shader)); Assert.That(edits.Count, Is.Zero);
-                Assert.That(inspector.Problem, Does.Contain("Choose a shader above"));
+                Assert.That(inspector.Problem, Does.Contain("changed the shader"));
             }
         }
 

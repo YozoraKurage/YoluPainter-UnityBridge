@@ -30,9 +30,6 @@ msgstr "テクスチャセット: {0}。"
 
 # ── 3D ビュー ──
 
-msgid "This face belongs to the texture set {0}. Double-click it, or switch in the Texture Set panel, to paint it."
-msgstr "この面はテクスチャセット {0} のものです。描くには、面をダブルクリックするか、テクスチャセットのパネルで切り替えてください。"
-
 msgid "This face uses material slot {0}, which has no texture set in this project (File ▸ Project Configuration adds one)."
 msgstr "この面はマテリアルスロット {0} で、このプロジェクトにはそのテクスチャセットがありません（ファイル ▸ プロジェクト設定 で足せます）。"
 
@@ -94,8 +91,8 @@ msgstr "{1} 個のマテリアルスロットのうち {0} 個がテクスチャ
 msgid "Each texture set gets the template and resolution below."
 msgstr "どのテクスチャセットも下のテンプレートと解像度になります。"
 
-msgid "Choose at least one texture set."
-msgstr "テクスチャセットを少なくとも 1 つ選んでください。"
+msgid "No texture set is chosen."
+msgstr "テクスチャセットが選ばれていません。"
 
 msgid "A new, empty texture set"
 msgstr "新しい空のテクスチャセット"
@@ -129,8 +126,8 @@ msgstr "{0} の新規プロジェクトです（テクスチャセット {1} 個
 
 # ── ベイク ──
 
-msgid "Check at least one texture set to bake."
-msgstr "ベイクするテクスチャセットを少なくとも 1 つチェックしてください。"
+msgid "No texture set is checked"
+msgstr "テクスチャセットがチェックされていません"
 
 msgid "At least one texture set stays checked."
 msgstr "少なくとも 1 つのテクスチャセットはチェックしたままにします。"
@@ -154,6 +151,3 @@ msgid "the texture set"
 msgstr "テクスチャセット"
 
 # ── 書き出し ──
-
-msgid "Nothing was exported: texture sets {0} would write the same file {1}. Rename one in File ▸ Project Configuration."
-msgstr "何も書き出していません: テクスチャセット {0} が同じファイル {1} に書くことになります。ファイル ▸ プロジェクト設定 でどれかの名前を変えてください。"

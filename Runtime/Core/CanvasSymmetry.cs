@@ -61,7 +61,7 @@ namespace Yozolab.YoluPainter.Core
         {
             CanvasSymmetry?.Validate();
             if (CanvasSymmetry != null && CanvasSymmetry.Enabled && (Effect == BrushEffect.Smudge || Effect == BrushEffect.Clone))
-                throw new InvalidOperationException("Smudge and Clone need a separate source and motion for each symmetry copy. Turn off symmetry to use them.");
+                throw new InvalidOperationException("Smudge and Clone need a separate source and motion for each symmetry copy, so they cannot run with symmetry on.");
         }
     }
 }

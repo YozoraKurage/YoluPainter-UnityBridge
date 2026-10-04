@@ -66,7 +66,7 @@ namespace Yozolab.YoluPainter.Editor.MaterialApply
             string path = AssetDatabase.GetAssetPath(material);
             plan.MaterialPath = path;
             if (!string.IsNullOrEmpty(path) && !path.EndsWith(".mat", StringComparison.OrdinalIgnoreCase))
-                refusals.Add(L.Tr("The material is part of {0} (an imported model or a built-in asset), which Unity re-creates or does not save. Extract the material (the model's Materials tab) and use the extracted one.", path));
+                refusals.Add(L.Tr("The material is part of {0} (an imported model or a built-in asset), which Unity re-creates or does not save.", path));
             else if (!string.IsNullOrEmpty(path) && !AssetDatabase.IsOpenForEdit(material))
                 refusals.Add(L.Tr("The material {0} is not open for editing (version control).", path));
             var changes = new List<MaterialApplyChange>(); var skipped = new List<string>();
@@ -75,7 +75,7 @@ namespace Yozolab.YoluPainter.Editor.MaterialApply
                 int i = material.shader != null ? material.shader.FindPropertyIndex(e.property) : -1;
                 if (e.kind == MaterialEditKind.Property && (i < 0 || material.shader.GetPropertyType(i) != e.type)) { skipped.Add(L.Tr("{0}: the material's shader no longer has this property with the same type.", e.property)); continue; }
                 if (e.kind == MaterialEditKind.Property && e.type == ShaderPropertyType.Texture && e.texture != null && (!EditorUtility.IsPersistent(e.texture) || string.IsNullOrEmpty(AssetDatabase.GetAssetPath(e.texture))))
-                { skipped.Add(L.Tr("{0}: a preview-only texture cannot be saved in the material. Choose a texture asset.", e.property)); continue; }
+                { skipped.Add(L.Tr("{0}: a preview-only texture cannot be saved in the material.", e.property)); continue; }
                 if (e.kind == MaterialEditKind.Property && e.type == ShaderPropertyType.Texture && e.texture != null && material.shader.GetPropertyTextureDimension(i) != UnityEngine.Rendering.TextureDimension.Any && e.texture.dimension != material.shader.GetPropertyTextureDimension(i))
                 { skipped.Add(L.Tr("{0}: the texture dimension does not match this shader property.", e.property)); continue; }
                 var before = e.ReadCurrent(material);
@@ -92,13 +92,13 @@ namespace Yozolab.YoluPainter.Editor.MaterialApply
             if (plan == null) throw new ArgumentNullException(nameof(plan));
             if (!plan.CanApply) throw new InvalidOperationException(string.Join(" ", plan.Refusals.Count > 0 ? plan.Refusals : new[] { "Nothing to apply." }));
             var material = plan.Material;
-            if (material == null || material.shader != plan.Shader) throw new InvalidOperationException(L.Tr("The material changed since the list was made; nothing was applied. Try again."));
+            if (material == null || material.shader != plan.Shader) throw new InvalidOperationException(L.Tr("The material changed since the list was made; nothing was applied."));
             // 確かめの間に変わっていないこと（シェーダーの差し替え・値の変更）
             foreach (var c in plan.Changes)
             {
                 int i = material.shader != null ? material.shader.FindPropertyIndex(c.Property) : -1;
                 if (c.Edit.kind == MaterialEditKind.Property && (i < 0 || material.shader.GetPropertyType(i) != c.Edit.type) || !c.Edit.ReadCurrent(material).SameValue(c.BeforeEdit))
-                    throw new InvalidOperationException(L.Tr("The material changed since the list was made; nothing was applied. Try again."));
+                    throw new InvalidOperationException(L.Tr("The material changed since the list was made; nothing was applied."));
             }
             Undo.IncrementCurrentGroup();
             int group = Undo.GetCurrentGroup();

@@ -14,8 +14,7 @@ namespace Yozolab.YoluPainter.Editor
 
         public override void OnInspectorGUI()
         {
-            if (targets.Length == 1) DrawSummary(((AssetImporter)target).assetPath);
-            else EditorGUILayout.HelpBox("Select a single file to see its channels or open it in YoluPainter.", MessageType.None);
+            if (targets.Length == 1) DrawSummary(((AssetImporter)target).assetPath); // 複数を選んだときは何も出さない
         }
 
         void DrawSummary(string assetPath)

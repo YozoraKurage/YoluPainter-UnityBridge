@@ -87,12 +87,12 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>ステンシルの画像をこのプロジェクトのリソースにする（null で外す）。置き場はそのまま。ミップが予算を超える画像は断る。</summary>
         internal void SetStencil(Guid? id)
         {
-            if (stroke != null) throw new InvalidOperationException(L.Tr("Finish the stroke first."));
+            if (stroke != null) throw new InvalidOperationException(L.Tr("A stroke is in progress."));
             if (id == null) { ClearStencil(); message = L.Tr("The stencil was removed."); Repaint(); return; }
             var image = ImageResources.Get(id.Value);
             var built = new StencilImage(image.Content, image.ColorSpace, StencilMipBudgetBytes);
             stencilResource = image.Id.ToString("D"); stencilImage = built; stencilImageKey = StencilKey(image); DisposeStencilOverlay();
-            message = L.Tr("Stencil: {0}. The brush paints through it; hold T and drag on the view to place it.", image.Name);
+            message = L.Tr("Stencil: {0}", image.Name);
             Repaint();
         }
         static string StencilKey(ImageResource image) => image.Id.ToString("N") + ":" + image.ContentHash + ":" + (int)image.ColorSpace;
@@ -233,7 +233,7 @@ namespace Yozolab.YoluPainter.Editor
             var kind = e.button == 2 || e.button == 0 && (e.control || e.command) ? StencilDragKind.Move
                 : e.button == 1 || e.button == 0 && e.alt ? StencilDragKind.Scale : e.button == 0 ? StencilDragKind.Rotate : StencilDragKind.None;
             if (kind == StencilDragKind.None) return false;
-            if (CurrentStencilImage == null) { message = L.Tr("Choose a stencil image first (Properties ▸ Stencil)."); e.Use(); Repaint(); return true; }
+            if (CurrentStencilImage == null) { message = L.Tr("No stencil image."); e.Use(); Repaint(); return true; }
             stencilDrag = kind; stencilDragView = view; stencilDragFrom = e.mousePosition;
             stencilDragStartCenter = stencilCenter; stencilDragStartSize = stencilSize; stencilDragStartAngle = stencilAngle; stencilDragSwept = 0;
             stencilDragLastAngle = StencilPointerAngle(e.mousePosition);
@@ -407,14 +407,11 @@ namespace Yozolab.YoluPainter.Editor
             DrawStencilImageBox(box, image);
             if (image != null && PaintGui.IconButton(Mark("stencil-clear", new Rect(row.xMax - 24, row.y, 24, row.height)), "close", L.Tr("Stop using the stencil"), false, stroke == null, 15))
                 TryAction(() => SetStencil(null));
-            if (image == null || CurrentStencilImage == null)
-            {
-                NoteRow(rows, L.Tr("An image laid over the 2D canvas and the 3D view that the brush paints through. Drop an image from the Assets panel here, or click to choose one of this project's images."));
-                rows.Space(4); return;
-            }
+            if (image == null || CurrentStencilImage == null) { rows.Space(4); return; }
             var mode = BrushStencil.Resolve(stencilMode, stencilImage);
             ChoiceDropdown(Mark("stencil-mode", rows.Row()), L.TrIn("stencil", "Reads as"), stencilMode, (StencilMode[])Enum.GetValues(typeof(StencilMode)), m => StencilModeName(m, stencilImage),
-                m => stencilMode = m, L.Tr("Amount: the image's brightness is how much paint gets through (white paints, black and transparent hold back). Colour: the brush paints the image's colours, its alpha is the amount. Automatic: amount for a grey image, colour otherwise."));
+                m => stencilMode = m, L.Tr("Amount: the image's brightness is how much paint gets through (white paints, black and transparent hold back). Colour: the brush paints the image's colours, its alpha is the amount. Automatic: amount for a grey image, colour otherwise.")
+                    + "\n" + L.Tr("Colour with material painting: Base Color takes the colours, the other channels only the alpha. A mask takes only the alpha."));
             var c = UiRows.Split(rows.Row(), 2, 6);
             stencilInvert = PaintGui.FitToggle(Mark("stencil-invert", c[0]), L.TrIn("stencil", "Invert"), stencilInvert, L.Tr("Black lets the paint through and white holds it back (transparent still holds back)."), mode == StencilMode.Mask);
             PaintGui.FitDropdown(Mark("stencil-tiling", c[1]), null, StencilTilingName(stencilTiling), at =>
@@ -430,11 +427,6 @@ namespace Yozolab.YoluPainter.Editor
             if (angle != stencilAngle) StencilAngle = angle;
             if (PaintGui.FitButton(Mark("stencil-reset", rows.Row(24)), L.Tr("Reset placement"), false, stencilDrag == StencilDragKind.None, L.Tr("Back to the middle of the view, the first size and no rotation.")))
                 ResetStencilPlacement();
-            NoteRow(rows, L.Tr("Hold T and drag on the 2D canvas or the 3D view: left turns it (Shift: 15° steps), middle or Ctrl+left moves it, right or Alt+left resizes it. Hold N to paint without it. It stays on the screen when the camera or the canvas moves."), NoteKind.Info);
-            if (mode == StencilMode.Color && brush.material && !EditingMask)
-                NoteRow(rows, L.Tr("Colour with material painting: Base Color takes the image's colours; the other channels paint their own values through the image's alpha."), NoteKind.Info);
-            if (mode == StencilMode.Color && EditingMask)
-                NoteRow(rows, L.Tr("A mask takes only the amount: the image's alpha in Colour mode."), NoteKind.Info);
             rows.Space(4);
         }
 
@@ -454,11 +446,11 @@ namespace Yozolab.YoluPainter.Editor
                 else PaintGui.Icon(thumb, "texture", PaintTheme.TextDim, 13);
                 PaintGui.Outline(thumb, PaintTheme.Border, 1, 0);
             }
-            string name = image != null ? image.Name : L.Tr("None (drop an image here)");
+            string name = image != null ? image.Name : L.Tr("None");
             var label = new Rect(thumb.xMax + 6, box.y, box.xMax - thumb.xMax - 26, box.height);
             PaintGui.Text(label, PaintGui.Fit(name, label.width, PaintTheme.Label, false), PaintTheme.Label, !enabled ? PaintTheme.TextDisabled : image != null ? PaintTheme.Text : PaintTheme.TextDim);
             PaintGui.Icon(new Rect(box.xMax - 22, box.y, 20, box.height), "arrow_drop_down", PaintTheme.TextDim, 16);
-            PaintGui.Tooltip(box, (image != null ? image.Name + " (" + image.Width + " × " + image.Height + ")\n" : "") + L.Tr("Click to choose one of this project's images; drop one from the Assets panel or the Project window."));
+            PaintGui.Tooltip(box, (image != null ? image.Name + " (" + image.Width + " × " + image.Height + ")\n" : "") + L.Tr("An image the brush paints through, laid over the 2D canvas and the 3D view") + "\n" + L.Tr("Click to choose one of this project's images; drop one from the Assets panel or the Project window."));
             if (e.type == EventType.MouseDown && e.button == 0 && hover) { e.Use(); OpenStencilMenu(box); }
             if (dropping)
             {
@@ -478,7 +470,7 @@ namespace Yozolab.YoluPainter.Editor
         void OpenStencilMenu(Rect at)
         {
             var menu = new PaintMenu(); var images = ImageResources.Images; var current = StencilResource ?? Guid.Empty;
-            if (images.Count == 0) menu.AddDisabledItem(new GUIContent(L.Tr("This project has no images yet (import them in the Assets panel)")));
+            if (images.Count == 0) menu.AddDisabledItem(new GUIContent(L.Tr("No images")));
             foreach (var r in images)
             {
                 var image = r;

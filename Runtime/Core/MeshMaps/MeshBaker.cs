@@ -148,7 +148,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             if (estimate > budget.MaxBytes)
                 throw new MeshBakeRefusedException("Baking " + settings.Maps.Length + " map(s) at " + width + "×" + height + (settings.Antialiasing > 1 ? " with " + settings.Antialiasing + "×" + settings.Antialiasing + " antialiasing" : "")
                     + (reference != null ? " from a " + reference.TriangleCount + "-triangle high poly" : "") + " needs about " + (estimate >> 20) + " MiB, over the " + (budget.MaxBytes >> 20)
-                    + " MiB budget. Bake fewer maps at once or raise the memory budget (Project Settings > YoluPainter).");
+                    + " MiB budget.");
             report.ReceivingTriangles = receivers.Count;
             if (!Report(progress, control, 0, "Preparing")) return Stopped(control, report);
 

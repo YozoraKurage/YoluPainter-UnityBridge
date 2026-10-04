@@ -42,7 +42,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>マテリアル表示に切り替えたときの知らせ（今のセットのスロットの対応と、中立に戻した理由）。</summary>
         string MaterialViewMessage()
         {
-            if (preview == null || !preview.HasModel) return L.Tr("3D view: material shading. Load a model to see its materials.");
+            if (preview == null || !preview.HasModel) return L.Tr("3D view: material shading.");
             SyncMaterialChoices();
             var b = preview.MaterialBinding(CurrentFirstSlot);
             if (b == null) return L.Tr("3D view: material shading.");

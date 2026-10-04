@@ -129,9 +129,9 @@ namespace Yozolab.YoluPainter.Core
             {
                 case LayerOpRefusal.IsGroup: return new LayerOpException(reason, "This is a group. Use Merge Group to merge what is in it.");
                 case LayerOpRefusal.NoLayerBelow: return new LayerOpException(reason, "There is no layer below in the same group to merge into.");
-                case LayerOpRefusal.LayerBelowIsGroup: return new LayerOpException(reason, "The layer below is a group. Merge the group first, or move the layer into it.");
+                case LayerOpRefusal.LayerBelowIsGroup: return new LayerOpException(reason, "The layer below is a group.");
                 case LayerOpRefusal.LayerBelowIsAdjustment: return new LayerOpException(reason, "The layer below is an adjustment layer, which has no pixels to merge into.");
-                case LayerOpRefusal.HiddenLayer: return new LayerOpException(reason, "Hidden layers are not merged (their pixels would be lost or hidden). Show both layers first.");
+                case LayerOpRefusal.HiddenLayer: return new LayerOpException(reason, "Hidden layers are not merged (their pixels would be lost or hidden).");
                 case LayerOpRefusal.NotGroup: return new LayerOpException(reason, "This is not a group.");
                 case LayerOpRefusal.EmptyGroup: return new LayerOpException(reason, "The group is empty: there is nothing to merge.");
                 case LayerOpRefusal.NothingVisible: return new LayerOpException(reason, "No layer shows anything: there is nothing to merge.");
@@ -404,10 +404,10 @@ namespace Yozolab.YoluPainter.Core
         {
             EnsureNoStroke(); CheckTolerance(tolerance); if (ids == null) throw new ArgumentNullException(nameof(ids));
             var members = new List<PaintLayer>(TopmostOf(ids));
-            if (members.Count < 2) throw new ArgumentException("Choose at least two layers to merge them together (one layer merges down).", nameof(ids));
+            if (members.Count < 2) throw new ArgumentException("Merging together needs at least two layers (one layer merges down).", nameof(ids));
             Guid parent = members[0].ParentId;
             foreach (var m in members)
-                if (m.ParentId != parent) throw new LayerOpException(LayerOpRefusal.DifferentGroups, "Only layers in the same group can be merged together. Move them into one group first.");
+                if (m.ParentId != parent) throw new LayerOpException(LayerOpRefusal.DifferentGroups, "Only layers in the same group can be merged together.");
             foreach (var m in members) if (!m.Visible) throw Refusal(LayerOpRefusal.HiddenLayer);
             var blocks = new List<PaintLayer>(); var owner = new Dictionary<PaintLayer, PaintLayer>();
             foreach (var m in members) foreach (var l in Block(m)) { blocks.Add(l); owner[l] = m; }

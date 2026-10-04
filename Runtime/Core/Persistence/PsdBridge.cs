@@ -27,7 +27,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
         {
             var notes = new List<PsdDiagnostic>();
             var result = Export(source, channel, notes);
-            if (notes.Count > 0) throw new InvalidOperationException("PSD export would leave out: " + notes[0].Message + " Use the export that reports what is not carried. Native project can still be saved losslessly.");
+            if (notes.Count > 0) throw new InvalidOperationException("PSD export would leave out: " + notes[0].Message + " Native project can still be saved losslessly.");
             return result;
         }
 
@@ -77,22 +77,22 @@ namespace Yozolab.YoluPainter.Core.Persistence
                 string refusal = PsdCodec.AdjustmentRefusal(layer.Adjustment);
                 if (refusal != null) throw new InvalidOperationException("Adjustment layer '" + layer.Name + "': " + refusal + " Native project can still be saved losslessly.");
             }
-            if (layer.IsGroup && layer.Clipping) throw new InvalidOperationException("Group '" + layer.Name + "' is clipped. Photoshop's handling of a clipped folder is not verified (psd-tools treats it as unsupported in Photoshop), so it is not exported; turn its clipping off or export from the native project. Native project can still be saved losslessly.");
+            if (layer.IsGroup && layer.Clipping) throw new InvalidOperationException("Group '" + layer.Name + "' is clipped. Photoshop's handling of a clipped folder is not verified (psd-tools treats it as unsupported in Photoshop), so it is not exported. Native project can still be saved losslessly.");
             if (layer.Filters.Count > 0 || layer.Mask != null && layer.Mask.Filters.Count > 0)
-                throw new InvalidOperationException("Layer '" + layer.Name + "' has non-destructive filters" + (HasGenerator(layer) ? " or generators" : "") + ". PSD has no exact form for them here (Photoshop keeps smart filters inside smart objects, which this exporter does not write, and has no mesh-map generators), and writing only the filtered pixels would drop the filter stack silently. Bake the filters into the layer (or remove them) before exporting PSD. Native project can still be saved losslessly.");
+                throw new InvalidOperationException("Layer '" + layer.Name + "' has non-destructive filters" + (HasGenerator(layer) ? " or generators" : "") + ". PSD has no exact form for them here (Photoshop keeps smart filters inside smart objects, which this exporter does not write, and has no mesh-map generators), and writing only the filtered pixels would drop the filter stack silently. Native project can still be saved losslessly.");
             foreach (var anchor in new[] { layer.Anchor, layer.Mask?.Anchor }) // PSD にアンカーは無い: 書かないことを知らせる（黙って捨てない）
                 if (anchor != null) notes.Add(new PsdDiagnostic(PsdCodec.NotCarriedIntoExport, "The anchor '" + anchor.Name + "' on " + (anchor.Placement == AnchorPlacement.Mask ? "the mask of " : "") + "layer '" + layer.Name
                     + "' is not written: PSD has no anchor points (the native project keeps it).", -1, 0));
             bool projected = layer.IsProjectedFill(channel) || layer.HasFillGradient(channel); // 画像のチャンネルと、デカールの全部のチャンネル
             if (layer.Kind == LayerKind.Fill && !projected && layer.FillValues.TryGetValue(channel, out var fillValue) && fillValue.A != 255)
-                throw new InvalidOperationException("Fill layer '" + layer.Name + "': a PSD solid colour fill is opaque, and this fill's " + channel + " value has alpha " + fillValue.A + ". Use the layer opacity instead. Native project can still be saved losslessly.");
+                throw new InvalidOperationException("Fill layer '" + layer.Name + "': a PSD solid colour fill is opaque, and this fill's " + channel + " value has alpha " + fillValue.A + ". Native project can still be saved losslessly.");
             if (layer.Kind != LayerKind.Raster && layer.Kind != LayerKind.Group && layer.Kind != LayerKind.Adjustment && layer.Kind != LayerKind.Fill) throw new InvalidOperationException("PSD projection does not write " + layer.Kind + " layers yet. Native project can still be saved losslessly.");
-            if (layer.Mask != null && layer.Mask.Inverted) throw new InvalidOperationException("PSD has no non-destructive mask inversion; turn Inverted off (or invert the mask pixels) before exporting. Native project can still be saved losslessly.");
+            if (layer.Mask != null && layer.Mask.Inverted) throw new InvalidOperationException("PSD has no non-destructive mask inversion. Native project can still be saved losslessly.");
             byte[] guid = layer.Id.ToByteArray();
             if (layer.Mask != null)
             {
                 byteBudget = checked(byteBudget + (long)source.Width * source.Height);
-                if (byteBudget > 128L * 1024 * 1024) throw new InvalidOperationException("PSD projection exceeds the prototype's 128 MiB decoded-layer budget. Save the native project instead.");
+                if (byteBudget > 128L * 1024 * 1024) throw new InvalidOperationException("PSD projection exceeds the prototype's 128 MiB decoded-layer budget. The native project can still be saved.");
             }
             var mask = layer.Mask == null ? null : ExportMask(layer.Mask, source.Width, source.Height);
             // 書き出すチャンネルでの不透明度と合成モード（層のチャンネルごとの設定があればそれ）。PSD は 1 チャンネルずつなので、そのチャンネルの値で書く
@@ -137,7 +137,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             if (right <= left || top <= bottom) { left = bottom = 0; right = top = 1; }
             int width = right-left, height = top-bottom;
             byteBudget = checked(byteBudget + (long)width*height*4);
-            if (byteBudget > 128L * 1024 * 1024) throw new InvalidOperationException("PSD projection exceeds the prototype's 128 MiB decoded-layer budget. Save the native project instead.");
+            if (byteBudget > 128L * 1024 * 1024) throw new InvalidOperationException("PSD projection exceeds the prototype's 128 MiB decoded-layer budget. The native project can still be saved.");
             var pixels = new byte[checked(width*height*4)];
             bool flipGreen = channel == PaintChannel.Normal && source.NormalSettings.FileDirection == NormalYDirection.DirectX;
             if (surface != null)
@@ -159,7 +159,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             if (PsdCodec.BlendKey(layer.BlendMode) == null) throw new InvalidOperationException("Blend mode " + layer.BlendMode + " has no PSD equivalent for a raster layer. Native project can still be saved losslessly.");
             int width = source.Width, height = source.Height;
             byteBudget = checked(byteBudget + (long)width * height * 4);
-            if (byteBudget > 128L * 1024 * 1024) throw new InvalidOperationException("PSD projection exceeds the prototype's 128 MiB decoded-layer budget. Save the native project instead.");
+            if (byteBudget > 128L * 1024 * 1024) throw new InvalidOperationException("PSD projection exceeds the prototype's 128 MiB decoded-layer budget. The native project can still be saved.");
             var rgba = layer.EvaluateOutputRegion(channel, 0, 0, width, height); // フィルターは上で断っているので、層そのものの画素
             var pixels = new byte[rgba.Length]; int row = width * 4;
             bool flipGreen = channel == PaintChannel.Normal && source.NormalSettings.FileDirection == NormalYDirection.DirectX;

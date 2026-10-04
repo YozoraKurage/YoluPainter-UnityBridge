@@ -46,7 +46,7 @@ namespace Yozolab.YoluPainter.Editor
             if (s.environment == PreviewEnvironmentSource.Texture && texture == null)
             {
                 s.environment = PreviewEnvironmentSource.Sky;
-                message = string.IsNullOrEmpty(s.environmentTexture) ? L.Tr("Choose an environment texture; the built-in sky is shown meanwhile.")
+                message = string.IsNullOrEmpty(s.environmentTexture) ? L.Tr("No environment texture; the built-in sky is shown.")
                     : L.Tr("The environment texture is gone (deleted or moved out of the project), so the built-in sky is shown.");
                 BindPreviewScene(); repaintPixels = true;
             }
@@ -65,13 +65,13 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>環境のテクスチャを選ぶ（Cubemap か Texture2D のアセット。それ以外は断る）。</summary>
         internal bool UseEnvironmentTexture(Texture texture)
         {
-            if (stroke != null) { message = L.Tr("Finish the stroke first."); return false; }
+            if (stroke != null) { message = L.Tr("A stroke is in progress."); return false; }
             string refusal = EnvironmentTextureRefusal(texture);
             if (refusal != null) { message = refusal; return false; }
             var s = PreviewScene;
             s.environmentTexture = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(texture)); s.environment = PreviewEnvironmentSource.Texture;
             environmentTexture = texture; environmentTextureFor = s.environmentTexture;
-            message = L.Tr("Environment: {0} (read on the GPU; its import settings are not changed).", texture.name) + (PreviewEnvironment.AspectNote(texture) is string aspect ? " " + aspect : "");
+            message = L.Tr("Environment: {0}", texture.name) + (PreviewEnvironment.AspectNote(texture) is string aspect ? " " + aspect : "");
             BindPreviewScene(); Repaint();
             return true;
         }
@@ -79,7 +79,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>環境に使えないテクスチャの理由（使えれば null）: アセットの Cubemap か 2D のテクスチャ（メインのアセット）だけ。</summary>
         internal static string EnvironmentTextureRefusal(Object candidate)
         {
-            if (candidate == null) return L.Tr("Choose a Cubemap or a latitude-longitude 2D texture.");
+            if (candidate == null) return L.Tr("No texture.");
             if (!(candidate is Texture texture)) return L.Tr("{0} is a {1}, not a texture.", candidate.name, candidate.GetType().Name);
             string refused = PreviewEnvironment.Refusal(texture);
             if (refused != null) return refused;

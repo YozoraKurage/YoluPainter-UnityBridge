@@ -344,7 +344,7 @@ namespace Yozolab.YoluPainter.Core
                 bool changed = false;
                 if (x >= 0 && y >= 0 && x < width && y < height)
                 {
-                    if (settings.Effect != BrushEffect.Paint) throw new InvalidOperationException("Pixel effects need a complete dab; use ApplyDab to freeze its source before writing.");
+                    if (settings.Effect != BrushEffect.Paint) throw new InvalidOperationException("Pixel effects need a complete dab; ApplyDab freezes its source before writing.");
                     int tile = tileSize; BeginPass();
                     try { changed = ApplyPixelAt(cursor, true, x / tile, y / tile, (y % tile) * tile + x % tile, coverage, pressure, 1, 1, at); }
                     finally { EndPass(); }

@@ -158,7 +158,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (x + 4 + width > limit) { x = limit; return new Rect(-10000, y, 0, h); }
                 var at = new Rect(x + 4, y, width, h); x += width + 8; return at;
             }
-            Rect Fit(string text) => Next(PaintTheme.LabelDim.CalcSize(new GUIContent(text)).x + 6); // 説明文は文字の幅に合わせる
+            Rect Fit(string text) => Next(PaintTheme.LabelDim.CalcSize(new GUIContent(text)).x + 6); // 短い状態の文字（マスクに描いている、など）は文字の幅に合わせる
             switch (tool)
             {
                 case PaintTool.Brush: case PaintTool.Blur: case PaintTool.Smudge: case PaintTool.Clone:
@@ -171,7 +171,7 @@ namespace Yozolab.YoluPainter.Editor
                     { float spacing = PaintGui.Slider(Mark("options.spacing", Next(120)), L.Tr("Spacing"), brush.spacing * 100, 1, 100, "0", "%", L.Tr("Distance between dabs, in % of the diameter")); if (spacing != brush.spacing * 100) brush.spacing = spacing / 100; } // Substance のツールバーと同じ
                     if (PaintGui.IconButton(Next(28), "stylus", L.Tr("Pressure controls size"), brush.pressureSize)) brush.pressureSize = !brush.pressureSize;
                     if (PaintGui.IconButton(Next(28), "opacity", L.Tr("Pressure controls opacity"), brush.pressureOpacity)) brush.pressureOpacity = !brush.pressureOpacity;
-                    if (EditingMask) { var t = L.Tr("Painting the layer mask (paint hides, erase reveals)"); PaintGui.Text(Fit(t), t, PaintTheme.LabelDim, PaintTheme.Warning); }
+                    if (EditingMask) { var t = L.Tr("Layer mask"); PaintGui.Text(Fit(t), t, PaintTheme.LabelDim, PaintTheme.Warning); }
                     break;
                 }
                 case PaintTool.Fill:
@@ -180,7 +180,6 @@ namespace Yozolab.YoluPainter.Editor
                     wandContiguous = PaintGui.Toggle(Next(110), L.Tr("Contiguous"), wandContiguous);
                     wandSampleAll = PaintGui.Toggle(Next(150), L.Tr("Sample All Layers"), wandSampleAll, L.Tr("Use the composite instead of the selected layer"));
                     if (tool == PaintTool.Fill) brush.opacity = PaintGui.Slider(Next(130), L.Tr("Opacity"), brush.opacity * 100, 0, 100, "0", "%") / 100;
-                    else SelectionModeHint(Fit(L.Tr("Shift adds · Ctrl subtracts · Shift+Ctrl intersects")));
                     break;
                 case PaintTool.Gradient:
                     PaintGui.EnumDropdown(Next(170), L.Tr("Shape"), gradientShape, (GradientShape[])Enum.GetValues(typeof(GradientShape)), s => L.Tr(s.ToString()), s => gradientShape = s);
@@ -199,23 +198,17 @@ namespace Yozolab.YoluPainter.Editor
                 case PaintTool.SelectRectangle:
                 case PaintTool.SelectEllipse:
                 case PaintTool.Lasso:
-                    SelectionModeHint(Fit(L.Tr("Shift adds · Ctrl subtracts · Shift+Ctrl intersects")));
                     if (PaintGui.IconButton(Next(28), "select_all", L.Tr("Select All (Ctrl+A)"))) document.SetSelection(SelectionMask.All(document));
                     if (PaintGui.IconButton(Next(28), "deselect", L.Tr("Deselect (Ctrl+D)"), false, document.Selection != null)) document.ClearSelection();
                     if (PaintGui.IconButton(Next(28), "invert_colors", L.Tr("Inverse (Ctrl+Shift+I)"), false, document.Selection != null)) document.SetSelection(document.Selection.Invert());
                     break;
                 case PaintTool.Move:
-                    { var t = L.Tr("Drag to move, corners to scale, outside to rotate. Arrow keys nudge."); PaintGui.Text(Fit(t), t, PaintTheme.LabelDim); }
                     if (PaintGui.IconButton(Next(28), "flip", L.Tr("Flip Horizontal"))) TryAction(() => TransformSelected(0, 0, 0, -1, 1, L.Tr("Flipped horizontally.")));
                     if (PaintGui.IconButton(Next(28), "rotate_90_degrees_cw", L.Tr("Rotate 90° Clockwise"))) TryAction(() => TransformSelected(0, 0, -90, 1, 1, L.Tr("Rotated 90° clockwise.")));
                     PaintGui.EnumDropdown(Next(200), L.Tr("Resampling"), moveResampling, (Resampling[])Enum.GetValues(typeof(Resampling)), s => L.Tr(s.ToString()), s => moveResampling = s);
                     break;
-                case PaintTool.Path:
-                    { var t = L.Tr("Click the 2D canvas or the model to add points; drag a point to move it; Delete removes the last one."); PaintGui.Text(Fit(t), t, PaintTheme.LabelDim); }
-                    break;
                 case PaintTool.Eyedropper:
                     wandSampleAll = PaintGui.Toggle(Next(150), L.Tr("Sample All Layers"), wandSampleAll, L.Tr("Pick from the composite instead of the selected layer"));
-                    { var t = L.Tr("Click the 2D canvas to pick the brush color."); PaintGui.Text(Fit(t), t, PaintTheme.LabelDim); }
                     break;
                 case PaintTool.IdSelect: IdSelectOptions(Next, Fit); break; // Tools/TexturePaintWindow.IdSelect.cs
                 case PaintTool.PolygonFill: // Tools/TexturePaintWindow.PolygonFill.cs
@@ -227,13 +220,10 @@ namespace Yozolab.YoluPainter.Editor
                     if (PaintGui.Button(Mark("polyfill-erase", Next(PaintGui.TextWidth(erase, PaintTheme.Label) + 20)), erase, polyFillErase, true, EditingMask ? L.Tr("Fill the mask with black (hides the layer)") : L.Tr("Erase to transparent"))) PolygonFillErase = true;
                     brush.opacity = PaintGui.Slider(Next(130), L.Tr("Opacity"), brush.opacity * 100, 0, 100, "0", "%") / 100;
                     if (overlapCandidates.Count > 1) PolygonOverlapOptions(Next(130));
-                    { var t = PolygonFillHint; PaintGui.Text(Fit(t), t, PaintTheme.LabelDim, EditingMask ? PaintTheme.Warning : PaintTheme.TextDim); }
                     break;
                 }
             }
         }
-
-        void SelectionModeHint(Rect r) => PaintGui.Text(r, L.Tr("Shift adds · Ctrl subtracts · Shift+Ctrl intersects"), PaintTheme.LabelDim);
 
         void OpenPresetMenu(Rect at)
         {
@@ -304,7 +294,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             string path = Dialogs.OpenFile(L.Tr("Choose a tool icon (PNG, up to 256 px)"), PainterToolIcons.UserFolder, "png");
             if (string.IsNullOrEmpty(path)) return;
-            TryAction(() => { PainterToolIcons.SetUserIcon(id, path, selected); message = L.Tr("The tool icon was changed. Right-click the tool to reset it."); });
+            TryAction(() => { PainterToolIcons.SetUserIcon(id, path, selected); message = L.Tr("The tool icon was changed."); });
         }
 
         void SwapColors() { var c = brush.color; brush.color = brush.secondaryColor; brush.secondaryColor = c; Repaint(); }
@@ -312,10 +302,11 @@ namespace Yozolab.YoluPainter.Editor
 
         // ───────── 表示域の見出し ─────────
 
-        internal Rect surfaceHeaderLabelForTests; internal float viewModeButtonsEndForTests;
+        internal Rect surfaceHeaderLabelForTests, canvasHeaderLabelForTests; internal string surfaceHeaderTextForTests, canvasHeaderTextForTests; internal float viewModeButtonsEndForTests;
         void DrawViewHeader()
         {
-            modelShowButtonForTests = canvasShowButtonForTests = surfaceHeaderLabelForTests = compactViewButtonForTests = compactShadingButtonForTests = default;
+            modelShowButtonForTests = canvasShowButtonForTests = surfaceHeaderLabelForTests = canvasHeaderLabelForTests = compactViewButtonForTests = compactShadingButtonForTests = default;
+            surfaceHeaderTextForTests = canvasHeaderTextForTests = null;
             var bar = new Rect(viewAreaRect.x, viewAreaRect.y, viewAreaRect.width, 26);
             PaintGui.Fill(bar, PaintTheme.PanelHeader);
             PaintGui.HLine(bar.x, bar.xMax, bar.yMax - 1, PaintTheme.Border);
@@ -347,7 +338,6 @@ namespace Yozolab.YoluPainter.Editor
             viewModeButtonsEndForTests = x;
             string channelName = L.Tr(channel.ToString());
             string what = EditingMask ? L.Tr("Layer mask") : channelName;
-            if (textureSets.Count > 1) what = currentSet.Name + " · " + what;
             if (canvasRect.width > 0)
             {
                 // 2D の見出し: 何を描いているか・拡大率、回っていれば角度、反転していればその印（押すと戻す）
@@ -358,20 +348,52 @@ namespace Yozolab.YoluPainter.Editor
                 if (marks > 0) DrawCanvasViewMarks(Mathf.Max(left, right - marks), bar.y, right);
                 var show = DrawViewShowDropdown(bar, canvasRect, left, right - marks, true);
                 float width = Mathf.Clamp(show.x - left - 8, 0, 300);
-                string label = PaintGui.Fit("2D · " + what + "  " + Mathf.RoundToInt(canvasZoom * 100) + "%", width, PaintTheme.LabelDim, false);
-                PaintGui.Text(new Rect(left, bar.y, width, bar.height), label, PaintTheme.LabelDim, EditingMask ? PaintTheme.Warning : PaintTheme.TextDim);
+                string zoom = Mathf.RoundToInt(canvasZoom * 100) + "%";
+                canvasHeaderLabelForTests = new Rect(left, bar.y, width, bar.height);
+                // 複数のテクスチャセットでは名前を足す。狭ければ、詰めるのはその名前だけ（チャンネルと拡大率は残す）
+                canvasHeaderTextForTests = textureSets.Count > 1
+                    ? ViewHeaderText(width, "2D · ", currentSet.Name, " · " + what + "  " + zoom, "2D  " + zoom, "2D")
+                    : ViewHeaderText(width, "2D · " + what + "  " + zoom, null, "", "2D  " + zoom, "2D");
+                PaintGui.Text(canvasHeaderLabelForTests, canvasHeaderTextForTests, PaintTheme.LabelDim, EditingMask ? PaintTheme.Warning : PaintTheme.TextDim);
             }
             if (surfaceRect.width > 0)
             {
                 float right = DrawShadingSwitch(bar), left = Mathf.Max(x + 8, surfaceRect.x + 8);
                 var show = DrawViewShowDropdown(bar, surfaceRect, left, right, false);
-                string label = "3D · " + (preview.HasSnapshot ? (model != null ? model.name : L.Tr("Demo cube")) : L.Tr("No model"));
                 float width = Mathf.Max(0, Mathf.Min(300, show.x - left - 8));
                 surfaceHeaderLabelForTests = new Rect(left, bar.y, width, bar.height);
-                PaintGui.Text(new Rect(left, bar.y, width, bar.height), PaintGui.Fit(label, width, PaintTheme.LabelDim, false), PaintTheme.LabelDim);
+                // モデルの名前は利用者のもの: 狭ければ、詰めるのはその名前だけ（「3D · 長いモデル名…」）
+                surfaceHeaderTextForTests = preview.HasSnapshot && model != null
+                    ? ViewHeaderText(width, "3D · ", model.name, "", "3D")
+                    : ViewHeaderText(width, "3D · " + (preview.HasSnapshot ? L.Tr("Demo cube") : L.Tr("No model")), null, "", "3D");
+                PaintGui.Text(surfaceHeaderLabelForTests, surfaceHeaderTextForTests, PaintTheme.LabelDim);
             }
             if (surfaceRect.width > 0 && !preview.HasSnapshot)
-                PaintGui.Text(surfaceRect, L.Tr("Choose a model in Texture Set, or 3D ▸ Demo Cube.\nThe original prefab is never instantiated."), new GUIStyle(PaintTheme.LabelDim) { alignment = TextAnchor.MiddleCenter, wordWrap = true });
+                PaintGui.Text(surfaceRect, L.Tr("No model"), new GUIStyle(PaintTheme.LabelDim) { alignment = TextAnchor.MiddleCenter, wordWrap = true });
+        }
+
+        /// <summary>利用者の名前が … で詰まっても読める最小の幅（px）。これより狭くなる名前は詰めずに、短い形へ移る。</summary>
+        internal const float ViewHeaderUserNameMin = 48;
+
+        /// <summary>見出しの文字。before + userName + after が入ればそれ。入らず userName（モデル・テクスチャセットの名前。利用者のもの）が
+        /// あれば、その名前だけを … で詰める（残りの名前の幅が <see cref="ViewHeaderUserNameMin"/> 以上のとき）。それも入らなければ、
+        /// 短い形を長い順に試し、どれも入らなければ null（出さない）。この UI の固定の文字（「2D」「Color」「100%」）は … で詰めない。</summary>
+        internal static string ViewHeaderText(float width, string before, string userName, string after, params string[] shorter)
+        {
+            bool Fits(string text) => PaintGui.TextWidth(text, PaintTheme.LabelDim) <= width;
+            string full = before + userName + after;
+            if (Fits(full)) return full;
+            if (!string.IsNullOrEmpty(userName))
+            {
+                float room = width - (PaintGui.TextWidth(full, PaintTheme.LabelDim) - PaintGui.TextWidth(userName, PaintTheme.LabelDim)) - 1;
+                if (room >= ViewHeaderUserNameMin)
+                {
+                    string cut = before + PaintGui.Fit(userName, room, PaintTheme.LabelDim, false) + after;
+                    if (Fits(cut)) return cut;
+                }
+            }
+            foreach (var candidate in shorter) if (Fits(candidate)) return candidate;
+            return null;
         }
 
         // ───────── ステータスバー ─────────

@@ -29,7 +29,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             RequireNoStrokeForResources();
             string path = source == null ? null : AssetDatabase.GetAssetPath(source);
-            if (string.IsNullOrEmpty(path)) throw new ResourceRefusedException(ResourceRefusal.Unsupported, L.Tr("Choose a material asset from the Unity project."));
+            if (string.IsNullOrEmpty(path)) throw new ResourceRefusedException(ResourceRefusal.Unsupported, L.Tr("Not a material asset of the Unity project."));
             var binding = PreviewMaterialBindings.Resolve(source);
             if (!binding.CanShow || binding.Kind != PreviewMaterialKind.Standard && binding.Kind != PreviewMaterialKind.LilToon)
                 throw new ResourceRefusedException(ResourceRefusal.Unsupported, L.Tr("This material's channel mapping is not verified: {0}", binding.Unusable ?? binding.Summary));

@@ -118,9 +118,9 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void CloneNeedsASourceInTheSameView()
         {
             window.SelectTool(TexturePaintWindow.PaintTool.Clone); Mouse(window, EventType.MouseDown, At(window, 300, 300));
-            Assert.That(window.IsStroking, Is.False); Assert.That(window.StatusMessage, Does.Contain("Alt-click"));
+            Assert.That(window.IsStroking, Is.False); Assert.That(window.StatusMessage, Does.Contain("No clone source"));
             window.View = TexturePaintWindow.ViewMode.Split; window.Preview.LoadDemoMesh(); Repaint(window);
-            Mouse(window, EventType.MouseDown, window.SurfaceRect.center); Assert.That(window.IsStroking, Is.False); Assert.That(window.StatusMessage, Does.Contain("Alt-click"));
+            Mouse(window, EventType.MouseDown, window.SurfaceRect.center); Assert.That(window.IsStroking, Is.False); Assert.That(window.StatusMessage, Does.Contain("No clone source"));
         }
         [Test] public void BrushEffectParametersSaveAndOpenYlpAndPresetFiles()
         {
@@ -285,7 +285,7 @@ namespace Yozolab.YoluPainter.Tests
             Mouse(window, EventType.MouseDown, at); Mouse(window, EventType.MouseUp, at);
             Assert.That(window.IsStroking, Is.False); Assert.That(window.Document.HasActiveStroke, Is.False);
             Assert.That(window.Document.UndoCount, Is.Zero); Assert.That(DocumentBinary.Write(window.Document), Is.EqualTo(before));
-            Assert.That(window.StatusMessage, Does.Contain("separate source and motion"));
+            Assert.That(window.StatusMessage, Does.Contain("do not work with symmetry"));
         }
     }
 }

@@ -49,9 +49,6 @@ msgstr "カーブのプリセット…"
 msgid "Shape value in, gradient position out. Click to add a point, drag to move, right-click to remove. Escape cancels."
 msgstr "形の値を入力、勾配上の位置を出力にします。クリックで点を追加、ドラッグで移動、右クリックで削除。Escape で取消。"
 
-msgid "RGB: Classic interpolation in sRGB. Data channels use stored-value luminance; opacity is independent."
-msgstr "RGB は sRGB の値で Classic 補間。データのチャンネルは格納値の輝度を使い、不透明度は独立です。"
-
 msgid "Top: opacity stops. Bottom: color or value stops. Click to add, drag to move, right-click or drag outside to remove. Small diamonds move the midpoint. Escape cancels a drag."
 msgstr "上は不透明度、下は色・値の分岐点。クリックで追加、ドラッグで移動、右クリックか枠の外へドラッグで削除。小さい印は中点。Escape でドラッグを取り消します。"
 
@@ -69,9 +66,6 @@ msgstr "モデルのルートを基準にした配置（シーンの単位）。
 
 msgid "Gradient unavailable; the fallback value is shown. {0}"
 msgstr "勾配を使えないため、代わりの値を表示しています。{0}"
-
-msgid "Ctrl: snap movement, size and rotation using Unity's Scene snap settings. Shift: resize both faces. Handles are drawn in front of the model."
-msgstr "Ctrl で Unity のシーンの設定に従って移動・大きさ・回転を刻みます。Shift で両面の大きさを変更。ハンドルはモデルの手前に描きます。"
 
 msgctxt "shape gradient"
 msgid "Move"

@@ -37,14 +37,14 @@ namespace Yozolab.YoluPainter.Core
             try
             {
                 if (settings.Effect != BrushEffect.Clone || hasSample || effectDabStarted || strokeTiles.Count != 0 || cloneSources != null)
-                    throw new InvalidOperationException("Set the composite clone source before the first clone dab.");
+                    throw new InvalidOperationException("The composite clone source cannot be set after the first clone dab.");
                 var channels = new PaintChannel[targets.Length];
                 for (int k = 0; k < targets.Length; k++)
                 {
                     bool found = false;
                     foreach (var layer in document.Layers) foreach (var channel in layer.Channels)
                         if (ReferenceEquals(channel.Value, targets[k].Surface)) { channels[k] = channel.Key; found = true; }
-                    if (!found) throw new InvalidOperationException("A mask cannot sample the channel composite. Choose Current layer.");
+                    if (!found) throw new InvalidOperationException("A mask cannot sample the channel composite.");
                 }
                 var sources = new Dictionary<TileCoord, CpuCompositor.CompositeJob>[targets.Length];
                 cloneSources = sources;

@@ -147,7 +147,7 @@ namespace Yozolab.YoluPainter.Editor
                 var (anchor, placement) = SelectedAnchor();
                 DrawAnchorRow(rows, SelectedLayerOrNull, placement); // 名前・読む段の数・外す（Layers/TexturePaintWindow.Anchors.cs）
                 var readers = document.AnchorReaders(anchor.Id);
-                NoteRow(rows, readers.Count == 0 ? L.Tr("No generator reads this anchor yet: add Generator ▸ Anchor on a layer above.")
+                NoteRow(rows, readers.Count == 0 ? L.Tr("No generator reads this anchor.")
                     : L.Tr("Read by:") + " " + string.Join(", ", readers.Select(r => r.layer.Name + (r.target == FilterTarget.Mask ? " (" + L.Tr("mask") + ")" : ""))), NoteKind.Info);
             }, title: () => SelectedAnchor().anchor?.Name ?? "", icon: "anchor");                                                       // Anchor の行で選んだもの
             return table;

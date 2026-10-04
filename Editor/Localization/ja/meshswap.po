@@ -43,17 +43,11 @@ msgstr "マテリアル {0} には、もうテクスチャセット {1} があ�
 msgid "Added the texture set {0} (material {1})."
 msgstr "テクスチャセット {0} を足しました（マテリアル {1}）。"
 
-msgid "Added the texture set {0}; choose its material in File ▸ Project Configuration."
-msgstr "テクスチャセット {0} を足しました。マテリアルは ファイル ▸ プロジェクト設定 で選んでください。"
+msgid "The loaded model does not use this texture set's material; it is not shown in 3D."
+msgstr "読み込んだモデルは、このテクスチャセットのマテリアルを使っていません。3D には見えません。"
 
-msgid "This face uses the material {0}, which has no texture set in this project (File ▸ Project Configuration adds one)."
-msgstr "この面はマテリアル {0} で、このプロジェクトにはそのテクスチャセットがありません（ファイル ▸ プロジェクト設定 で足せます）。"
-
-msgid "The loaded model does not use this texture set's material; it is not shown in 3D. Choose its material in File ▸ Project Configuration."
-msgstr "読み込んだモデルは、このテクスチャセットのマテリアルを使っていません。3D には見えません。ファイル ▸ プロジェクト設定 でマテリアルを選んでください。"
-
-msgid "{0} and {1} both painted material slots of {2}; {1} is kept, but it is not shown on the model. Choose its material in File ▸ Project Configuration."
-msgstr "{0} と {1} が、どちらも {2} のマテリアルスロットを描いていました。{1} は残しますが、モデルには見えません。ファイル ▸ プロジェクト設定 でマテリアルを選んでください。"
+msgid "{0} and {1} both painted material slots of {2}; {1} is kept, but it is not shown on the model."
+msgstr "{0} と {1} が、どちらも {2} のマテリアルスロットを描いていました。{1} は残しますが、モデルには見えません。"
 
 msgid "No export padding for {0}: no UV triangle of its material."
 msgstr "{0} は書き出しのパディングをしません: そのマテリアルの UV の三角形がありません。"
@@ -139,11 +133,11 @@ msgstr "前のモデルに結び付いたまま残します。理由: {0}"
 msgid "the layer is locked"
 msgstr "レイヤーがロックされています"
 
-msgid "The model is posed: the paths were matched on its posed shape. Reset the pose first to match them on the shape it was loaded with."
-msgstr "モデルにポーズを当てています。パスはポーズを当てた形で対応を取りました。読み込んだときの形で取るには、先にポーズを戻してください。"
+msgid "The model is posed: the paths were matched on its posed shape, not on the shape it was loaded with."
+msgstr "モデルにポーズを当てています。パスはポーズを当てた形で対応を取りました（読み込んだときの形ではありません）。"
 
-msgid "{0} baked mesh map(s) become stale; bake them again for the new model. Generators and projections that read them pass their input through until then."
-msgstr "ベイクしたメッシュマップ {0} 枚が古くなります。新しいモデルで焼き直してください。それまで、そのマップを読む Generator と投影は入力をそのまま通します。"
+msgid "{0} baked mesh map(s) become stale for the new model. Generators and projections that read them pass their input through until they are baked again."
+msgstr "ベイクしたメッシュマップ {0} 枚は、新しいモデルでは古くなります。それらを読む Generator と投影は、ベイクし直すまで入力をそのまま通します。"
 
 msgid "The pose and BlendShapes start from the new model's. Shape gradients and projections keep their place relative to the model root."
 msgstr "ポーズと BlendShape は新しいモデルのものから始まります。形のグラデーションと投影は、モデルのルートに対する置き場のまま残ります。"
@@ -193,9 +187,6 @@ msgstr "パス {0} 本を画素として残しました。"
 msgid "Added {0} texture set(s)."
 msgstr "テクスチャセットを {0} 個足しました。"
 
-msgid "Change the model and the texture set sizes in two steps (apply the model first); nothing changed."
-msgstr "モデルの差し替えとテクスチャセットの大きさの変更は、2 回に分けてください（先にモデルを適用）。何も変えていません。"
-
 # ── プロジェクト設定の画面 ──
 
 msgid "Reload the model from its asset when you apply (after exporting the FBX again). The texture sets stay on their materials."
@@ -206,9 +197,6 @@ msgstr "適用するとモデルを読み直します。"
 
 msgid "The model is changed when you apply."
 msgstr "適用するとモデルを差し替えます。"
-
-msgid "Texture sets keep their pixels and move to the materials below (matched by asset, then by name); you confirm the changes first."
-msgstr "テクスチャセットは画素を保ったまま、下のマテリアルに付け替わります（アセット、次に名前で対応）。先に変わる所を確かめます。"
 
 msgid "{0} not in this model."
 msgstr "{0} 個はこのモデルにありません。"

@@ -97,7 +97,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(mask2D.GetPixel(230, 200).r, Is.LessThan(.1f), "2D shows mask edits before the stroke ends");
             Assert.That(mask3D.GetPixel(230, 200).r, Is.GreaterThan(.9f), "the existing 3D display keeps its prior pixels during the stroke");
             Assert.That(window.ShowMeshMapIn2D(MeshMapKind.AmbientOcclusion), Is.False);
-            Assert.That(window.CanvasShowChoices().All(x => x.reason != null && x.reason.Contains("Finish the stroke")), Is.True);
+            Assert.That(window.CanvasShowChoices().All(x => x.reason != null && x.reason.Contains("A stroke is in progress")), Is.True);
             ViewShowKey(window, true, KeyCode.C, EventModifiers.Shift);
             Assert.That(window.CanvasShow, Is.EqualTo(TexturePaintWindow.ModelShowKind.Mask)); Assert.That(window.IsStroking, Is.True);
             Mouse(window, EventType.MouseUp, At(window, 320, 200));
@@ -128,7 +128,7 @@ namespace Yozolab.YoluPainter.Tests
             var ao = window.ModelShowChoices().Single(x => x.path == "Mesh Map/Ambient occlusion");
             Assert.That(ao.reason, Is.Null); ao.choose(); Assert.That(window.ModelShowName(), Is.EqualTo("AO (mesh map)"));
             window.ShowMaterialIn3D(); window.View = TexturePaintWindow.ViewMode.Split; Repaint(window); BeginLine(200, 200);
-            Assert.That(window.ModelShowChoices().All(x => x.reason != null && x.reason.Contains("Finish the stroke")), Is.True);
+            Assert.That(window.ModelShowChoices().All(x => x.reason != null && x.reason.Contains("A stroke is in progress")), Is.True);
             window.ModelShowChoices().First().choose(); Assert.That(window.IsStroking, Is.True);
             Key(window, KeyCode.Escape);
             window.View = TexturePaintWindow.ViewMode.Split;
@@ -191,7 +191,7 @@ namespace Yozolab.YoluPainter.Tests
             BeginLine(300, 300);
             ViewShowKey(window, false, KeyCode.C, EventModifiers.Shift);
             Assert.That(window.IsStroking, Is.True); Assert.That(window.ModelShow, Is.EqualTo(TexturePaintWindow.ModelShowKind.Channel));
-            Assert.That(window.StatusMessage, Does.Contain("Finish the stroke first"));
+            Assert.That(window.StatusMessage, Does.Contain("A stroke is in progress"));
             ViewShowKey(window, false, KeyCode.Escape);
             Assert.That(window.IsStroking, Is.False);
             ViewShowKey(window, false, KeyCode.C, EventModifiers.Shift);
@@ -238,7 +238,7 @@ namespace Yozolab.YoluPainter.Tests
                 var chosen = AssetDatabase.LoadAssetAtPath<Material>(folder + "/Chosen.mat");
                 window.Preview.LoadDemoMesh(); Repaint(window);
                 BeginLine(200, 200);
-                Assert.That(window.UsePreviewMaterial(chosen), Is.False); Assert.That(window.StatusMessage, Does.Contain("Finish the stroke first"));
+                Assert.That(window.UsePreviewMaterial(chosen), Is.False); Assert.That(window.StatusMessage, Does.Contain("A stroke is in progress"));
                 Assert.That(window.SetChannelRoute(PaintChannel.Color, ""), Is.False);
                 Assert.That(window.MaterialChoice(), Is.Null);
                 Mouse(window, EventType.MouseUp, At(window, 260, 200));

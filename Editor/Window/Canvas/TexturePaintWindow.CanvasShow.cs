@@ -28,7 +28,7 @@ namespace Yozolab.YoluPainter.Editor
         internal string CanvasShowName() => ViewShowName(canvasShow, canvasShowChannel, canvasShowMap);
         internal List<(string path, Action choose, string reason, bool on, string keys)> CanvasShowChoices() => ViewShowChoices(true);
         internal PaintMenu CanvasShowMenu() => ViewShowMenu(true);
-        string CanvasShowRefusal() => stroke != null || toolDragging ? L.Tr("Finish the stroke first; the 2D view keeps showing {0}.", CanvasShowName()) : null;
+        string CanvasShowRefusal() => stroke != null || toolDragging ? L.Tr("A stroke is in progress.") : null;
 
         internal bool ShowMaterialIn2D()
         {
@@ -52,7 +52,7 @@ namespace Yozolab.YoluPainter.Editor
         internal bool ShowMeshMapIn2D(MeshMapKind kind)
         {
             if (CanvasShowRefusal() is string refused) { message = refused; return false; }
-            if (!meshMaps.TryGet(kind, out _)) { message = L.Tr("{0} is not baked for this texture set (3D ▸ Bake Mesh Maps…).", MeshMapLabel(kind)); return false; }
+            if (!meshMaps.TryGet(kind, out _)) { message = L.Tr("{0} is not baked for this texture set.", MeshMapLabel(kind)); return false; }
             showKeysInCanvas = true; canvasShow = ModelShowKind.MeshMap; canvasShowMap = kind;
             CanvasShowChanged(L.Tr("2D view: the baked {0} only.", MeshMapLabel(kind))); return true;
         }
@@ -71,7 +71,7 @@ namespace Yozolab.YoluPainter.Editor
         void CycleMeshMapIn2D()
         {
             var kinds = meshMaps.Maps.Select(m => m.Kind).ToList();
-            if (kinds.Count == 0) { message = L.Tr("No mesh maps are baked for this texture set (3D ▸ Bake Mesh Maps…)."); return; }
+            if (kinds.Count == 0) { message = L.Tr("No mesh maps are baked for this texture set."); return; }
             int at = canvasShow == ModelShowKind.MeshMap ? kinds.IndexOf(canvasShowMap) : -1;
             if (at + 1 < kinds.Count) ShowMeshMapIn2D(kinds[at + 1]); else ShowMaterialIn2D();
         }

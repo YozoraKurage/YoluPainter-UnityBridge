@@ -26,12 +26,6 @@ msgstr "{0}を既定の値に戻す"
 msgid "Back to the default values."
 msgstr "既定の値に戻しました。"
 
-msgid "This tool's settings are in the options bar above the views."
-msgstr "このツールの設定は、ビューの上のオプションバーにあります。"
-
-msgid "Nothing to set here. Select a layer, a fill, a filter or a generator in the Layers panel, or a painting tool."
-msgstr "ここで設定するものはありません。レイヤーのパネルでレイヤー・塗りつぶし・フィルター・Generator を選ぶか、描くツールを選んでください。"
-
 # ── ブラシの主な値 ──
 
 msgid "Hardness of the round tip (an image tip keeps its own edge)"

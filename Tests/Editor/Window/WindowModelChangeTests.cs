@@ -332,7 +332,7 @@ namespace Yozolab.YoluPainter.Tests
             settings.Model = MaterialSetModels.Avatar(folder, "Other"); settings.Sets[0].Width = settings.Sets[0].Height = 1024;
             window.ApplyProjectConfiguration(settings);
             Assert.That(DialogsOf(window).Asked, Is.Empty); Assert.That(window.Model, Is.SameAs(model)); Assert.That(sets[0].Document.Width, Is.EqualTo(512));
-            Assert.That(window.StatusMessage, Does.Contain("two steps").And.Contain("nothing changed"));
+            Assert.That(window.StatusMessage, Does.Contain("cannot change at once").And.Contain("nothing changed"));
         }
 
         /// <summary>確かめの文の英日（日本語に英語の文が残らない）。描いた文は Logs/YoluPainterSnapshots/model-change に残す（見て確かめる用）。</summary>

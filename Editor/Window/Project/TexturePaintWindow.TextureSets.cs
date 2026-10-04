@@ -282,7 +282,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (g < 0) continue;
                 if (!taken[g]) { Take(k, g); continue; }
                 int owner = Array.IndexOf(result, g);
-                notes?.Add(L.Tr("{0} and {1} both painted material slots of {2}; {1} is kept, but it is not shown on the model. Choose its material in File ▸ Project Configuration.",
+                notes?.Add(L.Tr("{0} and {1} both painted material slots of {2}; {1} is kept, but it is not shown on the model.",
                     names != null && owner >= 0 ? names[owner] : "?", names != null ? names[k] : "?", groups[g].Unassigned ? L.Tr(PreviewMaterialGroup.UnassignedName) : groups[g].Name));
             }
             return result;
@@ -311,7 +311,7 @@ namespace Yozolab.YoluPainter.Editor
         /// セット（モデルに無いスロットの番号を仮の鍵にする。後でプロジェクト設定でマテリアルを選ぶ）。</summary>
         internal TextureSet AddTextureSet(int material, string name = null)
         {
-            if (stroke != null) throw new InvalidOperationException(L.Tr("Finish the stroke first."));
+            if (stroke != null) throw new InvalidOperationException(L.Tr("A stroke is in progress."));
             SyncCurrentSet();
             if (textureSets.Count >= YlpFormat.MaxTextureSets) throw new InvalidOperationException(L.Tr("A project has at most {0} texture sets.", YlpFormat.MaxTextureSets));
             var groups = preview != null && preview.HasModel ? preview.MaterialGroups : (IReadOnlyList<PreviewMaterialGroup>)new PreviewMaterialGroup[0];
@@ -325,7 +325,7 @@ namespace Yozolab.YoluPainter.Editor
             textureSets.Add(set); setsRevision++;
             ResolveSetMaterials();
             SwitchTextureSet(set.Id);
-            message = group != null ? L.Tr("Added the texture set {0} (material {1}).", set.Name, BaseSetName(group)) : L.Tr("Added the texture set {0}; choose its material in File ▸ Project Configuration.", set.Name);
+            message = group != null ? L.Tr("Added the texture set {0} (material {1}).", set.Name, BaseSetName(group)) : L.Tr("Added the texture set {0}.", set.Name);
             return set;
         }
 
@@ -352,7 +352,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>テクスチャセットを消す（その作業も消え、Undo できない）。確かめて、断られたら何も変えない。最後の 1 つは消せない。消したら true。</summary>
         internal bool RemoveTextureSet(Guid id)
         {
-            if (stroke != null) { message = L.Tr("Finish the stroke first."); return false; }
+            if (stroke != null) { message = L.Tr("A stroke is in progress."); return false; }
             SyncCurrentSet();
             var set = textureSets.FirstOrDefault(s => s.Id == id) ?? throw new ArgumentException("This project has no texture set " + id + ".", nameof(id));
             if (textureSets.Count == 1) { message = L.Tr("A project keeps at least one texture set."); return false; }
@@ -418,8 +418,8 @@ namespace Yozolab.YoluPainter.Editor
             var owner = SetOfSlot(slot);
             int group = preview != null ? preview.MaterialGroupOfSlot(slot) : -1;
             string material = group >= 0 ? BaseSetName(preview.MaterialGroups[group]) : L.Tr("slot {0}", slot);
-            return owner != null ? L.Tr("This face belongs to the texture set {0}. Double-click it, or switch in the Texture Set panel, to paint it.", owner.Name)
-                : L.Tr("This face uses the material {0}, which has no texture set in this project (File ▸ Project Configuration adds one).", material);
+            return owner != null ? L.Tr("This face belongs to the texture set {0}.", owner.Name)
+                : L.Tr("This face uses the material {0}, which has no texture set in this project.", material);
         }
 
         /// <summary>3D ビューで今のセットのスロットでない面を押したとき: ダブルクリックならその面のセットに切り替えて true（描きはしない）、

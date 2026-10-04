@@ -53,9 +53,6 @@ msgstr "{0} 段が読む"
 msgid "Read by:"
 msgstr "読んでいる段:"
 
-msgid "No generator reads this anchor yet: add Generator ▸ Anchor on a layer above."
-msgstr "このアンカーを読む Generator はまだありません。上の層に Generator ▸ アンカー を足してください。"
-
 msgid "Remove the anchor (generators that read it pass their input through until you undo)"
 msgstr "アンカーを外す（読んでいる Generator は、取り消すまで入力をそのまま通します）"
 
@@ -70,12 +67,6 @@ msgstr "層「{0}」にあります"
 msgctxt "generator"
 msgid "Anchor"
 msgstr "アンカー"
-
-msgid "no anchor below this layer (Layer ▸ Add Anchor on a lower layer)"
-msgstr "この層より下にアンカーがありません（下の層で レイヤー ▸ アンカーを置く）"
-
-msgid "It has no effect until it reads an anchor below this layer: {0}"
-msgstr "この層より下のアンカーを読むまで効きません: {0}"
 
 msgid "The anchor point this generator reads: one on a layer below this one (the stack up to there) or on a lower layer's mask"
 msgstr "この Generator が読むアンカー: この層より下の層のもの（そこまでの合成）か、下の層のマスクのもの"

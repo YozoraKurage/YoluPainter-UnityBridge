@@ -35,7 +35,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 if (preview.TryPick(surfaceRect, e.mousePosition, out var hit) && IsEffectSurfaceTarget(hit))
                 { cloneSurfaceSource = hit; cloneGeometry = preview.Geometry; cloneOnSurface = true; cloneSource = hit.UV * new Vector2(document.Width, document.Height); set = true; }
-                else message = L.Tr("Set the clone source on a surface of the active texture set.");
+                else message = L.Tr("Not a surface of the active texture set.");
             }
             else if (canvasRect.Contains(e.mousePosition))
             {
@@ -47,17 +47,17 @@ namespace Yozolab.YoluPainter.Editor
             if (set)
             {
                 cloneDocument = document; cloneLayer = selectedLayer; cloneMask = EditingMask; cloneWidth = document.Width; cloneHeight = document.Height; cloneOffsetValid = false;
-                message = L.Tr("Clone source set. Alt-click sets a new source in the same view.");
+                message = L.Tr("Clone source set.");
             }
             e.Use(); Repaint(); return true;
         }
         bool PrepareBrushEffectStroke(Vector2 pointer, bool onSurface)
         {
             if ((onSurface ? HasSurfaceSymmetry : brush.canvasSymmetry != CanvasSymmetryMode.None) && (tool == PaintTool.Smudge || tool == PaintTool.Clone))
-            { message = L.Tr("Smudge and Clone need a separate source and motion for each symmetry copy. Turn off symmetry to use them."); return false; }
+            { message = L.Tr("Smudge and Clone do not work with symmetry."); return false; }
             if (tool != PaintTool.Clone) return true;
             if (!HasCloneSource || cloneOnSurface != onSurface)
-            { message = L.Tr("Alt-click this view to set a clone source on this layer or mask first."); return false; }
+            { message = L.Tr("No clone source in this view."); return false; }
             if (onSurface)
             {
                 if (!preview.TryPick(surfaceRect, pointer, out var hit) || !IsEffectSurfaceTarget(hit)) return false;
@@ -135,7 +135,7 @@ namespace Yozolab.YoluPainter.Editor
             double footprint = stencilPoints == null ? 0 : SurfaceStencilFootprint(hit);
             foreach (var p in dab.Pixels)
             {
-                if (!destChart.TryCoordinates(p, out var point)) throw new InvalidOperationException(L.Tr("Surface sampling could not reach this dab. Start a new stroke."));
+                if (!destChart.TryCoordinates(p, out var point)) throw new InvalidOperationException(L.Tr("Surface sampling could not reach this dab."));
                 if (!sourceChart.TrySample(point + offset, new BrushPixel(p.X, p.Y, p.Coverage), document.Width, document.Height, out var mapped)) continue;
                 plan.Add(mapped); stencilPoints?.Add(SurfaceStencilPoint(p.Position, footprint));
             }
@@ -164,12 +164,10 @@ namespace Yozolab.YoluPainter.Editor
             if (tool == PaintTool.Blur)
             {
                 brush.blurRadius = PaintGui.FitIntSlider(Mark("blur-radius", rows.SliderRow()), L.Tr("Blur radius"), brush.blurRadius, 1, 64, " px");
-                PaintGui.Paragraph(rows, L.Tr("Alpha-weighted box blur of the current layer or mask. Transparent pixels keep their RGB. Opacity, flow and pressure set the strength."), PaintTheme.TextDim);
             }
             else if (tool == PaintTool.Smudge)
             {
                 brush.smudgeStrength = PercentSlider(Mark("smudge-strength", rows.SliderRow()), L.Tr("Smudge strength"), brush.smudgeStrength, 0, 1);
-                PaintGui.Paragraph(rows, L.Tr("Each dab pulls pixels from the previous dab. In 3D it follows connected faces across UV seams and mirrored islands. Disconnected surfaces start a new pickup."), PaintTheme.TextDim);
             }
             else
             {
@@ -177,8 +175,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (aligned != brush.cloneAligned) { brush.cloneAligned = aligned; cloneOffsetValid = false; }
                 if (EditingMask) PaintGui.ValueBox(rows.Row(), L.Tr("Sample"), L.Tr("Current layer"), LabelColumn);
                 else brush.cloneAllLayers = PaintGui.FitToggle(Mark("clone-all-layers", rows.Row()), L.Tr("Sample all visible layers"), brush.cloneAllLayers);
-                PaintGui.Paragraph(rows, L.Tr("Alt-click sets the source in the 2D or 3D view. Aligned keeps the relation between strokes; off restarts at the source. All visible layers samples the channel composite before the stroke."), PaintTheme.TextDim);
-                PaintGui.Notice(rows, HasCloneSource ? L.Tr("Clone source ready") : L.Tr("Set the source with Alt-click"), "target", PaintTheme.TextDim);
+                PaintGui.Notice(rows, HasCloneSource ? L.Tr("Clone source ready") : L.Tr("No clone source"), "target", PaintTheme.TextDim);
             }
             rows.Space(4);
         }

@@ -184,7 +184,7 @@ namespace Yozolab.YoluPainter.Editor
             c = UiRows.Split(rows.Row(24), 2, 4);
             if (PaintGui.FitButton(c[0], L.Tr("Feather"), false, any, L.Tr("Soften the edge (Gaussian blur, σ = radius / 3.5)"))) TryAction(() => ModifySelection(SelectionModifyKind.Feather));
             if (PaintGui.FitButton(c[1], L.Tr("Sharpen Edge"), false, any, L.Tr("Hard edge: at least half selected becomes fully selected"))) TryAction(() => ModifySelection(SelectionModifyKind.Sharpen));
-            if (!any) PaintGui.Text(rows.Row(16), PaintGui.Fit(L.Tr("Make a selection first."), rows.Width, PaintTheme.LabelSmall), PaintTheme.LabelSmall);
+            if (!any) PaintGui.Text(rows.Row(16), PaintGui.Fit(L.Tr("No selection"), rows.Width, PaintTheme.LabelSmall), PaintTheme.LabelSmall);
             rows.Space(4);
         }
 
@@ -193,7 +193,6 @@ namespace Yozolab.YoluPainter.Editor
         void TransformSection(UiRows rows)
         {
             if (!ToolSection(rows, "move", L.Tr("Transform"), "transform")) return;
-            PaintGui.Paragraph(rows, L.Tr("Drag or arrow keys (Shift: 10 px) move the layer and its mask, or the selected pixels with the selection."));
             var row = rows.Row(24); float x = row.x;
             Rect B() { var b = new Rect(x, row.y, 28, row.height); x += 30; return b; }
             if (PaintGui.IconButton(Mark("flip-horizontal", B()), "flip", L.Tr("Flip Horizontal"), false, true, 18)) TryAction(() => TransformSelected(0, 0, 0, -1, 1, L.Tr("Flipped horizontally.")));

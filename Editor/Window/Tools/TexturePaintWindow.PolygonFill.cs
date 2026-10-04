@@ -102,16 +102,16 @@ namespace Yozolab.YoluPainter.Editor
 
         void BeginPolygonFill(Vector2 pointer, bool onSurface)
         {
-            if (preview == null || !preview.HasModel) { message = L.Tr("Load a model (or the demo cube) to fill its polygons on the 3D view or its UVs on the 2D canvas."); return; }
-            if (!preview.CanPaint) { message = "This preview snapshot is not safe to paint. See its load diagnostics."; return; }
+            if (preview == null || !preview.HasModel) { message = L.Tr("No model"); return; }
+            if (!preview.CanPaint) { message = L.Tr("This preview snapshot is not safe to paint."); return; }
             if (onSurface && preview.TryPick(surfaceRect, pointer, out var hit) && !PaintsSlot(hit.MaterialSlot)) { OtherSlotPressed(hit.MaterialSlot); return; }
             var layer = document.GetLayer(selectedLayer);
             TriangleFill fill;
             if (EditingMask) fill = document.BeginMaskTriangleFill(selectedLayer, brush.opacity, reveal: MaskFillReveals(layer));
             else
             {
-                if (layer.IsGroup) throw new InvalidOperationException("A group has no pixels. Select a layer inside it to fill, or fill the group's mask.");
-                if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException("Fill paints pixels: select a paint layer, or edit the layer's mask.");
+                if (layer.IsGroup) throw new InvalidOperationException(L.Tr("A group has no pixels."));
+                if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException(L.Tr("Only a paint layer or a mask can be filled."));
                 document.EnsurePixelsEditable(selectedLayer, polyFillErase); // ロックで断るなら、チャンネルを有効にする前に（何も残さない）
                 if (!layer.IsChannelEnabled(channel)) document.SetChannelEnabled(selectedLayer, channel, true);
                 if (!polyFillErase) RememberColor();
@@ -251,7 +251,5 @@ namespace Yozolab.YoluPainter.Editor
 
         string PolygonFillPaintLabel => EditingMask ? L.Tr("White (show)") : L.TrIn("polygon fill", "Paint");
         string PolygonFillEraseLabel => EditingMask ? L.Tr("Black (hide)") : L.TrIn("polygon fill", "Erase");
-        string PolygonFillHint => EditingMask ? L.Tr("Mask: white shows, black hides (X swaps). Click or drag; one undo when you let go.")
-            : L.Tr("Click or drag over the model or its UVs; one undo when you let go.");
     }
 }

@@ -455,7 +455,7 @@ namespace Yozolab.YoluPainter.Core
             long working = WorkingBytes(s.Chain, count, rect.W, rect.H, document.Width, document.Height, TileSize);
             if (working > document.FilterWorkingBudgetBytes)
                 throw new InvalidOperationException("Evaluating these filters over " + rect.W + " × " + rect.H + " pixels needs about " + (working >> 20) + " MiB of working memory, more than the filter budget ("
-                    + (document.FilterWorkingBudgetBytes >> 20) + " MiB). Nothing was evaluated; use a smaller radius or raise PaintDocument.FilterWorkingBudgetBytes.");
+                    + (document.FilterWorkingBudgetBytes >> 20) + " MiB). Nothing was evaluated.");
             var after = new int[count + 1];
             for (int k = count - 1; k >= 0; k--) after[k] = after[k + 1] + s.Chain[k].Settings.HaloPixels;
             var cur = Grow(rect, after[0]);

@@ -30,6 +30,7 @@ namespace Yozolab.YoluPainter.Tests
             if (!Application.isBatchMode) Assert.Ignore("Offscreen drawing is checked on the batch-gl daemon (the GUI-mode editor draws the window itself).");
             if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null) Assert.Ignore("No graphics device (-nographics).");
             var w = ScriptableObject.CreateInstance<TexturePaintWindow>();
+            var drawnTexts = new HashSet<string>(); PaintGui.TextDrawn = t => drawnTexts.Add(t);
             try
             {
                 w.Preview.LoadDemoMesh();
@@ -49,7 +50,7 @@ namespace Yozolab.YoluPainter.Tests
                                 string name = scenario + "-" + language + "-" + tool + "-" + width + "x" + height;
                                 PaintGui.ShortenedTexts = 0;
                                 Render(w, width, height, name);
-                                Assert.That(PaintGui.ShortenedTexts, Is.Zero, name + ": a UI label did not fit its box and was cut with …");
+                                Assert.That(PaintGui.ShortenedTexts, Is.Zero, name + ": a UI label did not fit its box and was cut with …: " + PaintGui.ShortenedTextsSummary);
                                 drawn++;
                             }
                         // プロパティの欄のほかのタブ（ブラシ｜マテリアル、マスクに描くときはマスク）を、既定のドックの欄の幅（300 − 枠 1 − スクロールの印 8）で
@@ -62,7 +63,7 @@ namespace Yozolab.YoluPainter.Tests
                                 string name = scenario + "-" + language + "-" + tool + "-tab-" + tab;
                                 PaintGui.ShortenedTexts = 0;
                                 RenderProperties(w, 291, name);
-                                Assert.That(PaintGui.ShortenedTexts, Is.Zero, name + ": a UI label did not fit its box and was cut with …");
+                                Assert.That(PaintGui.ShortenedTexts, Is.Zero, name + ": a UI label did not fit its box and was cut with …: " + PaintGui.ShortenedTextsSummary);
                                 tabs++;
                             }
                             if (w.PropertyTabsNow().Count > 0) w.SetPropertyTab(context, w.PropertyTabsNow()[0]);
@@ -74,15 +75,18 @@ namespace Yozolab.YoluPainter.Tests
                             PaintGui.ShortenedTexts = 0;
                             var size = w.OptionPopupSize(kind);
                             OffscreenGui.RenderToPng((int)size.x, 900, () => w.DrawOptionPopup(kind, new Rect(0, 0, size.x, 900)), Path.Combine(Folder, name + ".png"), PaintTheme.PanelBg);
-                            Assert.That(PaintGui.ShortenedTexts, Is.Zero, name + ": a UI label did not fit the popup and was cut with …");
+                            Assert.That(PaintGui.ShortenedTexts, Is.Zero, name + ": a UI label did not fit the popup and was cut with …: " + PaintGui.ShortenedTextsSummary);
                             Assert.That(w.OptionPopupSize(kind).y, Is.LessThan(900), name + ": the popup's content fits the window size it asks for");
                         }
                     }
                 }
                 Assert.That(drawn, Is.EqualTo(2 * 2 * (2 * Enum.GetValues(typeof(TexturePaintWindow.PaintTool)).Length + 1)));
                 Assert.That(tabs, Is.GreaterThan(0), "the painting tools have tabs");
+                // 描いた文字（英語・日本語）に、操作の説明文（クリックして〜、ドラッグで〜）が無い（説明はツールチップと ヘルプ ▸ キーボードショートカット）
+                Assert.That(drawnTexts.Count, Is.GreaterThan(100), "the drawn texts were collected");
+                Assert.That(drawnTexts.Where(t => NoInstructionTextTests.LooksLikeInstruction(t)), Is.Empty, "a drawn text reads like operating instructions");
             }
-            finally { Object.DestroyImmediate(w); }
+            finally { PaintGui.TextDrawn = null; Object.DestroyImmediate(w); }
         }
 
         /// <summary>busy: データのチャンネル（値のスライダー）、見つからない先端、紙の質感、画像の先端のデュアルブラシ、選択範囲、

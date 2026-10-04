@@ -86,7 +86,7 @@ namespace Yozolab.YoluPainter.Core
         {
             EnsureNoStroke();
             if (channels == null) throw new ArgumentNullException(nameof(channels));
-            if (channels.Count == 0) throw new ArgumentException("Choose at least one channel to paint.", nameof(channels));
+            if (channels.Count == 0) throw new ArgumentException("No channel is chosen to paint.", nameof(channels));
             var material = new List<ChannelPaint>(); var seen = new HashSet<PaintChannel>();
             foreach (var m in channels)
             {
@@ -95,7 +95,7 @@ namespace Yozolab.YoluPainter.Core
                 material.Add(m);
             }
             var layer = GetLayer(layerId);
-            if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException("Only paint layers have pixels to fill. Use the layer's mask for fill, adjustment and group layers.");
+            if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException("Only paint layers have pixels to fill.");
             RefuseLockedPixels(layer, erase); RefusePathLayer(layer);
             var effective = EffectiveRegion(region);
             var coords = new List<TileCoord>(effective != null ? effective.Tiles : EnumerateCanvasTiles());

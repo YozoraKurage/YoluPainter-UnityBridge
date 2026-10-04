@@ -25,8 +25,7 @@ namespace Yozolab.YoluPainter.Editor
         void OnGUI()
         {
             if (entries == null) Refresh();
-            EditorGUILayout.LabelField(L.Tr("Recovery checkpoints"), EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox(L.Tr("Closed windows with unsaved work are kept here. Recover opens the last checkpoint; save it as a .ylp. Discard removes that window's checkpoints and cannot be undone."), MessageType.Info);
+            EditorGUILayout.LabelField(new GUIContent(L.Tr("Recovery checkpoints"), L.Tr("Closed windows with unsaved work are kept here. Recover opens the last checkpoint; save it as a .ylp. Discard removes that window's checkpoints and cannot be undone.")), EditorStyles.boldLabel);
             if (storageNotice != null) EditorGUILayout.HelpBox(storageNotice, MessageType.Warning);
             if (problem != null) EditorGUILayout.HelpBox(problem, MessageType.Error);
             if (GUILayout.Button(L.Tr("Refresh checkpoints"))) Refresh();

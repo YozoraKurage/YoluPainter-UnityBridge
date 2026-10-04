@@ -97,9 +97,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void DrawLayerDetails(UiRows rows, PaintLayer active)
         {
-            if (active.IsGroup)
-                NoteRow(rows, active.BlendModeIn(channel) == LayerBlendMode.PassThrough ? L.Tr("Pass through: the contents blend with the layers below as if they were not grouped.") : L.Tr("Isolated: the contents are composited together first, then blended."));
-            else
+            if (!active.IsGroup)
             {
                 bool on = active.IsChannelEnabled(channel);
                 bool next = PaintGui.FitToggle(Spot("layer.channel", rows.Row()), L.Tr("Paint this channel") + " (" + L.Tr(channel.ToString()) + ")", on, L.Tr("Off: this layer is left out of the selected channel (what it holds there is kept)."));
@@ -165,8 +163,6 @@ namespace Yozolab.YoluPainter.Editor
                 TryAction(() => document.SetFillValue(active.Id, channel, GetBrush().Color));
             DrawFillImage(rows, active); // チャンネルの画像（TexturePaintWindow.FillImages.cs）
             DrawFillGradient(rows, active);
-            NoteRow(rows, active.IsDecal ? L.Tr("A decal shows only inside its box on the model (see Projection), in the shape of its image. Paint its mask to hide parts of it.")
-                : L.Tr("A fill covers the whole canvas. Paint its mask to choose where it shows."));
         }
 
         /// <summary>色の選択（別のウィンドウ）から。選んでいるあいだに文書やレイヤーが替わっていたら何もしない。ドラッグは 1 回の Undo に
@@ -202,12 +198,11 @@ namespace Yozolab.YoluPainter.Editor
                         if (hue != a.Hue || sat != a.Saturation || light != a.Lightness) next = AdjustmentSettings.HueSaturation(hue, sat, light);
                         break;
                     }
-                    default: NoteRow(rows, L.Tr("Inverts the colour of everything below.")); break;
+                    default: NoteRow(rows, L.Tr("No settings.")); break;
                 }
             }
             catch (ArgumentException ex) { message = ex.Message; next = a; }
             if (!next.Equals(a)) TryAction(() => document.SetAdjustment(active.Id, next, coalesce: true));
-            NoteRow(rows, L.Tr("Applies to the layers below."));
             if (!a.AppliesTo(channel)) NoteRow(rows, L.Tr("{0} does not apply to the {1} channel.", L.Tr(AdjustmentName(a.Type)), L.Tr(channel.ToString())), NoteKind.Info);
         }
 
@@ -253,7 +248,6 @@ namespace Yozolab.YoluPainter.Editor
             if (PaintGui.IconButton(Spot("mask.delete", new Rect(row.xMax - 24, row.y, 24, row.height)), "delete", L.Tr("Delete Layer Mask"), false, GUI.enabled, 16))
                 TryAction(() => { document.RemoveLayerMask(active.Id); editMask = false; });
             if (active.Mask != null) DrawAnchorRow(rows, active, AnchorPlacement.Mask);
-            NoteRow(rows, L.Tr("One mask for all channels."));
         }
     }
 }

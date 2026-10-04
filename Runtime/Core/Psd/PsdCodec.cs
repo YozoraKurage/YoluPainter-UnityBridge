@@ -1290,7 +1290,7 @@ namespace Yozolab.YoluPainter.Core.Psd
                 if (layer.IsFill)
                 {
                     if (layer.IsGroup || layer.IsAdjustment) throw new ArgumentException("A fill layer cannot also be a group or an adjustment layer.");
-                    if (layer.FillColor.Value.A != 255) throw new ArgumentException("A PSD solid colour fill is opaque; use the layer opacity for transparency.");
+                    if (layer.FillColor.Value.A != 255) throw new ArgumentException("A PSD solid colour fill is opaque.");
                     if (BlendKey(layer.BlendMode) == null) throw new ArgumentException("Blend mode " + layer.BlendMode + " has no PSD fill layer equivalent.");
                     continue;
                 }

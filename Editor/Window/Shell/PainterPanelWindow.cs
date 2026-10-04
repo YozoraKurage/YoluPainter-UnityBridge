@@ -189,7 +189,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             else
             {
-                PaintGui.Notice(rows, L.Tr("Several YoluPainter windows are open. Choose the one this panel belongs to."), "info", PaintTheme.TextDim);
+                PaintGui.Notice(rows, L.Tr("Several YoluPainter windows are open."), "info", PaintTheme.TextDim);
                 var painters = Painters();
                 for (int i = 0; i < painters.Count; i++)
                 {

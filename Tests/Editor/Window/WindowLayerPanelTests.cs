@@ -167,7 +167,7 @@ namespace Yozolab.YoluPainter.Tests
             try
             {
                 Assert.That(bake, Is.Not.Null, "Bake… opens the bake window");
-                Assert.That(window.MeshBakeRefusal(), Does.Contain("Load a model"));
+                Assert.That(window.MeshBakeRefusal(), Does.Contain("No model"));
                 Assert.That(window.MeshMaps.Count, Is.Zero); Assert.That(window.IsBakingMeshMaps, Is.False);
             }
             finally { if (bake != null) bake.Close(); }

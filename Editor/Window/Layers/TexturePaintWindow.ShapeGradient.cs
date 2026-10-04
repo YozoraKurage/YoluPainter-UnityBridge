@@ -62,21 +62,16 @@ namespace Yozolab.YoluPainter.Editor
             bool editing = ShapeEditFilter == e.Id;
             var row = Indent(rows.Row(24), indent); float modes = 2 * 26 + 4;
             if (PaintGui.Button(Spot("generator.shape.edit", new Rect(row.x, row.y, row.width - modes, row.height)), L.Tr("Edit in 3D View"), editing, GUI.enabled && stroke == null,
-                    L.Tr("Show the shape in the 3D view with handles: drag the arrows to move it, the rings to turn it and the squares on its faces to size it (Shift: both faces). The model shows the value faintly."), "view_in_ar"))
+                    L.Tr("Show the shape in the 3D view with handles"), "view_in_ar"))
                 ShapeEditFilter = editing ? Guid.Empty : e.Id;
             if (PaintGui.IconButton(Spot("generator.shape.move", new Rect(row.xMax - modes + 4, row.y, 26, row.height)), "transform", L.Tr("Handles: move (arrows along the model's axes, the square in the view's plane)"), shapeGizmoMode == ShapeGizmoMode.Move, GUI.enabled && editing, 16))
                 ShapeGizmoMode = ShapeGizmoMode.Move;
             if (PaintGui.IconButton(Spot("generator.shape.rotate", new Rect(row.xMax - 26, row.y, 26, row.height)), "3d_rotation", L.Tr("Handles: rotate (rings about the model's axes; Ctrl uses Unity's Scene rotation increment)"), shapeGizmoMode == ShapeGizmoMode.Rotate, GUI.enabled && editing, 16))
                 ShapeGizmoMode = ShapeGizmoMode.Rotate;
-            if (editing && surfaceRect.width <= 0) NoteRow(rows, L.Tr("Show the 3D view (View ▸ 3D or 2D | 3D) to see and drag the shape."), NoteKind.Info, indent);
-            else if (editing && (preview == null || !preview.HasModel)) NoteRow(rows, L.Tr("Load a model (or the demo cube) to see the shape on it."), NoteKind.Info, indent);
-
-            NoteRow(rows, L.Tr("Ctrl: snap movement, size and rotation using Unity's Scene snap settings. Shift: resize both faces. Handles are drawn in front of the model."), NoteKind.Plain, indent);
-
             // 置き場（モデルのルートの空間、シーンの単位）
             PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.Tr("Placement"), L.Tr("In the model root's space: its position and rotation, in scene units (the root's scale is not applied). The same values as the handles in the 3D view."));
             var c = VectorRow(rows, "generator.shape.center", L.Tr("Center"), v.CenterX, v.CenterY, v.CenterZ, .01f, "0.###", -ShapeVolume.MaxCoordinate, ShapeVolume.MaxCoordinate,
-                L.Tr("Where the shape's centre is, from the model root (scene units). Drag to change (Shift: ×10), click to type."), indent);
+                L.Tr("The shape's centre, from the model root (scene units)"), indent);
             v = v.WithCenter(c[0], c[1], c[2]);
             var r = VectorRow(rows, "generator.shape.rotation", L.TrIn("shape gradient", "Rotation"), v.RotationX, v.RotationY, v.RotationZ, 1, "0.#", -ShapeVolume.MaxAngle, ShapeVolume.MaxAngle,
                 L.Tr("Euler angles in degrees, as Unity's Transform shows them (turned about Z, then X, then Y)."), indent);
@@ -112,7 +107,7 @@ namespace Yozolab.YoluPainter.Editor
             // シーンの物から写す（読むだけ）
             PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.Tr("From the Scene"), L.Tr("Copies a scene object's shape relative to the model root once: its BoxCollider or SphereCollider, or else its position, rotation and scale. The scene is only read, never changed."));
             var source = shapeSceneSourceFilter == e.Id.ToString() ? shapeSceneSource : null;
-            if (PaintGui.ObjectBox(Spot("generator.shape.source", Indent(rows.Row(), indent)), ref source, ShapeSourcePickerId, true, L.Tr("None (drop an object here)"), "view_in_ar",
+            if (PaintGui.ObjectBox(Spot("generator.shape.source", Indent(rows.Row(), indent)), ref source, ShapeSourcePickerId, true, L.Tr("None"), "view_in_ar",
                     L.Tr("Pick a scene object to copy its shape from (read only)"), L.Tr("Forget the object (the copied shape stays)"), "", GUI.enabled && stroke == null))
             {
                 shapeSceneSource = source; shapeSceneSourceFilter = source != null ? e.Id.ToString() : "";
@@ -156,10 +151,10 @@ namespace Yozolab.YoluPainter.Editor
         /// 読んだ）、物がシーンに無い。</summary>
         internal static string ShapeSceneRefusal(GameObject modelRoot, GameObject source)
         {
-            if (modelRoot == null) return L.Tr("The shape is placed relative to the model's root, but no model from a scene is loaded (the demo cube has no root in the scene). Load the model from the scene first.");
+            if (modelRoot == null) return L.Tr("No model from a scene is loaded.");
             if (EditorUtility.IsPersistent(modelRoot) || !modelRoot.scene.IsValid() || !modelRoot.scene.isLoaded)
-                return L.Tr("The model was loaded from a Prefab asset, not from a scene, so a scene object cannot be placed relative to its root. Put the model in a scene and load that object.");
-            if (source == null) return L.Tr("Choose a scene object to copy the shape from.");
+                return L.Tr("The model is a Prefab asset, not a scene object.");
+            if (source == null) return L.Tr("No scene object.");
             if (EditorUtility.IsPersistent(source) || !source.scene.IsValid() || !source.scene.isLoaded) return L.Tr("'{0}' is not an object in an open scene.", source.name);
             return null;
         }
@@ -200,9 +195,9 @@ namespace Yozolab.YoluPainter.Editor
             bool done = false;
             TryAction(() =>
             {
-                if (stroke != null) { message = L.Tr("Finish the stroke first."); return; }
+                if (stroke != null) { message = L.Tr("A stroke is in progress."); return; }
                 var effect = document.FindFilter(selectedLayer, filterId, out _);
-                if (effect == null || !effect.Settings.IsGenerator || effect.Settings.Generator.Type != GeneratorType.ShapeGradient) { message = L.Tr("Select the layer with the shape gradient first."); return; }
+                if (effect == null || !effect.Settings.IsGenerator || effect.Settings.Generator.Type != GeneratorType.ShapeGradient) { message = L.Tr("The selected layer has no shape gradient."); return; }
                 string why = ShapeSceneRefusal(model, source);
                 if (why != null) { message = why; return; }
                 var g = effect.Settings.Generator;
@@ -212,7 +207,7 @@ namespace Yozolab.YoluPainter.Editor
                 document.EndCoalescing(); // 前の欄のドラッグにまとめない
                 ApplyFilterSettings(filterId, effect.Settings.WithGenerator(g.WithVolume(volume)));
                 document.EndCoalescing();
-                message = L.Tr("Copied the shape of '{0}' ({1}) relative to the model root. The scene was not changed.", source.name, what);
+                message = L.Tr("Copied the shape of '{0}' ({1}).", source.name, what);
                 done = true;
             });
             return done;

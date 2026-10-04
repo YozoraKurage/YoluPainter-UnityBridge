@@ -24,8 +24,5 @@ msgstr "マテリアルは変えていません。"
 
 # ── 書き出しのパディング（Project/TexturePaintWindow.ExportPadding.cs） ──
 
-msgid "No export padding: load the model in the 3D view so its UVs are known."
-msgstr "書き出しのパディングをしていません。UV が分かるように、3D ビューにモデルを読み込んでください。"
-
 msgid "No export padding for {0}: no UV triangle of its material slot."
 msgstr "{0} は書き出しのパディングをしていません。そのマテリアルのスロットに UV の三角形がありません。"

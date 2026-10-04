@@ -31,12 +31,12 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>ブラシのストローク（2D キャンバスと 3D ビュー）: 押して始め、ドラッグで足し、離して確定する。</summary>
         void HandleBrushInput(Event e)
         {
-            if(!IsBrushTool&&e.type==EventType.MouseDown&&surfaceRect.Contains(e.mousePosition)&&e.button==0&&!e.alt){message=tool+" works on the 2D canvas. Use the brush, the polygon fill, a selection tool or the bucket on the 3D view.";e.Use();return;}
+            if(!IsBrushTool&&e.type==EventType.MouseDown&&surfaceRect.Contains(e.mousePosition)&&e.button==0&&!e.alt){message=L.Tr("{0} works on the 2D canvas.",tool);e.Use();return;}
             if(e.type==EventType.MouseDown && e.button==0 && !e.alt && (canvasRect.Contains(e.mousePosition)||surfaceRect.Contains(e.mousePosition)))
             {
                 surfaceStroke=surfaceRect.Contains(e.mousePosition);
                 if (!PrepareBrushEffectStroke(e.mousePosition, surfaceStroke)) { e.Use(); Repaint(); return; }
-                if(surfaceStroke && !preview.CanPaint){message="This preview snapshot is not safe to paint. See its load diagnostics.";return;}
+                if(surfaceStroke && !preview.CanPaint){message=L.Tr("This preview snapshot is not safe to paint.");return;}
                 // ほかのテクスチャセットの面では描き始めない（その面をダブルクリックするか、テクスチャセットのパネルで切り替える）
                 if(surfaceStroke && preview.TryPick(surfaceRect,e.mousePosition,out var startHit) && !PaintsSlot(startHit.MaterialSlot)){OtherSlotPressed(startHit.MaterialSlot);e.Use();Repaint();return;}
                 TryAction(()=>
@@ -46,7 +46,7 @@ namespace Yozolab.YoluPainter.Editor
                     if(EditingMask) stroke=document.BeginMaskStroke(selectedLayer,StrokeBrush(surfaceStroke));
                     else
                     {
-                        if(document.GetLayer(selectedLayer).IsGroup) throw new InvalidOperationException("A group has no pixels. Select a layer inside it to paint, or paint the group's mask.");
+                        if(document.GetLayer(selectedLayer).IsGroup) throw new InvalidOperationException(L.Tr("A group has no pixels."));
                         // 今のチャンネル 1 つ、またはマテリアルの組（Tools/TexturePaintWindow.MaterialBrush.cs）。ロックで断るときは何も変えず、層で無効の
                         // チャンネルはストロークの中で有効にする（ストロークと同じ 1 回の Undo。取消で戻る）
                         stroke=document.BeginMaterialStroke(selectedLayer,StrokeChannels(),StrokeBrush(surfaceStroke));
@@ -112,7 +112,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             float total=lengths[pieces];
             int steps=Mathf.Max(1,Mathf.CeilToInt(total/spacing));
-            if(steps>SurfaceDabsPerEvent)throw new InvalidOperationException("Surface input exceeded per-event budget; stroke canceled without partial edits. Reduce brush size or move more slowly.");
+            if(steps>SurfaceDabsPerEvent)throw new InvalidOperationException("Surface input exceeded per-event budget; stroke canceled without partial edits.");
             float startPressure=previousPressure;
             for(int i=1,j=1;i<=steps;i++)
             {

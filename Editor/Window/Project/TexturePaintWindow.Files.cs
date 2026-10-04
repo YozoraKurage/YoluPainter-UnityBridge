@@ -220,7 +220,7 @@ namespace Yozolab.YoluPainter.Editor
                 FinishStroke(false);CancelToolDrag();
                 ReplaceProject(new[]{set},set);BindDocument();
                 ForgetProjectFile();importedPsdPath=Path.GetFullPath(path);channel=PaintChannel.Color;
-                message="Imported "+Path.GetFileName(path)+". Save keeps it as a .ylp (with the original PSD inside); Export PSD writes a PSD. The PSD itself is never rewritten.";
+                message=L.Tr("Imported {0}; the PSD itself is never rewritten.",Path.GetFileName(path));
                 // 編集できる取り込みでも、書き出す PSD に含まれない情報や合成結果の差などの注意があれば一覧で見せる（黙って捨てない）
                 var notes=result.Diagnostics.Select(d=>d.ToString()).ToList();
                 if(notes.Count>0)Dialogs.Inform("PSD imported with notes",String.Join("\n",notes.Take(40))+(notes.Count>40?"\n… and "+(notes.Count-40)+" more.":"")+"\n\nThe original PSD bytes are kept inside the .ylp when you save.");
@@ -259,7 +259,7 @@ namespace Yozolab.YoluPainter.Editor
             var planned=textureSets.SelectMany(set=>YlpContent.UsedChannels(set.Document).Select(c=>(set,channel:c,name:ExportImageName(stem,set,c)))).ToList();
             if(planned.Count==0){message="Nothing to export: no layer uses any channel.";return;}
             var clash=planned.GroupBy(t=>t.name,StringComparer.OrdinalIgnoreCase).FirstOrDefault(g=>g.Count()>1);
-            if(clash!=null){message=L.Tr("Nothing was exported: texture sets {0} would write the same file {1}. Rename one in File ▸ Project Configuration.",String.Join(", ",clash.Select(t=>t.set.Name).Distinct()),clash.Key);return;}
+            if(clash!=null){message=L.Tr("Nothing was exported: texture sets {0} would write the same file {1}.",String.Join(", ",clash.Select(t=>t.set.Name).Distinct()),clash.Key);return;}
             if(!ConfirmInactiveGenerators(planned.Select(t=>t.set).Distinct().Select(set=>(set.Name,set.Document))))return;
             string folder=Dialogs.OpenFolder("Export images into folder",projectPath!=null?Path.GetDirectoryName(projectPath):Application.dataPath);if(String.IsNullOrEmpty(folder))return;
             var targets=planned.Select(t=>(t.set,t.channel,path:Path.Combine(folder,t.name))).ToList();

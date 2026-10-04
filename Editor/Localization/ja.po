@@ -312,9 +312,6 @@ msgstr "筆圧で直径を変える"
 msgid "Pressure controls opacity"
 msgstr "筆圧で不透明度を変える"
 
-msgid "Painting the layer mask (paint hides, erase reveals)"
-msgstr "レイヤーマスクを描画中（描くと隠れ、消すと現れる）"
-
 msgid "Tolerance"
 msgstr "許容値"
 
@@ -357,12 +354,6 @@ msgstr "選択を解除（Ctrl+D）"
 msgid "Inverse (Ctrl+Shift+I)"
 msgstr "選択範囲を反転（Ctrl+Shift+I）"
 
-msgid "Shift adds · Ctrl subtracts · Shift+Ctrl intersects"
-msgstr "Shift で追加 · Ctrl で削除 · Shift+Ctrl で共通部分"
-
-msgid "Drag to move, corners to scale, outside to rotate. Arrow keys nudge."
-msgstr "ドラッグで移動、角で拡大・縮小、外側で回転。矢印キーで少しずつ動かす。"
-
 msgid "Resampling"
 msgstr "補間方法"
 
@@ -372,14 +363,8 @@ msgstr "バイリニア"
 msgid "Nearest"
 msgstr "ニアレストネイバー"
 
-msgid "Click the 2D canvas or the model to add points; drag a point to move it; Delete removes the last one."
-msgstr "2D キャンバスかモデルをクリックして点を追加。点はドラッグで移動、Delete で最後の点を削除。"
-
 msgid "Pick from the composite instead of the selected layer"
 msgstr "選んだレイヤーではなく、合成結果から拾う"
-
-msgid "Click the 2D canvas to pick the brush color."
-msgstr "2D キャンバスをクリックしてブラシの色を拾う。"
 
 # ---- view ----
 
@@ -398,13 +383,6 @@ msgstr "レイヤーマスク"
 msgid "No model"
 msgstr "モデルなし"
 
-msgid ""
-"Choose a model in Texture Set, or 3D ▸ Demo Cube.\n"
-"The original prefab is never instantiated."
-msgstr ""
-"テクスチャセットでモデルを選ぶか、3D ▸ デモのキューブ を使ってください。\n"
-"元のプレハブはインスタンス化しません。"
-
 msgid "Untitled"
 msgstr "名称未設定"
 
@@ -418,9 +396,6 @@ msgstr "モデル"
 
 msgid "Demo cube"
 msgstr "デモのキューブ"
-
-msgid "None (drop a model here)"
-msgstr "なし（ここにモデルをドロップ）"
 
 msgid "Choose a model…"
 msgstr "モデルを選ぶ…"
@@ -449,12 +424,6 @@ msgstr "ノーマル"
 msgid "Emission"
 msgstr "エミッション"
 
-msgid "Normal channel: layers composite as unit normals (Overlay adds detail, other modes replace)."
-msgstr "ノーマルのチャンネル: レイヤーは単位ベクトルとして合成します（オーバーレイは細部を足し、ほかのモードは置き換え）。"
-
-msgid "Painting only the selected channel; the other channels stay as they are."
-msgstr "選んだチャンネルだけを描きます。ほかのチャンネルはそのままです。"
-
 # ---- layers ----
 
 msgid "Add Filter"
@@ -474,12 +443,6 @@ msgstr "表示する"
 
 msgid "Paint this channel"
 msgstr "このチャンネルを描く"
-
-msgid "Pass through: the contents blend with the layers below as if they were not grouped."
-msgstr "通過: 中身はグループが無いかのように下のレイヤーと合成されます。"
-
-msgid "Isolated: the contents are composited together first, then blended."
-msgstr "分離: 中身を先にまとめて合成してから、下のレイヤーと合成します。"
 
 # ---- brush details ----
 
@@ -632,9 +595,6 @@ msgstr "アイコンのフォルダを開く"
 
 msgid "Choose a tool icon (PNG, up to 256 px)"
 msgstr "ツールのアイコンを選ぶ（PNG、256 px まで）"
-
-msgid "The tool icon was changed. Right-click the tool to reset it."
-msgstr "ツールのアイコンを変更しました。ツールを右クリックすると元に戻せます。"
 
 msgid "The tool icon is back to the bundled one."
 msgstr "ツールのアイコンを元に戻しました。"

@@ -48,7 +48,7 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>選びを変えられないとき（ストロークの最中）の理由。変えられれば null。</summary>
-        string MaterialChoiceRefusal() => stroke != null ? L.Tr("Finish the stroke first.") : null;
+        string MaterialChoiceRefusal() => stroke != null ? L.Tr("A stroke is in progress.") : null;
 
         /// <summary>セットを元のマテリアルで見せる（手で決めた流し込み先は残す）。</summary>
         internal bool UseOriginalMaterial(TextureSet set = null)
@@ -74,14 +74,14 @@ namespace Yozolab.YoluPainter.Editor
             choice.source = PreviewMaterialSource.Material; choice.materialGuid = guid; choice.materialFileId = fileId; choice.shaderName = "";
             resolvedChoices[SetKey(set)] = material;
             DropMadeMaterial(set);
-            MaterialChoiceChanged(L.Tr("3D view: {0} is shown with the material {1} (a preview copy; the material is not changed).", set.Name, material.name));
+            MaterialChoiceChanged(L.Tr("3D view: {0} shows the material {1}.", set.Name, material.name));
             return true;
         }
 
         /// <summary>プロジェクトのマテリアルに使えない理由（使えれば null）。</summary>
         internal static string PreviewMaterialRefusal(Object candidate)
         {
-            if (candidate == null) return L.Tr("Choose a material.");
+            if (candidate == null) return L.Tr("No material.");
             if (!(candidate is Material material)) return L.Tr("{0} is a {1}, not a material.", candidate.name, candidate.GetType().Name);
             if (!EditorUtility.IsPersistent(material) || !AssetDatabase.TryGetGUIDAndLocalFileIdentifier(material, out string guid, out long _) || string.IsNullOrEmpty(guid))
                 return L.Tr("{0} is not a material asset in the project (only an asset can be found again later).", material.name);
@@ -97,14 +97,14 @@ namespace Yozolab.YoluPainter.Editor
             var choice = EnsureChoice(set);
             choice.source = PreviewMaterialSource.Shader; choice.shaderName = shader.name; choice.materialGuid = ""; choice.materialFileId = 0;
             MadeMaterialFor(set, shader);
-            MaterialChoiceChanged(L.Tr("3D view: {0} is shown with a new material of the shader {1} (made for the preview only).", set.Name, shader.name));
+            MaterialChoiceChanged(L.Tr("3D view: {0} shows a new material of the shader {1}.", set.Name, shader.name));
             return true;
         }
 
         /// <summary>シェーダーに使えない理由（使えれば null）: 無い・壊れている・この GPU で使えない・隠しのもの。</summary>
         internal static string PreviewShaderRefusal(Shader shader)
         {
-            if (shader == null) return L.Tr("Choose a shader.");
+            if (shader == null) return L.Tr("No shader.");
             if (shader.name.StartsWith("Hidden/", StringComparison.Ordinal)) return L.Tr("{0} is a hidden shader, not one for materials.", shader.name);
             return PreviewMaterialBindings.ShaderProblem(shader);
         }

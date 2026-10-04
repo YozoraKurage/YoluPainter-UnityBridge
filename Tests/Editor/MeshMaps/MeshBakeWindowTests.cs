@@ -219,9 +219,9 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void TheWindowRefusesForTheSameReasonsAsBakeMeshMaps()
         {
             // モデルが無い
-            Assert.That(owner.MeshBakeRefusal(), Does.Contain("Load a model"));
-            Assert.That(owner.StartMeshBake(), Does.Contain("Load a model")); Assert.That(owner.IsBakingMeshMaps, Is.False);
-            Assert.That(owner.BakeMeshMaps(), Is.Null); Assert.That(owner.StatusMessage, Does.Contain("Load a model"));
+            Assert.That(owner.MeshBakeRefusal(), Does.Contain("No model"));
+            Assert.That(owner.StartMeshBake(), Does.Contain("No model")); Assert.That(owner.IsBakingMeshMaps, Is.False);
+            Assert.That(owner.BakeMeshMaps(), Is.Null); Assert.That(owner.StatusMessage, Does.Contain("No model"));
             owner.Preview.LoadDemoMesh();
             Assert.That(owner.MeshBakeRefusal(), Is.Null);
             // ポーズの変更中（スライダーを離すまでスナップショットは古い）
@@ -231,7 +231,7 @@ namespace Yozolab.YoluPainter.Tests
             pending.SetValue(owner, false);
             // 焼くマップが無い（保存したマップから戻した設定などで）
             owner.MeshBakeSettings.Maps = new MeshMapKind[0];
-            Assert.That(owner.StartMeshBake(), Does.Contain("at least one map"));
+            Assert.That(owner.StartMeshBake(), Does.Contain("No map is checked"));
             owner.MeshBakeSettings.Maps = new[] { MeshMapKind.AmbientOcclusion }; owner.MeshBakeSettings.AoSamples = 512; owner.MeshBakeUseGpu = false;
             // ベイク中はもう 1 つ始めない（窓からも、呼んだ所で待つベイクからも）
             Assert.That(owner.StartMeshBake(), Is.Null);

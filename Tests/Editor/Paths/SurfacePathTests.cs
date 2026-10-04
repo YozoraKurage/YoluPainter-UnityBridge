@@ -124,7 +124,7 @@ namespace Yozolab.YoluPainter.Tests
             var path = new SurfacePath(Guid.NewGuid(), PaintChannel.Color, "0123456789abcdef", Brush(), new[] { new PathPoint(0, .2, .2) });
             Assert.That(() => SurfacePathRenderer.Render(d, g, path), Throws.InvalidOperationException.With.Message.Contains("another model"));
             var good = new SurfacePath(Guid.NewGuid(), PaintChannel.Roughness, SurfacePathRenderer.Fingerprint(g), Brush(), new[] { new PathPoint(0, .2, .2) });
-            Assert.That(() => d.SetPath(l.Id, good, SurfacePathRenderer.Render(d, g, good).Surface), Throws.InvalidOperationException.With.Message.Contains("Enable"));
+            Assert.That(() => d.SetPath(l.Id, good, SurfacePathRenderer.Render(d, g, good).Surface), Throws.InvalidOperationException.With.Message.Contains("not enabled"));
             var fill = d.AddFillLayer("F");
             var color = new SurfacePath(Guid.NewGuid(), PaintChannel.Color, SurfacePathRenderer.Fingerprint(g), Brush(), new[] { new PathPoint(0, .2, .2) });
             Assert.That(() => d.SetPath(fill.Id, color, SurfacePathRenderer.Render(d, g, color).Surface), Throws.InvalidOperationException);

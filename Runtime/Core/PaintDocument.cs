@@ -86,9 +86,9 @@ namespace Yozolab.YoluPainter.Core
         public SparseTileSurface GetChannel(PaintChannel channel)
         {
             ValidateChannel(channel);
-            if (Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers have no pixel surface. Change the fill value, or paint on the layer's mask.");
-            if (Kind == LayerKind.Adjustment) throw new InvalidOperationException("Adjustment layers have no pixel surface. Change the adjustment, or paint on the layer's mask.");
-            if (Kind == LayerKind.Group) throw new InvalidOperationException("Groups have no pixel surface. Paint on a layer inside the group, or on the group's mask.");
+            if (Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers have no pixel surface.");
+            if (Kind == LayerKind.Adjustment) throw new InvalidOperationException("Adjustment layers have no pixel surface.");
+            if (Kind == LayerKind.Group) throw new InvalidOperationException("Groups have no pixel surface.");
             SparseTileSurface surface;
             if (!channels.TryGetValue(channel, out surface))
             {
@@ -360,7 +360,7 @@ namespace Yozolab.YoluPainter.Core
             var layer = GetLayer(id);
             if (layer.Kind != LayerKind.Adjustment) throw new InvalidOperationException("Only adjustment layers have adjustment settings.");
             foreach (var channel in layer.EnabledChannels)
-                if (!settings.AppliesTo(channel)) throw new InvalidOperationException(settings.Type + " cannot be applied to the enabled " + channel + " channel. Disable it first.");
+                if (!settings.AppliesTo(channel)) throw new InvalidOperationException(settings.Type + " cannot be applied to the enabled " + channel + " channel.");
             var old = layer.Adjustment; if (old.Equals(settings)) return;
             RefuseLockedAttributes(layer);
             Execute(LayerScoped(layer, null, () => layer.Adjustment = settings, () => layer.Adjustment = old, 128), coalesce ? (object)("adjustment", id) : null);
@@ -434,7 +434,7 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>Puts sibling layers into a new group placed where the topmost of them was. They keep their order.</summary>
         public PaintLayer GroupLayers(IReadOnlyCollection<Guid> ids, string name = null, Guid? groupId = null)
         {
-            EnsureNoStroke(); if (ids == null || ids.Count == 0) throw new ArgumentException("Choose at least one layer.", nameof(ids));
+            EnsureNoStroke(); if (ids == null || ids.Count == 0) throw new ArgumentException("No layer is chosen.", nameof(ids));
             var members = new List<PaintLayer>(); foreach (var id in ids) { var l = GetLayer(id); if (!members.Contains(l)) members.Add(l); }
             Guid parentId = members[0].ParentId;
             foreach (var m in members) if (m.ParentId != parentId) throw new InvalidOperationException("Only layers in the same group can be grouped together.");
@@ -607,7 +607,7 @@ namespace Yozolab.YoluPainter.Core
                 throw new InvalidOperationException(layer.Adjustment.Type + " cannot be applied to the " + channel + " channel.");
             if (!enabled && layer.Path != null && layer.Path.Material == null)
                 foreach (var m in layer.Path.Paints) if (m.Channel == channel)
-                    throw new InvalidOperationException("Rasterize the path before disabling a channel it draws.");
+                    throw new InvalidOperationException("A channel drawn by a path cannot be disabled until the path is rasterized.");
             // 有効にして初めて面ができたときは、取り消しで面も外す（空の面が残ると保存のバイト列が変わる）。やり直しでは同じ面を付け直す
             // （作り直すと、その面に描いた後の履歴が、外れた面へ画素を戻してしまう）
             bool hadSurface = layer.TryGetChannel(channel, out _);
@@ -679,11 +679,11 @@ namespace Yozolab.YoluPainter.Core
         {
             EnsureNoStroke(); RefuseInBatch("A stroke"); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
             var layer = GetLayer(layerId);
-            if (layer.Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers are generated from their values and cannot be painted. Paint on the layer's mask, or add a paint layer.");
+            if (layer.Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers are generated from their values and cannot be painted.");
             RefuseLockedPixels(layer, settings.Erase);
             RefusePathLayer(layer);
             var surface = layer.GetChannel(channel);
-            if (!layer.IsChannelEnabled(channel)) throw new InvalidOperationException("Enable the target channel before painting.");
+            if (!layer.IsChannelEnabled(channel)) throw new InvalidOperationException("The target channel is not enabled.");
             activeStroke = new BrushStroke(this, surface, settings.ForChannel(channel), KeepsAlpha(layer)); return activeStroke;
         }
         public byte[] Composite(PaintChannel channel) { return CpuCompositor.Composite(this, channel); }
@@ -704,7 +704,7 @@ namespace Yozolab.YoluPainter.Core
         internal void EnsureNoStroke()
         {
             if (notifyingHistory) throw new InvalidOperationException("Do not mutate document state inside a history notification.");
-            if (activeStroke != null) throw new InvalidOperationException("Finish or cancel the active stroke first.");
+            if (activeStroke != null) throw new InvalidOperationException("A stroke is in progress.");
         }
         internal void BeforeExternalMutation() { EnsureNoStroke(); }
         internal void AfterExternalMutation() { ClearHistory(); Revision++; }
@@ -792,7 +792,7 @@ namespace Yozolab.YoluPainter.Core
         internal void EnsureStrokeBudget(long projectedBytes)
         {
             if (projectedBytes > activeStrokeBudgetBytes)
-                throw new InvalidOperationException("Active stroke rollback budget exceeded. Stroke cancelled safely; use shorter strokes or raise ActiveStrokeBudgetBytes.");
+                throw new InvalidOperationException("Active stroke rollback budget exceeded. Stroke cancelled safely.");
         }
         internal void FinishStroke(BrushStroke stroke, IHistoryCommand command)
         {

@@ -157,8 +157,8 @@ namespace Yozolab.YoluPainter.Core
         {
             EnsureNoStroke(); PaintLayer.ValidateChannel(channel);
             var layer = GetLayer(layerId);
-            if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException("Only paint layers have pixels to fill. Use the layer's mask for fill, adjustment and group layers.");
-            if (!layer.IsChannelEnabled(channel)) throw new InvalidOperationException("Enable the target channel before filling.");
+            if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException("Only paint layers have pixels to fill.");
+            if (!layer.IsChannelEnabled(channel)) throw new InvalidOperationException("The target channel is not enabled.");
             RefuseLockedPixels(layer, erase);
             RefusePathLayer(layer);
             keepAlpha = KeepsAlpha(layer);

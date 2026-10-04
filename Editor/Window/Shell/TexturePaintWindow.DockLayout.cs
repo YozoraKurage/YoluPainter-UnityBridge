@@ -137,28 +137,46 @@ namespace Yozolab.YoluPainter.Editor
 
         // ───────── 見出しとタブ ─────────
 
-        /// <summary>見出しの中のタブの矩形。1 つだけのまとまりは見出し全体（列では左の畳む印を除く）。収まらなければ幅を比で縮める。</summary>
+        /// <summary>タブの幅（名前を出す幅の下限の目安。これより狭いタブはアイコンだけ）。</summary>
+        const float TabIconOnlyWidth = 28;
+
+        /// <summary>見出しの中のタブの矩形。1 つだけのまとまりは見出し全体（列では左の畳む印を除く）。収まらなければ、見えているタブの名前を先に取り、
+        /// ほかはアイコンだけ（名前はツールチップ）にする。余りがあれば、左から名前の全部が入るタブを広げる。名前を … で詰めたタブは作らない。</summary>
         Rect[] TabRects(Rect head, DockGroup g)
         {
             float x = head.x + (g.Floating ? 4 : 22), available = head.xMax - 4 - x;
             int n = g.panels.Count;
             if (n == 1) return new[] { new Rect(x, head.y, available, head.height) };
-            var natural = g.panels.Select(id => 20 + PaintGui.TextWidth(L.Tr(Panel(id).Title), PaintTheme.Header) + 12).ToArray();
+            var natural = g.panels.Select(id => TabNaturalWidth(Panel(id))).ToArray();
             var widths = (float[])natural.Clone();
             if (natural.Sum() > available)
             {
-                // 収まらなければ、見えているタブの名前を先に取り、ほかのタブを縮める（アイコンだけの幅まで。それでも足りなければ全部を比で）
-                const float iconOnly = 28;
                 int shown = Mathf.Max(0, g.panels.IndexOf(g.Active));
-                float shownWidth = Mathf.Clamp(available - (n - 1) * iconOnly, iconOnly, natural[shown]);
-                float others = natural.Sum() - natural[shown], scale = others > 0 ? Mathf.Clamp01((available - shownWidth) / others) : 1;
-                for (int i = 0; i < n; i++) widths[i] = i == shown ? shownWidth : Mathf.Max(Mathf.Min(iconOnly, natural[i]), natural[i] * scale);
+                for (int i = 0; i < n; i++) widths[i] = Mathf.Min(TabIconOnlyWidth, natural[i]);
+                float rest = available - widths.Sum();
+                if (rest >= natural[shown] - widths[shown]) { rest -= natural[shown] - widths[shown]; widths[shown] = natural[shown]; }
+                for (int i = 0; i < n; i++)
+                    if (widths[i] < natural[i] && rest >= natural[i] - widths[i]) { rest -= natural[i] - widths[i]; widths[i] = natural[i]; }
                 float total = widths.Sum();
-                if (total > available) for (int i = 0; i < n; i++) widths[i] *= available / total;
+                if (total > available) for (int i = 0; i < n; i++) widths[i] *= available / total; // アイコンの数すら入らない狭さ
             }
             var rects = new Rect[n];
             for (int i = 0; i < n; i++) { rects[i] = new Rect(x, head.y, Mathf.Floor(widths[i]), head.height); x = rects[i].xMax; }
             return rects;
+        }
+
+        /// <summary>タブにアイコンと名前の全部を出すのに要る幅。</summary>
+        static float TabNaturalWidth(DockPanel panel) => 20 + PaintGui.TextWidth(L.Tr(panel.Title), PaintTheme.Header) + 12;
+
+        /// <summary>タブに名前が（詰めずに全部）入るか。入らなければアイコンだけを描く。</summary>
+        static bool TabShowsName(Rect t, DockPanel panel) => t.width >= 44 && PaintGui.TextWidth(L.Tr(panel.Title), PaintTheme.Header) <= t.width - 24;
+
+        /// <summary>テスト用: 見出しの幅 headWidth でのまとまりのタブの矩形と、名前を出すか。</summary>
+        internal (Rect[] rects, bool[] showsName, float available) TabLayoutForTests(string groupId, float headWidth)
+        {
+            var g = Layout.Group(groupId); var head = new Rect(0, 0, headWidth, PanelHeaderHeight);
+            var rects = TabRects(head, g);
+            return (rects, rects.Select((r, i) => TabShowsName(r, Panel(g.panels[i]))).ToArray(), head.xMax - 4 - (head.x + (g.Floating ? 4 : 22)));
         }
 
         /// <summary>x の位置に入れるときのタブの番号（タブの中央より左ならその前）。</summary>
@@ -191,7 +209,7 @@ namespace Yozolab.YoluPainter.Editor
                     if (shown) PaintGui.Fill(new Rect(face.x, face.y, face.width, 2), g.collapsed ? PaintTheme.TextDim : PaintTheme.Accent);
                 }
                 DrawTabLabel(t, panel, single || shown);
-                PaintGui.Tooltip(t, single ? HeaderTooltip(g) : L.Tr(panel.Title) + "\n" + HeaderTooltip(g));
+                PaintGui.Tooltip(t, TabTooltip(g, panel, t));
             }
             if (!GUI.enabled) return;
             if (e.type == EventType.MouseDown && e.button == 0 && r.Contains(e.mousePosition))
@@ -209,24 +227,41 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
 
-        string HeaderTooltip(DockGroup g) => g.Floating
+        /// <summary>タブのツールチップ: 先頭に名前（アイコンだけのタブでは、名前が読める唯一の場所）。1 つだけのまとまりで名前が見出しに出ているときだけ省く。</summary>
+        static string TabTooltip(DockGroup g, DockPanel panel, Rect t) => g.panels.Count == 1 && TabShowsName(t, panel) ? HeaderTooltip(g) : L.Tr(panel.Title) + "\n" + HeaderTooltip(g);
+
+        /// <summary>テスト用: 見出しの幅 headWidth でのまとまりの index 番目のタブのツールチップ。</summary>
+        internal string TabTooltipForTests(string groupId, int index, float headWidth)
+        {
+            var g = Layout.Group(groupId); var head = new Rect(0, 0, headWidth, PanelHeaderHeight);
+            return TabTooltip(g, Panel(g.panels[index]), TabRects(head, g)[index]);
+        }
+
+        /// <summary>テスト用: まとまりの見出しだけを head に描く（本体は描かない）。</summary>
+        internal void DrawGroupHeaderForTests(string groupId, Rect head) => DrawGroupHeader(head, Layout.Group(groupId), null);
+
+        static string HeaderTooltip(DockGroup g) => g.Floating
             ? L.Tr("Drag a tab onto the painter window's dock to put it back, or onto another header to make tabs. Right-click for more.")
             : L.Tr("Click to fold; drag to move, onto another header to make tabs, or out of the window to open it in a separate window. Right-click for more.");
 
-        /// <summary>タブの中身（アイコンと名前）。幅が足りなければ名前を … で詰め、さらに狭ければアイコンだけ。</summary>
+        /// <summary>タブの中身（アイコンと名前）。名前が入りきらなければアイコンだけ（… で詰めない。名前はツールチップ）。「プロパティ ― ブラシ」の
+        /// 続き（今の中身）は入るときだけ出す。</summary>
         void DrawTabLabel(Rect t, DockPanel panel, bool bright)
         {
             var color = bright ? PaintTheme.Text : PaintTheme.TextDim;
-            if (t.width < 44) { PaintGui.Icon(new Rect(t.x, t.y + 1, t.width, t.height), panel.Icon, color, 15); return; }
-            PaintGui.Icon(new Rect(t.x, t.y + 1, 16, t.height), panel.Icon, PaintTheme.TextDim, 15);
+            string title = L.Tr(panel.Title);
+            float titleWidth = PaintGui.TextWidth(title, PaintTheme.Header);
             var text = new Rect(t.x + 20, t.y + 1, t.width - 24, t.height);
-            string title = L.Tr(panel.Title), subtitle = bright && panel.Subtitle != null && document != null ? panel.Subtitle() : null;
-            if (string.IsNullOrEmpty(subtitle)) { PaintGui.Text(text, PaintGui.Fit(title, text.width, PaintTheme.Header, false), PaintTheme.Header, color); return; }
-            // 「プロパティ ― ブラシ」: 名前を太字で、今の中身を続けて（収まらなければ中身から詰める）
-            float titleWidth = Mathf.Min(PaintGui.TextWidth(title, PaintTheme.Header), text.width);
-            PaintGui.Text(new Rect(text.x, text.y, titleWidth, text.height), PaintGui.Fit(title, titleWidth, PaintTheme.Header, false), PaintTheme.Header, color);
+            if (!TabShowsName(t, panel)) { PaintGui.Icon(new Rect(t.x, t.y + 1, t.width, t.height), panel.Icon, color, 15); return; }
+            PaintGui.Icon(new Rect(t.x, t.y + 1, 16, t.height), panel.Icon, PaintTheme.TextDim, 15);
+            string subtitle = bright && panel.Subtitle != null && document != null ? panel.Subtitle() : null;
+            if (string.IsNullOrEmpty(subtitle)) { PaintGui.Text(text, title, PaintTheme.Header, color); return; }
+            // 「プロパティ ― ブラシ」: 名前を太字で、今の中身を続けて。中身は入るときだけ（利用者の名前が長いだけなら、余裕のあるときに限り … で詰める）
+            PaintGui.Text(new Rect(text.x, text.y, titleWidth, text.height), title, PaintTheme.Header, color);
             var rest = new Rect(text.x + titleWidth, text.y, text.width - titleWidth, text.height);
-            if (rest.width > 24) PaintGui.Text(rest, PaintGui.Fit(" ― " + subtitle, rest.width, PaintTheme.Label, false), PaintTheme.Label, bright ? PaintTheme.Text : PaintTheme.TextDim);
+            string tail = " ― " + subtitle;
+            if (PaintGui.TextWidth(tail, PaintTheme.Label) <= rest.width) PaintGui.Text(rest, tail, PaintTheme.Label, bright ? PaintTheme.Text : PaintTheme.TextDim);
+            else if (rest.width >= 80) PaintGui.Text(rest, PaintGui.Fit(tail, rest.width, PaintTheme.Label, false), PaintTheme.Label, bright ? PaintTheme.Text : PaintTheme.TextDim);
         }
 
         // ───────── ドラッグ ─────────

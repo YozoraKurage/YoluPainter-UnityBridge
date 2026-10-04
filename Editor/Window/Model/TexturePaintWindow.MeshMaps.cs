@@ -169,9 +169,9 @@ namespace Yozolab.YoluPainter.Editor
             var expected = meshMaps.Count > 0 ? CurrentMeshMapExpectation() : null;
             if (meshBakeJob != null) DrawMeshBakeProgressRow(rows);
             else if (PaintGui.Button(Spot("meshmap.bake", rows.Row(28, 6)), L.Tr("Bake Mesh Maps…"), true, GUI.enabled && stroke == null,
-                    L.Tr("Open the bake window: check the maps, set them up and bake them from the loaded model"), "local_fire_department"))
+                    L.Tr("Open the bake window"), "local_fire_department"))
                 TryAction(() => OpenMeshBakeWindow());
-            if (preview == null || !preview.HasModel) NoteRow(rows, L.Tr("Load a model in Texture Set (or 3D ▸ Demo Cube) to bake."), NoteKind.Info);
+            if (preview == null || !preview.HasModel) NoteRow(rows, L.Tr("No model"), NoteKind.Info);
             if (meshMaps.Count > 0) DrawBakedMeshMaps(rows, expected);
             else if (preview != null && preview.HasModel) NoteRow(rows, L.Tr("No mesh maps are baked yet."), NoteKind.Plain);
             if (meshMapNote != null) NoteRow(rows, meshMapNote, NoteKind.Warning);
@@ -192,9 +192,9 @@ namespace Yozolab.YoluPainter.Editor
                 PaintGui.Text(new Rect(row.x + 18, row.y, row.width - 18 - right, row.height), PaintGui.Fit(MeshMapLabel(map.Kind), row.width - 22 - right, PaintTheme.Label), PaintTheme.Label);
                 PaintGui.Text(new Rect(row.xMax - right, row.y, right, row.height), state, StateStyle, color);
                 PaintGui.Tooltip(row, L.Tr("{0} × {1} · slot {2}", map.Width, map.Height, SlotList(map.Provenance)));
-                if (check.State == MeshMapState.Stale) NoteRow(rows, L.Tr("{0} is stale and is not used: {1} Bake again to update it.", MeshMapLabel(map.Kind), string.Join(" ", check.Reasons).Replace(";", "; ")), NoteKind.Warning, 18); // 由来の条件の文字列は ; で折り返せるようにする
+                if (check.State == MeshMapState.Stale) NoteRow(rows, L.Tr("{0} is stale and is not used: {1}", MeshMapLabel(map.Kind), string.Join(" ", check.Reasons).Replace(";", "; ")), NoteKind.Warning, 18); // 由来の条件の文字列は ; で折り返せるようにする
             }
-            if (expected.MeshHash == null) NoteRow(rows, L.Tr("No model is loaded, so the maps cannot be checked against it."), NoteKind.Info);
+            if (expected.MeshHash == null) NoteRow(rows, L.Tr("Not checked: no model is loaded."), NoteKind.Info);
             rows.Space(2);
             var views = new List<MeshMapView> { MeshMapView.None, MeshMapView.Coverage };
             views.AddRange(meshMaps.Maps.Select(m => (MeshMapView)m.Kind));
@@ -215,9 +215,9 @@ namespace Yozolab.YoluPainter.Editor
                     x += 13 + w + 12;
                 }
             }
-            if (!MeshMapsSaved) NoteRow(rows, L.Tr("These mesh maps are not in the saved file yet. Save keeps them in the .ylp (they are not part of Undo)."));
+            if (!MeshMapsSaved) NoteRow(rows, L.Tr("Not saved yet"));
             if (PaintGui.Button(rows.Row(), L.Tr("Clear Mesh Maps"), false, GUI.enabled && stroke == null, L.Tr("Remove the baked maps (derived data; the layers do not change)"), "delete"))
-            { meshMaps.Clear(); meshMapView = MeshMapView.None; message = L.Tr("Cleared the mesh maps (derived data; nothing in the layers changed)."); }
+            { meshMaps.Clear(); meshMapView = MeshMapView.None; message = L.Tr("Cleared the mesh maps."); }
         }
 
         static string MeshMapLabel(MeshMapKind kind)
@@ -320,7 +320,7 @@ namespace Yozolab.YoluPainter.Editor
             string problem = MeshMapSaveProblem(files.Values.Sum(b => b.LongLength), files.Count, entries.Values.Select(b => b.LongLength));
             if (problem != null)
             {
-                string note = "Mesh maps were left out of the last save: " + problem + " The document itself was saved; bake the maps again after opening it.";
+                string note = "Mesh maps were left out of the last save: " + problem + " The document itself was saved.";
                 foreach (var set in textureSets) { set.SavingMeshMapRevision = -1; if (set.MeshMaps.Count > 0) set.MeshMapNote = note; }
                 Debug.LogWarning("Texture Painter: " + note);
                 return;
@@ -357,7 +357,7 @@ namespace Yozolab.YoluPainter.Editor
                     loaded.Add(map);
                 }
                 catch (Exception ex) when (ex is InvalidDataException || ex is ArgumentException)
-                { notes.Add(who + "Mesh map " + kind + " could not be read (" + ex.Message + "); bake it again."); }
+                { notes.Add(who + "Mesh map " + kind + " could not be read (" + ex.Message + ")."); }
             }
             if (loaded.Count > 0)
             {

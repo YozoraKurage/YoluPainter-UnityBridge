@@ -30,7 +30,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
         public YlpResourceEntry(Guid id, ResourceKind kind, string name, string content, int width, int height, ResourceColorSpace colorSpace, ResourceOrigin origin)
         {
             if (id == Guid.Empty) throw new ArgumentException("A resource needs an ID.", nameof(id));
-            if (kind != ResourceKind.Image) throw new ArgumentOutOfRangeException(nameof(kind), "Use the smart constructor for smart materials and smart masks.");
+            if (kind != ResourceKind.Image) throw new ArgumentOutOfRangeException(nameof(kind), "Smart materials and smart masks are made with the smart constructor.");
             ImageResource.CheckName(name);
             if (!ImageContent.IsHash(content)) throw new ArgumentException("A content hash is 64 lower-case hex digits.", nameof(content));
             if (width < 1 || height < 1 || width > ImageContent.MaxSide || height > ImageContent.MaxSide) throw new ArgumentOutOfRangeException(nameof(width), "An image is 1–" + ImageContent.MaxSide + " pixels on each side.");
@@ -41,7 +41,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
         public YlpResourceEntry(Guid id, ResourceKind kind, string name, string sha256, long length, ResourceOrigin origin)
         {
             if (id == Guid.Empty) throw new ArgumentException("A resource needs an ID.", nameof(id));
-            if (kind != ResourceKind.SmartMaterial && kind != ResourceKind.SmartMask && kind != ResourceKind.Material && kind != ResourceKind.Brush) throw new ArgumentOutOfRangeException(nameof(kind), "Use the image constructor for images.");
+            if (kind != ResourceKind.SmartMaterial && kind != ResourceKind.SmartMask && kind != ResourceKind.Material && kind != ResourceKind.Brush) throw new ArgumentOutOfRangeException(nameof(kind), "Images are made with the image constructor.");
             ImageResource.CheckName(name);
             if (!ImageContent.IsHash(sha256)) throw new ArgumentException("A file hash is 64 lower-case hex digits.", nameof(sha256));
             if (length < 1 || length > YlpArchive.MaxEntryBytes) throw new ArgumentOutOfRangeException(nameof(length), "A smart material file is 1–" + YlpArchive.MaxEntryBytes + " bytes.");

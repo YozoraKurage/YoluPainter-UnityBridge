@@ -37,8 +37,8 @@ msgstr "{0} の復旧の世代をすべて破棄しますか？ 元に戻せま�
 msgid "Discard checkpoint"
 msgstr "checkpoint を破棄"
 
-msgid "The checkpoint changed; refresh the list before discarding it."
-msgstr "checkpoint が変わりました。破棄する前に一覧を更新してください。"
+msgid "The checkpoint changed."
+msgstr "checkpoint が変わりました。"
 
 msgid "Recovered native source from the last durable checkpoint. Unsaved edits after that checkpoint may be missing."
 msgstr "最後に保存が完了した checkpoint から正本を復旧しました。その後の未保存の変更は戻らないことがあります。"

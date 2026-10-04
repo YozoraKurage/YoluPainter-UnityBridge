@@ -47,7 +47,7 @@ namespace Yozolab.YoluPainter.Core
         {
             EnsureNoStroke(); if (!Enum.IsDefined(typeof(AnchorPlacement), placement)) throw new ArgumentOutOfRangeException(nameof(placement));
             var layer = GetLayer(layerId);
-            if (placement == AnchorPlacement.Mask && layer.Mask == null) throw new InvalidOperationException("'" + layer.Name + "' has no mask to put an anchor on. Add a mask first.");
+            if (placement == AnchorPlacement.Mask && layer.Mask == null) throw new InvalidOperationException("'" + layer.Name + "' has no mask to put an anchor on.");
             if ((placement == AnchorPlacement.Layer ? layer.Anchor : layer.Mask.Anchor) != null)
                 throw new InvalidOperationException("'" + layer.Name + "'" + (placement == AnchorPlacement.Mask ? " (mask)" : "") + " already has an anchor.");
             RefuseLockedAttributes(layer); // 画素は変えないので、すべてのロックでだけ断る（フィルターと同じ）

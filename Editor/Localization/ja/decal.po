@@ -23,9 +23,6 @@ msgstr "透明"
 msgid "Decal: the image spans the box's X and Y (seen from its −Z side); Z is how deep it reaches into the surface."
 msgstr "デカール: 画像はボックスの X と Y に広がる（−Z の側から見て）。Z は面の手前と奥へ届く深さ。"
 
-msgid "A decal shows only inside its box on the model (see Projection), in the shape of its image. Paint its mask to hide parts of it."
-msgstr "デカールはモデルの上のボックスの中だけに、画像の形で出る（投影の欄）。一部を隠すにはマスクを塗る。"
-
 # ── 間引き ──
 
 msgctxt "decal"
@@ -49,9 +46,6 @@ msgstr "画像を見る側からこれ以上向きの変わった面には出さ
 msgid "How softly faces fade out towards that angle (0 %: a hard cut)."
 msgstr "その角度に向かって面をどれだけ柔らかく薄くするか（0 %: くっきり切る）。"
 
-msgid "The decal shows inside its box on the model, cut out by the alpha of its first image (Color first); every channel's value shows in that shape."
-msgstr "デカールはモデルの上のボックスの中に、最初の画像（Color が先）のアルファで切り抜いて出る。どのチャンネルの値もその形で出る。"
-
 msgid "The decal is not shown: {0}"
 msgstr "デカールは出ていない: {0}"
 
@@ -63,20 +57,8 @@ msgstr "デカールが読む 2 つのメッシュマップを（チェックし
 
 # ── 置く ──
 
-msgid "Load a model (or the demo cube) and show the 3D view to place a decal."
-msgstr "デカールを置くには、モデル（かデモのキューブ）を読み込んで 3D ビューを出す。"
-
-msgid "Drop the image on the model to place a decal there."
-msgstr "画像をモデルの上に落とすと、そこにデカールを置く。"
-
-msgid "That face belongs to the texture set {0}. Switch to it (double-click the face) to place a decal there."
-msgstr "その面はテクスチャセット {0} のもの。そこにデカールを置くには、そのセットに切り替える（面をダブルクリック）。"
-
 msgid "That face belongs to no texture set of this project."
 msgstr "その面はこのプロジェクトのどのテクスチャセットにも属さない。"
-
-msgid "Placed {0} as a decal in {1}. Drag the handles in the 3D view to move, turn or size it."
-msgstr "{0} を {1} のデカールとして置いた。3D ビューのハンドルをドラッグすると、動かす・回す・大きさを変えることができる。"
 
 msgid "Placed {0} as a decal in {1}, but it is not shown yet: {2}"
 msgstr "{0} を {1} のデカールとして置いたが、まだ出ていない: {2}"
@@ -85,12 +67,6 @@ msgstr "{0} を {1} のデカールとして置いたが、まだ出ていない
 
 msgid "Handles in 3D View"
 msgstr "3D ビューのハンドル"
-
-msgid "Show or hide the projection's box in the 3D view (Q). While this layer is selected its handles show: drag the arrows to move it, the rings to turn it and the squares on its faces to size it (Shift: both faces)."
-msgstr "3D ビューに投影のボックスを出す・隠す（Q）。この層を選んでいる間はハンドルが出る: 矢印のドラッグで動かし、輪で回し、面の四角で大きさを変える（Shift: 両側の面）。"
-
-msgid "The handles hide while you edit the layer's mask; select the layer itself to move the box."
-msgstr "層のマスクを編集している間はハンドルを出さない。ボックスを動かすには層そのものを選ぶ。"
 
 msgid "Projection handles hidden (Q shows them)."
 msgstr "投影のハンドルを隠した（Q で出す）。"

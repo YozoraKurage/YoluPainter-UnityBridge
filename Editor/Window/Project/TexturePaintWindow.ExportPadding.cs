@@ -36,7 +36,7 @@ namespace Yozolab.YoluPainter.Editor
             int padding = PainterSettings.ExportPadding;
             if (padding == 0) return rgba;
             var coverage = ExportCoverage(set);
-            string why = coverage == null ? L.Tr("No export padding: load the model in the 3D view so its UVs are known.")
+            string why = coverage == null ? L.Tr("No export padding: no model in the 3D view, so the UVs are unknown.")
                 : !coverage.Contains(true) ? L.Tr("No export padding for {0}: no UV triangle of its material.", set.Name) : null;
             if (why != null) { if (notes != null && !notes.Contains(why)) notes.Add(why); return rgba; }
             var d = set.Document;

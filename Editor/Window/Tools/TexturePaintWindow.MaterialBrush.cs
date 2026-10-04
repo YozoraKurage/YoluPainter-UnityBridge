@@ -161,8 +161,7 @@ namespace Yozolab.YoluPainter.Editor
                 }
             }
             if (CurrentBrushEffect == BrushEffect.Paint) { foreach (var c in Channels) if (MaterialIncludes(c)) MaterialValueRow(rows, c); }
-            else PaintGui.Paragraph(rows, L.Tr("Pixel effects use each checked channel's existing pixels; the material values and color dynamics do not change the result."), PaintTheme.TextDim);
-            if (EditingMask) NoteRow(rows, L.Tr("While you edit a mask, strokes paint the mask only."), NoteKind.Info);
+            if (EditingMask) NoteRow(rows, L.Tr("Painting the layer mask"), NoteKind.Info);
             rows.Space(4);
         }
 

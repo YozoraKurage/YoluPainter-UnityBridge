@@ -86,7 +86,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public SamplingChart BuildSamplingChart(SurfaceHit anchor, float radius, Vector3 tangent = default, int maxTriangles = 2048, long maxBytes = long.MaxValue)
         {
             if (anchor.SnapshotRevision != SnapshotRevision || anchor.TriangleIndex < 0 || anchor.TriangleIndex >= triangles.Length)
-                throw new InvalidOperationException("The model snapshot changed. Set the source again.");
+                throw new InvalidOperationException("The model snapshot changed.");
             if (!Finite(radius) || radius <= 0 || !Finite(anchor.Position) || !Finite(tangent)) throw new ArgumentOutOfRangeException(nameof(radius));
             var seed = triangles[anchor.TriangleIndex];
             if (!Visible(anchor.TriangleIndex) || anchor.RendererIndex != seed.RendererIndex || anchor.MaterialSlot != seed.MaterialSlot) throw new InvalidOperationException("Surface binding does not match the current snapshot.");

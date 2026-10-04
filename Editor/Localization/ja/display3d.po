@@ -28,18 +28,6 @@ msgstr "シェーダー: {0}"
 msgid "3D view: {0} shows its own material."
 msgstr "3D ビュー: {0} は元のマテリアルで見せます。"
 
-msgid "3D view: {0} is shown with the material {1} (a preview copy; the material is not changed)."
-msgstr "3D ビュー: {0} をマテリアル {1} で見せます（プレビュー用の複製で、マテリアルは変えません）。"
-
-msgid "3D view: {0} is shown with a new material of the shader {1} (made for the preview only)."
-msgstr "3D ビュー: {0} をシェーダー {1} の新しいマテリアルで見せます（プレビューの中だけに作ります）。"
-
-msgid "Choose a material."
-msgstr "マテリアルを選んでください。"
-
-msgid "Choose a shader."
-msgstr "シェーダーを選んでください。"
-
 msgid "{0} is a {1}, not a material."
 msgstr "{0} は {1} で、マテリアルではありません。"
 
@@ -54,9 +42,6 @@ msgstr "{0} に選んだマテリアルが見つからないので（消した�
 
 msgid "The shader {0} chosen for {1} is gone, so it shows its own material again."
 msgstr "{1} に選んだシェーダー {0} が見つからないので、元のマテリアルで見せます。"
-
-msgid "This material slot has no source material (the demo cube or an unassigned slot). Choose a material or a shader above to see the painted maps with it."
-msgstr "このマテリアルスロットには元のマテリアルがありません（デモのキューブか、割り当ての無いスロット）。上でマテリアルかシェーダーを選ぶと、描いたマップをそれで見られます。"
 
 msgid "{0} was made from a shader for the preview only, so there is no material asset to apply to."
 msgstr "{0} はプレビューのためだけにシェーダーから作ったものなので、反映するマテリアルのアセットがありません。"
@@ -114,8 +99,8 @@ msgstr "プロパティの名前から推測"
 msgid "(guessed from its name)"
 msgstr "（名前から推測）"
 
-msgid "The mapping of {0} is guessed from its property names (not verified); change it under Channels in the Material panel if it looks wrong."
-msgstr "{0} の対応はプロパティの名前から推測したものです（確かめていません）。違って見えたら、マテリアルの欄のチャンネルで変えてください。"
+msgid "The mapping of {0} is guessed from its property names (not verified)."
+msgstr "{0} の対応はプロパティの名前から推測したものです（確かめていません）。"
 
 msgid "not shown: no property of this shader looks like it takes this channel (the mapping is not verified; set it under Channels in the Material panel)."
 msgstr "見せません: このシェーダーにはこのチャンネルを受けるらしいプロパティがありません（対応は確かめていません。マテリアルの欄のチャンネルで指定できます）。"
@@ -163,6 +148,9 @@ msgstr "3D ビューで見せるもの: マテリアル、または 1 つのチ�
 msgid "3D View Shows"
 msgstr "3D ビューで見せるもの"
 
+msgid "2D View Shows"
+msgstr "2D ビューで見せるもの"
+
 msgid "Channel"
 msgstr "チャンネル"
 
@@ -201,15 +189,6 @@ msgstr "3D ビュー: ベイクした {0} だけ。"
 
 msgid "It is stale for the loaded model."
 msgstr "読み込んだモデルに対して古いマップです。"
-
-msgid "{0} is not baked for this texture set (3D ▸ Bake Mesh Maps…)."
-msgstr "このテクスチャセットでは {0} をベイクしていません（3D ▸ メッシュマップをベイク…）。"
-
-msgid "No mesh maps are baked for this texture set (3D ▸ Bake Mesh Maps…)."
-msgstr "このテクスチャセットにはベイクしたメッシュマップがありません（3D ▸ メッシュマップをベイク…）。"
-
-msgid "Finish the stroke first; the 3D view keeps showing {0}."
-msgstr "先にストロークを終えてください。3D ビューは {0} を見せたままです。"
 
 msgid "3D view: C shows one channel at a time (unlit) · Shift+B one baked mesh map at a time · Shift+C the material · Ctrl + right drag turns the environment and the light"
 msgstr "3D ビュー: C で 1 つずつチャンネルを見せる（照明なし）・Shift+B でベイクしたメッシュマップを 1 つずつ・Shift+C でマテリアル・Ctrl + 右ドラッグで環境と光を回す"
@@ -308,17 +287,8 @@ msgstr "露出"
 msgid "Brightens or darkens the 3D picture only (+1 doubles it); the textures and the export are not changed"
 msgstr "3D ビューの絵だけを明るく・暗くします（+1 で 2 倍）。テクスチャと書き出しは変えません"
 
-msgid "Choose a Cubemap or a latitude-longitude 2D texture."
-msgstr "Cubemap か緯度経度の 2D のテクスチャを選んでください。"
-
-msgid "Choose an environment texture; the built-in sky is shown meanwhile."
-msgstr "環境のテクスチャを選んでください。それまでは内蔵の空を見せます。"
-
 msgid "The environment texture is gone (deleted or moved out of the project), so the built-in sky is shown."
 msgstr "環境のテクスチャが見つからないので（消したか、プロジェクトの外へ動かした）、内蔵の空を見せます。"
-
-msgid "Environment: {0} (read on the GPU; its import settings are not changed)."
-msgstr "環境: {0}（GPU で読むだけで、インポート設定は変えません）。"
 
 msgid "{0} is a {1}, not a texture."
 msgstr "{0} は {1} で、テクスチャではありません。"

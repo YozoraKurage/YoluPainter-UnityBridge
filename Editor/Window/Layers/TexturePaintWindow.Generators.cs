@@ -147,7 +147,7 @@ namespace Yozolab.YoluPainter.Editor
             ConnectGeneratorInputs();
             if (type == GeneratorType.ShapeGradient) ShapeEditFilter = added.Id; // 足したらすぐ 3D ビューで形を動かせるように
             var status = StageStatus(added);
-            if (!status.Active) message += " " + (type == GeneratorType.Anchor ? L.Tr("It has no effect until it reads an anchor below this layer: {0}", status.Reason) : L.Tr("It has no effect until its mesh maps are baked: {0}", status.Reason));
+            if (!status.Active) message += " " + L.Tr("No effect: {0}", status.Reason);
             return added;
         }
 
@@ -161,7 +161,7 @@ namespace Yozolab.YoluPainter.Editor
                 try
                 {
                     why = document.FilterRefusal(layerId, target, FilterSettings.FromGenerator(GeneratorSettings.Default(type)), channel);
-                    if (why == null && type == GeneratorType.Anchor && document.AnchorsReadableFrom(layerId).Count == 0) why = L.Tr("no anchor below this layer (Layer ▸ Add Anchor on a lower layer)");
+                    if (why == null && type == GeneratorType.Anchor && document.AnchorsReadableFrom(layerId).Count == 0) why = L.Tr("no anchor below this layer");
                 }
                 catch (KeyNotFoundException) { why = L.Tr("no layer"); }
                 choices.Add((GeneratorName(type), type, why));
@@ -263,16 +263,16 @@ namespace Yozolab.YoluPainter.Editor
             }
             if (!status.Active)
             {
-                NoteRow(rows, L.Tr("No effect now: the input passes through unchanged. {0}", status.Reason), NoteKind.Warning, indent);
+                NoteRow(rows, L.Tr("No effect: {0}", status.Reason), NoteKind.Warning, indent);
                 if (meshBakeJob == null && status.Maps.Any(m => !m.Usable) && PaintGui.Button(Spot("generator.bake", Indent(rows.Row(24), indent)), L.Tr("Bake Mesh Maps…"), false, GUI.enabled && stroke == null,
-                        L.Tr("Open the bake window: check the maps, set them up and bake them from the loaded model"), "local_fire_department"))
+                        L.Tr("Open the bake window"), "local_fire_department"))
                     TryAction(() => OpenMeshBakeWindow());
             }
             bool pinned = g.Pins.Count > 0;
             bool pin = pinned;
             if (status.Maps.Count > 0) // マップを読まない Generator（崩しを UV に置いた Anchor）にはピンが無い
                 pin = PaintGui.FitToggle(Spot("generator.pin", Indent(rows.Row(), indent)), L.Tr("Only this bake"), pinned,
-                    L.Tr("On: keep reading exactly the bake shown above. A rebake under other conditions is then not used (the generator has no effect until you turn this on again). Off: follow the latest bake."),
+                    L.Tr("On: keep reading this bake. Off: follow the latest bake."),
                     pinned || status.Maps.All(m => m.Usable));
             try
             {
@@ -289,7 +289,6 @@ namespace Yozolab.YoluPainter.Editor
                         if (g.Type == GeneratorType.Dirt)
                             next = next.WithBalance(PaintGui.KeepSlider(Spot("generator.balance", Indent(rows.SliderRow(), indent)), L.Tr("AO ↔ Cavities"), next.Balance, 0, 1, "0", "%",
                                 L.Tr("0 %: ambient occlusion only. 100 %: cavities (concave curvature) only."), true, 100));
-                        NoteRow(rows, L.Tr("Curvature comes from the model's bake; painted Height does not change it."), NoteKind.Plain, indent);
                         break;
                     case GeneratorType.PositionGradient:
                         ChoiceDropdown(Spot("generator.axis", Indent(rows.Row(), indent)), L.Tr("Axis"), next.Axis, new[] { 0, 1, 2 }, AxisName,
@@ -330,9 +329,9 @@ namespace Yozolab.YoluPainter.Editor
                 }
                 next = next.WithInvert(PaintGui.FitToggle(Spot("generator.invert", Indent(rows.Row(), indent)), L.TrIn("generator", "Invert"), next.Invert, L.Tr("Swap 0 and 1 after the range")));
                 // 崩し
-                PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.Tr("Breakup"), L.Tr("Seeded noise that wears the result away in patches, so edges and dirt do not look uniform (100 %: gone where the noise is strongest). The same seed always gives the same result."));
+                PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.Tr("Breakup"), L.Tr("Seeded noise that wears the result away in patches"));
                 double amount = PaintGui.KeepSlider(Spot("generator.noise", Indent(rows.SliderRow(), indent)), L.TrIn("filter", "Amount"), next.NoiseAmount, 0, 1, "0", "%", null, true, 100);
-                int seed = PaintGui.KeepIntField(Spot("generator.seed", Indent(rows.Row(), indent)), L.TrIn("filter", "Seed"), next.NoiseSeed, int.MinValue, int.MaxValue, L.Tr("The same seed gives the same noise. Drag to change, click to type."));
+                int seed = PaintGui.KeepIntField(Spot("generator.seed", Indent(rows.Row(), indent)), L.TrIn("filter", "Seed"), next.NoiseSeed, int.MinValue, int.MaxValue, L.Tr("The same seed gives the same noise."));
                 double scale = PaintGui.KeepSlider(Spot("generator.scale", Indent(rows.SliderRow(), indent)), L.TrIn("generator", "Size"), next.NoiseScale, .005, .5, "0.###", "", L.Tr("The size of the largest features, as a fraction of the model's bounding-box diagonal (or of the UV square)"), amount > 0);
                 next = next.WithNoise(amount, scale, seed, next.NoiseSpace);
                 ChoiceDropdown(Spot("generator.space", Indent(rows.Row(), indent)), L.TrIn("generator", "Placed"), next.NoiseSpace, (GeneratorNoiseSpace[])Enum.GetValues(typeof(GeneratorNoiseSpace)), NoiseSpaceName,
@@ -375,14 +374,14 @@ namespace Yozolab.YoluPainter.Editor
             if (list == null) return ConfirmInactiveFillImages(documents); // 塗りつぶしの画像も（TexturePaintWindow.FillImages.cs）
             if (Dialogs.Confirm(L.Tr("Generators without mesh maps"), L.Tr("These generators have no usable mesh maps, so the exported images would not have their effect (the layers pass through unchanged):\n{0}\n\nBake the mesh maps first, or export anyway?", list), L.Tr("Export Anyway"), L.Tr("Cancel")))
                 return ConfirmInactiveFillImages(documents);
-            message = L.Tr("Nothing was exported: some generators have no usable mesh maps. Bake them (Texture Set Settings ▸ Mesh Maps) first.");
+            message = L.Tr("Nothing was exported: some generators have no usable mesh maps.");
             return false;
         }
         /// <summary>保存の知らせに添える文（.ylp には Generator がそのまま残る。合成の画像だけが効きなし）。無ければ空。</summary>
         string InactiveGeneratorSaveNote()
         {
             int count = textureSets.Sum(s => (s == currentSet ? document : s.Document).InactiveGenerators().Count);
-            return (count == 0 ? "" : " " + L.Tr("{0} generator(s) have no usable mesh maps; they are kept in the file, and the preview images inside it are without their effect.", count)) + InactiveFillImageSaveNote();
+            return (count == 0 ? "" : " " + L.Tr("{0} generator(s) have no usable mesh maps.", count)) + InactiveFillImageSaveNote();
         }
     }
 }

@@ -72,7 +72,6 @@ namespace Yozolab.YoluPainter.Editor
                 NoteRow(rows, layer.IsDecal ? L.Tr("Decal gradient unavailable; it is transparent. {0}", status.Reason) : L.Tr("Gradient unavailable; the fallback value is shown. {0}", status.Reason), NoteKind.Warning);
                 if (PaintGui.Button(Spot("fill.gradient.bake", rows.Row()), L.Tr("Bake Mesh Maps…"))) TryAction(() => OpenMeshBakeWindow());
             }
-            NoteRow(rows, L.Tr("Ctrl: snap movement, size and rotation using Unity's Scene snap settings. Shift: resize both faces. Handles are drawn in front of the model."));
         }
         internal float DrawFillGradientSectionOnly(Rect area)
         {

@@ -200,7 +200,7 @@ namespace Yozolab.YoluPainter.Core
         public static int MaxDegreeOfParallelism
         {
             get { return maxDegree; }
-            set { if (value < 0) throw new ArgumentOutOfRangeException(nameof(value), "Use 0 for one thread per processor, or a positive count."); maxDegree = value; }
+            set { if (value < 0) throw new ArgumentOutOfRangeException(nameof(value), "The thread count is 0 (one per processor) or positive."); maxDegree = value; }
         }
         /// <summary>The number of threads an operation starting now may use (at least 1).</summary>
         public static int Degree { get { int d = maxDegree; return d > 0 ? d : Math.Max(1, Environment.ProcessorCount); } }

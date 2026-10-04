@@ -34,9 +34,9 @@ namespace Yozolab.YoluPainter.Editor
         /// 名前は一番上の層の名前。</summary>
         internal SmartResource SaveSmartMaterial(string name = null)
         {
-            if (stroke != null || toolDragging) { message = L.Tr("Finish the stroke first."); return null; }
+            if (stroke != null || toolDragging) { message = L.Tr("A stroke is in progress."); return null; }
             var members = document.TopmostOf(SelectedLayers);
-            if (members.Count == 0) { message = L.Tr("Select the layers to save as a smart material first."); return null; }
+            if (members.Count == 0) { message = L.Tr("No layer is selected."); return null; }
             try { return KeepSmart(document.CaptureSmartMaterial(members.Select(l => l.Id), name ?? members[members.Count - 1].Name, ImageResources)); }
             catch (SmartRefusedException ex) { message = SmartRefusalText(ex); return null; }
         }
@@ -44,9 +44,9 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>レイヤー ▸ マスクをスマートマスクとして保存: 選んでいる層のマスク（画素・設定・フィルターと Generator）を。</summary>
         internal SmartResource SaveSmartMask(string name = null)
         {
-            if (stroke != null || toolDragging) { message = L.Tr("Finish the stroke first."); return null; }
+            if (stroke != null || toolDragging) { message = L.Tr("A stroke is in progress."); return null; }
             var layer = SelectedOrNull;
-            if (layer == null) { message = L.Tr("Select a layer first."); return null; }
+            if (layer == null) { message = L.Tr("No layer is selected."); return null; }
             if (layer.Mask == null) { message = L.Tr("{0} has no mask to save as a smart mask.", layer.Name); return null; }
             try { return KeepSmart(document.CaptureSmartMask(layer.Id, name ?? L.Tr("{0} mask", layer.Name))); }
             catch (SmartRefusedException ex) { message = SmartRefusalText(ex); return null; }
@@ -191,7 +191,7 @@ namespace Yozolab.YoluPainter.Editor
         /// </summary>
         internal SmartPlaceResult PlaceSmartAsset(string key, SmartPlacement where = null, Guid? maskLayer = null)
         {
-            if (stroke != null || toolDragging) { message = L.Tr("Finish the stroke first."); return null; }
+            if (stroke != null || toolDragging) { message = L.Tr("A stroke is in progress."); return null; }
             SmartMaterial material; string name;
             try { material = SmartAsset(key, out name); }
             catch (Exception ex) when (ex is InvalidDataException || ex is IOException || ex is ResourceRefusedException || ex is UnauthorizedAccessException) { message = ex.Message; return null; }
@@ -228,7 +228,7 @@ namespace Yozolab.YoluPainter.Editor
         SmartPlaceResult ApplySmartMaskTo(SmartMaterial mask, string name, Guid layerId)
         {
             var layer = document.Layers.FirstOrDefault(l => l.Id == layerId);
-            if (layer == null) { message = L.Tr("Select the layer to put {0} on first.", name); return null; }
+            if (layer == null) { message = L.Tr("No layer is selected."); return null; }
             try
             {
                 var result = document.ApplySmartMask(mask, layer.Id);
@@ -247,9 +247,9 @@ namespace Yozolab.YoluPainter.Editor
             string text = "";
             if (result.Resampled) text += " " + L.Tr("It was made at {0} × {1} and was resized to {2} × {3}.", material.Width, material.Height, document.Width, document.Height);
             if (result.SwitchedOff.Count > 0)
-                text += " " + L.Tr("This texture set does not use {0}: those values were placed switched off (switch the channels on in the layers to use them).", string.Join(", ", result.SwitchedOff.Select(c => L.Tr(c.ToString()))));
+                text += " " + L.Tr("This texture set does not use {0}: those values were placed switched off.", string.Join(", ", result.SwitchedOff.Select(c => L.Tr(c.ToString()))));
             if (result.Pinned > 0) text += " " + L.Tr("{0} generator(s) were pinned to this texture set's bake.", result.Pinned);
-            if (result.InactiveGenerators.Count > 0) text += " " + L.Tr("Its generators have no effect until this texture set's mesh maps are baked (3D ▸ Bake Mesh Maps…).");
+            if (result.InactiveGenerators.Count > 0) text += " " + L.Tr("Its generators have no effect: no mesh maps are baked.");
             if (result.Notes.Count > 0) text += " " + string.Join(" ", result.Notes);
             return text;
         }
@@ -259,7 +259,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             switch (ex.Reason)
             {
-                case SmartRefusal.NothingToSave: return L.Tr("Select the layers to save as a smart material first.");
+                case SmartRefusal.NothingToSave: return L.Tr("No layer is selected.");
                 case SmartRefusal.NoMask: return L.Tr("The layer has no mask to save as a smart mask.");
                 case SmartRefusal.WrongKind: return L.Tr("A smart mask goes on a layer's mask, and a smart material is placed as layers.");
                 case SmartRefusal.Budget: return L.Tr("It needs {0} MiB of layer pixels, more than the {1} MiB left under the layer pixel budget (Project Settings ▸ YoluPainter). Nothing was changed.", (ex.Bytes + (1 << 20) - 1) >> 20, ex.Limit >> 20)

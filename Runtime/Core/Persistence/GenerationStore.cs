@@ -165,7 +165,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
             bool exists = File.Exists(Path.Combine(root, "current"));
             if (expectedToken == null)
             {
-                if (exists) throw new IOException("The destination already has a document. Open it or choose a new folder; implicit overwrite is blocked.");
+                if (exists) throw new IOException("The destination already has a document; implicit overwrite is blocked.");
             }
             else
             {

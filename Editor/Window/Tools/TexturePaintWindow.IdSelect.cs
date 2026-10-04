@@ -36,7 +36,7 @@ namespace Yozolab.YoluPainter.Editor
         internal void BeginIdColorPick(Guid filter)
         {
             idPickLayer = selectedLayer; idPickFilter = filter;
-            message = L.Tr("Click parts on the 2D canvas or the 3D view to add their ID colours (Ctrl+click takes one out). Esc stops.");
+            message = L.Tr("Picking ID colours");
             Repaint();
         }
         internal void EndIdColorPick(string note = null)
@@ -47,11 +47,11 @@ namespace Yozolab.YoluPainter.Editor
             Repaint(); RepaintPanelWindowsSoon();
         }
 
-        /// <summary>今のテクスチャセットの ID マップ（今の条件で焼いたもの）。無い・古いときは null と理由（焼き方も添える）。</summary>
+        /// <summary>今のテクスチャセットの ID マップ（今の条件で焼いたもの）。無い・古いときは null と理由。</summary>
         internal BakedMeshMap UsableIdMap(out string reason)
         {
             if (meshMaps.TryGetUsable(MeshMapKind.Id, CurrentMeshMapExpectation(), out var map, out var why)) { reason = null; return map; }
-            reason = L.Tr("There is no usable ID map for this texture set: {0} Bake one (Texture Set Settings ▸ Mesh Maps ▸ Bake…, check ID).", why);
+            reason = L.Tr("There is no usable ID map for this texture set: {0}", why);
             return null;
         }
 
@@ -62,7 +62,7 @@ namespace Yozolab.YoluPainter.Editor
             rgb = 0; why = null;
             if (onSurface)
             {
-                if (preview == null || !preview.HasModel) { why = L.Tr("Load a model (or the demo cube) to pick on the 3D view."); return false; }
+                if (preview == null || !preview.HasModel) { why = L.Tr("No model in the 3D view."); return false; }
                 if (!preview.TryPick(surfaceRect, pointer, out var hit)) { why = L.Tr("Nothing of the model under the pointer."); return false; }
                 if (!PaintsSlot(hit.MaterialSlot)) { OtherSlotPressed(hit.MaterialSlot); return false; }
                 if (!IdMapColors.TryGetAtUv(map, hit.UV.x, hit.UV.y, out rgb)) { why = L.Tr("The ID map has no colour where that face lies in UV."); return false; }
@@ -117,7 +117,7 @@ namespace Yozolab.YoluPainter.Editor
             if (map == null) { message = reason; return; }
             var g = effect.Settings.Generator; string key = map.Provenance.ConditionKey;
             if (g.Pins.TryGetValue(MeshMapKind.Id, out var pin) && pin != key)
-            { message = L.Tr("This generator reads another ID bake (Only this bake). Its colours may not match this map: turn Only this bake off first, then pick again."); return; }
+            { message = L.Tr("This generator reads another ID bake (Only this bake)."); return; }
             if (!TryIdColorUnder(pointer, onSurface, map, out int rgb, out var why)) { if (why != null) message = why; return; }
             GeneratorSettings next;
             if (remove)
@@ -159,7 +159,6 @@ namespace Yozolab.YoluPainter.Editor
                     TryAction(OpenIdBake);
                 var t = L.Tr("No usable ID map yet"); PaintGui.Text(fit(t), t, PaintTheme.LabelDim, PaintTheme.Warning);
             }
-            else SelectionModeHint(fit(L.Tr("Shift adds · Ctrl subtracts · Shift+Ctrl intersects")));
             if (PaintGui.IconButton(next(28), "select_all", L.Tr("Select All (Ctrl+A)"))) document.SetSelection(SelectionMask.All(document));
             if (PaintGui.IconButton(next(28), "deselect", L.Tr("Deselect (Ctrl+D)"), false, document.Selection != null)) document.ClearSelection();
             if (PaintGui.IconButton(next(28), "invert_colors", L.Tr("Inverse (Ctrl+Shift+I)"), false, document.Selection != null)) document.SetSelection(document.Selection.Invert());
@@ -170,7 +169,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (!ToolSection(rows, "id-map", L.Tr("ID Map"), "palette")) return;
             var map = UsableIdMap(out var reason);
-            if (map != null) NoteRow(rows, L.Tr("Colours from: {0}. Click a part on the 2D canvas or the 3D view to select every pixel of its colour.", IdSourceFromKey(map.Provenance.SettingsKey)), NoteKind.Info);
+            if (map != null) NoteRow(rows, L.Tr("Colours from: {0}", IdSourceFromKey(map.Provenance.SettingsKey)), NoteKind.Info);
             else NoteRow(rows, reason, NoteKind.Warning);
             if (PaintGui.Button(Mark("idselect-bake-panel", rows.Row(26, 4)), map != null ? L.Tr("Bake ID Map Again…") : L.Tr("Bake ID Map…"), map == null, stroke == null && meshBakeJob == null,
                     L.Tr("Open the bake window with the ID map checked"), "local_fire_department"))
@@ -185,7 +184,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             var g = e.Settings.Generator;
             PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.Tr("ID Colors"), L.Tr("Texels of the ID map with one of these colours (within the tolerance) get 1, the rest 0."));
-            if (g.IdColors.Count == 0) NoteRow(rows, L.Tr("No colours yet: turn on Pick from ID Map and click parts on the 2D canvas or the 3D view."), NoteKind.Info, indent);
+            if (g.IdColors.Count == 0) NoteRow(rows, L.Tr("No colours"), NoteKind.Info, indent);
             for (int i = 0; i < g.IdColors.Count; i++)
             {
                 int rgb = g.IdColors[i];

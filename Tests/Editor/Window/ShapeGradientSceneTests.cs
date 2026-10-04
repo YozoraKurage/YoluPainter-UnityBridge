@@ -124,7 +124,7 @@ namespace Yozolab.YoluPainter.Tests
 
             int steps = d.UndoCount; var initial = VolumeOf(window, gen.Id);
             Assert.That(window.CopyShapeFromScene(gen.Id, boxSource), Is.True, window.StatusMessage);
-            Assert.That(window.StatusMessage, Does.Contain("BoxCollider").And.Contain("not changed"));
+            Assert.That(window.StatusMessage, Does.Contain("BoxCollider"));
             AssertVolume(VolumeOf(window, gen.Id), GeneratorShape.Box, Local(boxSource.transform.TransformPoint(box.center)), LocalEuler(boxSource.transform.rotation), new Vector3(2, 2, 2),
                 "box collider (the root's scale 2 is not applied)");
             Assert.That(VolumeOf(window, gen.Id).Falloff, Is.EqualTo(initial.Falloff), "the falloff is kept");
@@ -161,7 +161,7 @@ namespace Yozolab.YoluPainter.Tests
             var gen = ShapeGradientOn(window); var d = window.Document; int steps = d.UndoCount; var initial = VolumeOf(window, gen.Id);
             var source = Made(new GameObject("Source")); source.AddComponent<BoxCollider>();
             Assert.That(window.CopyShapeFromScene(gen.Id, source), Is.False);
-            Assert.That(window.StatusMessage, Does.Contain("no model from a scene"));
+            Assert.That(window.StatusMessage, Does.Contain("No model from a scene"));
             // プレハブのアセットを直接読んだモデル
             var meshAsset = Quad(); AssetDatabase.CreateAsset(meshAsset, folder + "/Model.asset"); // アセットはフォルダごと消す
             var go = new GameObject("Prefab model"); go.AddComponent<MeshFilter>().sharedMesh = meshAsset; go.AddComponent<MeshRenderer>();
@@ -181,7 +181,7 @@ namespace Yozolab.YoluPainter.Tests
             var hidden = Made(new GameObject("Not in a scene") { hideFlags = HideFlags.HideAndDontSave });
             Assert.That(hidden.scene.IsValid(), Is.False);
             Assert.That(window.CopyShapeFromScene(gen.Id, hidden), Is.False); Assert.That(window.StatusMessage, Does.Contain("not an object in an open scene"));
-            Assert.That(window.CopyShapeFromScene(gen.Id, null), Is.False); Assert.That(window.StatusMessage, Does.Contain("Choose a scene object"));
+            Assert.That(window.CopyShapeFromScene(gen.Id, null), Is.False); Assert.That(window.StatusMessage, Does.Contain("No scene object"));
             Assert.That(window.CopyShapeFromScene(gen.Id, prefab), Is.False, "an asset is not a scene object");
             Assert.That(d.UndoCount, Is.EqualTo(steps)); Assert.That(VolumeOf(window, gen.Id), Is.EqualTo(initial), "nothing changed");
             // 大きさ 0 の物は値の範囲で断る（何も変えない）

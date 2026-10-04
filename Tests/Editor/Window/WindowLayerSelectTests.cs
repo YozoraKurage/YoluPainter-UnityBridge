@@ -154,7 +154,7 @@ namespace Yozolab.YoluPainter.Tests
             BeginLine(300, 300);
             Key(window, KeyCode.G, Ctrl); Key(window, KeyCode.N, Ctrl | EventModifiers.Shift);
             Assert.That(d.Layers.Count, Is.EqualTo(count), "not during a stroke");
-            Assert.That(window.StatusMessage, Does.Contain("Finish the stroke first"));
+            Assert.That(window.StatusMessage, Does.Contain("A stroke is in progress"));
             Assert.That(window.IsStroking, Is.True);
             Mouse(window, EventType.MouseUp, At(window, 360, 300));
             Key(window, KeyCode.N, Ctrl | EventModifiers.Shift);

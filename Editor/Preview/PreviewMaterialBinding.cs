@@ -106,7 +106,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                     foreach (var c in mapped?.Conditions ?? Array.Empty<LilToonCondition>())
                     {
                         if (c.Kind == "property" && material.HasProperty(c.Name) && material.GetFloat(c.Name) == 0)
-                            notes.Add(L.Tr("{0}: {1} is off on this material, so the painted {0} does not show. Turn it on in the Material panel to see it (only the preview changes).", channel, c.Name));
+                            notes.Add(L.Tr("{0}: {1} is off on this material, so the painted {0} does not show.", channel, c.Name));
                         else if (c.Kind == "keyword" && !material.IsKeywordEnabled(c.Name))
                             notes.Add(L.Tr("{0}: the keyword {1} is off on this material, so the painted {0} does not show.", channel, c.Name));
                         else if (c.Kind == "compile" && !c.Satisfied)
@@ -199,7 +199,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             }
             if (standardProblem != null) remarks.Add(standardProblem);
             var guessed = GuessedBinding(b, shader);
-            if (guessed.Kind == PreviewMaterialKind.Guessed) remarks.Add(L.Tr("The mapping of {0} is guessed from its property names (not verified); change it under Channels in the Material panel if it looks wrong.", shader.name));
+            if (guessed.Kind == PreviewMaterialKind.Guessed) remarks.Add(L.Tr("The mapping of {0} is guessed from its property names (not verified).", shader.name));
             guessed.Remarks = remarks;
             return guessed;
         }

@@ -27,8 +27,8 @@ namespace Yozolab.YoluPainter.Editor
             {
                 added = document.AddFilter(selectedLayer, target, settings, target == FilterTarget.Content ? new[] { channel } : null);
                 selectedFilter = added.Id; repaintPixels = true;
-                message = target == FilterTarget.Mask ? L.Tr("Added {0} to the mask (non-destructive: the painted pixels are unchanged).", FilterName(settings))
-                    : L.Tr("Added {0} to the {1} pixels (non-destructive: the painted pixels are unchanged).", FilterName(settings), L.Tr(channel.ToString()));
+                message = target == FilterTarget.Mask ? L.Tr("Added {0} to the mask.", FilterName(settings))
+                    : L.Tr("Added {0} to the {1} pixels.", FilterName(settings), L.Tr(channel.ToString()));
             });
             return added;
         }
@@ -42,8 +42,8 @@ namespace Yozolab.YoluPainter.Editor
             TryAction(() =>
             {
                 bool keepAlpha = (document.EffectiveLocks(selectedLayer) & LayerLocks.Transparency) != 0 && document.GetLayer(selectedLayer).Filters.Count > 0;
-                if (document.BakeFilters(selectedLayer)) message = L.Tr("Baked the filters into the layer's pixels (one undo step); the filter stack is now empty.")
-                    + (keepAlpha ? " " + L.Tr("The transparent pixels are locked, so only the colours were baked: each pixel kept its transparency.") : "");
+                if (document.BakeFilters(selectedLayer)) message = L.Tr("Baked the filters into the layer's pixels.")
+                    + (keepAlpha ? " " + L.Tr("Transparency kept (locked).") : "");
                 else message = L.Tr("The layer has no filters to bake.");
                 repaintPixels = true;
             });
@@ -142,7 +142,7 @@ namespace Yozolab.YoluPainter.Editor
                     case FilterType.Noise:
                     {
                         double amount = PaintGui.KeepSlider(Indent(rows.SliderRow(), indent), L.TrIn("filter", "Amount"), f.Amount, 0, 1, "0", "%", null, true, 100);
-                        int seed = PaintGui.KeepIntField(Indent(rows.Row(), indent), L.TrIn("filter", "Seed"), f.Seed, int.MinValue, int.MaxValue, L.Tr("The same seed gives the same noise. Drag to change, click to type."));
+                        int seed = PaintGui.KeepIntField(Indent(rows.Row(), indent), L.TrIn("filter", "Seed"), f.Seed, int.MinValue, int.MaxValue, L.Tr("The same seed gives the same noise."));
                         next = f.WithAmount(amount).WithSeed(seed);
                         break;
                     }

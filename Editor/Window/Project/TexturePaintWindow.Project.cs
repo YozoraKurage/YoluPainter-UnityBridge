@@ -50,7 +50,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (s == null) throw new ArgumentNullException(nameof(s));
             s.Validate();
-            if (stroke != null) throw new InvalidOperationException(L.Tr("Finish the stroke first."));
+            if (stroke != null) throw new InvalidOperationException(L.Tr("A stroke is in progress."));
             previewDisplayCanceled = false;
             resolution = s.Resolution;
             model = s.Model;
@@ -63,7 +63,7 @@ namespace Yozolab.YoluPainter.Editor
                 ? (s.Materials ?? Enumerable.Range(0, groups.Count).ToArray()).Select(m => Mathf.Clamp(m, 0, groups.Count - 1)).Distinct().OrderBy(m => m).Take(YlpFormat.MaxTextureSets)
                     .Select(m => (key: MaterialKeyOf(groups[m]), name: BaseSetName(groups[m]))).ToList()
                 : new List<(YlpMaterialRef key, string name)> { (YlpMaterialRef.PendingSlot(0), NumberedSetName(1)) };
-            if (chosen.Count == 0) throw new ArgumentException(L.Tr("Choose at least one texture set."));
+            if (chosen.Count == 0) throw new ArgumentException(L.Tr("No texture set is chosen."));
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var sets = new List<TextureSet>();
             foreach (var (key, name) in chosen)
@@ -84,7 +84,7 @@ namespace Yozolab.YoluPainter.Editor
             channel = PaintChannel.Color;
             SuggestSaveLocation();
             repaintPixels = true;
-            message = model == null ? L.Tr("New project without a model. Choose one in Texture Set or File ▸ Project Configuration.")
+            message = model == null ? L.Tr("New project without a model.")
                 : sets.Count == 1 ? L.Tr("New project for {0} ({1}).", model.name, sets[0].Name)
                 : L.Tr("New project for {0} with {1} texture sets.", model.name, sets.Count);
             if (s.BakeMeshMaps) { if (preview.IsPreparing) bakePreparedModel = preview; else if (preview.CanPaint) BakeMeshMaps(); }
@@ -99,7 +99,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (s == null) throw new ArgumentNullException(nameof(s));
             s.Validate();
-            if (stroke != null) throw new InvalidOperationException(L.Tr("Finish the stroke first."));
+            if (stroke != null) throw new InvalidOperationException(L.Tr("A stroke is in progress."));
             SyncCurrentSet();
             var removed = new List<TextureSet>(); var resizes = new List<SetResize>();
             if (s.Sets != null)
@@ -109,7 +109,7 @@ namespace Yozolab.YoluPainter.Editor
                 resizes = PlanResizes(s.Sets, removed);
             }
             bool swap = s.Model != null && preview != null && preview.HasModel && (s.Model != model || s.ReloadModel);
-            if (swap && resizes.Count > 0) { message = L.Tr("Change the model and the texture set sizes in two steps (apply the model first); nothing changed."); return; }
+            if (swap && resizes.Count > 0) { message = L.Tr("The model and the texture set sizes cannot change at once; nothing changed."); return; }
             if (removed.Count > 0 && !Dialogs.Confirm(L.Tr("Remove texture sets?"), RemovalWarning(removed), L.Tr("Remove"), L.Tr("Cancel")))
             { message = L.Tr("The project configuration was not applied; nothing changed."); return; }
             if (resizes.Count > 0 && !Dialogs.Confirm(L.Tr("Resize texture sets?"), ResizeWarning(resizes, s.Resampling), L.Tr("Resize"), L.Tr("Cancel")))
@@ -246,7 +246,7 @@ namespace Yozolab.YoluPainter.Editor
                 var layer = d.GetLayer(id); var path = (Core.Paths.SurfacePath)layer.Path;
                 var geometry = preview != null ? preview.Geometry : null;
                 if (geometry == null || Yozolab.YoluPainter.Editor.Preview.SurfacePathRenderer.Fingerprint(geometry) != path.ModelFingerprint)
-                { notes.Add(SetNotePrefix(set) + L.Tr("The path on the layer {0} was resampled, not redrawn: its model is not loaded. Redraw it in the Path section when it is.", layer.Name)); continue; }
+                { notes.Add(SetNotePrefix(set) + L.Tr("The path on the layer {0} was resampled, not redrawn: its model is not loaded.", layer.Name)); continue; }
                 try { var render = Yozolab.YoluPainter.Editor.Preview.SurfacePathRenderer.Render(d, geometry, path, preview.BrushBudget); d.SetPath(id, path, render.Channels); }
                 catch (Exception ex) when (ex is InvalidOperationException || ex is ArgumentException)
                 { notes.Add(SetNotePrefix(set) + L.Tr("The path on the layer {0} was resampled, not redrawn: {1}", layer.Name, ex.Message)); }

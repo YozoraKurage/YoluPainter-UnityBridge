@@ -58,7 +58,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             var e = Event.current;
             if ((preview.IsPreparing || preview.PreparationCanceled) && e.type == EventType.MouseDown && e.button == 0 && !e.alt && surfaceRect.Contains(e.mousePosition))
-            { message = L.Tr("Wait for the model preparation to finish, or cancel it."); e.Use(); }
+            { message = L.Tr("The model is being prepared."); e.Use(); }
         }
     }
 }

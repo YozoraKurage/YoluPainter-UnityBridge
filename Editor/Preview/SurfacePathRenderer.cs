@@ -58,7 +58,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (document == null) throw new ArgumentNullException(nameof(document));
             if (geometry == null) throw new ArgumentNullException(nameof(geometry));
             if (path == null) throw new ArgumentNullException(nameof(path));
-            if (path.ModelFingerprint != Fingerprint(geometry)) throw new InvalidOperationException("This path belongs to another model snapshot (its triangles or UVs differ). Load that model, or rasterize the layer.");
+            if (path.ModelFingerprint != Fingerprint(geometry)) throw new InvalidOperationException("This path belongs to another model snapshot (its triangles or UVs differ).");
             foreach (var p in path.Points) if (p.Triangle >= geometry.TriangleCount) throw new InvalidOperationException("A path point refers to a triangle the snapshot does not have.");
             var brush = path.Brush;
             var scratch = new PaintDocument(document.Width, document.Height, document.TileSize, 0) { SourceBudgetBytes = document.SourceBudgetBytes, ActiveStrokeBudgetBytes = document.ActiveStrokeBudgetBytes };

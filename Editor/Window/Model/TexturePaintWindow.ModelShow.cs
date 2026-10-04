@@ -27,7 +27,7 @@ namespace Yozolab.YoluPainter.Editor
         internal MeshMapKind ModelShowMap => modelShowMap;
 
         /// <summary>見せ方を変えられないとき（ストロークやツールのドラッグの最中）の理由。</summary>
-        string ModelShowRefusal() => stroke != null || toolDragging ? L.Tr("Finish the stroke first; the 3D view keeps showing {0}.", ModelShowName()) : null;
+        string ModelShowRefusal() => stroke != null || toolDragging ? L.Tr("A stroke is in progress.") : null;
 
         /// <summary>マテリアル（描き方どおりの表示）に戻す。</summary>
         internal bool ShowMaterialIn3D()
@@ -66,7 +66,7 @@ namespace Yozolab.YoluPainter.Editor
         internal bool ShowMeshMapIn3D(MeshMapKind kind)
         {
             if (ModelShowRefusal() is string refused) { message = refused; return false; }
-            if (!meshMaps.TryGet(kind, out var map)) { message = L.Tr("{0} is not baked for this texture set (3D ▸ Bake Mesh Maps…).", MeshMapLabel(kind)); return false; }
+            if (!meshMaps.TryGet(kind, out var map)) { message = L.Tr("{0} is not baked for this texture set.", MeshMapLabel(kind)); return false; }
             showKeysInCanvas = false;
             modelShow = ModelShowKind.MeshMap; modelShowMap = kind;
             var check = map.Provenance.Check(CurrentMeshMapExpectation());
@@ -90,7 +90,7 @@ namespace Yozolab.YoluPainter.Editor
         internal void CycleMeshMapIn3D()
         {
             var kinds = meshMaps.Maps.Select(m => m.Kind).ToList();
-            if (kinds.Count == 0) { if (ModelShowRefusal() is string refused) message = refused; else message = L.Tr("No mesh maps are baked for this texture set (3D ▸ Bake Mesh Maps…)."); return; }
+            if (kinds.Count == 0) { if (ModelShowRefusal() is string refused) message = refused; else message = L.Tr("No mesh maps are baked for this texture set."); return; }
             int at = modelShow == ModelShowKind.MeshMap ? kinds.IndexOf(modelShowMap) : -1;
             if (at + 1 < kinds.Count) ShowMeshMapIn3D(kinds[at + 1]); else ShowMaterialIn3D();
         }
@@ -220,30 +220,44 @@ namespace Yozolab.YoluPainter.Editor
 
         // ───────── 見出しとメニュー ─────────
 
-        /// <summary>各ビュー上部の中央に今の表示名を出す。左右の操作があるときは空いている範囲へ収める。</summary>
+        /// <summary>各ビュー上部の中央に今の表示名を出す。左右の操作があるときは空いている範囲へ収める。名前が入らない狭さでは、名前を詰めずに
+        /// 目のアイコン＋▾にし（名前はツールチップ）、それも入らなければ出さない（幅 0）。出さないときの切り替えは、3D は Model メニューの
+        /// 「3D View Shows」、2D は View メニューの「2D View Shows」と、キー（C・Shift+B・Shift+C）にある。</summary>
         Rect DrawViewShowDropdown(Rect bar, Rect view, float left, float right, bool canvas)
         {
             string label = canvas ? CanvasShowName() : ModelShowName();
-            float w = Mathf.Min(Mathf.Clamp(PaintGui.TextWidth(label, PaintTheme.Label) + 28, 86, 220), Mathf.Max(0, right - left - 4));
+            float room = Mathf.Max(0, right - left - 4);
+            float full = Mathf.Max(86, PaintGui.TextWidth(label + " ▾", PaintTheme.Label) + 20);
+            float w = ViewShowButtonWidth(room, full);
+            bool compact = w < full;
             var r = new Rect(Mathf.Clamp(view.center.x - w * .5f, left, Mathf.Max(left, right - w)), bar.y + 2, w, 22);
+            if (w <= 0) r.x = Mathf.Max(left, right);
             if (canvas) canvasShowButtonForTests = r; else modelShowButtonForTests = r;
             string tip = canvas ? L.Tr("What the 2D view shows: the current composite, one channel, the layer mask or a baked mesh map. Independent of 3D and the painted channel (C · Shift+B · Shift+C).") :
                 L.Tr("What the 3D view shows: the material, or one channel or one baked mesh map unlit, as it is (C: channels · Shift+B: mesh maps · Shift+C: the material)");
-            if (w > 0 && PaintGui.Button(r, PaintGui.Fit(label, Mathf.Max(0, w - 24), PaintTheme.Label, false) + " ▾", (canvas ? canvasShow : modelShow) != ModelShowKind.Material, true, tip))
+            if (compact) tip = label + "\n" + tip;
+            if (w > 0 && PaintGui.Button(r, compact ? "▾" : label + " ▾", (canvas ? canvasShow : modelShow) != ModelShowKind.Material, true, tip, compact ? "visibility" : null))
             {
                 showKeysInCanvas = canvas;
                 ViewShowMenu(canvas).DropDown(r);
             }
             return r;
         }
+        /// <summary>名前が入らないときの、目のアイコン＋▾のボタンの幅。</summary>
+        const float ViewShowCompactWidth = 40;
+        /// <summary>表示の切り替えのボタンの幅: 名前の全部（full）が room に入ればそれ、入らなければ目のアイコン＋▾、それも入らなければ 0（出さない）。</summary>
+        internal static float ViewShowButtonWidth(float room, float full) => full <= room ? full : room >= ViewShowCompactWidth ? ViewShowCompactWidth : 0;
         internal Rect modelShowButtonForTests, canvasShowButtonForTests, compactViewButtonForTests, compactShadingButtonForTests;
 
         /// <summary>3D メニューの「見せるもの」。</summary>
-        void ModelShowMenuItems(PaintMenu m) => ModelShowItems(m, L.Tr("3D View Shows") + "/");
+        void ModelShowMenuItems(PaintMenu m) => ViewShowItems(m, L.Tr("3D View Shows") + "/", false);
 
-        void ModelShowItems(PaintMenu m, string prefix)
+        /// <summary>2D ビューの「見せるもの」。ビューの上の切り替えが幅の都合で隠れても、マウスでここから指定できる。</summary>
+        void CanvasShowMenuItems(PaintMenu m) => ViewShowItems(m, L.Tr("2D View Shows") + "/", true);
+
+        void ViewShowItems(PaintMenu m, string prefix, bool canvas)
         {
-            foreach (var item in ModelShowChoices())
+            foreach (var item in ViewShowChoices(canvas))
                 AddItem(m, prefix + item.path, item.choose, item.reason == null, item.on, item.keys);
         }
 
@@ -272,7 +286,7 @@ namespace Yozolab.YoluPainter.Editor
         List<(string path, Action choose, string reason, bool on, string keys)> ViewShowChoices(bool canvas)
         {
             var items = new List<(string, Action, string, bool, string)>();
-            string locked = canvas ? CanvasShowRefusal() : ModelShowRefusal() ?? (!preview.HasModel ? L.Tr("Load a model first.") : null);
+            string locked = canvas ? CanvasShowRefusal() : ModelShowRefusal() ?? (!preview.HasModel ? L.Tr("No model") : null);
             var shown = canvas ? canvasShow : modelShow;
             var shownChannel = canvas ? canvasShowChannel : modelShowChannel;
             var shownMap = canvas ? canvasShowMap : modelShowMap;

@@ -52,7 +52,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 case MirrorOutcome.NoSurface: return L.Tr("Symmetry: some copies have no surface nearby and were skipped.");
                 case MirrorOutcome.OtherSlot: return L.Tr("Symmetry: some copies are on another texture set and were skipped.");
-                case MirrorOutcome.Hidden: return L.Tr("Symmetry: some copies cannot be seen from this view and were skipped. Enable Ignore visibility to paint hidden symmetry copies.");
+                case MirrorOutcome.Hidden: return L.Tr("Symmetry: some copies cannot be seen from this view and were skipped.");
                 default: return null;
             }
         }
@@ -90,7 +90,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (PaintGui.Button(Mark("symmetry-" + axis, axes[i]), axis.ToString(), symmetryAxis == axis, true, L.Tr("The plane is perpendicular to the model's local {0} axis", axis.ToString()))) SymmetryAxis = axis;
             }
             float offset = PaintGui.NumberField(Mark("symmetry-offset", rows.Row()), L.Tr("Center"), symmetryOffset, "0.####", " m", .001f, -MaxSymmetryOffset, MaxSymmetryOffset,
-                L.Tr("Where the plane is: the distance from the model's origin along the axis, in scene units. Drag to change it (Shift: ×10), or click to type."));
+                L.Tr("Distance from the model's origin along the axis, in scene units"));
             if (offset != symmetryOffset) SymmetryOffset = offset;
             var c = UiRows.Split(rows.Row(), 2, 6);
             if (PaintGui.FitButton(Mark("symmetry-origin", c[0]), L.Tr("Model origin"), false, symmetryOffset != 0, L.Tr("Put the plane through the model's origin (its root object)"))) SymmetryOffset = 0;
@@ -105,7 +105,6 @@ namespace Yozolab.YoluPainter.Editor
             if (ignore != brush.symmetryIgnoreVisibility) SymmetryIgnoreVisibility = ignore;
             bool shown = PaintGui.FitToggle(Mark("symmetry-plane", rows.Row()), L.Tr("Show symmetry axes"), symmetryPlaneShown);
             if (shown != symmetryPlaneShown) SymmetryPlaneShown = shown;
-            PaintGui.Paragraph(rows, L.Tr("Copies stay on this texture set. Mirror and radial symmetry combine up to N × 2 copies; overlaps use the largest coverage."), PaintTheme.TextDim);
             PaintGui.Paragraph(rows, L.Tr("2D canvas symmetry"), PaintTheme.TextDim);
             var modes = new[] { CanvasSymmetryMode.None, CanvasSymmetryMode.Vertical, CanvasSymmetryMode.Horizontal, CanvasSymmetryMode.Both, CanvasSymmetryMode.Radial };
             var names = new[] { L.Tr("Off"), L.Tr("Vertical"), L.Tr("Horizontal"), L.Tr("Both"), L.TrIn("Symmetry", "Radial") };
@@ -122,14 +121,13 @@ namespace Yozolab.YoluPainter.Editor
             brush.canvasSymmetryY = PaintGui.NumberField(Mark("symmetry-2d-y", rows.Row()), L.Tr("Center Y"), brush.canvasSymmetryY * document.Height, "0.##", " px", 1, 0, document.Height) / document.Height;
             brush.canvasSymmetryCount = PaintGui.FitIntSlider(Mark("symmetry-2d-count", rows.SliderRow()), L.Tr("Copies"), brush.canvasSymmetryCount, 2, 16);
             if (PaintGui.FitButton(Mark("symmetry-2d-center", rows.Row()), L.Tr("Canvas center"))) brush.canvasSymmetryX = brush.canvasSymmetryY = .5f;
-            PaintGui.Paragraph(rows, L.Tr("Axes use document pixels, independent of canvas view rotation and flip. Smudge and Clone cannot be combined with symmetry."), PaintTheme.TextDim);
             rows.Space(4);
         }
 
         /// <summary>3D ビューの見出しの、シンメトリーの切り替え（ストロークの間は変えられない）。</summary>
         void DrawSymmetryHeaderToggle(Rect r)
         {
-            if (PaintGui.IconButton(Mark("symmetry-header", r), "flip", L.Tr("Symmetry: mirror 3D brush strokes across the model's plane (set the axis with the options bar's symmetry menu)"), symmetry, stroke == null, 16))
+            if (PaintGui.IconButton(Mark("symmetry-header", r), "flip", L.Tr("Mirror 3D strokes"), symmetry, stroke == null, 16))
                 Symmetry = !symmetry;
         }
 

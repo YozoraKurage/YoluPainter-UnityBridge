@@ -48,7 +48,7 @@ namespace Yozolab.YoluPainter.Editor
                 foreach (var line in d.MissingFillImages()) lines.Add(textureSets.Count > 1 ? set.Name + ": " + line : line);
             }
             if (lines.Count == 0) return null;
-            return L.Tr("{0} fill channel(s) read an image this project does not have; they show their fill value until you choose another image (the reference is kept): {1}", lines.Count, string.Join("; ", lines.Take(5)) + (lines.Count > 5 ? " …" : ""));
+            return L.Tr("{0} fill channel(s) read an image this project does not have; they show their fill value (the reference is kept): {1}", lines.Count, string.Join("; ", lines.Take(5)) + (lines.Count > 5 ? " …" : ""));
         }
 
         // ───────── チャンネルの画像の欄 ─────────
@@ -76,7 +76,7 @@ namespace Yozolab.YoluPainter.Editor
             DrawImageBox(box, active, image, has ? id : (Guid?)null);
             if (has && PaintGui.IconButton(Spot("fill.image.clear", new Rect(row.xMax - 24, row.y, 24, row.height)), "close", L.Tr("Stop using the image (the channel shows its value again)"), false, GUI.enabled, 15))
                 TryAction(() => document.SetFillImage(active.Id, channel, null));
-            if (!has) { NoteRow(rows, L.Tr("Drop an image from the Assets panel here, or click to choose one of this project's images.")); return; }
+            if (!has) return;
             if (image != null)
             {
                 var cs = image.ColorSpace;
@@ -108,7 +108,7 @@ namespace Yozolab.YoluPainter.Editor
                 else PaintGui.Icon(thumb, id.HasValue ? "link_off" : "texture", PaintTheme.TextDim, 13);
                 PaintGui.Outline(thumb, PaintTheme.Border, 1, 0);
             }
-            string name = image != null ? image.Name : id.HasValue ? L.Tr("Missing image") : L.Tr("None (drop an image here)");
+            string name = image != null ? image.Name : id.HasValue ? L.Tr("Missing image") : L.Tr("None");
             var label = new Rect(thumb.xMax + 6, box.y, box.xMax - thumb.xMax - 26, box.height);
             PaintGui.Text(label, PaintGui.Fit(name, label.width, PaintTheme.Label, false), PaintTheme.Label, !enabled ? PaintTheme.TextDisabled : image != null ? PaintTheme.Text : PaintTheme.TextDim);
             PaintGui.Icon(new Rect(box.xMax - 22, box.y, 20, box.height), "arrow_drop_down", PaintTheme.TextDim, 16);
@@ -141,7 +141,7 @@ namespace Yozolab.YoluPainter.Editor
         /// 無ければ先に取り込む（取り込みは Undo に入らない。画像を差すのは 1 回の Undo）。</summary>
         internal void SetFillImageFromAsset(Guid layerId, PaintChannel target, string assetKey)
         {
-            if (stroke != null) throw new InvalidOperationException(L.Tr("Finish the stroke first."));
+            if (stroke != null) throw new InvalidOperationException(L.Tr("A stroke is in progress."));
             if (!TryParseAssetKey(assetKey, out var source, out string id)) throw new ArgumentException("Not an asset: " + assetKey, nameof(assetKey));
             var image = ImportAsset(source, id);
             SetFillImage(layerId, target, image.Id);
@@ -151,7 +151,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>層のチャンネルに、このプロジェクトの画像を差す（1 回の Undo）。知らせに読み方を添える。</summary>
         internal void SetFillImage(Guid layerId, PaintChannel target, Guid resourceId)
         {
-            if (stroke != null) throw new InvalidOperationException(L.Tr("Finish the stroke first."));
+            if (stroke != null) throw new InvalidOperationException(L.Tr("A stroke is in progress."));
             var image = ImageResources.Get(resourceId);
             document.SetFillImage(layerId, target, resourceId);
             selectedLayer = layerId; repaintPixels = true;
@@ -163,7 +163,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             var menu = new PaintMenu(); var images = ImageResources.Images;
             var current = document.Layers.FirstOrDefault(l => l.Id == layerId)?.FillImages.TryGetValue(target, out var cur) == true ? cur : Guid.Empty;
-            if (images.Count == 0) menu.AddDisabledItem(new GUIContent(L.Tr("This project has no images yet (import them in the Assets panel)")));
+            if (images.Count == 0) menu.AddDisabledItem(new GUIContent(L.Tr("No images")));
             foreach (var r in images)
             {
                 var image = r;
@@ -193,7 +193,6 @@ namespace Yozolab.YoluPainter.Editor
         void DrawFillProjection(UiRows rows, PaintLayer active)
         {
             var p = active.Projection; var next = p;
-            if (active.FillImages.Count == 0 && !p.IsDecal) NoteRow(rows, L.Tr("Choose an image for a channel (Layer ▸ Image) to project it; these settings apply to every image of this layer."));
             try
             {
                 ChoiceDropdown(Spot("projection.mode", rows.Row()), L.Tr("Projection"), p.Mode, (FillProjectionMode[])Enum.GetValues(typeof(FillProjectionMode)), ProjectionName,
@@ -263,7 +262,7 @@ namespace Yozolab.YoluPainter.Editor
             bool editing = ProjectionEditLayer == active.Id;
             var row = rows.Row(24); float modes = 3 * 26 + 6;
             if (PaintGui.Button(Spot("projection.edit", new Rect(row.x, row.y, row.width - modes, row.height)), L.Tr("Handles in 3D View"), editing, GUI.enabled && stroke == null,
-                    L.Tr("Show or hide the projection's box in the 3D view (Q). While this layer is selected its handles show: drag the arrows to move it, the rings to turn it and the squares on its faces to size it (Shift: both faces)."), "view_in_ar"))
+                    L.Tr("Show or hide the projection's box and its handles in the 3D view (Q)"), "view_in_ar"))
                 ProjectionHandlesHidden = editing;
             if (PaintGui.IconButton(Spot("projection.move", new Rect(row.xMax - modes + 4, row.y, 26, row.height)), "transform", L.Tr("Handles: move (arrows along the model's axes, the square in the view's plane)"), shapeGizmoMode == ShapeGizmoMode.Move, GUI.enabled && editing, 16))
                 ShapeGizmoMode = ShapeGizmoMode.Move;
@@ -271,12 +270,12 @@ namespace Yozolab.YoluPainter.Editor
                 ShapeGizmoMode = ShapeGizmoMode.Rotate;
             if (PaintGui.IconButton(Spot("projection.fit", new Rect(row.xMax - 26, row.y, 26, row.height)), "target", L.Tr("Fit the box to the model (its bounds; a cube for tri-planar and spherical)"), false, GUI.enabled && stroke == null && preview != null && preview.HasModel, 16))
                 TryAction(() => { document.EndCoalescing(); document.SetFillProjection(active.Id, active.Projection.WithPlacement(ModelPlacement(p.Mode))); document.EndCoalescing(); });
-            if (EditingMask && !projectionHandlesHidden) NoteRow(rows, L.Tr("The handles hide while you edit the layer's mask; select the layer itself to move the box."), NoteKind.Info);
-            else if (editing && surfaceRect.width <= 0) NoteRow(rows, L.Tr("Show the 3D view (View ▸ 3D or 2D | 3D) to see and drag the box."), NoteKind.Info);
-            else if (editing && (preview == null || !preview.HasModel)) NoteRow(rows, L.Tr("Load a model (or the demo cube) to see the box on it."), NoteKind.Info);
+            if (EditingMask && !projectionHandlesHidden) NoteRow(rows, L.Tr("Handles hidden while the mask is edited"), NoteKind.Info);
+            else if (editing && surfaceRect.width <= 0) NoteRow(rows, L.Tr("The 3D view is hidden."), NoteKind.Info);
+            else if (editing && (preview == null || !preview.HasModel)) NoteRow(rows, L.Tr("No model in the 3D view."), NoteKind.Info);
             PaintGui.GroupLabel(rows.Row(16), L.Tr("Placement"), L.Tr("In the model root's space: its position and rotation, in scene units (the root's scale is not applied). The same values as the handles in the 3D view."));
             var c = VectorRow(rows, "projection.center", L.Tr("Center"), v.CenterX, v.CenterY, v.CenterZ, .01f, "0.###", -ShapeVolume.MaxCoordinate, ShapeVolume.MaxCoordinate,
-                L.Tr("Where the box's centre is, from the model root (scene units). Drag to change (Shift: ×10), click to type."), 0);
+                L.Tr("The box's centre, from the model root (scene units)"), 0);
             var next = v.WithCenter(c[0], c[1], c[2]);
             var r = VectorRow(rows, "projection.rotation3d", L.TrIn("shape gradient", "Rotation"), v.RotationX, v.RotationY, v.RotationZ, 1, "0.#", -ShapeVolume.MaxAngle, ShapeVolume.MaxAngle,
                 L.Tr("Euler angles in degrees, as Unity's Transform shows them (turned about Z, then X, then Y)."), 0);
@@ -290,7 +289,6 @@ namespace Yozolab.YoluPainter.Editor
                     : L.Tr("Tri-planar: each face's image spans the box's two other sizes."), 0);
                 next = next.WithSize(s[0], s[1], s[2]);
             }
-            else NoteRow(rows, L.Tr("Spherical: the image goes once around the box's centre (longitude) and from pole to pole; the size is not used."));
             if (!next.Equals(v))
             {
                 string why = next.Refusal();

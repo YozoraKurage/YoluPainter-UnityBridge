@@ -238,6 +238,8 @@ namespace Yozolab.YoluPainter.Editor
             Item(m, "Fit on Screen", () => FitCanvasView(), stroke == null, keys: "Ctrl+0");
             m.AddSeparator("");
             CanvasViewMenuItems(m);
+            m.AddSeparator("");
+            CanvasShowMenuItems(m); // 2D の見せるもの（Model/TexturePaintWindow.ModelShow.cs）
         }
 
         void WindowMenu(PaintMenu m)
@@ -266,7 +268,12 @@ namespace Yozolab.YoluPainter.Editor
                 + "\n" + L.Tr("3D view: C shows one channel at a time (unlit) · Shift+B one baked mesh map at a time · Shift+C the material · Ctrl + right drag turns the environment and the light")
                 + "\n" + L.Tr("Stencil (Properties ▸ Stencil): hold T and drag on a view, left turns it (with Shift in 15° steps), middle or Ctrl+left moves it, right or Alt+left resizes it · hold N to paint without it")
 
-                + "\n" + L.Tr("Q shows or hides the handles of the selected fill layer's projection or decal")));
+                + "\n" + L.Tr("Q shows or hides the handles of the selected fill layer's projection or decal")
+                + "\n" + L.Tr("Projection box and shape handles: Ctrl snaps (Unity's Scene snap settings) · Shift resizes both faces")
+                + "\n" + L.Tr("Selection tools: Shift adds · Ctrl subtracts · Shift+Ctrl intersects")
+                + "\n" + L.Tr("Move: drag moves · a corner scales · outside the box rotates · arrow keys nudge (Shift: 10 px)")
+                + "\n" + L.Tr("Path: click adds a point · drag moves a point · Delete removes the last point")
+                + "\n" + L.Tr("Clone Stamp: Alt+click sets the source · Polygon Fill: click or drag over the model or its UVs")));
             Item(m, "Implementation Limits", () => Dialogs.Inform(L.Tr("Implementation Limits"), L.Tr(LimitsHelp)));
             Item(m, "Plugins…", ShowPluginList);
             m.AddSeparator("");

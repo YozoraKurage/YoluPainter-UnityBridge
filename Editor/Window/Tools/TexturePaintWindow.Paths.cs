@@ -48,10 +48,10 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>クリック: 近くの制御点を掴むか、面の点を足す。</summary>
         internal void BeginPathEdit(Vector2 pointer)
         {
-            if(!preview.CanPaint){message="Load a complete model (or the demo cube) to draw paths on it.";return;}
-            if(EditingMask){message="Paths draw layer pixels; turn off mask painting first.";return;}
+            if(!preview.CanPaint){message=L.Tr("No model to draw a path on.");return;}
+            if(EditingMask){message=L.Tr("A path cannot be drawn on a mask.");return;}
             var layer=document.GetLayer(selectedLayer);
-            if(layer.Path is CanvasPath){message="This layer has a canvas path; edit it on the 2D canvas, or rasterize it.";return;}
+            if(layer.Path is CanvasPath){message=L.Tr("This layer has a canvas path.");return;}
             var existing=layer.Path as SurfacePath;
             if(existing!=null)
                 for(int i=0;i<existing.Points.Count;i++)
@@ -60,7 +60,7 @@ namespace Yozolab.YoluPainter.Editor
                     var p=SurfacePathRenderer.Position(preview.Geometry,existing.Points[i],out _);
                     if(preview.TryWorldToGui(surfaceRect,p,out var g)&&Vector2.Distance(g,pointer)<=PathGrabPoints){pathDrag=i;pathDragOnCanvas=false;pathDragGui=pointer;GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive);return;}
                 }
-            if(!preview.TryPick(surfaceRect,pointer,out var hit)){message="Nothing of the model under the pointer.";return;}
+            if(!preview.TryPick(surfaceRect,pointer,out var hit)){message=L.Tr("Nothing of the model under the pointer.");return;}
             if(!PaintsSlot(hit.MaterialSlot)){OtherSlotPressed(hit.MaterialSlot);return;}
             var point=SurfacePathRenderer.PointOf(hit);
             SurfacePath path;
@@ -78,15 +78,15 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>2D キャンバスのクリック: 近くの制御点を掴むか、その画素の座標に点を足す。</summary>
         internal void BeginCanvasPathEdit(Vector2 pointer)
         {
-            if(EditingMask){message="Paths draw layer pixels; turn off mask painting first.";return;}
+            if(EditingMask){message=L.Tr("A path cannot be drawn on a mask.");return;}
             var layer=document.GetLayer(selectedLayer);
-            if(layer.Path is SurfacePath){message="This layer has a path on the model; edit it in the 3D view, or rasterize it.";return;}
+            if(layer.Path is SurfacePath){message=L.Tr("This layer has a path on the model.");return;}
             var existing=layer.Path as CanvasPath;
             if(existing!=null)
                 for(int i=0;i<existing.Points.Count;i++)
                     if(Vector2.Distance(CanvasPathGui(existing.Points[i]),pointer)<=PathGrabPoints){pathDrag=i;pathDragOnCanvas=true;pathDragGui=pointer;GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive);return;}
             var at=CanvasPoint(pointer);
-            if(at.x<0||at.y<0||at.x>document.Width||at.y>document.Height){message="Click inside the canvas to add a path point.";return;}
+            if(at.x<0||at.y<0||at.x>document.Width||at.y>document.Height){message=L.Tr("Outside the canvas.");return;}
             var point=new CanvasPoint(at.x,at.y);
             CanvasPath path;
             if(existing==null)
@@ -120,7 +120,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             var layer=document.GetLayer(selectedLayer);
             if(!(layer.Path is SurfacePath path)||index<0||index>=path.Points.Count)return;
-            if(!preview.TryPick(surfaceRect,pointer,out var hit)||!PaintsSlot(hit.MaterialSlot)){message="Drop the point on the model (this texture set's material slot).";return;}
+            if(!preview.TryPick(surfaceRect,pointer,out var hit)||!PaintsSlot(hit.MaterialSlot)){message=L.Tr("Not on this texture set's surface.");return;}
             var points=path.Points.ToArray(); points[index]=SurfacePathRenderer.PointOf(hit,points[index].Pressure);
             ApplyPath(layer.Id,path.WithPoints(points),"Moved path point "+(index+1)+".");
         }
@@ -137,13 +137,12 @@ namespace Yozolab.YoluPainter.Editor
         {
             var render=SurfacePathRenderer.Render(document,preview.Geometry,path,preview.BrushBudget);
             document.SetPath(layerId,path,render.Channels);
-            message=done+(render.Gaps>0?" "+render.Gaps+" sample(s) could not be projected onto the surface and were skipped.":"");repaintPixels=true;
+            message=done+(render.Gaps>0?" "+L.Tr("{0} sample(s) were off the surface and skipped.",render.Gaps):"");repaintPixels=true;
         }
 
         void PathSection(UiRows rows)
         {
             if (!ToolSection(rows, "path", L.Tr("Path"), "conversion_path")) return;
-            PaintGui.Paragraph(rows, L.Tr("Click the model in the 3D view or the 2D canvas to add points; drag a point to move it; Delete removes the last point. The layer is redrawn from the path each time."));
             var layer = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
             string rasterizeTip = L.Tr("Keep the pixels and remove the path, so the layer can be painted");
             if (layer?.Path is CanvasPath canvasPath)
@@ -160,18 +159,21 @@ namespace Yozolab.YoluPainter.Editor
             {
                 PaintGui.Paragraph(rows, L.Tr("Path on the model: {0} point(s) on {1}", surfacePath.Points.Count, string.Join(", ", surfacePath.Paints.Select(m => L.Tr(m.Channel.ToString())))), PaintTheme.TextDim);
                 bool bound = preview.Geometry != null && SurfacePathRenderer.Fingerprint(preview.Geometry) == surfacePath.ModelFingerprint;
-                if (!bound) PaintGui.Notice(rows, L.Tr("This path was drawn on another model snapshot (different triangles or UVs). Load that model to edit it, or rasterize it."), "warning", PaintTheme.Warning);
-                var c = UiRows.Split(rows.Row(24), 3, 6);
-                if (PaintGui.FitButton(Mark("path.use-brush", c[0]), L.TrIn("path", "Use Brush"), false, bound && stroke == null, L.Tr("Redraw the path with the current brush")))
+                if (!bound) PaintGui.Notice(rows, L.Tr("Drawn on another model"), "warning", PaintTheme.Warning);
+                // 3 つが 1 行に収まらない幅（最小の窓の日本語など）では、ラスタライズを次の行へ送る（… で詰めない）
+                string useBrush = L.TrIn("path", "Use Brush"), redraw = L.TrIn("path", "Redraw"), rasterize = L.TrIn("path", "Rasterize");
+                float cell = (rows.Width - 12) / 3, needed = new[] { useBrush, redraw, rasterize }.Max(t => PaintGui.TextWidth(t, PaintTheme.LabelCenter)) + 12;
+                var c = needed <= cell ? UiRows.Split(rows.Row(24), 3, 6) : UiRows.Split(rows.Row(24), 2, 6).Concat(new[] { rows.Row(24) }).ToArray();
+                if (PaintGui.FitButton(Mark("path.use-brush", c[0]), useBrush, false, bound && stroke == null, L.Tr("Redraw the path with the current brush")))
                     TryAction(() => ApplyPath(layer.Id, surfacePath.WithBrush(CurrentPathBrush()).WithMaterial(brush.material ? StrokeChannels() : null), L.Tr("Path redrawn with the current brush.")));
-                if (PaintGui.FitButton(c[1], L.TrIn("path", "Redraw"), false, bound && stroke == null, L.Tr("Redraw on the current pose")))
+                if (PaintGui.FitButton(c[1], redraw, false, bound && stroke == null, L.Tr("Redraw on the current pose")))
                     TryAction(() => ApplyPath(layer.Id, surfacePath, L.Tr("Path redrawn.")));
-                if (PaintGui.FitButton(c[2], L.TrIn("path", "Rasterize"), false, true, rasterizeTip)) TryAction(() => RasterizePath(layer.Id));
+                if (PaintGui.FitButton(c[2], rasterize, false, true, rasterizeTip)) TryAction(() => RasterizePath(layer.Id));
             }
             rows.Space(4);
         }
 
-        void RasterizePath(Guid layerId) { document.Rasterize(layerId); message = L.Tr("Rasterized: the layer keeps its pixels and can be painted."); }
+        void RasterizePath(Guid layerId) { document.Rasterize(layerId); message = L.Tr("Rasterized."); }
 
         /// <summary>選んだ層のパスの制御点と線を 3D ビューに重ねる（Repaint のとき）。</summary>
         void DrawPathMarkers()

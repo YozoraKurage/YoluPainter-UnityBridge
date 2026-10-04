@@ -90,7 +90,7 @@ namespace Yozolab.YoluPainter.Editor
             if (name != anchor.Name) RenameAnchor(anchor, name);
             var countRect = new Rect(nameRect.xMax + 4, row.y, countWidth, row.height);
             PaintGui.Text(countRect, count, PaintTheme.LabelDim, PaintTheme.TextDim);
-            PaintGui.Tooltip(countRect, readers.Count == 0 ? L.Tr("No generator reads this anchor yet: add Generator ▸ Anchor on a layer above.")
+            PaintGui.Tooltip(countRect, readers.Count == 0 ? L.Tr("No generator reads this anchor.")
                 : L.Tr("Read by:") + "\n" + string.Join("\n", readers.Select(r => r.layer.Name + (r.target == FilterTarget.Mask ? " (" + L.Tr("mask") + ")" : ""))));
             if (PaintGui.IconButton(Spot(key + ".remove", new Rect(row.xMax - 24, row.y, 24, row.height)), "delete", L.Tr("Remove the anchor (generators that read it pass their input through until you undo)"), false, idle, 16))
                 RemoveAnchorOf(anchor);

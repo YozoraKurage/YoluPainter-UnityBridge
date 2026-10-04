@@ -31,12 +31,12 @@ namespace Yozolab.YoluPainter.Editor
         bool DecalTarget(Vector2 gui, out SurfaceHit hit, out string why)
         {
             why = null; hit = default;
-            if (preview == null || !preview.HasModel || surfaceRect.width <= 0) { why = L.Tr("Load a model (or the demo cube) and show the 3D view to place a decal."); return false; }
-            if (!preview.TryPick(surfaceRect, gui, out hit)) { why = L.Tr("Drop the image on the model to place a decal there."); return false; }
+            if (preview == null || !preview.HasModel || surfaceRect.width <= 0) { why = L.Tr("No model in the 3D view."); return false; }
+            if (!preview.TryPick(surfaceRect, gui, out hit)) { why = L.Tr("Not on the model."); return false; }
             if (!PaintsSlot(hit.MaterialSlot))
             {
                 var owner = SetOfSlot(hit.MaterialSlot);
-                why = owner != null ? L.Tr("That face belongs to the texture set {0}. Switch to it (double-click the face) to place a decal there.", owner.Name) : L.Tr("That face belongs to no texture set of this project.");
+                why = owner != null ? L.Tr("That face belongs to the texture set {0}.", owner.Name) : L.Tr("That face belongs to no texture set of this project.");
                 return false;
             }
             return true;
@@ -49,7 +49,7 @@ namespace Yozolab.YoluPainter.Editor
         /// </summary>
         internal Guid PlaceDecal(Guid resourceId, Vector2 gui)
         {
-            if (stroke != null) throw new InvalidOperationException(L.Tr("Finish the stroke first."));
+            if (stroke != null) throw new InvalidOperationException(L.Tr("A stroke is in progress."));
             var image = ImageResources.Get(resourceId);
             if (!DecalTarget(gui, out var hit, out string why)) throw new InvalidOperationException(why);
             var projection = FillProjection.DecalAt(DecalPlacement(hit, gui, image.Width, image.Height));
@@ -64,7 +64,7 @@ namespace Yozolab.YoluPainter.Editor
             selectedLayer = layerId; editMask = false; repaintPixels = true;
             ProjectionHandlesHidden = false; // 選んだデカールのハンドルを出して、置いたらすぐ動かせるように
             string problem = document.GetDecalProblem(layerId);
-            message = problem == null ? L.Tr("Placed {0} as a decal in {1}. Drag the handles in the 3D view to move, turn or size it.", image.Name, L.Tr(target.ToString()))
+            message = problem == null ? L.Tr("Placed {0} as a decal in {1}.", image.Name, L.Tr(target.ToString()))
                 : L.Tr("Placed {0} as a decal in {1}, but it is not shown yet: {2}", image.Name, L.Tr(target.ToString()), problem);
             Repaint();
             return layerId;
@@ -142,11 +142,7 @@ namespace Yozolab.YoluPainter.Editor
             if (!next.Equals(p)) TryAction(() => document.SetFillProjection(active.Id, next, coalesce: true));
             string problem = null;
             try { problem = document.GetDecalProblem(active.Id); } catch (ArgumentException) { }
-            if (problem == null)
-            {
-                NoteRow(rows, L.Tr("The decal shows inside its box on the model, cut out by the alpha of its first image (Color first); every channel's value shows in that shape."), NoteKind.Info);
-                return false;
-            }
+            if (problem == null) return false;
             NoteRow(rows, L.Tr("The decal is not shown: {0}", problem), NoteKind.Warning);
             if (preview != null && preview.CanPaint && PaintGui.Button(Spot("decal.bake", rows.Row(24)), L.Tr("Bake Position and World Normal"), false, GUI.enabled && stroke == null,
                     L.Tr("Bakes the two mesh maps a decal reads (for the checked texture sets), keeping the other maps."), "deployed_code"))

@@ -22,7 +22,7 @@ namespace Yozolab.YoluPainter.Editor
         PaintLayer RequireMovableLayer()
         {
             var layer=document.GetLayer(selectedLayer);
-            if(layer.IsGroup)throw new InvalidOperationException("A group has no pixels to move. Select a layer inside it.");
+            if(layer.IsGroup)throw new InvalidOperationException(L.Tr("A group has no pixels to move."));
             if(layer.Kind!=LayerKind.Raster)throw new InvalidOperationException("Only paint layers can be moved or transformed ("+layer.Kind+" layers have no pixels).");
             return layer;
         }

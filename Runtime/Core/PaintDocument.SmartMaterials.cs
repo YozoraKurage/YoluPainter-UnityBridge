@@ -29,7 +29,7 @@ namespace Yozolab.YoluPainter.Core
         {
             EnsureNoStroke(); SmartMaterial.CheckName(name);
             var members = TopmostOf(layerIds ?? throw new ArgumentNullException(nameof(layerIds)));
-            if (members.Count == 0) throw new SmartRefusedException(SmartRefusal.NothingToSave, "Choose the layers to save as a smart material.");
+            if (members.Count == 0) throw new SmartRefusedException(SmartRefusal.NothingToSave, "No layer is chosen to save as a smart material.");
             var fragment = NewFragment();
             var notes = new List<string>(); var repin = new List<Guid>(); var used = new List<Guid>();
             var ids = new Dictionary<Guid, Guid>(); var clones = new List<PaintLayer>(); var anchors = new Dictionary<Guid, Guid>();
@@ -195,7 +195,7 @@ namespace Yozolab.YoluPainter.Core
         {
             EnsureNoStroke(); if (mask == null) throw new ArgumentNullException(nameof(mask));
             var layer = GetLayer(layerId);
-            if (mask.Kind != SmartKind.Mask) throw new SmartRefusedException(SmartRefusal.WrongKind, "\"" + mask.Name + "\" is a smart material. Place it as layers.");
+            if (mask.Kind != SmartKind.Mask) throw new SmartRefusedException(SmartRefusal.WrongKind, "\"" + mask.Name + "\" is a smart material.");
             RefuseLockedAttributes(layer); // マスクを変えるのは、すべてのロックでだけ断る（AddLayerMask と同じ）
             if (mask.Repin.Count > 0) ResolveGeneratorInputs(InputsRevision());
             var notes = new List<string>();

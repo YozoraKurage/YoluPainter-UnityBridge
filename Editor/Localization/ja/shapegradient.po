@@ -34,20 +34,11 @@ msgstr "ボックス: 中は 1、面に向かって 0 へ。球: 表面に向か
 msgid "Edit in 3D View"
 msgstr "3D ビューで編集"
 
-msgid "Show the shape in the 3D view with handles: drag the arrows to move it, the rings to turn it and the squares on its faces to size it (Shift: both faces). The model shows the value faintly."
-msgstr "3D ビューに形とハンドルを出します: 矢印のドラッグで動かし、輪で回し、面の四角で大きさを変えます（Shift で両側の面）。モデルには値を薄く重ねて見せます。"
-
 msgid "Handles: move (arrows along the model's axes, the square in the view's plane)"
 msgstr "ハンドル: 移動（矢印はモデルの軸に沿って、中央の四角は画面に平行な面の中で）"
 
 msgid "Handles: rotate (rings about the model's axes; Ctrl snaps to 15°)"
 msgstr "ハンドル: 回転（モデルの軸のまわりの輪。Ctrl で 15° ごと）"
-
-msgid "Show the 3D view (View ▸ 3D or 2D | 3D) to see and drag the shape."
-msgstr "形を見て動かすには 3D ビューを出してください（表示 ▸ 3D か 2D | 3D）。"
-
-msgid "Load a model (or the demo cube) to see the shape on it."
-msgstr "形をモデルの上で見るには、モデル（かデモのキューブ）を読み込んでください。"
 
 msgid "The shape drag was cancelled; the shape is where it was."
 msgstr "形のドラッグを取り消しました。形は元の所のままです。"
@@ -59,9 +50,6 @@ msgstr "置き場"
 
 msgid "In the model root's space: its position and rotation, in scene units (the root's scale is not applied). The same values as the handles in the 3D view."
 msgstr "モデルのルートの位置と向きを基準にした空間で、単位はシーンの単位です（ルートの大きさ（scale）は掛けません）。3D ビューのハンドルと同じ値です。"
-
-msgid "Where the shape's centre is, from the model root (scene units). Drag to change (Shift: ×10), click to type."
-msgstr "形の中心の位置（モデルのルートから、シーンの単位）。ドラッグで変え（Shift で 10 倍）、クリックで数値を打てます。"
 
 msgctxt "shape gradient"
 msgid "Rotation"
@@ -106,9 +94,6 @@ msgstr "シーンから"
 msgid "Copies a scene object's shape relative to the model root once: its BoxCollider or SphereCollider, or else its position, rotation and scale. The scene is only read, never changed."
 msgstr "シーンの物の形を、モデルのルートからの相対で 1 回写します: BoxCollider か SphereCollider があればその形、無ければ位置・回転・大きさ。シーンは読むだけで、変えません。"
 
-msgid "None (drop an object here)"
-msgstr "なし（物をここへドロップ）"
-
 msgid "Pick a scene object to copy its shape from (read only)"
 msgstr "形を写すシーンの物を選ぶ（読むだけ）"
 
@@ -121,23 +106,8 @@ msgstr "シーンから取り直す"
 msgid "Reads the object's shape again (after you moved it in the scene). One undo step."
 msgstr "物の形を読み直します（シーンで動かした後など）。1 回の Undo になります。"
 
-msgid "Copied the shape of '{0}' ({1}) relative to the model root. The scene was not changed."
-msgstr "'{0}' の形（{1}）をモデルのルートからの相対で写しました。シーンは変えていません。"
-
 msgid "'{0}' cannot be used: {1}"
 msgstr "'{0}' は使えません: {1}"
 
-msgid "Select the layer with the shape gradient first."
-msgstr "先に形のグラデーションのある層を選んでください。"
-
-msgid "Choose a scene object to copy the shape from."
-msgstr "形を写すシーンの物を選んでください。"
-
 msgid "'{0}' is not an object in an open scene."
 msgstr "'{0}' は開いているシーンの物ではありません。"
-
-msgid "The shape is placed relative to the model's root, but no model from a scene is loaded (the demo cube has no root in the scene). Load the model from the scene first."
-msgstr "形はモデルのルートを基準に置きますが、シーンのモデルを読み込んでいません（デモのキューブにはシーンのルートがありません）。先にシーンのモデルを読み込んでください。"
-
-msgid "The model was loaded from a Prefab asset, not from a scene, so a scene object cannot be placed relative to its root. Put the model in a scene and load that object."
-msgstr "モデルはシーンではなくプレハブのアセットから読み込んだので、シーンの物をそのルートからの相対で置けません。モデルをシーンに置き、そのオブジェクトを読み込んでください。"

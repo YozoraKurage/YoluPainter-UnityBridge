@@ -48,7 +48,7 @@ namespace Yozolab.YoluPainter.Editor
             var planned = PlanTemplateExport(template, stem);
             if (planned.Count == 0) { message = L.Tr("Nothing to export for {0}: no layer uses a channel it reads.", template.Name); return; }
             var clash = planned.GroupBy(t => t.name, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
-            if (clash != null) { message = L.Tr("Nothing was exported: texture sets {0} would write the same file {1}. Rename one in File ▸ Project Configuration.", string.Join(", ", clash.Select(t => t.set.Name).Distinct()), clash.Key); return; }
+            if (clash != null) { message = L.Tr("Nothing was exported: texture sets {0} would write the same file {1}.", string.Join(", ", clash.Select(t => t.set.Name).Distinct()), clash.Key); return; }
             if (!ConfirmInactiveGenerators(planned.Select(t => t.set).Distinct().Select(set => (set.Name, set.Document)))) return;
             string folder = Dialogs.OpenFolder(L.Tr("Export images for {0} into folder", template.Name), projectPath != null ? Path.GetDirectoryName(projectPath) : Application.dataPath);
             if (string.IsNullOrEmpty(folder)) return;

@@ -86,13 +86,13 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (document == null) return L.Tr("There is no document to bake mesh maps for.");
             if (meshBakeJob != null) return L.Tr("Mesh maps are already being baked.");
-            if (stroke != null) return L.Tr("Finish the stroke before baking mesh maps.");
-            if (posePending) return L.Tr("The pose is being changed; bake after it is applied (when the slider is released).");
-            if (preview == null || !preview.HasModel) return L.Tr("Load a model (or the demo cube) before baking mesh maps.");
-            if (!preview.CanPaint) return L.Tr("Mesh maps are baked only from a complete static snapshot that can be painted; this one is incomplete (see the load diagnostics).");
+            if (stroke != null) return L.Tr("A stroke is in progress.");
+            if (posePending) return L.Tr("The pose is being changed.");
+            if (preview == null || !preview.HasModel) return L.Tr("No model");
+            if (!preview.CanPaint) return L.Tr("Mesh maps are baked only from a complete static snapshot that can be painted; this one is incomplete.");
             if (highPolyModel != null && CurrentHighPolyInput() == null) return L.Tr("Mesh maps cannot be baked: {0}", highPolyNote ?? L.Tr("the high poly has no readable mesh."));
-            if (meshBakeSettings.Maps == null || meshBakeSettings.Maps.Length == 0) return L.Tr("Check at least one map to bake.");
-            if (CheckedBakeSets().Count == 0) return L.Tr("Check at least one texture set to bake.");
+            if (meshBakeSettings.Maps == null || meshBakeSettings.Maps.Length == 0) return L.Tr("No map is checked");
+            if (CheckedBakeSets().Count == 0) return L.Tr("No texture set is checked");
             return null;
         }
 
@@ -279,7 +279,7 @@ namespace Yozolab.YoluPainter.Editor
             if (result.Status != MeshBakeStatus.Completed)
                 return MeshBakeEnded(result.Status, result.Status == MeshBakeStatus.TimedOut ? L.Tr("The mesh-map bake hit its time limit; the previous maps are unchanged.") : L.Tr("The mesh-map bake was canceled; the previous maps are unchanged."), false);
             string changed = MeshBakeChanged(job);
-            if (changed != null) return MeshBakeEnded(null, L.Tr("The baked maps were not used because {0} changed during the bake; the previous maps are unchanged. Bake again.", changed), false);
+            if (changed != null) return MeshBakeEnded(null, L.Tr("The bake was discarded because {0} changed; the previous maps are unchanged.", changed), false);
             job.Set.MeshMaps.Put(result.Maps);
             if (job.Set == currentSet && meshMapView == MeshMapView.None) meshMapView = MeshMapView.Coverage;
             Repaint();
@@ -287,7 +287,7 @@ namespace Yozolab.YoluPainter.Editor
             // ステータスには全部、窓の下の帯には短く（詳しい記録は窓の共通の設定の「最後のベイク」）
             string summary = L.Tr("Baked {0} map(s) in {1} s.", result.Maps.Count, report.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture))
                 + (report.OverlapTexels > 0 ? " " + L.Tr("{0} texels have overlapping UVs (the lower triangle index wins).", report.OverlapTexels.ToString("N0", CultureInfo.InvariantCulture)) : "");
-            return MeshBakeEnded(result.Status, (textureSets.Count > 1 ? job.Set.Name + ": " : "") + L.Tr("Baked {0} at {1}×{2} for slot {3} (rays: {4}): {5}. Mesh maps are derived data, not layers; Save keeps them in the .ylp.",
+            return MeshBakeEnded(result.Status, (textureSets.Count > 1 ? job.Set.Name + ": " : "") + L.Tr("Baked {0} at {1}×{2} for slot {3} (rays: {4}): {5}.",
                 string.Join(", ", result.Maps.Select(m => MeshMapLabel(m.Kind))), s.Width, s.Height, s.TargetSlot, report.RayBackend, report.Summary()), true, summary);
         }
         MeshBakeStatus? MeshBakeEnded(MeshBakeStatus? status, string text, bool ok, string summary = null)
@@ -526,8 +526,9 @@ namespace Yozolab.YoluPainter.Editor
         void DrawMeshBakeCommon(UiRows rows, MeshBakeWindow host)
         {
             var s = meshBakeSettings;
-            PaintGui.Text(rows.Row(22), L.Tr("Common Settings"), PaintTheme.LabelBold);
-            NoteRow(rows, L.Tr("These apply to every map. Distances are relative to the model's bounding-box diagonal, so they do not depend on its size or units."));
+            var commonHead = rows.Row(22);
+            PaintGui.Text(commonHead, L.Tr("Common Settings"), PaintTheme.LabelBold);
+            PaintGui.Tooltip(commonHead, L.Tr("These apply to every map. Distances are relative to the model's bounding-box diagonal, so they do not depend on its size or units."));
             // 出力
             PaintGui.GroupLabel(rows.Row(16), L.TrIn("mesh map", "Output"));
             var bakeSets = CheckedBakeSets();
@@ -545,7 +546,7 @@ namespace Yozolab.YoluPainter.Editor
             // 高ポリ
             PaintGui.GroupLabel(rows.Row(16), L.Tr("High Poly (optional)"));
             var high = highPolyModel;
-            if (PaintGui.ObjectBox(rows.Row(), ref high, HighPolyPickerId, true, L.Tr("None (drop a high poly here)"), "view_in_ar",
+            if (PaintGui.ObjectBox(rows.Row(), ref high, HighPolyPickerId, true, L.Tr("None"), "view_in_ar",
                     L.Tr("A second model whose detail is projected onto this one (meshes are read only; nothing is instantiated or changed)"), L.Tr("Stop using the high poly")))
             { highPolyModel = high; CurrentHighPolyInput(); Repaint(); host.Repaint(); }
             bool usesHigh = highPolyModel != null;
@@ -565,7 +566,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (PaintGui.IconButton(new Rect(row.xMax - 24, row.y, 24, row.height), "sync", L.Tr("Read the high poly's meshes again (after editing them)"), false, GUI.enabled, 16)) { DisposeHighPoly(); CurrentHighPolyInput(); }
                 if (highPolyNote != null) NoteRow(rows, highPolyNote, NoteKind.Warning);
             }
-            else NoteRow(rows, L.Tr("Without a high poly, the maps are baked from this model alone (tangent normal, height and opacity are then uniform)."), NoteKind.Info);
+            else NoteRow(rows, L.Tr("No high poly: tangent normal, height and opacity are uniform."), NoteKind.Info);
             // 最後のベイク
             if (lastMeshBakeReport != null) DrawMeshBakeReport(rows, lastMeshBakeReport);
         }
@@ -595,18 +596,19 @@ namespace Yozolab.YoluPainter.Editor
             bool on = s.Includes(kind), last = on && s.Maps.Length == 1;
             string bakeLabel = L.Tr("Bake this map");
             float toggleWidth = PaintGui.TextWidth(bakeLabel, PaintTheme.Label) + 30;
-            PaintGui.Text(new Rect(head.x, head.y, head.width - toggleWidth - 8, head.height), MeshMapLabel(kind), PaintTheme.LabelBold);
+            var title = new Rect(head.x, head.y, head.width - toggleWidth - 8, head.height);
+            PaintGui.Text(title, MeshMapLabel(kind), PaintTheme.LabelBold);
+            PaintGui.Tooltip(title, MeshMapDescription(kind));
             bool next = PaintGui.Toggle(host.Spot("bake.include", new Rect(head.xMax - toggleWidth, head.y, toggleWidth, head.height)), bakeLabel, on, last ? L.Tr("At least one map stays checked.") : null, !last);
             if (next != on) SetMeshBakeKind(kind, next);
-            NoteRow(rows, MeshMapDescription(kind));
             // 焼いたマップの状態
             if (!meshMaps.TryGet(kind, out var map)) NoteRow(rows, L.Tr("Not baked yet"), NoteKind.Info);
             else
             {
                 var check = map.Provenance.Check(expected);
                 NoteRow(rows, L.Tr("Baked map: {0} ({1} × {2}, slot {3})", MeshMapStateName(check.State), map.Width, map.Height, SlotList(map.Provenance)), check.State == MeshMapState.Stale ? NoteKind.Warning : NoteKind.Info);
-                if (check.State == MeshMapState.Stale) NoteRow(rows, L.Tr("{0} is stale and is not used: {1} Bake again to update it.", MeshMapLabel(kind), string.Join(" ", check.Reasons).Replace(";", "; ")), NoteKind.Warning);
-                else if (check.State == MeshMapState.Unverified) NoteRow(rows, L.Tr("No model is loaded, so the maps cannot be checked against it."), NoteKind.Info);
+                if (check.State == MeshMapState.Stale) NoteRow(rows, L.Tr("{0} is stale and is not used: {1}", MeshMapLabel(kind), string.Join(" ", check.Reasons).Replace(";", "; ")), NoteKind.Warning);
+                else if (check.State == MeshMapState.Unverified) NoteRow(rows, L.Tr("Not checked: no model is loaded."), NoteKind.Info);
             }
             rows.Space(2);
             switch (kind)
@@ -621,14 +623,12 @@ namespace Yozolab.YoluPainter.Editor
                     if (kind == MeshMapKind.AmbientOcclusion)
                         BakeChoice(host, rows.Row(), L.TrIn("mesh map", "Falloff"), s.AoFalloff, (MeshOcclusionFalloff[])Enum.GetValues(typeof(MeshOcclusionFalloff)), FalloffName, v => meshBakeSettings.AoFalloff = v,
                             L.Tr("Linear: nearer occluders darken more"));
-                    NoteRow(rows, L.Tr("The rays are shared by ambient occlusion and the bent normal; occluders and the GPU are in Common Settings."), NoteKind.Info);
                     break;
                 case MeshMapKind.Thickness:
                     PaintGui.GroupLabel(rows.Row(16), L.TrIn("mesh bake", "Rays"));
                     s.ThicknessSamples = PaintGui.KeepIntSlider(host.Spot("bake.thickness.rays", rows.Row()), L.TrIn("mesh map", "Rays"), s.ThicknessSamples, 1, 512, "", L.Tr("Rays per texel (more is smoother and slower)"));
                     s.ThicknessMaxDistance = PaintGui.KeepSlider(rows.Row(), L.TrIn("mesh map", "Distance"), s.ThicknessMaxDistance, .001, 1, "0.###", "", L.Tr("Max distance, relative to the bounding-box diagonal; thicker parts read 1"));
                     s.ThicknessSpreadDegrees = PaintGui.KeepSlider(rows.Row(), L.TrIn("mesh map", "Spread"), s.ThicknessSpreadDegrees, 1, 180, "0", "°", L.Tr("180° = the whole hemisphere"));
-                    NoteRow(rows, L.Tr("Occluders and the GPU are in Common Settings."), NoteKind.Info);
                     break;
                 case MeshMapKind.Curvature:
                     s.CurvatureRadius = PaintGui.KeepSlider(host.Spot("bake.curvature.radius", rows.Row()), L.TrIn("mesh map", "Radius"), s.CurvatureRadius, MeshBakeSettings.MinCurvatureRadius, .2, "0.###", "",
@@ -636,18 +636,14 @@ namespace Yozolab.YoluPainter.Editor
                     break;
                 case MeshMapKind.Id:
                     BakeChoice(host, rows.Row(), L.Tr("Colors from"), s.IdSource, IdSourceChoices, IdSourceName, v => meshBakeSettings.IdSource = v,
-                        L.Tr("What gets its own colour in the ID map"));
-                    NoteRow(rows, IdSourceDescription(s.IdSource));
+                        L.Tr("What gets its own colour in the ID map") + "\n" + IdSourceDescription(s.IdSource));
                     IdColorAssignmentRows(rows, host.Repaint);
                     if ((s.IdSource == MeshIdSource.MaterialSlot || s.IdSource == MeshIdSource.Mesh) && highPolyModel == null)
-                        NoteRow(rows, L.Tr("Without a high poly, every texel of one texture set has the same slot and mesh, so this ID map is one colour. Use mesh parts, UV islands or vertex colours, or choose a high poly."), NoteKind.Warning);
-                    break;
-                default:
-                    NoteRow(rows, L.Tr("This map has no settings of its own; Common Settings apply."), NoteKind.Plain);
+                        NoteRow(rows, L.Tr("No high poly: this ID map is one colour."), NoteKind.Warning);
                     break;
             }
             if ((kind == MeshMapKind.TangentNormal || kind == MeshMapKind.Height || kind == MeshMapKind.Opacity) && highPolyModel == null)
-                NoteRow(rows, L.Tr("No high poly is chosen (Common Settings), so this map is uniform."), NoteKind.Warning);
+                NoteRow(rows, L.Tr("No high poly: this map is uniform."), NoteKind.Warning);
         }
 
         /// <summary>種類の説明（右の設定の上）。</summary>
@@ -662,7 +658,7 @@ namespace Yozolab.YoluPainter.Editor
                 case MeshMapKind.Thickness: return L.Tr("How far rays travel inward before leaving the other side, divided by the max distance: 0 = thin, 1 = thick.");
                 case MeshMapKind.TangentNormal: return L.Tr("The high poly's normals in this model's tangent space (OpenGL, Y+). Flat where the high poly is missed.");
                 case MeshMapKind.Height: return L.Tr("The signed distance from this model to the high poly along the projection (outside is brighter). 0.5 where it is missed.");
-                case MeshMapKind.Id: return L.Tr("A flat colour for each part (material slot, mesh, connected mesh part or UV island) or each triangle's vertex colour. Select by these colours with Shift+W or the ID colour generator.");
+                case MeshMapKind.Id: return L.Tr("A flat colour for each part (material slot, mesh, connected mesh part or UV island) or each triangle's vertex colour.");
                 case MeshMapKind.BentNormal: return L.Tr("The average unblocked direction of the ambient occlusion rays (world space).");
                 default: return L.Tr("1 where the high poly is hit, 0 where it is missed (1 wherever this model covers when there is no high poly).");
             }
@@ -724,8 +720,8 @@ namespace Yozolab.YoluPainter.Editor
                 string text; Color color; string icon;
                 if (refusal != null) { text = refusal; color = PaintTheme.Warning; icon = "warning"; }
                 else if (meshBakeOutcome != null) { text = meshBakeOutcome; color = meshBakeOutcomeOk ? PaintTheme.TextDim : PaintTheme.Warning; icon = meshBakeOutcomeOk ? "check" : "info"; }
-                else { text = L.Tr("Check the maps to bake on the left, and pick one to see its settings."); color = PaintTheme.TextDim; icon = "info"; }
-                DrawMeshBakeStatus(status, text, icon, color);
+                else { text = null; color = PaintTheme.TextDim; icon = "info"; }
+                if (text != null) DrawMeshBakeStatus(status, text, icon, color);
                 if (PaintGui.Button(host.Spot("bake.start", bake), bakeText, true, refusal == null && GUI.enabled, refusal ?? L.Tr("Bake the checked maps from the loaded model. The model, its materials and textures are not changed."), "local_fire_department"))
                     TryAction(() => StartMeshBake());
             }

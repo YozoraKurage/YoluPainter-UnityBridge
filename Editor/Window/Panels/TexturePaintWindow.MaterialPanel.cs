@@ -65,7 +65,7 @@ namespace Yozolab.YoluPainter.Editor
                     if (preview != null && preview.HasModel) DrawPreviewMaterialRow(rows, source);
                     if (source == null)
                     {
-                        PaintGui.Notice(rows, preview != null && preview.HasModel ? L.Tr("This material slot has no source material (the demo cube or an unassigned slot). Choose a material or a shader above to see the painted maps with it.") : L.Tr("Load a model to see and adjust its material."), "info", PaintTheme.TextDim);
+                        PaintGui.Notice(rows, preview != null && preview.HasModel ? L.Tr("No source material") : L.Tr("No model"), "info", PaintTheme.TextDim);
                         DisposeMaterialInspector(); return;
                     }
                     EnsureMaterialInspector(source);
@@ -126,7 +126,7 @@ namespace Yozolab.YoluPainter.Editor
             PaintGui.Text(line, changed == 0 ? L.Tr("No changes") : L.Tr("{0} changed in the preview only (not applied)", changed), PaintTheme.LabelDim, changed == 0 ? PaintTheme.TextDim : PaintTheme.Warning);
             var buttons = UiRows.Split(new Rect(r.x, line.yMax + 4, r.width, 26), 2, 6);
             if (PaintGui.FitButton(MaterialSpot("material.revertAll", buttons[0]), L.Tr("Revert All"), false, GUI.enabled && changed > 0, L.Tr("Put every property of this material back to the material's own value (the preview only)")))
-                TryAction(() => { int n = materialEdits.RevertAll(source); message = L.Tr("Reverted {0} change(s); the preview shows the material's own values again.", n); repaintPixels = true; });
+                TryAction(() => { int n = materialEdits.RevertAll(source); message = L.Tr("Reverted {0} change(s).", n); repaintPixels = true; });
             if (PaintGui.FitButton(MaterialSpot("material.apply", buttons[1]), L.Tr("Apply to Material…"), true, GUI.enabled && changed > 0, L.Tr("Write the changed values into the material itself, after listing them (Unity's Undo reverts it)")))
                 TryAction(ApplyMaterialEdits);
         }
@@ -215,7 +215,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>「マテリアルに反映…」: 変えた値の一覧を出して確かめ、受ければ元のマテリアルに入れる（Unity の Undo に 1 つ）。断れば何もしない。</summary>
         internal void ApplyMaterialEdits()
         {
-            if (stroke != null) { message = L.Tr("Finish the stroke first."); return; }
+            if (stroke != null) { message = L.Tr("A stroke is in progress."); return; }
             CaptureMaterialInspector();
             var source = PanelMaterial;
             if (IsMadeMaterial(source)) // シェーダーから作ったプレビューだけのマテリアル（Model/TexturePaintWindow.PreviewMaterial.cs）
@@ -228,7 +228,7 @@ namespace Yozolab.YoluPainter.Editor
             if (!Dialogs.Confirm(L.Tr("Apply to the material?"), plan.Describe(), L.Tr("Apply"), L.Tr("Cancel"))) { message = L.Tr("Not applied; the material is unchanged."); return; }
             int n = PreviewMaterialApply.Apply(plan, materialEdits);
             repaintPixels = true;
-            message = L.Tr("Applied {0} change(s) to {1}. Unity's Undo (Edit ▸ Undo) reverts the material.", n, source.name);
+            message = L.Tr("Applied {0} change(s) to {1}.", n, source.name);
         }
 
         // ───────── 未反映の変更を知らせる ─────────
@@ -247,7 +247,7 @@ namespace Yozolab.YoluPainter.Editor
                 foreach (var set in TextureSets) { var chosen = ViewMaterialOf(set); if (chosen != null) present.Add(chosen); } // 選んだマテリアル（PreviewMaterial.cs）
                 var gone = materialEdits.Materials.Where(m => !present.Contains(m)).ToList();
                 int dropped = 0; foreach (var m in gone) dropped += materialEdits.RevertAll(m);
-                if (dropped > 0) { message = L.Tr("Discarded {0} preview-only material change(s) of materials that are not in this model (they were never applied).", dropped); Repaint(); }
+                if (dropped > 0) { message = L.Tr("Discarded {0} preview-only material change(s) of materials that are not in this model.", dropped); Repaint(); }
             }
             if (materialEditsNoticePending)
             {

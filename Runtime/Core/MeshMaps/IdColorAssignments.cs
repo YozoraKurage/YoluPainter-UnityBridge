@@ -34,7 +34,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         }
         public IdColorAssignments WithColor(string binding, int part, int? rgb)
         {
-            if (Colors.Count > 0 && binding != Binding) throw new ArgumentException("Manual ID colours belong to another model. Reset them before assigning this model.");
+            if (Colors.Count > 0 && binding != Binding) throw new ArgumentException("Manual ID colours belong to another model.");
             var copy = new Dictionary<int, int>(Colors);
             if (rgb.HasValue) copy[part] = rgb.Value; else copy.Remove(part);
             return new IdColorAssignments(binding, copy);
@@ -72,7 +72,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         {
             if (colors.Colors.Count == 0) return;
             if (colors.Binding != Binding || colors.Colors.Keys.Any(p => p >= Count))
-                throw new MeshBakeRefusedException("Manual ID colours belong to another model or mesh partition. Reset them before baking ID.");
+                throw new MeshBakeRefusedException("Manual ID colours belong to another model or mesh partition.");
         }
     }
 }

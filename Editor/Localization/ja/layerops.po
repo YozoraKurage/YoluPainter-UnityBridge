@@ -33,9 +33,6 @@ msgstr "表示レイヤーを結合"
 
 # ── 複製 ──
 
-msgid "Select a layer first."
-msgstr "先にレイヤーを選んでください。"
-
 # 複製したレイヤーの名前（Photoshop の「〜 のコピー」）
 msgid "{0} copy"
 msgstr "{0} のコピー"
@@ -97,9 +94,6 @@ msgstr "合成の {0} × {1} 画素をコピーしました。"
 msgid "Cut {0} × {1} pixels."
 msgstr "{0} × {1} 画素をカットしました。"
 
-msgid "The clipboard is empty. Copy pixels first (Ctrl+C)."
-msgstr "クリップボードが空です。先に画素をコピーしてください（Ctrl+C）。"
-
 msgid "The clipboard holds {0} MiB, more than the one-operation budget of {1} MiB. Nothing was pasted."
 msgstr "クリップボードは {0} MiB あり、1 回の操作の予算 {1} MiB を超えています。ペーストしませんでした。"
 
@@ -117,26 +111,14 @@ msgstr "キャンバスの外の {0} 画素は切り捨てました。"
 msgid "There is no layer below in the same group to merge into."
 msgstr "同じグループの中に、結合する下のレイヤーがありません。"
 
-msgid "The layer below is a group. Merge the group first (Ctrl+E with the group selected)."
-msgstr "下のレイヤーはグループです。先にグループを結合してください（グループを選んで Ctrl+E）。"
-
 msgid "The layer below is an adjustment layer, which has no pixels to merge into."
 msgstr "下のレイヤーは調整レイヤーで、結合する画素がありません。"
-
-msgid "Hidden layers are not merged. Show both layers first."
-msgstr "非表示のレイヤーは結合しません。先に両方のレイヤーを表示してください。"
-
-msgid "Select a group to merge it."
-msgstr "結合するグループを選んでください。"
 
 msgid "The group is empty: there is nothing to merge."
 msgstr "グループが空なので、結合するものがありません。"
 
 msgid "No layer shows anything: there is nothing to merge."
 msgstr "見えているレイヤーが無いので、結合するものがありません。"
-
-msgid "This layer has no pixels to copy. Copy Merged (Ctrl+Shift+C) copies what shows."
-msgstr "このレイヤーにはコピーする画素がありません。見えているものは「結合部分をコピー」（Ctrl+Shift+C）でコピーできます。"
 
 msgid "There is nothing to copy here."
 msgstr "ここにはコピーするものがありません。"
@@ -147,15 +129,9 @@ msgstr "コピーには {0} MiB 要り、クリップボードの上限 {1} MiB�
 msgid "The result needs more than the one-operation budget of {0} MiB (Project Settings ▸ YoluPainter). Nothing was changed."
 msgstr "結果が 1 回の操作の予算 {0} MiB（Project Settings ▸ YoluPainter）を超えます。何も変えていません。"
 
-msgid "This layer is drawn by a path. Rasterize it to cut from it."
-msgstr "このレイヤーはパスで描かれています。カットするには先にラスタライズしてください。"
-
-msgid "A fill layer cannot be cut. Copy it, or paint on its mask."
-msgstr "塗りつぶしレイヤーはカットできません。コピーするか、マスクに描いてください。"
-
 # Core の文（L.Tr にそのまま渡る）
-msgid "Enable the channel before cutting from it."
-msgstr "カットする前にチャンネルを有効にしてください。"
+msgid "The channel is not enabled on this layer."
+msgstr "このレイヤーではチャンネルが有効ではありません。"
 
 msgid "The layer has no mask."
 msgstr "レイヤーにマスクがありません。"

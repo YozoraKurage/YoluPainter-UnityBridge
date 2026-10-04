@@ -269,7 +269,7 @@ namespace Yozolab.YoluPainter.Core
             if (Type == GeneratorType.Anchor)
             {
                 if (!Enum.IsDefined(typeof(PaintChannel), AnchorChannel)) throw new ArgumentOutOfRangeException(nameof(AnchorChannel), "Unknown channel " + (int)AnchorChannel + ".");
-                if (AnchorChannel == PaintChannel.Normal) throw new ArgumentException("The Normal channel holds unit vectors, not one value per pixel; read Height (the painted relief) instead.", nameof(AnchorChannel));
+                if (AnchorChannel == PaintChannel.Normal) throw new ArgumentException("The Normal channel holds unit vectors, not one value per pixel.", nameof(AnchorChannel));
                 if (!Enum.IsDefined(typeof(AnchorRead), AnchorRead)) throw new ArgumentOutOfRangeException(nameof(AnchorRead), "Unknown anchor read " + (int)AnchorRead + ".");
             }
             else if (AnchorId != Guid.Empty || AnchorChannel != PaintChannel.Color || AnchorRead != AnchorRead.Value) throw new ArgumentException("The anchor belongs to the anchor generator.", nameof(AnchorId));

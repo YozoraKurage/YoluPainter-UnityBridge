@@ -186,7 +186,7 @@ namespace Yozolab.YoluPainter.Editor
             if(String.IsNullOrEmpty(projectPath)) return;
             lastExternalCheck=EditorApplication.timeSinceStartup;
             externalConflict=YlpStore.HasExternalChange(projectPath,projectToken);
-            if(externalConflict) message="The saved file changed outside this window. Normal save is blocked; use Save As or explicitly reopen after reviewing local edits.";
+            if(externalConflict) message=L.Tr("The saved file changed outside this window; Save is blocked (Save As still works).");
         }
         void OnGUI()
         {

@@ -13,12 +13,6 @@ msgstr "同じマテリアルのアセットを使うスロットは、高ポリ
 msgid "Manual part colours"
 msgstr "部品の ID 色を指定"
 
-msgid "Load a model to assign ID colours."
-msgstr "ID 色を指定するにはモデルを読み込んでください。"
-
-msgid "These manual colours belong to another model. Reset them before editing or baking ID."
-msgstr "指定した色は別のモデル用です。編集や ID のベイクの前にリセットしてください。"
-
 msgid "Part {0}"
 msgstr "部品 {0}"
 
@@ -34,12 +28,6 @@ msgstr "指定した色は、この塊の生成元や高ポリの色より優先
 msgid "Reset all manual colours"
 msgstr "指定した色をすべてリセット"
 
-msgid "Manual ID colours changed. Bake ID again; Ctrl+Z undoes the colour edit."
-msgstr "指定した ID 色を変更しました。ID をベイクし直してください。Ctrl+Z で色の変更を戻せます。"
-
-msgid "UV candidate {0}/{1}. Shared UV pixels still change on every overlapping face."
-msgstr "UV の候補 {0}/{1}。共有される UV の画素は、重なるすべての面に反映されます。"
-
 msgid "Candidate {0} · triangle {1}"
 msgstr "候補 {0}・三角形 {1}"
 
@@ -49,11 +37,11 @@ msgstr "UV の重なり"
 msgid "Tab / Shift+Tab or right-click on the 2D canvas chooses an overlapping UV region. Shared pixels still affect all faces."
 msgstr "2D キャンバスで Tab／Shift+Tab、または右クリックすると、重なった UV の候補を選べます。共有画素の変更はすべての面に反映されます。"
 
-msgid "Manual ID colours belong to another model or mesh partition. Reset them before baking ID."
-msgstr "指定した ID 色は別のモデルか塊の対応に結び付いています。ID のベイクの前にリセットしてください。"
+msgid "Manual ID colours belong to another model or mesh partition."
+msgstr "指定した ID 色は別のモデルか塊の対応に結び付いています。"
 
-msgid "Manual ID colours belong to another model. Reset them before assigning this model."
-msgstr "指定した ID 色は別のモデル用です。このモデルに色を指定する前にリセットしてください。"
+msgid "Manual ID colours belong to another model."
+msgstr "指定した ID 色は別のモデル用です。"
 
 msgid "ID highlight exceeds the preview memory budget."
 msgstr "ID の強調表示がプレビューのメモリ予算を超えます。"

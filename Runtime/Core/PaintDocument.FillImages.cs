@@ -87,7 +87,7 @@ namespace Yozolab.YoluPainter.Core
         public void SetFillImage(Guid id, PaintChannel channel, Guid? resourceId)
         {
             EnsureNoStroke(); PaintLayer.ValidateChannel(channel); var layer = GetLayer(id);
-            if (layer.Kind != LayerKind.Fill) throw new InvalidOperationException("Only fill layers have images. Place the image as a layer instead.");
+            if (layer.Kind != LayerKind.Fill) throw new InvalidOperationException("Only fill layers have images.");
             layer.FillGradients.TryGetValue(channel, out var oldGradient);
             Guid? old = layer.FillImages.TryGetValue(channel, out var current) ? current : (Guid?)null;
             if (Nullable.Equals(old, resourceId)) return;
@@ -249,7 +249,7 @@ namespace Yozolab.YoluPainter.Core
         {
             if (!layer.IsDecal || !layer.FillValues.Keys.Any(layer.IsChannelEnabled)) return;
             string problem = GetDecalProblem(layer.Id);
-            if (problem != null) throw new InvalidOperationException("'" + layer.Name + "': the decal cannot be baked because it is not shown now (" + problem + ") Baking would leave it out. Bake the mesh maps (Position and World Normal) first. Nothing was changed.");
+            if (problem != null) throw new InvalidOperationException("'" + layer.Name + "': the decal cannot be baked because it is not shown now (" + problem + ") Baking would leave it out. Nothing was changed.");
         }
 
         /// <summary>One line per fill image channel (enabled, layer visible) that shows its fill value instead of its image now, naming the

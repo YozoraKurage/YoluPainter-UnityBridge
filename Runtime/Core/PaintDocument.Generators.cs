@@ -234,7 +234,7 @@ namespace Yozolab.YoluPainter.Core
                     var status = StatusOfStage(e);
                     if (!status.Active)
                         throw new InvalidOperationException("'" + layer.Name + "'" + where + ": " + e.Settings.Name + " cannot be baked because it has no effect now (" + status.Reason
-                            + ") Baking would leave its effect out. Bake the mesh maps again (or turn the generator off) first. Nothing was changed.");
+                            + ") Baking would leave its effect out. Nothing was changed.");
                 }
         }
     }

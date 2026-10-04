@@ -250,15 +250,11 @@ namespace Yozolab.YoluPainter.Editor
             return strip;
         }
 
-        /// <summary>出す欄が無いとき（スポイトなど）: 何を選ぶと出るかを書く。</summary>
+        /// <summary>出す欄が無いとき（スポイトなど）: 何も出さない（使い方の案内は置かない）。</summary>
         void NothingToShow(UiRows rows, PropertyContext context)
         {
             rows.Space(6);
             rows.Indent = 0;
-            string text = context == PropertyContext.Eyedropper || context == PropertyContext.PolygonFill
-                ? L.Tr("This tool's settings are in the options bar above the views.")
-                : L.Tr("Nothing to set here. Select a layer, a fill, a filter or a generator in the Layers panel, or a painting tool.");
-            NoteRow(rows, text, NoteKind.Info);
         }
 
         // ───────── 開閉の記憶 ─────────

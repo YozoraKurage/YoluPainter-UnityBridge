@@ -4,9 +4,6 @@ msgstr "マテリアルのテクスチャが 2D 画像ではありません。"
 msgid "A smart material is already being saved."
 msgstr "スマートマテリアルを保存中です。"
 
-msgid "Choose a material asset from the Unity project."
-msgstr "Unity のプロジェクトのマテリアルアセットを選んでください。"
-
 msgid "Delete"
 msgstr "削除"
 

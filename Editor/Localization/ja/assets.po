@@ -61,9 +61,6 @@ msgstr "画像"
 msgid "No resource in this project matches the search."
 msgstr "このプロジェクトに、探した名前のリソースはありません。"
 
-msgid "This project has no resources yet. Import images from the Unity project, your library or the built-ins, or drop textures from the Project window here."
-msgstr "このプロジェクトにはまだリソースがありません。Unity のプロジェクト・自分の置き場・内蔵から画像を取り込むか、Project ウィンドウからテクスチャをここへ落としてください。"
-
 msgid "No texture in the Unity project matches the search."
 msgstr "Unity のプロジェクトに、探した名前のテクスチャはありません。"
 
@@ -73,17 +70,11 @@ msgstr "Unity のプロジェクトに Texture2D のアセットがありませ�
 msgid "No image in your library matches the search."
 msgstr "自分の置き場に、探した名前の画像はありません。"
 
-msgid "Your library is empty ({0}). Put resources into it from This Project, or copy PNG and JPEG files into the folder."
-msgstr "自分の置き場は空です（{0}）。「このプロジェクト」からリソースを入れるか、PNG・JPEG のファイルをそのフォルダへ写してください。"
-
 msgid "No built-in image matches the search."
 msgstr "探した名前の内蔵の画像はありません。"
 
 msgid "Already in this project."
 msgstr "このプロジェクトに取り込み済みです。"
-
-msgid "Select an asset to see what you can do with it."
-msgstr "アセットを選ぶと、できることが出ます。"
 
 # ── 操作 ──
 
@@ -219,8 +210,8 @@ msgstr "写しのままにする"
 msgid "Updated {0} resource(s) from their sources."
 msgstr "{0} 個のリソースを出どころから更新しました。"
 
-msgid "{0} resource(s) changed in their source; the copies in this project are kept (Assets panel ▸ Update to take the new pixels)."
-msgstr "{0} 個のリソースの出どころが変わっています。このプロジェクトの写しのままです（新しい画素にするには、アセットのパネル ▸ 更新する）。"
+msgid "{0} resource(s) changed in their source; the copies in this project are kept."
+msgstr "{0} 件のリソースの出どころが変わりました。このプロジェクトの写しはそのまま残しています。"
 
 msgid "The source of {0} changed since it was copied into this project."
 msgstr "このプロジェクトに写した後で、{0} の出どころが変わりました。"

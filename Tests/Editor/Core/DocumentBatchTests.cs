@@ -141,7 +141,7 @@ namespace Yozolab.YoluPainter.Tests
             var image = new byte[256 * 256 * 4];
             Assert.That(() => doc.ReplacePixels(group.Id, PaintChannel.Color, image), Throws.InvalidOperationException);
             Assert.That(() => doc.ReplacePixels(fill.Id, PaintChannel.Color, image), Throws.InvalidOperationException);
-            Assert.That(() => doc.ReplacePixels(layer.Id, PaintChannel.Roughness, image), Throws.InvalidOperationException.With.Message.Contains("Enable"));
+            Assert.That(() => doc.ReplacePixels(layer.Id, PaintChannel.Roughness, image), Throws.InvalidOperationException.With.Message.Contains("not enabled"));
             var small = new PaintDocument(256, 256, 128, 64L << 20) { SourceBudgetBytes = 1024 };
             var l2 = small.AddLayer("L"); small.SetChannelEnabled(l2.Id, PaintChannel.Color, true); long revision = small.Revision;
             Assert.That(() => small.ReplacePixels(l2.Id, PaintChannel.Color, Image(256, 256, (x, y) => new Rgba32((byte)x, (byte)y, 3, 255))), Throws.InvalidOperationException);

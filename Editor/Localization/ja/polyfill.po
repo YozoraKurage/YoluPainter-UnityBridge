@@ -40,16 +40,7 @@ msgstr "マスクを白で塗る（レイヤーを見せる）"
 msgid "Fill the mask with black (hides the layer)"
 msgstr "マスクを黒で塗る（レイヤーを隠す）"
 
-msgid "Click or drag over the model or its UVs; one undo when you let go."
-msgstr "モデルか UV の上をクリック・ドラッグ。離すと 1 回の取り消しにまとまる"
-
-msgid "Mask: white shows, black hides (X swaps). Click or drag; one undo when you let go."
-msgstr "マスク: 白は見せ、黒は隠す（X で入れ替え）。クリック・ドラッグ。離すと 1 回の取り消しにまとまる"
-
 # ── ステータスバー ──
-
-msgid "Load a model (or the demo cube) to fill its polygons on the 3D view or its UVs on the 2D canvas."
-msgstr "モデル（かデモのキューブ）を読み込むと、3D ビューでポリゴンを、2D キャンバスで UV を塗れます。"
 
 msgid "Filled {0} × {1}."
 msgstr "{0} × {1} を塗りました。"

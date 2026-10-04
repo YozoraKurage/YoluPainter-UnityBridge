@@ -53,21 +53,6 @@ msgctxt "mesh bake"
 msgid "Rays"
 msgstr "レイ"
 
-msgid "Without a high poly, the maps are baked from this model alone (tangent normal, height and opacity are then uniform)."
-msgstr "高ポリが無ければ、このモデルだけからベイクします（そのとき接空間法線・高さ・不透明度は一様な値になります）。"
-
-msgid "The rays are shared by ambient occlusion and the bent normal; occluders and the GPU are in Common Settings."
-msgstr "レイの設定はアンビエントオクルージョンとベントノーマルで共通です。遮蔽物と GPU は共通の設定にあります。"
-
-msgid "Occluders and the GPU are in Common Settings."
-msgstr "遮蔽物と GPU は共通の設定にあります。"
-
-msgid "This map has no settings of its own; Common Settings apply."
-msgstr "このマップに固有の設定はありません。共通の設定が効きます。"
-
-msgid "No high poly is chosen (Common Settings), so this map is uniform."
-msgstr "高ポリを選んでいない（共通の設定）ので、このマップは一様な値になります。"
-
 # ── マップの説明 ──
 
 msgid "The model's smooth (vertex) normals in model space: world axes, origin at the model root, stored as n × 0.5 + 0.5."
@@ -138,9 +123,6 @@ msgctxt "mesh bake"
 msgid "Close"
 msgstr "閉じる"
 
-msgid "Check the maps to bake on the left, and pick one to see its settings."
-msgstr "左でベイクするマップをチェックし、項目を選ぶと設定が出ます。"
-
 msgid "Stop the bake; the previous maps stay as they are"
 msgstr "ベイクを止めます。前のマップはそのままです"
 
@@ -177,20 +159,17 @@ msgstr "メッシュマップをベイクするドキュメントがありませ
 msgid "Mesh maps are already being baked."
 msgstr "メッシュマップはベイク中です。"
 
-msgid "Finish the stroke before baking mesh maps."
-msgstr "メッシュマップをベイクする前にストロークを終えてください。"
-
-msgid "The pose is being changed; bake after it is applied (when the slider is released)."
-msgstr "ポーズの変更中です。ポーズが反映されてから（スライダーを離してから）ベイクしてください。"
+msgid "The pose is being changed."
+msgstr "ポーズを変更中です。"
 
 msgid "Mesh maps cannot be baked: {0}"
 msgstr "メッシュマップをベイクできません: {0}"
 
-msgid "Check at least one map to bake."
-msgstr "ベイクするマップを少なくとも 1 つチェックしてください。"
+msgid "No map is checked"
+msgstr "マップがチェックされていません"
 
-msgid "The baked maps were not used because {0} changed during the bake; the previous maps are unchanged. Bake again."
-msgstr "ベイクの間に{0}が変わったので、ベイクしたマップは使いませんでした。前のマップはそのままです。もう一度ベイクしてください。"
+msgid "The bake was discarded because {0} changed; the previous maps are unchanged."
+msgstr "{0}が変わったので、ベイクの結果は使いませんでした。前のマップはそのままです。"
 
 msgid "the document"
 msgstr "ドキュメント"

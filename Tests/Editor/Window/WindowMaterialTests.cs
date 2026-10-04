@@ -179,7 +179,7 @@ namespace Yozolab.YoluPainter.Tests
             ClickToolControl("material.toggle");
             ClickToolControl("material.chip." + PaintChannel.Color);
             Assert.That(window.MaterialIncludes(PaintChannel.Color), Is.True, "the only channel cannot be left out");
-            Assert.That(window.StatusMessage, Does.Contain("at least one channel"));
+            Assert.That(window.StatusMessage, Does.Contain("No channel is chosen"));
             ClickToolControl("material.toggle");
             Assert.That(window.MaterialMode, Is.False);
         }

@@ -25,9 +25,6 @@ msgstr "面はモデルのローカルの {0} 軸に直交します"
 msgid "Center"
 msgstr "中心"
 
-msgid "Where the plane is: the distance from the model's origin along the axis, in scene units. Drag to change it (Shift: ×10), or click to type."
-msgstr "面の位置: モデルの原点から軸の向きに測った距離（シーンの単位）。ドラッグで変え（Shift で 10 倍）、クリックで数値を打てます。"
-
 msgid "Model origin"
 msgstr "モデルの原点"
 
@@ -51,9 +48,6 @@ msgstr "映したダブは、このテクスチャセットのいちばん近い
 
 # ── 3D ビューの見出し ──
 
-msgid "Symmetry: mirror 3D brush strokes across the model's plane (set the axis with the options bar's symmetry menu)"
-msgstr "シンメトリー: 3D のブラシのストロークを、モデルの対称の面で映した所にも描きます（軸はオプションバーのシンメトリーのメニューで選びます）"
-
 # ── 映した側を塗らなかったときの知らせ ──
 
 msgid "Symmetry: some copies have no surface nearby and were skipped."
@@ -61,9 +55,6 @@ msgstr "シンメトリー: 近くに面の無い対称先は塗っていませ�
 
 msgid "Symmetry: some copies are on another texture set and were skipped."
 msgstr "シンメトリー: 別のテクスチャセットにある対称先は塗っていません。"
-
-msgid "Symmetry: some copies cannot be seen from this view and were skipped. Enable Ignore visibility to paint hidden symmetry copies."
-msgstr "シンメトリー: この向きから見えない対称先は塗っていません。見えない側にも塗るには「可視性を無視」を有効にしてください。"
 
 msgid "Reflect dabs across the model root's plane, within the active texture set."
 msgstr "モデルのルートを基準にした面で、今のテクスチャセットの中へダブを映します。"
@@ -82,9 +73,6 @@ msgstr "対称先では裏側や隠れた面にも塗ります。元のダブは
 
 msgid "Show symmetry axes"
 msgstr "対称の軸を表示"
-
-msgid "Copies stay on this texture set. Mirror and radial symmetry combine up to N × 2 copies; overlaps use the largest coverage."
-msgstr "対称先も今のテクスチャセットに限ります。鏡映と放射状を合わせると最大 N × 2 個。重なりは大きいほうの覆いで塗ります。"
 
 msgid "2D canvas symmetry"
 msgstr "2D キャンバスの対称"
@@ -109,12 +97,6 @@ msgstr "中心 Y"
 
 msgid "Canvas center"
 msgstr "キャンバスの中心"
-
-msgid "Axes use document pixels, independent of canvas view rotation and flip. Smudge and Clone cannot be combined with symmetry."
-msgstr "軸は文書の画素の座標です。表示の回転・反転には依存しません。指先とクローンは対称と併用できません。"
-
-msgid "Smudge and Clone need a separate source and motion for each symmetry copy. Turn off symmetry to use them."
-msgstr "指先とクローンには対称先ごとの読み元と移動方向が必要です。使うには対称を切ってください。"
 
 msgctxt "Symmetry"
 msgid "Radial"

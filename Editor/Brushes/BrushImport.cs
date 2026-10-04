@@ -35,7 +35,7 @@ namespace Yozolab.YoluPainter.Editor
                     return new[] { new ImportedBrush(name, "PNG tip", new BrushSettings { Tip = tip, Radius = Math.Max(tip.Width, tip.Height) / 2.0, Spacing = .1 }) };
                 }
                 case ".sut":
-                    throw new BrushImportException("Clip Studio Paint brushes (.sut) are not supported: their tips are stored in a protected container. Export the tip as a PNG and import that instead.");
+                    throw new BrushImportException("Clip Studio Paint brushes (.sut) are not supported: their tips are stored in a protected container.");
                 case ".kpp":
                     throw new BrushImportException("Krita brush presets (.kpp) are not supported; import the tip files (.gbr, .gih or .png) instead.");
                 default:

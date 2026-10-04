@@ -42,7 +42,7 @@ namespace Yozolab.YoluPainter.Editor
             var rows = new UiRows(r, 8);
             if (!brush.material && channel == PaintChannel.Normal)
             {
-                PaintGui.Text(rows.Row(36), L.Tr("The Normal channel paints a direction. Choose it in Properties ▸ Brush ▸ Normal."), PaintTheme.Wrap);
+                PaintGui.Text(rows.Row(36), L.Tr("The Normal channel paints a direction."), PaintTheme.Wrap);
                 DrawBrushSwatches(rows.Row(44));
                 return;
             }
@@ -265,7 +265,6 @@ namespace Yozolab.YoluPainter.Editor
                 if (Event.current.type == EventType.MouseDown && Event.current.button == 0 && cell.Contains(Event.current.mousePosition) && GUI.enabled) { SetBrushColor(c); Event.current.Use(); }
                 PaintGui.Tooltip(cell, "#" + ColorUtility.ToHtmlStringRGB(c));
             }
-            if (recentColors.Count == 0) PaintGui.Text(r, L.Tr("Colors you paint with appear here."), PaintTheme.LabelSmall);
         }
 
         /// <summary>描き始めたブラシの色を使った色の履歴の先頭に足す（カラーとエミッションのとき。同じ色は前へ移す）。</summary>

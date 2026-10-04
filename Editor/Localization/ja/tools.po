@@ -165,12 +165,6 @@ msgstr "円形の 2 つ目の先端の硬さ（画像の先端は自分の縁の
 
 # ---- color dynamics ----
 
-msgid "Color dynamics apply to the Color and Emission channels only; a mask is painted with the exact value."
-msgstr "色の変化はカラーとエミッションのチャンネルだけに効きます。マスクは指定した値のまま描きます。"
-
-msgid "Color dynamics apply to the Color and Emission channels only; this channel is painted with the exact value."
-msgstr "色の変化はカラーとエミッションのチャンネルだけに効きます。このチャンネルは指定した値のまま描きます。"
-
 msgid "The second color for foreground/background jitter"
 msgstr "描画色・背景色のジッターで使う 2 つ目の色"
 
@@ -302,14 +296,7 @@ msgstr "境界をぼかす（ガウスぼかし、σ = 半径 / 3.5）"
 msgid "Hard edge: at least half selected becomes fully selected"
 msgstr "境界をくっきりさせる（半分以上選ばれた画素を完全に選ぶ）"
 
-msgid "Make a selection first."
-msgstr "先に選択範囲を作ってください。"
-
 # ---- transform ----
-
-# "10 px" の間は改行しない空白（U+00A0）
-msgid "Drag or arrow keys (Shift: 10 px) move the layer and its mask, or the selected pixels with the selection."
-msgstr "ドラッグか矢印キー（Shift で 10 px）で、レイヤーとそのマスクを動かします。選択範囲があれば、選択した画素と選択範囲を動かします。"
 
 msgid "Numeric transform"
 msgstr "数値で変形"
@@ -348,17 +335,11 @@ msgstr "この数値で変形する（1 回の取り消しで戻せる）"
 
 # ---- path ----
 
-msgid "Click the model in the 3D view or the 2D canvas to add points; drag a point to move it; Delete removes the last point. The layer is redrawn from the path each time."
-msgstr "3D ビューのモデルか 2D キャンバスをクリックして点を追加。点はドラッグで移動、Delete で最後の点を削除。そのたびにパスからレイヤーを描き直します。"
-
 msgid "Canvas path: {0} point(s) on {1}"
 msgstr "2D のパス: {0} 点（{1}）"
 
 msgid "Path on the model: {0} point(s) on {1}"
 msgstr "モデル上のパス: {0} 点（{1}）"
-
-msgid "This path was drawn on another model snapshot (different triangles or UVs). Load that model to edit it, or rasterize it."
-msgstr "このパスは別のモデルのスナップショット（三角形か UV が違う）で描かれています。編集するにはそのモデルを読み込むか、ラスタライズしてください。"
 
 msgctxt "path"
 msgid "Use Brush"
@@ -386,6 +367,3 @@ msgstr "今のブラシでパスを描き直しました。"
 
 msgid "Path redrawn."
 msgstr "パスを描き直しました。"
-
-msgid "Rasterized: the layer keeps its pixels and can be painted."
-msgstr "ラスタライズしました。レイヤーは画素を残し、描けるようになりました。"

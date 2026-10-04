@@ -37,7 +37,8 @@ namespace Yozolab.YoluPainter.Editor
             if (optional)
             {
                 bool enabled = PaintGui.FitToggle(Spot("gradient.enabled", Indent(rows.Row(), indent)), L.Tr("Color / Value Gradient"), ramp != null,
-                    L.Tr("Map the shape's value through color or value stops and independent opacity stops. Off keeps the original scalar generator."));
+                    L.Tr("Map the shape's value through color or value stops and independent opacity stops. Off keeps the original scalar generator.")
+                    + "\n" + L.Tr("Colours mix in sRGB; data channels use the stops' luminance; opacity is separate."));
                 if (enabled != (ramp != null)) { ramp = enabled ? GradientRamp.Default : null; next = next.WithRamp(ramp); }
             }
             if (ramp == null) return next;
@@ -111,7 +112,6 @@ namespace Yozolab.YoluPainter.Editor
                 if (!changed.Equals(ramp)) ramp = changed;
                 rampCurveBase = ramp;
             }
-            NoteRow(rows, L.Tr("RGB: Classic interpolation in sRGB. Data channels use stored-value luminance; opacity is independent."), NoteKind.Plain, indent);
             return next.WithRamp(ramp);
         }
     }

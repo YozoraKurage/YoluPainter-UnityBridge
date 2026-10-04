@@ -151,7 +151,7 @@ namespace Yozolab.YoluPainter.Tests
             BeginLine(300, 300);
             Key(window, KeyCode.J, Ctrl);
             Assert.That(d.Layers.Count, Is.EqualTo(count), "no duplicate during a stroke");
-            Assert.That(window.StatusMessage, Does.Contain("Finish the stroke first"));
+            Assert.That(window.StatusMessage, Does.Contain("A stroke is in progress"));
             Assert.That(window.IsStroking, Is.True, "the stroke goes on");
             Mouse(window, EventType.MouseUp, At(window, 360, 300));
             Key(window, KeyCode.J, Ctrl);

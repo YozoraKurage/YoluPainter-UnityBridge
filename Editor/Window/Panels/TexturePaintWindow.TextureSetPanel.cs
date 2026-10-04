@@ -50,7 +50,7 @@ namespace Yozolab.YoluPainter.Editor
             var box = new Rect(row.x + 64, row.y, row.width - 64 - 30, row.height);
             PaintGui.Rounded(box, PaintTheme.ControlBg, 3); PaintGui.Outline(box, PaintTheme.Border, 1, 3);
             PaintGui.Icon(new Rect(box.x + 2, box.y, 20, box.height), "deployed_code", PaintTheme.TextDim, 15);
-            string modelName = model != null ? model.name : preview.HasModel ? L.Tr("Demo cube") : L.Tr("None (drop a model here)");
+            string modelName = model != null ? model.name : preview.HasModel ? L.Tr("Demo cube") : L.Tr("No model");
             PaintGui.Text(new Rect(box.x + 24, box.y, box.width - 28, box.height), PaintGui.Fit(modelName, box.width - 28, PaintTheme.Label, false), PaintTheme.Label, model != null || preview.HasModel ? PaintTheme.Text : PaintTheme.TextDim);
             HandleModelDrop(box);
             if (PaintGui.IconButton(new Rect(box.xMax + 4, row.y, 26, row.height), "folder_open", L.Tr("Choose a model…"), false, true, 17))
@@ -125,7 +125,7 @@ namespace Yozolab.YoluPainter.Editor
                 var style = current ? PaintTheme.LabelBold : PaintTheme.Label;
                 PaintGui.Text(new Rect(x, row.y, Mathf.Max(0, right - x), row.height), PaintGui.Fit(set.Name, Mathf.Max(0, right - x), style, false), style, current ? Color.white : PaintTheme.Text);
                 string tip = set.Name + "\n" + L.Tr("Material") + ": " + SetMaterialText(set) + "\n" + set.Document.Width + " × " + set.Document.Height
-                    + (missing ? "\n" + L.Tr("The loaded model does not use this texture set's material; it is not shown in 3D. Choose its material in File ▸ Project Configuration.") : "")
+                    + (missing ? "\n" + L.Tr("The loaded model does not use this texture set's material; it is not shown in 3D.") : "")
                     + (current ? "" : "\n" + L.Tr("Click to paint this texture set."));
                 PaintGui.Tooltip(row, tip);
                 if (e.type == EventType.MouseDown && e.button == 0 && hover && !eye.Contains(e.mousePosition) && !current) clicked = set;
@@ -159,9 +159,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if (next == channel) return;
             channel = next; repaintPixels = true;
-            message = channel == PaintChannel.Normal ? L.Tr("Normal channel: layers composite as unit normals (Overlay adds detail, other modes replace).")
-                : brush.material ? L.Tr("Showing {0}. The material brush paints the channels checked in Properties ▸ Material.", L.Tr(channel.ToString()))
-                : L.Tr("Painting only the selected channel; the other channels stay as they are.");
+            message = L.Tr("Channel: {0}", L.Tr(channel.ToString()));
         }
 
         void HandleModelDrop(Rect box)

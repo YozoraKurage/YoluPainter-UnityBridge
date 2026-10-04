@@ -47,7 +47,7 @@ namespace Yozolab.YoluPainter.Core
             if (!Enum.IsDefined(typeof(ResourceColorSpace), colorSpace)) throw new ArgumentOutOfRangeException(nameof(colorSpace));
             long need = ImageMipChain.ExtraBytes(content.Width, content.Height);
             if (need > mipBudgetBytes)
-                throw new ResourceRefusedException(ResourceRefusal.OverBudget, "The stencil's mipmaps need " + (need >> 20) + " MiB, more than its budget (" + (mipBudgetBytes >> 20) + " MiB). Use a smaller image.");
+                throw new ResourceRefusedException(ResourceRefusal.OverBudget, "The stencil's mipmaps need " + (need >> 20) + " MiB, more than its budget (" + (mipBudgetBytes >> 20) + " MiB).");
             Content = content; ColorSpace = colorSpace; IsGrey = IsGreyImage(content);
             mips = ImageMipChain.Build(content, FillImageConversion.None, false);
         }

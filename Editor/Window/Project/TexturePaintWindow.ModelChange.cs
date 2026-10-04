@@ -107,7 +107,7 @@ namespace Yozolab.YoluPainter.Editor
         /// </summary>
         internal bool ChangeModel(GameObject next, IReadOnlyDictionary<Guid, int> assignment = null, bool reload = false)
         {
-            if (stroke != null) { message = L.Tr("Finish the stroke first."); return false; }
+            if (stroke != null) { message = L.Tr("A stroke is in progress."); return false; }
             if (next == model && !reload) return false;
             if (next == null || preview == null || !preview.HasModel)
             {
@@ -255,11 +255,11 @@ namespace Yozolab.YoluPainter.Editor
                     lines.Add("• " + string.Format(CultureInfo.InvariantCulture, L.TrIn("model change", "{0}: {1}."), (textureSets.Count > 1 ? set.Name + " / " : "") + p.LayerName, what));
                 }
                 if (paths.Count > ModelChangeListLimit) lines.Add(L.Tr("… and {0} more.", paths.Count - ModelChangeListLimit));
-                if (plan.WasPosed) lines.Add(L.Tr("The model is posed: the paths were matched on its posed shape. Reset the pose first to match them on the shape it was loaded with."));
+                if (plan.WasPosed) lines.Add(L.Tr("The model is posed: the paths were matched on its posed shape, not on the shape it was loaded with."));
             }
             int stale = plan.Sets.Sum(s => s.MapsTurningStale);
             lines.Add("");
-            if (stale > 0) lines.Add(L.Tr("{0} baked mesh map(s) become stale; bake them again for the new model. Generators and projections that read them pass their input through until then.", stale));
+            if (stale > 0) lines.Add(L.Tr("{0} baked mesh map(s) become stale for the new model. Generators and projections that read them pass their input through until they are baked again.", stale));
             lines.Add(L.Tr("The pose and BlendShapes start from the new model's. Shape gradients and projections keep their place relative to the model root."));
             lines.Add("");
             lines.Add(L.Tr("Changing the model cannot be undone (the saved file keeps the old model until you save). The painted pixels and each texture set's undo history are kept; redrawn and rasterized paths are one undo step in their texture set. The model's assets are not changed."));

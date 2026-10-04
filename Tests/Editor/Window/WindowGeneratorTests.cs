@@ -36,7 +36,7 @@ namespace Yozolab.YoluPainter.Tests
             var plain = d.Composite(PaintChannel.Color);
             var gen = window.AddGenerator(FilterTarget.Mask, GeneratorType.EdgeWear);
             Assert.That(gen, Is.Not.Null, window.StatusMessage);
-            Assert.That(window.StatusMessage, Does.Contain("no effect until its mesh maps are baked"));
+            Assert.That(window.StatusMessage, Does.Contain("No effect"));
             var status = d.GetGeneratorStatus(fill.Id, gen.Id);
             Assert.That(status.Active, Is.False); Assert.That(status.Reason, Does.Contain("Curvature has not been baked"));
             AssertShows(window, plain, "no maps: the mask passes through, nothing turns black");

@@ -37,9 +37,9 @@ namespace Yozolab.YoluPainter.Editor
             document.SetNormalSettings(next, coalesce);
             repaintPixels = true;
             if (next.DeriveFromHeight != old.DeriveFromHeight)
-                message = next.DeriveFromHeight ? L.Tr("Height → Normal on: the Normal output now has the normal derived from Height under the painted Normal layers (nothing is painted into a layer).") : L.Tr("Height → Normal off: the Normal output is the painted Normal layers only.");
+                message = next.DeriveFromHeight ? L.Tr("Height → Normal on") : L.Tr("Height → Normal off");
             else if (next.FileDirection != old.FileDirection)
-                message = L.Tr("Normal files (Export Images / PNG / PSD) are now written in {0} order. The .ylp texture and the preview stay OpenGL (Unity).", DirectionName(next.FileDirection));
+                message = L.Tr("Normal files: {0}", DirectionName(next.FileDirection));
         }
         static string DirectionName(NormalYDirection d) => d == NormalYDirection.DirectX ? "DirectX (Y−)" : "OpenGL (Y+)";
         static string EdgeName(HeightEdgeMode m) => m == HeightEdgeMode.Wrap ? L.Tr("Wrap (tiling)") : L.TrIn("normal output", "Clamp");
@@ -65,7 +65,7 @@ namespace Yozolab.YoluPainter.Editor
                     L.Tr("Green direction of Normal images written by Export Images / PNG / PSD. Unity uses OpenGL (Y+); the .ylp texture and the preview always do."));
                 if (channel == PaintChannel.Height)
                 {
-                    if (s.DeriveFromHeight) NoteRow(rows, L.Tr("Height also shapes the Normal output. Switch to the Normal channel to see it."), NoteKind.Info);
+                    if (s.DeriveFromHeight) NoteRow(rows, L.Tr("Height also shapes the Normal output."), NoteKind.Info);
                     return;
                 }
                 bool show = PaintGui.FitToggle(rows.Row(), L.Tr("Show output"), showNormalOutput,
@@ -85,9 +85,7 @@ namespace Yozolab.YoluPainter.Editor
                 DrawNormalBrushValue(rows);
                 var layer = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
                 if (layer != null && !layer.IsGroup && layer.Kind != LayerKind.Adjustment && !NormalMaps.IsVectorMode(layer.BlendModeIn(PaintChannel.Normal)))
-                    NoteRow(rows, L.Tr("{0} has no meaning for normals: in the Normal channel this layer replaces what is below, like Normal. Use Overlay to add it as detail (reoriented normal mapping).", L.TrIn("blend mode", BlendName(layer.BlendModeIn(PaintChannel.Normal)))), NoteKind.Info);
-                else if (layer != null && layer.Kind == LayerKind.Adjustment)
-                    NoteRow(rows, L.Tr("Adjustments change the encoded values of the Normal channel (not the vectors); the output renormalizes them."));
+                    NoteRow(rows, L.Tr("{0} replaces the normals below (like Normal).", L.TrIn("blend mode", BlendName(layer.BlendModeIn(PaintChannel.Normal)))), NoteKind.Info);
             }
             finally { GUI.enabled = was; }
         }
@@ -104,7 +102,7 @@ namespace Yozolab.YoluPainter.Editor
             double ny = PaintGui.KeepSlider(rows.SliderRow(), L.TrIn("normal brush", "Tilt Y"), y, -1, 1, "0.00", "", L.Tr("+1 leans up (OpenGL / Unity)"));
             if (nx != x || ny != y) { if (material) SetMaterialNormal((float)nx, (float)ny); else SetBrushNormal((float)nx, (float)ny); }
             if (PaintGui.IconButton(Spot("normal.flat", new Rect(row.xMax - 24, row.y, 24, row.height)), "restart_alt", L.Tr("Flat brush value (128, 128, 255): paints a flat normal"), false, GUI.enabled, 16)) { if (material) SetMaterialNormal(0, 0); else SetBrushNormal(0, 0); }
-            if (material && !MaterialIncludes(PaintChannel.Normal)) NoteRow(rows, L.Tr("The material does not paint Normal now. Check it in Properties ▸ Material."), NoteKind.Info);
+            if (material && !MaterialIncludes(PaintChannel.Normal)) NoteRow(rows, L.Tr("The material does not paint Normal."), NoteKind.Info);
         }
         /// <summary>ブラシの値を (x, y, √(1 − x² − y²)) の法線にする（長さが 1 を超える傾きは z = 0 の向きに縮める）。</summary>
         internal void SetBrushNormal(float x, float y)

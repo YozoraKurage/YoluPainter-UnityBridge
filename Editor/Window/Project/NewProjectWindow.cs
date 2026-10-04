@@ -89,7 +89,7 @@ namespace Yozolab.YoluPainter.Editor
             if (Resampling.HasValue && !Enum.IsDefined(typeof(CanvasResampling), Resampling.Value)) throw new ArgumentOutOfRangeException(nameof(Resampling));
             if (Materials != null)
             {
-                if (Materials.Length == 0) throw new ArgumentException(L.Tr("Choose at least one texture set."), nameof(Materials));
+                if (Materials.Length == 0) throw new ArgumentException(L.Tr("No texture set is chosen."), nameof(Materials));
                 if (Materials.Any(s => s < 0 || s > YlpFormat.MaxMaterialSlot)) throw new ArgumentOutOfRangeException(nameof(Materials));
             }
             if (Sets != null)
@@ -197,7 +197,7 @@ namespace Yozolab.YoluPainter.Editor
             int missing = Settings.Sets.Count(d => d.Id != Guid.Empty && d.Material < 0);
             int unused = groups.Count(g => Settings.Sets.All(d => d.Material != g.Index));
             string text = (Settings.ReloadModel && Settings.Model == OriginalModel ? L.Tr("The model is reloaded when you apply.") : L.Tr("The model is changed when you apply."))
-                + " " + L.Tr("Texture sets keep their pixels and move to the materials below (matched by asset, then by name); you confirm the changes first.")
+                + " " + L.Tr("Texture sets keep their pixels and move to the materials below (matched by asset, then by name).")
                 + (missing > 0 ? " " + L.Tr("{0} not in this model.", missing) : "") + (unused > 0 ? " " + L.Tr("{0} material(s) without a texture set.", unused) : "");
             PaintGui.Notice(rows, text, missing > 0 ? "warning" : "info", missing > 0 ? PaintTheme.Warning : PaintTheme.TextDim);
         }
@@ -273,12 +273,13 @@ namespace Yozolab.YoluPainter.Editor
                 // 大きさはセットごと（上の並びの欄）。ここでは変えるときの再標本化を選ぶ
                 bool resizing = Settings.Sets != null && Settings.Sets.Any(d => d.Resizes);
                 PaintGui.EnumDropdown(rows.Row(24), L.Tr("Resampling"), Settings.Resampling, ResamplingChoices, ResamplingName, v => Settings.Resampling = v, resizing, labelWidth);
-                PaintGui.Paragraph(rows, resizing ? L.Tr("Resized texture sets are resampled when you apply; their undo history is cleared.") : L.Tr("Choose a texture set's size in its row above."), PaintTheme.TextDim);
+                if (resizing) PaintGui.Notice(rows, L.Tr("Resized texture sets are resampled when you apply; their undo history is cleared."), "warning", PaintTheme.Warning);
             }
             else PaintGui.EnumDropdown(rows.Row(24), L.Tr("Resolution"), Settings.Resolution, NewProjectSettings.Resolutions, v => v + " × " + v, v => Settings.Resolution = v, true, labelWidth);
-            PaintGui.EnumDropdown(rows.Row(24), L.Tr("Normal map format"), Settings.NormalFormat, (NormalYDirection[])Enum.GetValues(typeof(NormalYDirection)),
+            var normalRow = rows.Row(24, 10);
+            PaintGui.EnumDropdown(normalRow, L.Tr("Normal map format"), Settings.NormalFormat, (NormalYDirection[])Enum.GetValues(typeof(NormalYDirection)),
                 v => v == NormalYDirection.OpenGL ? L.Tr("OpenGL (Y+, Unity)") : L.Tr("DirectX (Y−)"), v => Settings.NormalFormat = v, true, labelWidth);
-            PaintGui.Text(rows.Row(16, 10), L.Tr("Unity reads normal maps as OpenGL. The format is used when exporting files."), PaintTheme.LabelSmall);
+            PaintGui.Tooltip(normalRow, L.Tr("Unity reads normal maps as OpenGL. The format is used when exporting files."));
             if (!Configure)
                 Settings.BakeMeshMaps = PaintGui.Toggle(rows.Row(22), L.Tr("Bake mesh maps after creating"), Settings.BakeMeshMaps, L.Tr("Normal, position, AO, curvature and thickness from the model"), preview.CanPaint);
 

@@ -20,7 +20,7 @@ namespace Yozolab.YoluPainter.Core
                 int y0 = Math.Max(0, (int)Math.Ceiling(cy - extent - .5)), y1 = Math.Min(height - 1, (int)Math.Floor(cy + extent - .5));
                 if (x0 > x1 || y0 > y1) continue;
                 work = checked(work + (long)(x1 - x0 + 1) * (y1 - y0 + 1));
-                if (work > MaxSymmetryCandidatePixels) throw new InvalidOperationException("Symmetry dab exceeded the pixel work budget. Reduce the brush size or the number of copies.");
+                if (work > MaxSymmetryCandidatePixels) throw new InvalidOperationException("Symmetry dab exceeded the pixel work budget.");
                 bounds.Add((transform, x0, x1, y0, y1));
             }
             foreach (var b in bounds)

@@ -58,25 +58,10 @@ msgstr "検索に合うスマートマテリアルがここにはありません
 msgid "No smart mask here matches the search."
 msgstr "検索に合うスマートマスクがここにはありません。"
 
-msgid "This project has no smart materials yet. Save layers with Layer ▸ Save as Smart Material, or import one from your library or the built-ins."
-msgstr "このプロジェクトにはまだスマートマテリアルがありません。レイヤー ▸ スマートマテリアルとして保存 で層を保存するか、自分の置き場・内蔵から取り込んでください。"
-
-msgid "This project has no smart masks yet. Save a layer's mask with Layer ▸ Save Mask as Smart Mask, or import one from your library or the built-ins."
-msgstr "このプロジェクトにはまだスマートマスクがありません。レイヤー ▸ マスクをスマートマスクとして保存 で層のマスクを保存するか、自分の置き場・内蔵から取り込んでください。"
-
 msgid "Smart materials and smart masks are not Unity assets. Look in This Project, My Library or Built-in."
 msgstr "スマートマテリアルとスマートマスクは Unity のアセットではありません。このプロジェクト・自分の置き場・内蔵を見てください。"
 
-msgid "Your library has no smart materials yet ({0}). Saving one puts it there."
-msgstr "自分の置き場にはまだスマートマテリアルがありません（{0}）。保存するとここに入ります。"
-
-msgid "Your library has no smart masks yet ({0}). Saving one puts it there."
-msgstr "自分の置き場にはまだスマートマスクがありません（{0}）。保存するとここに入ります。"
-
 # ── 保存 ──
-
-msgid "Select the layers to save as a smart material first."
-msgstr "先にスマートマテリアルとして保存する層を選んでください。"
 
 msgid "{0} has no mask to save as a smart mask."
 msgstr "{0} にはスマートマスクとして保存するマスクがありません。"
@@ -116,9 +101,6 @@ msgstr "{0} を {1} 層のグループとして置きました。"
 msgid "Placed {0}."
 msgstr "{0} を置きました。"
 
-msgid "Select the layer to put {0} on first."
-msgstr "先に {0} を置く層を選んでください。"
-
 msgid "Put {0} on the mask of {1}, replacing its mask (Undo brings it back)."
 msgstr "{0} を {1} のマスクに置きました（前のマスクと置き換えました。取り消すと戻ります）。"
 
@@ -128,14 +110,8 @@ msgstr "{0} を {1} のマスクとして置きました。"
 msgid "It was made at {0} × {1} and was resized to {2} × {3}."
 msgstr "{0} × {1} で作られたものを {2} × {3} にしました。"
 
-msgid "This texture set does not use {0}: those values were placed switched off (switch the channels on in the layers to use them)."
-msgstr "このテクスチャセットは {0} を使っていないので、その値はオフにして置きました（使うときは層のチャンネルをオンにしてください）。"
-
 msgid "{0} generator(s) were pinned to this texture set's bake."
 msgstr "{0} 個の Generator をこのテクスチャセットのベイクに固定しました。"
-
-msgid "Its generators have no effect until this texture set's mesh maps are baked (3D ▸ Bake Mesh Maps…)."
-msgstr "このテクスチャセットのメッシュマップを焼くまで、Generator は効きません（3D ▸ メッシュマップをベイク…）。"
 
 msgid "{0} is no longer in your library."
 msgstr "{0} はもう自分の置き場にありません。"

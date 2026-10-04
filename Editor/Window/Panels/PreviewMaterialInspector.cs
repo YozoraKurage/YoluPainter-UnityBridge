@@ -49,7 +49,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (Copy.shader != shader)
             {
                 Copy.shader = shader; Copy.CopyPropertiesFromMaterial(source); Copy.shaderKeywords = source.shaderKeywords; edits.ApplyTo(source, Copy);
-                Problem = L.Tr("The inspector changed the shader. Choose a shader above instead; that change was cancelled.");
+                Problem = L.Tr("The inspector changed the shader; that change was cancelled.");
                 return false;
             }
             bool changed = edits.Capture(source, Copy);

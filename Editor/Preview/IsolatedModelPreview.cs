@@ -284,7 +284,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             LoadCount++; Timings = new PreviewLoadTimings();
             var loadClock = System.Diagnostics.Stopwatch.StartNew();
             LoadedSource = source; SourceFingerprint = PreviewSourceFingerprint.Of(source);
-            if (source == null) { report.Diagnostics.Add("Choose a model GameObject or Prefab to load."); return report; }
+            if (source == null) { report.Diagnostics.Add("No model."); return report; }
             EnsurePreview();
             var shader = Shader.Find("Hidden/YoluPainter/PreviewSurface");
             if (shader == null) { report.Diagnostics.Add("The package's neutral preview shader could not be loaded."); return report; }
@@ -350,7 +350,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             MaterialView.Reset(materials.Count); ApplyRendererMaterials();
             report.Diagnostics.Add("G1 uses UV0, 0–1 UVs, editor mesh snapshots and an opaque neutral shader. UV tiling, alpha cutouts, shader displacement, exact lilToon/SRP appearance and shader-driven vertex motion are not represented. Skinned meshes show their current pose and BlendShapes, baked on the CPU.");
             report.Diagnostics.Add("Overlapping UVs share pixels. Duplicate-position edges may join seams; surface filtering cannot make overlapping UVs independent.");
-            if (incomplete) report.Diagnostics.Add("Surface painting is disabled for this incomplete snapshot, so omitted geometry cannot silently allow painting through clothes. Choose a supported static-mesh root.");
+            if (incomplete) report.Diagnostics.Add("Surface painting is disabled for this incomplete snapshot, so omitted geometry cannot silently allow painting through clothes.");
             return report;
         }
 
@@ -543,7 +543,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 sourceColors.RemoveRange(firstSlot, sourceColors.Count - firstSlot);
                 slotNames.RemoveRange(firstSlot, slotNames.Count - firstSlot);
                 slotMeshNames.RemoveRange(firstSlot, slotMeshNames.Count - firstSlot);
-                report.Diagnostics.Add(renderer.name + ": " + L.Tr("The mesh could not be read in the Editor. Enable Read/Write in its model import settings and try again; YoluPainter does not change those settings.") + " " + exception.Message);
+                report.Diagnostics.Add(renderer.name + ": " + L.Tr("The mesh could not be read in the Editor: Read/Write is off in its model import settings (YoluPainter does not change those settings).") + " " + exception.Message);
                 return false;
             }
         }
@@ -630,7 +630,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public bool ApplyPose()
         {
             ThrowIfDisposed();
-            if (IsPreparing) throw new InvalidOperationException(L.Tr("Wait for the model preparation to finish, or cancel it."));
+            if (IsPreparing) throw new InvalidOperationException(L.Tr("The model is being prepared."));
             if (!HasSkinnedMeshes) return false;
             foreach (var e in entries)
             {

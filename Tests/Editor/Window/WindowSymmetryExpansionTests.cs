@@ -112,7 +112,7 @@ namespace Yozolab.YoluPainter.Tests
         [TestCase("Smudge")] [TestCase("Clone")]
         public void CanvasSymmetryRefusesSourceDependentEffectsWithAReason(string toolName)
         {
-            PrepareCanvasSymmetry(); window.SelectTool((TexturePaintWindow.PaintTool)Enum.Parse(typeof(TexturePaintWindow.PaintTool),toolName)); var before=Snapshot(); Click(At(window,300,400)); Assert.That(window.IsStroking,Is.False); Assert.That(Snapshot(),Is.EqualTo(before)); Assert.That(window.StatusMessage,Does.Contain("separate source"));
+            PrepareCanvasSymmetry(); window.SelectTool((TexturePaintWindow.PaintTool)Enum.Parse(typeof(TexturePaintWindow.PaintTool),toolName)); var before=Snapshot(); Click(At(window,300,400)); Assert.That(window.IsStroking,Is.False); Assert.That(Snapshot(),Is.EqualTo(before)); Assert.That(window.StatusMessage,Does.Contain("do not work with symmetry"));
         }
         [Test] public void ExpandedSymmetryControlsChangeSettingsWithoutEditingTheDocument()
         {

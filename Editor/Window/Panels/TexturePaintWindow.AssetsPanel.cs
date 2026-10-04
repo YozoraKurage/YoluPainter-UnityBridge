@@ -241,18 +241,17 @@ namespace Yozolab.YoluPainter.Editor
                 if (searching && assetSource != AssetSource.Unity) return masks ? L.Tr("No smart mask here matches the search.") : L.Tr("No smart material here matches the search.");
                 switch (assetSource)
                 {
-                    case AssetSource.Project: return masks ? L.Tr("This project has no smart masks yet. Save a layer's mask with Layer ▸ Save Mask as Smart Mask, or import one from your library or the built-ins.")
-                        : L.Tr("This project has no smart materials yet. Save layers with Layer ▸ Save as Smart Material, or import one from your library or the built-ins.");
+                    case AssetSource.Project: return masks ? L.Tr("No smart masks") : L.Tr("No smart materials");
                     case AssetSource.Unity: return L.Tr("No .ylsmart asset matches the selected kind and search.");
-                    case AssetSource.Library: return masks ? L.Tr("Your library has no smart masks yet ({0}). Saving one puts it there.", PainterSettings.LibraryFolder) : L.Tr("Your library has no smart materials yet ({0}). Saving one puts it there.", PainterSettings.LibraryFolder);
+                    case AssetSource.Library: return (masks ? L.Tr("No smart masks") : L.Tr("No smart materials")) + "\n" + PainterSettings.LibraryFolder;
                     default: return masks ? L.Tr("No smart mask here matches the search.") : L.Tr("No smart material here matches the search.");
                 }
             }
             switch (assetSource)
             {
-                case AssetSource.Project: return searching ? L.Tr("No resource in this project matches the search.") : L.Tr("This project has no resources yet. Import images from the Unity project, your library or the built-ins, or drop textures from the Project window here.");
+                case AssetSource.Project: return searching ? L.Tr("No resource in this project matches the search.") : L.Tr("No resources");
                 case AssetSource.Unity: return searching ? L.Tr("No texture in the Unity project matches the search.") : L.Tr("The Unity project has no Texture2D assets.");
-                case AssetSource.Library: return searching ? L.Tr("No image in your library matches the search.") : L.Tr("Your library is empty ({0}). Put resources into it from This Project, or copy PNG and JPEG files into the folder.", PainterSettings.LibraryFolder);
+                case AssetSource.Library: return searching ? L.Tr("No image in your library matches the search.") : L.Tr("No images") + "\n" + PainterSettings.LibraryFolder;
                 default: return L.Tr("No built-in image matches the search.");
             }
         }
@@ -261,8 +260,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             var item = items.FirstOrDefault(i => i.Key == selectedAsset);
             var info = new Rect(r.x, r.y, r.width, 18);
-            if (item == null) PaintGui.Text(info, PaintGui.Fit(L.Tr("Select an asset to see what you can do with it."), info.width, PaintTheme.LabelDim), PaintTheme.LabelDim);
-            else
+            if (item != null)
             {
                 string text = item.Name + (string.IsNullOrEmpty(item.Detail) ? "" : " · " + item.Detail);
                 PaintGui.Text(info, PaintGui.Fit(text, info.width, PaintTheme.LabelDim, false), PaintTheme.LabelDim);

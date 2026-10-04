@@ -75,35 +75,17 @@ msgstr "画像を端の先へ、表示域いっぱいに繰り返します。繰
 msgid "Amount: the image's brightness is how much paint gets through (white paints, black and transparent hold back). Colour: the brush paints the image's colours, its alpha is the amount. Automatic: amount for a grey image, colour otherwise."
 msgstr "量: 画像の明るさが塗りを通す量です（白は塗り、黒と透明は止めます）。色: ブラシは画像の色で塗り、そのアルファが量です。自動: 灰色の画像なら量、そうでなければ色。"
 
-msgid "An image laid over the 2D canvas and the 3D view that the brush paints through. Drop an image from the Assets panel here, or click to choose one of this project's images."
-msgstr "2D キャンバスと 3D ビューに重ねる画像で、ブラシはその上から塗ります。アセットのパネルから画像をここへドロップするか、押してこのプロジェクトの画像から選びます。"
-
-msgid "Hold T and drag on the 2D canvas or the 3D view: left turns it (Shift: 15° steps), middle or Ctrl+left moves it, right or Alt+left resizes it. Hold N to paint without it. It stays on the screen when the camera or the canvas moves."
-msgstr "T を押したまま 2D キャンバスか 3D ビューをドラッグ: 左で回し（Shift で 15° 刻み）、中か Ctrl+左で動かし、右か Alt+左で大きさを変えます。N を押しているあいだは使わずに塗ります。カメラやキャンバスを動かしても、画面の同じ所にあります。"
-
-msgid "Colour with material painting: Base Color takes the image's colours; the other channels paint their own values through the image's alpha."
-msgstr "マテリアルで塗るときの色: Base Color に画像の色が入り、ほかのチャンネルは自分の値を画像のアルファの量で塗ります。"
-
-msgid "A mask takes only the amount: the image's alpha in Colour mode."
-msgstr "マスクには量だけが入ります（色のときは画像のアルファ）。"
-
 msgid "Stop using the stencil"
 msgstr "ステンシルを外す"
 
 msgid "None (no stencil)"
 msgstr "なし（ステンシルを使わない）"
 
-msgid "Stencil: {0}. The brush paints through it; hold T and drag on the view to place it."
-msgstr "ステンシル: {0}。ブラシはその上から塗ります。T を押したまま表示域をドラッグして置き場を変えます。"
-
 msgid "The stencil was removed."
 msgstr "ステンシルを外しました。"
 
 msgid "The stencil's image is no longer in this project; the stencil was removed."
 msgstr "ステンシルの画像がこのプロジェクトから無くなったので、ステンシルを外しました。"
-
-msgid "Choose a stencil image first (Properties ▸ Stencil)."
-msgstr "先にステンシルの画像を選んでください（プロパティ ▸ ステンシル）。"
 
 msgid "Stencil (Properties ▸ Stencil): hold T and drag on a view, left turns it (with Shift in 15° steps), middle or Ctrl+left moves it, right or Alt+left resizes it · hold N to paint without it"
 msgstr "ステンシル（プロパティ ▸ ステンシル）: T を押したまま表示域をドラッグ、左で回す（Shift で 15° 刻み）、中か Ctrl+左で動かす、右か Alt+左で大きさ · N を押しているあいだは使わずに塗る"

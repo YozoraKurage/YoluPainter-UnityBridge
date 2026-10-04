@@ -111,7 +111,7 @@ namespace Yozolab.YoluPainter.Core
         void RequireTransformable(PaintLayer layer, Resampling resampling, Affine2D transform)
         {
             if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException(layer.IsGroup
-                ? "A group has no pixels to transform. Select a layer inside it."
+                ? "A group has no pixels to transform."
                 : "Only paint layers have pixels to transform.");
             if (!Enum.IsDefined(typeof(Resampling), resampling)) throw new ArgumentOutOfRangeException(nameof(resampling));
             RefusePathLayer(layer);

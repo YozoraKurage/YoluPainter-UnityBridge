@@ -139,8 +139,7 @@ namespace Yozolab.YoluPainter.Editor
         void ColorDynamicsSection(UiRows rows)
         {
             if (!ToolSection(rows, "brush-color", L.Tr("Color Dynamics"), "palette")) return;
-            if (EditingMask) PaintGui.Notice(rows, L.Tr("Color dynamics apply to the Color and Emission channels only; a mask is painted with the exact value."), "info", PaintTheme.TextDim);
-            else if (!BrushSettings.CarriesColor(channel)) PaintGui.Notice(rows, L.Tr("Color dynamics apply to the Color and Emission channels only; this channel is painted with the exact value."), "info", PaintTheme.TextDim);
+            if (EditingMask || !BrushSettings.CarriesColor(channel)) PaintGui.Notice(rows, L.Tr("Only Color and Emission use color dynamics."), "info", PaintTheme.TextDim);
             var row = rows.SliderRow();
             PaintGui.ColorSwatch(new Rect(row.x, row.y + 4, 30, row.height - 8), brush.secondaryColor, color => { color.a = 1; brush.secondaryColor = color; Repaint(); }, false,
                 L.Tr("Background color") + "\n" + L.Tr("The second color for foreground/background jitter"));

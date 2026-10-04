@@ -34,9 +34,13 @@ namespace Yozolab.YoluPainter.Editor
             else { var s = new GUIStyle(PaintTheme.LabelCenter); s.normal.textColor = color; GUI.Label(at, string.IsNullOrEmpty(name) ? "?" : name.Substring(0, 1).ToUpperInvariant(), s); }
         }
 
+        /// <summary>試験用: 描いた文字を受け取る（Text・Paragraph・Notice）。画面に操作の説明文が出ていないことを、描いた文字から確かめる。</summary>
+        internal static Action<string> TextDrawn;
+
         public static void Text(Rect r, string text, GUIStyle style = null, Color? color = null)
         {
             if (!Repainting || string.IsNullOrEmpty(text)) return;
+            TextDrawn?.Invoke(text);
             style = style ?? PaintTheme.Label;
             if (color.HasValue) { var c = style.normal.textColor; style.normal.textColor = color.Value; GUI.Label(r, text, style); style.normal.textColor = c; }
             else GUI.Label(r, text, style);
@@ -169,7 +173,7 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>アイコンと名前のタブの帯（プロパティの欄の頭。Substance Painter のブラシ｜アルファ｜ステンシル｜マテリアル）。押されたタブの
-        /// 番号を返す（押されなければ active）。幅が足りなければ名前を詰め、さらに狭ければアイコンだけ。</summary>
+        /// 番号を返す（押されなければ active）。幅が足りなければアイコンを外して名前だけ、名前も入らなければアイコンだけ（名前を … で詰めない。名前はツールチップ）。</summary>
         public static int TabStrip(Rect r, string[] labels, string[] icons, int active, string[] tooltips = null)
         {
             Fill(r, PaintTheme.PanelHeader);
@@ -192,7 +196,7 @@ namespace Yozolab.YoluPainter.Editor
                     Icon(new Rect(x, t.y, 16, t.height), icons[i], color, 15);
                     Text(new Rect(x + 20, t.y, labelWidth + 2, t.height), labels[i], PaintTheme.Header, color);
                 }
-                else if (t.width >= 40) Text(t, Fit(labels[i], t.width - 6, PaintTheme.Header, false), new GUIStyle(PaintTheme.Header) { alignment = TextAnchor.MiddleCenter }, color);
+                else if (labelWidth <= t.width - 6) Text(t, labels[i], new GUIStyle(PaintTheme.Header) { alignment = TextAnchor.MiddleCenter }, color); // アイコンは入らないが名前は入る
                 else Icon(t, icons[i], color, 15);
                 Tooltip(t, tooltips != null && i < tooltips.Length && tooltips[i] != null ? labels[i] + "\n" + tooltips[i] : labels[i]);
             }

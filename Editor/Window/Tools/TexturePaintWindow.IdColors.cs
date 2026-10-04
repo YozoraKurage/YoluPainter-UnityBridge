@@ -39,22 +39,22 @@ namespace Yozolab.YoluPainter.Editor
         }
         internal void AssignIdPartColor(int part, int? rgb, bool coalesce = false)
         {
-            var index = IdParts(); if (index == null) throw new InvalidOperationException("Load a model to assign ID colours.");
+            var index = IdParts(); if (index == null) throw new InvalidOperationException(L.Tr("No model"));
             if (part < 0 || part >= index.Count) throw new ArgumentOutOfRangeException(nameof(part));
             document.SetIdColors(document.IdColors.WithColor(index.Binding, part, rgb), coalesce);
-            message = L.Tr("Manual ID colours changed. Bake ID again; Ctrl+Z undoes the colour edit.");
+            message = L.Tr("Manual ID colours changed.");
             Repaint(); RepaintPanelWindowsSoon();
         }
         /// <summary>プロパティとベイクの窓で共有する手動色の欄。低ポリの塊の手動色は生成元と高ポリからの色より優先する。
         /// 対応の違うモデルは明示的にリセットするまで編集・ベイクを断る。</summary>
         void IdColorAssignmentRows(UiRows rows, Action repaint)
         {
-            PaintGui.GroupLabel(rows.Row(18, 4), L.Tr("Manual part colours"));
+            PaintGui.GroupLabel(rows.Row(18, 4), L.Tr("Manual part colours"), L.Tr("Manual colours override the source and high poly on these mesh parts. Equal colours select together. Bake ID again after editing."));
             var index = IdParts();
-            if (index == null) { NoteRow(rows, L.Tr("Load a model to assign ID colours.")); return; }
+            if (index == null) { NoteRow(rows, L.Tr("No model")); return; }
             var colors = document.IdColors;
             bool stale = colors.Colors.Count > 0 && colors.Binding != index.Binding;
-            if (stale) NoteRow(rows, L.Tr("These manual colours belong to another model. Reset them before editing or baking ID."), NoteKind.Warning);
+            if (stale) NoteRow(rows, L.Tr("These manual colours belong to another model."), NoteKind.Warning);
             else
             {
                 if (idEditorParts == null || idEditorSlot != CurrentMaterialGroup)
@@ -92,7 +92,6 @@ namespace Yozolab.YoluPainter.Editor
                     if (PaintGui.Button(Mark("id-part-reset", new Rect(row.xMax - 100, row.y, 100, row.height)), L.Tr("Automatic"), false, assigned && stroke == null && meshBakeJob == null))
                         TryAction(() => { AssignIdPartColor(chosen, null); repaint(); });
                 }
-                NoteRow(rows, L.Tr("Manual colours override the source and high poly on these mesh parts. Equal colours select together. Bake ID again after editing."));
             }
             if (PaintGui.Button(Mark("id-colors-reset", rows.Row(24)), L.Tr("Reset all manual colours"), false, colors.Colors.Count > 0 && stroke == null && meshBakeJob == null))
                 TryAction(() => { document.SetIdColors(IdColorAssignments.Empty); repaint(); Repaint(); });

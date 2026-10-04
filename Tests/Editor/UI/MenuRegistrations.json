@@ -28,7 +28,7 @@
     {
       "path": "Editor/Window/Layers/TexturePaintWindow.FillImages.cs",
       "calls": [
-        "menu.AddDisabledItem(new GUIContent(L.Tr(\"This project has no images yet (import them in the Assets panel)\")))",
+        "menu.AddDisabledItem(new GUIContent(L.Tr(\"No images\")))",
         "menu.AddItem(new GUIContent(image.Name + \" (\" + image.Width + \" × \" + image.Height + \")\"), image.Id == current, () => { TryAction(() => SetFillImage(layerId, target, image.Id)); Repaint(); })",
         "menu.AddSeparator(\"\")",
         "menu.AddItem(new GUIContent(L.Tr(\"None (use the value)\")), false, () => { TryAction(() => document.SetFillImage(layerId, target, null)); Repaint(); })"
@@ -315,7 +315,7 @@
         "Item(m, \"Reset Panel Layout\", ResetDockLayout)",
         "m.AddSeparator(\"\")",
         "m.AddItem(new GUIContent(L.Tr(\"Language\") + \"/\" + label), L.Language == lang, () => { L.Language = lang; Repaint(); })",
-        "Item(m, \"Keyboard Shortcuts\", () => Dialogs.Inform(L.Tr(\"Keyboard Shortcuts\"), L.Tr(ShortcutHelp) + \"\\n\" + L.Tr(\"2D view: - / ^ (or =) rotate 15° · R + drag rotates (with Shift in 15° steps) · Shift + middle drag rotates · Shift+R resets the rotation · H flips horizontally · Ctrl+0 also resets the rotation\") + \"\\n\" + L.Tr(\"Shift+W ID colour select (click a part on the 2D canvas or the 3D view; needs a baked ID map)\") + \"\\n\" + L.Tr(\"3D view: C shows one channel at a time (unlit) · Shift+B one baked mesh map at a time · Shift+C the material · Ctrl + right drag turns the environment and the light\") + \"\\n\" + L.Tr(\"Stencil (Properties ▸ Stencil): hold T and drag on a view, left turns it (with Shift in 15° steps), middle or Ctrl+left moves it, right or Alt+left resizes it · hold N to paint without it\") + \"\\n\" + L.Tr(\"Q shows or hides the handles of the selected fill layer's projection or decal\")))",
+        "Item(m, \"Keyboard Shortcuts\", () => Dialogs.Inform(L.Tr(\"Keyboard Shortcuts\"), L.Tr(ShortcutHelp) + \"\\n\" + L.Tr(\"2D view: - / ^ (or =) rotate 15° · R + drag rotates (with Shift in 15° steps) · Shift + middle drag rotates · Shift+R resets the rotation · H flips horizontally · Ctrl+0 also resets the rotation\") + \"\\n\" + L.Tr(\"Shift+W ID colour select (click a part on the 2D canvas or the 3D view; needs a baked ID map)\") + \"\\n\" + L.Tr(\"3D view: C shows one channel at a time (unlit) · Shift+B one baked mesh map at a time · Shift+C the material · Ctrl + right drag turns the environment and the light\") + \"\\n\" + L.Tr(\"Stencil (Properties ▸ Stencil): hold T and drag on a view, left turns it (with Shift in 15° steps), middle or Ctrl+left moves it, right or Alt+left resizes it · hold N to paint without it\") + \"\\n\" + L.Tr(\"Q shows or hides the handles of the selected fill layer's projection or decal\") + \"\\n\" + L.Tr(\"Projection box and shape handles: Ctrl snaps (Unity's Scene snap settings) · Shift resizes both faces\") + \"\\n\" + L.Tr(\"Selection tools: Shift adds · Ctrl subtracts · Shift+Ctrl intersects\") + \"\\n\" + L.Tr(\"Move: drag moves · a corner scales · outside the box rotates · arrow keys nudge (Shift: 10 px)\") + \"\\n\" + L.Tr(\"Path: click adds a point · drag moves a point · Delete removes the last point\") + \"\\n\" + L.Tr(\"Clone Stamp: Alt+click sets the source · Polygon Fill: click or drag over the model or its UVs\")))",
         "Item(m, \"Implementation Limits\", () => Dialogs.Inform(L.Tr(\"Implementation Limits\"), L.Tr(LimitsHelp)))",
         "Item(m, \"Plugins…\", ShowPluginList)",
         "m.AddSeparator(\"\")",
@@ -380,7 +380,7 @@
       "path": "Editor/Window/Tools/TexturePaintWindow.Stencil.cs",
       "calls": [
         "menu.AddItem(new GUIContent(StencilTilingName(item)), item == stencilTiling, () => { stencilTiling = item; Repaint(); })",
-        "menu.AddDisabledItem(new GUIContent(L.Tr(\"This project has no images yet (import them in the Assets panel)\")))",
+        "menu.AddDisabledItem(new GUIContent(L.Tr(\"No images\")))",
         "menu.AddItem(new GUIContent(image.Name + \" (\" + image.Width + \" × \" + image.Height + \")\"), image.Id == current, () => { TryAction(() => SetStencil(image.Id)); Repaint(); })",
         "menu.AddSeparator(\"\")",
         "menu.AddItem(new GUIContent(L.Tr(\"None (no stencil)\")), false, () => { TryAction(() => SetStencil(null)); Repaint(); })"

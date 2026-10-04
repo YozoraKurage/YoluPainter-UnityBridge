@@ -168,7 +168,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>まとまりごと列（左か右）の index 番目（列の中のまとまりの数え方）へ動かす（同じ列の中の移動も、別のウィンドウからの戻しも）。</summary>
         public void MoveGroup(string groupId, DockPlace column, int index)
         {
-            if (column == DockPlace.Floating) throw new ArgumentException("Use Float to put a group in a separate window.", nameof(column));
+            if (column == DockPlace.Floating) throw new ArgumentException("Floating is not a dock column.", nameof(column));
             var g = Group(groupId);
             var before = Column(column); int old = before.IndexOf(g);
             groups.Remove(g);
@@ -182,7 +182,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             var from = GroupOf(panel);
             if (from.panels.Count == 1) { MoveGroup(from.id, column, index); return; }
-            if (column == DockPlace.Floating) throw new ArgumentException("Use Float to put a panel in a separate window.", nameof(column));
+            if (column == DockPlace.Floating) throw new ArgumentException("Floating is not a dock column.", nameof(column));
             Detach(from, panel);
             Insert(Single(panel, column), column, index);
         }

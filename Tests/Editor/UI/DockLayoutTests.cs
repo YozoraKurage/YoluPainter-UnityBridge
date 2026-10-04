@@ -263,6 +263,102 @@ namespace Yozolab.YoluPainter.Tests
             finally { Object.DestroyImmediate(w); }
         }
 
+        /// <summary>タブの名前は、詰めずに全部を出すか、アイコンだけ（名前はツールチップ）。どの幅でも、英語でも日本語でも、見えているタブには名前が
+        /// 入る限り名前を出し、全部が入る幅なら全部のタブに名前を出し、タブが見出しからはみ出さない。</summary>
+        [Test] public void TabsShowTheirWholeNameOrOnlyTheIconAtEveryHeaderWidth()
+        {
+            Assume.That(PaintGui.TextWidth("Layers", PaintTheme.Header), Is.GreaterThan(10), "no font to measure with");
+            var w = ScriptableObject.CreateInstance<TexturePaintWindow>();
+            try
+            {
+                w.DockLayoutForTests = DockLayout.Default();
+                var layout = w.DockLayoutForTests;
+                string tabs = layout.GroupOf("layers").id; layout.Join("properties", tabs); // レイヤー・テクスチャセットの設定・マテリアル・プロパティの 4 つ
+                var panels = layout.Group(tabs).panels.ToArray();
+                Assert.That(panels.Length, Is.EqualTo(4));
+                foreach (var language in new[] { PainterLanguage.English, PainterLanguage.Japanese })
+                {
+                    L.OverrideLanguage(language);
+                    foreach (var shown in panels)
+                    {
+                        layout.SetActive(shown);
+                        for (float width = 60; width <= 520; width += 3)
+                        {
+                            var (rects, names, available) = w.TabLayoutForTests(tabs, width);
+                            string at = language + " " + shown + " " + width;
+                            Assert.That(rects.Last().xMax - rects.First().x, Is.LessThanOrEqualTo(available + 1), at + ": the tabs fit the header");
+                            var natural = panels.Select(p => 20 + PaintGui.TextWidth(TexturePaintWindow.PanelTitle(p), PaintTheme.Header) + 12).ToArray();
+                            int active = System.Array.IndexOf(panels, shown);
+                            for (int i = 0; i < rects.Length; i++) if (names[i]) Assert.That(rects[i].width, Is.GreaterThanOrEqualTo(44), at + ": a tab with its name is wide enough");
+                            if (available - (panels.Length - 1) * 28 >= natural[active]) Assert.That(names[active], Is.True, at + ": the shown tab has its name when the others can be icons");
+                            if (natural.Sum() <= available) Assert.That(names, Is.All.True, at + ": every name when all fit");
+                        }
+                    }
+                }
+            }
+            finally { L.OverrideLanguage(PainterLanguage.English); Object.DestroyImmediate(w); }
+        }
+
+        static readonly string[] AllPanels = { "color", "textureSet", "layers", "properties", "material", "assets", "textureSetSettings" };
+
+        /// <summary>1 つだけのまとまり（パネル 1 つの見出し）も、名前が入らない幅ではアイコンだけになり、名前はツールチップの先頭で読める。
+        /// どの幅でも、英語でも日本語でも。</summary>
+        [Test] public void ASinglePanelHeaderNamesItselfOrItsTooltipDoes()
+        {
+            Assume.That(PaintGui.TextWidth("Layers", PaintTheme.Header), Is.GreaterThan(10), "no font to measure with");
+            var w = ScriptableObject.CreateInstance<TexturePaintWindow>();
+            try
+            {
+                w.DockLayoutForTests = Classic(); // どのパネルも 1 つだけのまとまり
+                var layout = w.DockLayoutForTests; int iconOnly = 0;
+                foreach (var language in new[] { PainterLanguage.English, PainterLanguage.Japanese })
+                {
+                    L.OverrideLanguage(language);
+                    foreach (var panel in AllPanels)
+                    {
+                        string group = layout.GroupOf(panel).id; string title = TexturePaintWindow.PanelTitle(panel);
+                        Assert.That(layout.Group(group).panels, Has.Count.EqualTo(1));
+                        for (float width = 30; width <= 320; width += 4)
+                        {
+                            var (rects, names, available) = w.TabLayoutForTests(group, width);
+                            string tip = w.TabTooltipForTests(group, 0, width), at = language + " " + panel + " " + width;
+                            if (!names[0]) { iconOnly++; Assert.That(tip, Does.StartWith(title + "\n"), at + ": an icon-only header names itself in its tooltip"); }
+                            else Assert.That(rects[0].width, Is.GreaterThanOrEqualTo(44), at);
+                        }
+                    }
+                }
+                Assert.That(iconOnly, Is.GreaterThan(0), "the sweep includes widths where the name does not fit");
+            }
+            finally { L.OverrideLanguage(PainterLanguage.English); Object.DestroyImmediate(w); }
+        }
+
+        /// <summary>1 つだけのまとまりの見出しを狭い幅で描いても、名前を … で詰めない（名前が入らなければアイコンだけ）。描いた文字で確かめる（batch-gl）。
+        /// 続きの「― 今の中身」は利用者の名前なので、… で詰めてよい。</summary>
+        [Test] public void ASinglePanelHeaderDrawnNarrowNeverCutsItsName()
+        {
+            if (!CanDrawOffscreen) Assert.Ignore("Offscreen drawing is checked on the batch-gl daemon.");
+            var w = ScriptableObject.CreateInstance<TexturePaintWindow>();
+            try
+            {
+                w.DockLayoutForTests = Classic(); var layout = w.DockLayoutForTests;
+                foreach (var language in new[] { PainterLanguage.English, PainterLanguage.Japanese })
+                {
+                    L.OverrideLanguage(language);
+                    foreach (var panel in AllPanels)
+                        foreach (int width in new[] { 40, 70, 100, 140, 200 })
+                        {
+                            var drawn = new List<string>(); PaintGui.TextDrawn = drawn.Add;
+                            try { OffscreenGui.RenderToPng(width, 24, () => w.DrawGroupHeaderForTests(layout.GroupOf(panel).id, new Rect(0, 0, width, 24)), Path.Combine(Folder, "single-header-" + panel + "-" + language + "-" + width + ".png"), PaintTheme.PanelBg); }
+                            finally { PaintGui.TextDrawn = null; }
+                            string title = TexturePaintWindow.PanelTitle(panel), at = language + " " + panel + " " + width;
+                            Assert.That(drawn.Where(t => !t.StartsWith(" ― ")), Has.All.EqualTo(title), at + ": the header draws its whole name or no text");
+                            Assert.That(drawn.Where(t => t.Contains("…") && !t.StartsWith(" ― ")), Is.Empty, at);
+                        }
+                }
+            }
+            finally { PaintGui.TextDrawn = null; L.OverrideLanguage(PainterLanguage.English); Object.DestroyImmediate(w); }
+        }
+
         /// <summary>タブのまとまりと、別のウィンドウに出した後の列、別のウィンドウの中身を、窓を開かずに描く（batch-gl。PNG は
         /// Logs/YoluPainterSnapshots に残して見て確かめる）。英語と日本語で。</summary>
         [Test] public void TabsAndSeparateWindowsDrawOffscreen()
