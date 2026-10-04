@@ -61,6 +61,15 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
 
         static Mesh MeshOf(Renderer r) => r is SkinnedMeshRenderer s ? s.sharedMesh : r.TryGetComponent<MeshFilter>(out var f) ? f.sharedMesh : null;
 
+        /// <summary>根の下に、送れるレンダラー（有効な MeshRenderer・SkinnedMeshRenderer で、メッシュがあるもの）が 1 つでもあるか（写さずに見る）。</summary>
+        public static bool HasSendableRenderer(GameObject root)
+        {
+            if (root == null) return false;
+            foreach (var r in root.GetComponentsInChildren<Renderer>(true))
+                if (IsActive(r) && (r is MeshRenderer || r is SkinnedMeshRenderer) && MeshOf(r) != null) return true;
+            return false;
+        }
+
         /// <summary>根の下のモデルを写す（まだ送らない）。</summary>
         public static LiveLinkModel Capture(GameObject root)
         {

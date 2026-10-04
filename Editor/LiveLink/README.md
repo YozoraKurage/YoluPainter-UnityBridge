@@ -1,8 +1,33 @@
 # Live Link
 
 Live Link shows the textures painted in the standalone YoluPainter on a model in the Unity scene, with its real materials
-(lilToon, Standard, …). Menu: **YozoLab ▸ YoluPainter ▸ Live Link**. The standalone listens on a link name (default
-`yolupainter-livelink`); connect, choose a GameObject in the scene and send it.
+(lilToon, Standard, …). One action does it all: right-click a GameObject in the Hierarchy ▸ **Open in YoluPainter** (also under
+**GameObject**), or the large button of **YozoLab ▸ YoluPainter ▸ Live Link** (it works on the selection).
+
+## Open in YoluPainter
+
+- Available when the selected object is in the scene (not a Prefab asset) and has an active `MeshRenderer` or `SkinnedMeshRenderer`
+  with a mesh. Otherwise the menu item is greyed out, and the window's button says why in its tooltip.
+- If Live Link is connected it sends the model. If not, it connects; if nobody answers on the link name, it starts the standalone
+  with `--livelink`, tries again until the standalone answers, then connects and sends the model. The wait is shown in a progress bar
+  that can be cancelled, and it gives up 60 seconds after the connection was started (counted again from the start of the
+  standalone), also when a peer accepts the connection but never answers.
+- Whether a standalone is there is decided by trying to connect, not by looking for its key file. A standalone that answers on the
+  link name, even to refuse, is never started a second time. When it refuses because another Unity is connected, nothing is started and
+  Live Link waits up to 10 seconds (4 seconds for the automatic reconnection) for that connection to end. A refusal because of another
+  version or key is shown at once, without waiting. A standalone that is running but not listening (Live Link turned off in its
+  settings), or that fails during the handshake, does not answer, so one more is started with `--livelink`.
+- A new unnamed project in the standalone that has nothing painted becomes one texture set per material of the received model; a
+  project with painting is kept as it is.
+- Where the standalone is: on Windows, the location the installer wrote (`InstallLocation` under
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\YoluPainter`, the file `yolupainter.exe` in it); otherwise the path in
+  **Edit ▸ Preferences ▸ YoluPainter** (also in the window's *Details*; quotation marks and spaces around a pasted path are ignored). When neither is known, a file dialog asks once and the choice is
+  kept in Preferences. On Linux the path in Preferences is used.
+- After a script recompile (domain reload) or entering or leaving Play mode, a connection that was showing a model is made again and the model is
+  sent again (remembered in `SessionState`; the standalone is not started for this, and if it was closed nothing is shown). Disconnecting by hand
+  or quitting the editor forgets it. When the standalone is closed, the temporary display is removed and the link is closed quietly.
+- The window keeps the button and the state in front. *Details* holds the link name (default `yolupainter-livelink`), the
+  executable, Connect / Disconnect, Send model, Stop showing, the bridge version, the model's materials, the log and the test pattern.
 
 ## What it touches
 

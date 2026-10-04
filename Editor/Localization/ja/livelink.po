@@ -81,7 +81,55 @@ msgstr "モデルがシーンから消えました。"
 msgid "The renderers, meshes or materials changed; sending the model again."
 msgstr "レンダラー・メッシュ・マテリアルが変わったので、モデルを送り直します。"
 
-# ── 窓 ──
+# ── 窓（前に出す「YoluPainter で開く」と状態。個別の操作は「詳しく」） ──
+
+msgid "Open in YoluPainter"
+msgstr "YoluPainter で開く"
+
+msgid "Starts YoluPainter if it is not running, connects to it and shows the selected GameObject with the textures painted there."
+msgstr "YoluPainter が動いていなければ起動し、つないで、選んだゲームオブジェクトに YoluPainter で描いたテクスチャを重ねて見せます。"
+
+msgid "Details"
+msgstr "詳しく"
+
+msgid "Connected"
+msgstr "つながっています"
+
+msgid "Not connected"
+msgstr "つながっていません"
+
+msgid "Connecting…"
+msgstr "つないでいます…"
+
+msgid "Starting YoluPainter…"
+msgstr "YoluPainter を起動しています…"
+
+msgid "Showing {0}"
+msgstr "{0} を見せています"
+
+msgid "Cancelled"
+msgstr "取り消しました"
+
+msgid "YoluPainter executable"
+msgstr "YoluPainter の実行ファイル"
+
+msgid "The standalone YoluPainter that Open in YoluPainter starts. When empty, the location written by the Windows installer is used."
+msgstr "「YoluPainter で開く」が起動するスタンドアロンの YoluPainter。空のときは、Windows のインストーラーが書いた場所を使います。"
+
+msgid "Choose the YoluPainter executable"
+msgstr "YoluPainter の実行ファイルを選ぶ"
+
+msgid "The GameObject was removed."
+msgstr "ゲームオブジェクトが消えました。"
+
+msgid "YoluPainter could not be started: {0}"
+msgstr "YoluPainter を起動できません: {0}"
+
+msgid "YoluPainter closed before it was connected (exit code {0})."
+msgstr "YoluPainter はつながる前に終了しました（終了コード {0}）。"
+
+msgid "YoluPainter did not accept the connection within {0} s."
+msgstr "YoluPainter が {0} 秒以内につながりませんでした。"
 
 msgid "Bridge"
 msgstr "ブリッジ"
@@ -94,12 +142,6 @@ msgstr "つなぎ先の名前"
 
 msgid "The name the standalone YoluPainter listens on (the same on both sides)."
 msgstr "スタンドアロンの YoluPainter が待ち受けている名前（両方で同じにします）。"
-
-msgid "The GameObject in the scene whose renderers are sent and shown."
-msgstr "レンダラーを送って見せる、シーンのゲームオブジェクト。"
-
-msgid "Use selection"
-msgstr "選んだものを使う"
 
 msgid "Connect"
 msgstr "つなぐ"

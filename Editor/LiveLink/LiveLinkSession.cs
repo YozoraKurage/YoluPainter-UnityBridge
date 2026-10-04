@@ -28,6 +28,10 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         public int ModelsSent { get; private set; }
         /// <summary>送ったマテリアルの更新の数（モデルを送り直さずに済んだ回数。試験・表示用）。</summary>
         public int MaterialUpdatesSent { get; private set; }
+        /// <summary>つながりが終わった知らせ（断られた・つなげなかった・相手が閉じた）の種類。終わっていなければ null。</summary>
+        public LiveLinkEventKind? EndedBy { get; private set; }
+        /// <summary>終わった知らせの数値（断られたときは YoluPainter の RejectCode: 1 版が合わない・2 ほかの Unity とつながっている・3 鍵）。</summary>
+        public int EndedCode { get; private set; }
         public event Action Changed;
 
         ulong lastSerial; bool pending; double nextCheck; bool disposed;
@@ -53,13 +57,29 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         [InitializeOnLoadMethod]
         static void Hook()
         {
-            AssemblyReloadEvents.beforeAssemblyReload += StopActive;
+            // リロード・Play の出入りでは、つないでいたことを覚えて切り、リロードの後に自動でつなぎ直す（LiveLinkResume）。終了では覚えない
+            AssemblyReloadEvents.beforeAssemblyReload += StopForReload;
             EditorApplication.quitting += StopActive;
-            EditorApplication.playModeStateChanged += state => { if (state == PlayModeStateChange.ExitingEditMode) StopActive(); };
+            EditorApplication.playModeStateChanged += state =>
+            {
+                if (state == PlayModeStateChange.ExitingEditMode || state == PlayModeStateChange.ExitingPlayMode) StopForReload();
+                else if (state == PlayModeStateChange.EnteredPlayMode || state == PlayModeStateChange.EnteredEditMode) LiveLinkResume.TryResume();
+            };
+            // リロードの後。Play へ移る途中は、Play のシーンが出来てから（EnteredPlayMode）つなぎ直す
+            EditorApplication.delayCall += () => { if (!EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isPlaying) LiveLinkResume.TryResume(); };
         }
 
-        /// <summary>今のつながりを切る（PropertyBlock を外す）。</summary>
+        /// <summary>今のつながりを切る（PropertyBlock を外す）。つなぎ直しの覚えも消す。</summary>
         public static void StopActive() => Active?.Dispose();
+
+        /// <summary>リロード・Play の出入りのための切り方: つないでモデルを見せていたことを覚えてから切る（LiveLinkResume.TryResume がつなぎ直す）。</summary>
+        public static void StopForReload()
+        {
+            var s = Active;
+            if (s == null) return;
+            LiveLinkResume.Remember(s);
+            s.DisposeCore();
+        }
 
         /// <summary>モデルを写して送る（前のモデルに当てた PropertyBlock は外す）。失敗すれば理由。</summary>
         public string SendModel(GameObject root)
@@ -104,6 +124,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             while (LiveLinkBridge.NextEvent(Handle, out var e))
             {
                 changed = true;
+                if (e.Kind == LiveLinkEventKind.Rejected || e.Kind == LiveLinkEventKind.Failed || e.Kind == LiveLinkEventKind.Closed) { EndedBy = e.Kind; EndedCode = e.Code; }
                 switch (e.Kind)
                 {
                     case LiveLinkEventKind.SetAdded: AddLog(L.Tr("Texture set {0} arrived.", e.Text)); break;
@@ -159,7 +180,15 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             if (sent > 0) PosesSent++;
         }
 
+        /// <summary>切る。つなぎ直しの覚えも消す（利用者が切った・つなぎ直す）。</summary>
         public void Dispose()
+        {
+            if (disposed) return;
+            LiveLinkResume.Forget();
+            DisposeCore();
+        }
+
+        void DisposeCore()
         {
             if (disposed) return;
             disposed = true;

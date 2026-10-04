@@ -6,3 +6,4 @@ PanelWindowTests
 ShortcutGuardTests
 WindowResizeTests
 YlpImporterTests
+LiveLinkWindowTests
