@@ -1,0 +1,224 @@
+using System;
+using System.Text;
+using UnityEditor;
+using Yozolab.YoluPainter.Core;
+
+namespace Yozolab.YoluPainter.Editor.LiveLink
+{
+    /// <summary>ブリッジの知らせ。</summary>
+    internal enum LiveLinkEventKind { Connected = 1, Rejected = 2, Failed = 3, Closed = 4, SetAdded = 5, SetRemoved = 6, PeerError = 7, Note = 8 }
+
+    internal readonly struct LiveLinkEvent
+    {
+        public readonly LiveLinkEventKind Kind; public readonly uint Set; public readonly int Code; public readonly string Text;
+        public LiveLinkEvent(LiveLinkEventKind kind, uint set, int code, string text) { Kind = kind; Set = set; Code = code; Text = text; }
+    }
+
+    /// <summary>つながりの状態（ylb_status）。</summary>
+    internal enum LiveLinkStatus { Unknown = -1, Connecting = 0, Connected = 1, Closed = 2, Failed = 3 }
+
+    /// <summary>
+    /// ブリッジの DLL（yolu_bridge。Plugins/LiveLink の Linux の .so と Windows の .dll、エディタだけ）の口。初めて使うときに DLL を読み、
+    /// 最初に版（ylb_abi_version）を確かめる。合わなければほかの関数を呼ばない。Unity は一度読んだ DLL を手放さないので、ドメインの
+    /// 読み直しの後は前のドメインのつながりを ylb_disconnect_all で切る（DLL を使ったドメインがあったときだけ。使わない人には DLL を読ませない）。
+    /// </summary>
+    internal static unsafe class LiveLinkBridge
+    {
+        /// <summary>この C# が知っているブリッジの版。</summary>
+        public const uint ExpectedAbi = 2;
+        const string LoadedKey = "Yozolab.YoluPainter.LiveLink.BridgeLoaded";
+        static bool s_checked; static string s_problem; static uint s_abi, s_protocols;
+
+        /// <summary>使えない理由（使えれば null）。初めて呼んだときに DLL を読む。</summary>
+        public static string Problem { get { Check(); return s_problem; } }
+        public static bool Available => Problem == null;
+        public static uint AbiVersion { get { Check(); return s_abi; } }
+        /// <summary>ブリッジの読めるプロトコルの版の範囲。</summary>
+        public static (int Min, int Max) ProtocolVersions { get { Check(); return ((int)(s_protocols >> 16), (int)(s_protocols & 0xffff)); } }
+
+        static void Check()
+        {
+            if (s_checked) return;
+            s_checked = true;
+            try
+            {
+                s_abi = LiveLinkNative.ylb_abi_version();
+                SessionState.SetBool(LoadedKey, true);
+                if (s_abi != ExpectedAbi) { s_problem = L.Tr("The Live Link library is version {0}, not {1}. Unity needs a restart.", s_abi, ExpectedAbi); return; }
+                s_protocols = LiveLinkNative.ylb_protocol_versions();
+            }
+            catch (DllNotFoundException e) { s_problem = L.Tr("The Live Link library (yolu_bridge) could not be loaded: {0}", e.Message); }
+            catch (EntryPointNotFoundException e) { s_problem = L.Tr("The Live Link library is missing a function ({0}). Unity needs a restart.", e.Message); }
+            catch (BadImageFormatException e) { s_problem = L.Tr("The Live Link library (yolu_bridge) could not be loaded: {0}", e.Message); }
+        }
+
+        [InitializeOnLoadMethod]
+        static void CleanUpPreviousDomain()
+        {
+            // DLL は前のドメインから読まれたまま。前のドメインのつながり（C# の側はもう無い）を切る
+            if (!SessionState.GetBool(LoadedKey, false)) return;
+            if (Available) LiveLinkNative.ylb_disconnect_all();
+        }
+
+        static byte[] Utf8(string s) => Encoding.UTF8.GetBytes(s ?? "");
+
+        delegate int TextReader(byte* buffer, int capacity);
+        static string ReadText(TextReader read)
+        {
+            var buf = new byte[256];
+            int n;
+            fixed (byte* p = buf) n = read(p, buf.Length);
+            if (n < 0) return null;
+            if (n > buf.Length) { buf = new byte[n]; fixed (byte* p = buf) n = read(p, buf.Length); }
+            return Encoding.UTF8.GetString(buf, 0, Math.Min(n, buf.Length));
+        }
+
+        /// <summary>つなぎ始める（待たない）。0 なら名前が使えない。</summary>
+        public static ulong Connect(string name, string agent)
+        {
+            if (!Available) return 0;
+            byte[] n = Utf8(name), a = Utf8(agent);
+            fixed (byte* pn = n) fixed (byte* pa = a) return LiveLinkNative.ylb_connect(pn, n.Length, pa, a.Length);
+        }
+
+        public static void Disconnect(ulong handle) { if (handle != 0 && Available) LiveLinkNative.ylb_disconnect(handle); }
+
+        public static LiveLinkStatus Status(ulong handle) => !Available ? LiveLinkStatus.Unknown : (LiveLinkStatus)Math.Max(-1, LiveLinkNative.ylb_status(handle));
+
+        public static string StatusText(ulong handle) => ReadText((p, cap) => LiveLinkNative.ylb_status_text(handle, p, cap));
+
+        public static ulong Serial(ulong handle) => LiveLinkNative.ylb_serial(handle);
+
+        /// <summary>知らせを 1 つ取り出す。</summary>
+        public static bool NextEvent(ulong handle, out LiveLinkEvent e)
+        {
+            var buf = new byte[1024]; YlbEvent raw; int r;
+            fixed (byte* p = buf) r = LiveLinkNative.ylb_next_event(handle, &raw, p, buf.Length);
+            if (r != 1) { e = default; return false; }
+            e = new LiveLinkEvent((LiveLinkEventKind)raw.kind, raw.set, raw.code, Encoding.UTF8.GetString(buf, 0, Math.Max(0, Math.Min(raw.text_len, buf.Length))));
+            return true;
+        }
+
+        public static int SetCount(ulong handle) => LiveLinkNative.ylb_set_count(handle);
+
+        public static bool SetInfo(ulong handle, int index, out YlbSetInfo info)
+        {
+            YlbSetInfo raw;
+            bool ok = LiveLinkNative.ylb_set_info(handle, index, &raw) == 0;
+            info = raw;
+            return ok;
+        }
+
+        public static string SetName(ulong handle, uint set) => ReadText((p, cap) => LiveLinkNative.ylb_set_name(handle, set, p, cap));
+
+        // ───────── モデル・ポーズの組み立て ─────────
+
+        public static int ModelBegin(ulong handle, string name) { var b = Utf8(name); fixed (byte* p = b) return LiveLinkNative.ylb_model_begin(handle, p, b.Length); }
+
+        public static int ModelMaterial(ulong handle, bool unassigned, string name, string guid, long fileId, string shader)
+        {
+            byte[] n = Utf8(name), g = Utf8(guid), s = Utf8(shader);
+            fixed (byte* pn = n) fixed (byte* pg = g) fixed (byte* ps = s)
+                return LiveLinkNative.ylb_model_material(handle, unassigned ? 1 : 0, pn, n.Length, pg, g.Length, fileId, ps, s.Length);
+        }
+
+        public static int ModelMaterialTexture(ulong handle, int material, string property, int width, int height)
+        {
+            var b = Utf8(property);
+            fixed (byte* p = b) return LiveLinkNative.ylb_model_material_texture(handle, material, p, b.Length, (uint)Math.Max(0, width), (uint)Math.Max(0, height));
+        }
+
+        public static int ModelMaterialRoute(ulong handle, int material, int channel, string property)
+        {
+            var b = Utf8(property);
+            fixed (byte* p = b) return LiveLinkNative.ylb_model_material_route(handle, material, channel, p, b.Length);
+        }
+
+        public static int ModelMesh(ulong handle, string key, string name, bool skinned, float[] positions, float[] normals, float[] uv0, int vertexCount)
+        {
+            byte[] k = Utf8(key), n = Utf8(name);
+            fixed (byte* pk = k) fixed (byte* pn = n) fixed (float* pp = positions) fixed (float* pnr = normals) fixed (float* pu = uv0)
+                return LiveLinkNative.ylb_model_mesh(handle, pk, k.Length, pn, n.Length, skinned ? 1 : 0, pp, normals != null && normals.Length > 0 ? pnr : null, uv0 != null && uv0.Length > 0 ? pu : null, vertexCount);
+        }
+
+        public static int ModelSubmesh(ulong handle, int mesh, int material, int[] indices)
+        {
+            fixed (int* p = indices) return LiveLinkNative.ylb_model_submesh(handle, mesh, material, p, indices?.Length ?? 0);
+        }
+
+        // マテリアルの更新（モデルを送り直さずに、シェーダー・テクスチャのプロパティ・流し込み先だけを変える）
+
+        public static int MaterialsBegin(ulong handle) => LiveLinkNative.ylb_materials_begin(handle);
+
+        public static int MaterialsMaterial(ulong handle, bool unassigned, string name, string guid, long fileId, string shader)
+        {
+            byte[] n = Utf8(name), g = Utf8(guid), s = Utf8(shader);
+            fixed (byte* pn = n) fixed (byte* pg = g) fixed (byte* ps = s)
+                return LiveLinkNative.ylb_materials_material(handle, unassigned ? 1 : 0, pn, n.Length, pg, g.Length, fileId, ps, s.Length);
+        }
+
+        public static int MaterialsTexture(ulong handle, int material, string property, int width, int height)
+        {
+            var b = Utf8(property);
+            fixed (byte* p = b) return LiveLinkNative.ylb_materials_texture(handle, material, p, b.Length, (uint)Math.Max(0, width), (uint)Math.Max(0, height));
+        }
+
+        public static int MaterialsRoute(ulong handle, int material, int channel, string property)
+        {
+            var b = Utf8(property);
+            fixed (byte* p = b) return LiveLinkNative.ylb_materials_route(handle, material, channel, p, b.Length);
+        }
+
+        public static int MaterialsSend(ulong handle) => LiveLinkNative.ylb_materials_send(handle);
+
+        public static int ModelSend(ulong handle) => LiveLinkNative.ylb_model_send(handle);
+        public static int ModelClose(ulong handle) => LiveLinkNative.ylb_model_close(handle);
+        public static int PoseBegin(ulong handle) => LiveLinkNative.ylb_pose_begin(handle);
+
+        public static int PoseMesh(ulong handle, int mesh, float[] positions, float[] normals, int vertexCount)
+        {
+            fixed (float* pp = positions) fixed (float* pn = normals)
+                return LiveLinkNative.ylb_pose_mesh(handle, mesh, pp, normals != null && normals.Length > 0 ? pn : null, vertexCount);
+        }
+
+        public static int PoseSend(ulong handle) => LiveLinkNative.ylb_pose_send(handle);
+    }
+
+    /// <summary>
+    /// ブリッジの中の自己診断のスタンドアロン（同じプロセスで本物のソケットと共有メモリを通し、マテリアルごとの色の市松を返す）。
+    /// スタンドアロン無しで Live Link を確かめる（窓の「診断」と試験）。
+    /// </summary>
+    internal static unsafe class LiveLinkTestServer
+    {
+        /// <summary>待ち受けを始める（0 は失敗）。モデルが来ると、マテリアルごとに size × size のセットを返す。</summary>
+        public static ulong Start(string name, int size, int tileSize)
+        {
+            if (!LiveLinkBridge.Available) return 0;
+            var b = Encoding.UTF8.GetBytes(name);
+            fixed (byte* p = b) return LiveLinkNative.ylb_test_server_start(p, b.Length, size, tileSize);
+        }
+
+        public static void Stop(ulong server) { if (server != 0 && LiveLinkBridge.Available) LiveLinkNative.ylb_test_server_stop(server); }
+
+        /// <summary>模様の色（マテリアルの番号とタイルの座標から）。</summary>
+        public static UnityEngine.Color32 Pattern(uint material, uint tileX, uint tileY)
+        {
+            uint v = LiveLinkNative.ylb_test_server_pattern(material, tileX, tileY);
+            return new UnityEngine.Color32((byte)v, (byte)(v >> 8), (byte)(v >> 16), (byte)(v >> 24));
+        }
+
+        /// <summary>マテリアルの番号のセットの、タイル [x0, x1) × [y0, y1) を塗って知らせる。塗ったタイルの数を返す。</summary>
+        public static int Paint(ulong server, uint material, PaintChannel channel, uint x0, uint y0, uint x1, uint y1, UnityEngine.Color32 color)
+            => LiveLinkNative.ylb_test_server_paint(server, material, (int)channel, x0, y0, x1, y1, color.r | (uint)color.g << 8 | (uint)color.b << 16 | (uint)color.a << 24);
+
+        /// <summary>鍵のファイルを別の鍵に差し替える（つなぎ直すと鍵の断りを受ける）。</summary>
+        public static bool ReplaceKey(ulong server) => LiveLinkNative.ylb_test_server_replace_key(server) == 0;
+
+        public static YlbTestServerStats Stats(ulong server)
+        {
+            YlbTestServerStats stats;
+            LiveLinkNative.ylb_test_server_stats(server, &stats);
+            return stats;
+        }
+    }
+}

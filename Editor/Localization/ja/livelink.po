@@ -1,0 +1,173 @@
+# Japanese translation for YoluPainter: Live Link (the Live Link window, sending a scene model to the standalone YoluPainter and
+# showing its textures with material property blocks).
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# ── ブリッジ（ネイティブのライブラリ） ──
+
+msgid "The Live Link library is version {0}, not {1}. Unity needs a restart."
+msgstr "Live Link のライブラリの版は {0} です（必要なのは {1}）。Unity の再起動が要ります。"
+
+msgid "The Live Link library (yolu_bridge) could not be loaded: {0}"
+msgstr "Live Link のライブラリ（yolu_bridge）を読めません: {0}"
+
+msgid "The Live Link library is missing a function ({0}). Unity needs a restart."
+msgstr "Live Link のライブラリに関数（{0}）がありません。Unity の再起動が要ります。"
+
+msgid "The channel packing shader ({0}) cannot be used here, so only Color, Emission and Normal are shown."
+msgstr "チャンネルを詰め直すシェーダー（{0}）がここでは使えないので、カラー・エミッション・ノーマルだけを見せます。"
+
+# ── モデルを送る ──
+
+msgid "{0}: {1} is not sent (only mesh and skinned mesh renderers)."
+msgstr "{0}: {1} は送りません（送るのはメッシュレンダラーとスキンメッシュレンダラーだけ）。"
+
+msgid "{0}: the mesh has non-triangle submeshes and is not sent."
+msgstr "{0}: 三角形でないサブメッシュがあるので送りません。"
+
+msgid "These submeshes have no material, so painting cannot be shown on them."
+msgstr "このサブメッシュにはマテリアルが無いので、描いたものを見せられません。"
+
+msgid "{0}: {1} is not shown (keyword {2} is off)."
+msgstr "{0}: {1} は見せません（キーワード {2} が切れています）。"
+
+msgid "The model is gone."
+msgstr "モデルが無くなりました。"
+
+msgid "The Live Link library refused the model ({0})."
+msgstr "Live Link のライブラリがモデルを断りました（{0}）。"
+
+msgid "A renderer of the model was removed."
+msgstr "モデルのレンダラーが消えました。"
+
+msgid "{0}: the mesh changed while it was being sent."
+msgstr "{0}: 送っている間にメッシュが変わりました。"
+
+msgid "The model could not be sent (not connected)."
+msgstr "モデルを送れません（つながっていません）。"
+
+msgid "Not connected."
+msgstr "つながっていません。"
+
+msgid "The link name must be 1–64 letters, digits, '.', '_' or '-'."
+msgstr "つなぎ先の名前は 1〜64 文字の英字・数字・「.」「_」「-」です。"
+
+msgid "No GameObject is chosen."
+msgstr "ゲームオブジェクトが選ばれていません。"
+
+msgid "A Prefab asset cannot be chosen."
+msgstr "プレハブのアセットは選べません。"
+
+msgid "Not connected to the standalone yet."
+msgstr "まだスタンドアロンとつながっていません。"
+
+msgid "{0} has no active mesh renderers to send."
+msgstr "{0} には送れる有効なメッシュレンダラーがありません。"
+
+msgid "Sent {0}: {1} renderers, {2} materials, {3} vertices."
+msgstr "{0} を送りました: レンダラー {1}・マテリアル {2}・頂点 {3}。"
+
+msgid "Texture set {0} arrived."
+msgstr "テクスチャセット {0} が届きました。"
+
+msgid "A texture set was removed."
+msgstr "テクスチャセットが消えました。"
+
+msgid "The model was removed from the scene."
+msgstr "モデルがシーンから消えました。"
+
+msgid "The renderers, meshes or materials changed; sending the model again."
+msgstr "レンダラー・メッシュ・マテリアルが変わったので、モデルを送り直します。"
+
+# ── 窓 ──
+
+msgid "Bridge"
+msgstr "ブリッジ"
+
+msgid "version {0}, protocol {1}–{2}"
+msgstr "版 {0}、プロトコル {1}〜{2}"
+
+msgid "Link name"
+msgstr "つなぎ先の名前"
+
+msgid "The name the standalone YoluPainter listens on (the same on both sides)."
+msgstr "スタンドアロンの YoluPainter が待ち受けている名前（両方で同じにします）。"
+
+msgid "The GameObject in the scene whose renderers are sent and shown."
+msgstr "レンダラーを送って見せる、シーンのゲームオブジェクト。"
+
+msgid "Use selection"
+msgstr "選んだものを使う"
+
+msgid "Connect"
+msgstr "つなぐ"
+
+msgid "Disconnect"
+msgstr "切る"
+
+msgid "Send model"
+msgstr "モデルを送る"
+
+msgid "Send model again"
+msgstr "モデルを送り直す"
+
+msgid "Stop showing"
+msgstr "見せるのをやめる"
+
+msgid "Model: {0} ({1} renderers, {2} vertices)"
+msgstr "モデル: {0}（レンダラー {1}・頂点 {2}）"
+
+msgid "nothing to show"
+msgstr "見せるものなし"
+
+msgid "no texture set yet"
+msgstr "テクスチャセットはまだ"
+
+msgid "{0} × {1}, {2} uploads"
+msgstr "{0} × {1}、{2} 回の更新"
+
+msgid "Last update"
+msgstr "最後の更新"
+
+msgid "{0} tiles ({1}): copy {2:0.00} ms, upload {3:0.00} ms, {4:0.0} ms after painting"
+msgstr "{0} タイル（{1}）: 写し {2:0.00} ms、GPU へ {3:0.00} ms、描いてから {4:0.0} ms"
+
+msgid "strip"
+msgstr "帯"
+
+msgid "whole texture"
+msgstr "テクスチャ全体"
+
+msgid "Property blocks"
+msgstr "プロパティブロック"
+
+msgid "Log"
+msgstr "ログ"
+
+msgid "Diagnostics"
+msgstr "診断"
+
+msgid "Without the standalone: a test pattern server inside this editor (a checker per material) checks the link, the shared memory and the property blocks."
+msgstr "スタンドアロン無しで: このエディタの中の試しの模様のサーバー（マテリアルごとの市松模様）で、つながり・共有メモリ・プロパティブロックを確かめます。"
+
+msgid "Connect to the test pattern"
+msgstr "試しの模様につなぐ"
+
+msgid "The test pattern server could not start."
+msgstr "試しの模様のサーバーを始められません。"
+
+# ── マテリアルの更新 ──
+
+msgid "The model was not sent yet."
+msgstr "まだモデルを送っていません。"
+
+msgid "The Live Link library refused the material update ({0})."
+msgstr "Live Link のライブラリがマテリアルの更新を断りました（{0}）。"
+
+msgid "The material update could not be sent (not connected)."
+msgstr "マテリアルの更新を送れません（つながっていません）。"
+
+msgid "The shaders, keywords or textures of the materials changed; sent the material information again."
+msgstr "マテリアルのシェーダー・キーワード・テクスチャが変わったので、マテリアルの情報を送り直しました。"

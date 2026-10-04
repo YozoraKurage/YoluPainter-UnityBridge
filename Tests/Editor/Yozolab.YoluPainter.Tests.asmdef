@@ -1,6 +1,6 @@
 {
   "name": "Yozolab.YoluPainter.Tests",
-  "references": ["Yozolab.YoluPainter.Core", "Yozolab.YoluPainter.Api", "Yozolab.YoluPainter.Editor"],
+  "references": ["Yozolab.YoluPainter.Core", "Yozolab.YoluPainter.Api", "Yozolab.YoluPainter.Editor", "Yozolab.YoluPainter.Editor.LiveLink"],
   "includePlatforms": ["Editor"],
   "optionalUnityReferences": ["TestAssemblies"],
   "autoReferenced": false
