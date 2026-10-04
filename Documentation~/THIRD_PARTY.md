@@ -11,8 +11,8 @@ The package does not redistribute PSD-tool/Pillow/Unity executable code, Photosh
 ## Live Link native library
 
 `Plugins/LiveLink/libyolu_bridge.so` (Linux x86_64 editor) and `Plugins/LiveLink/yolu_bridge.dll` (Windows x86_64 editor) are
-the Live Link bridge, a small native library written in Rust by the YoluPainter author. They are loaded only by the editor and only
-when Live Link is used. They are statically linked with these Rust crates (versions as built):
+the Live Link bridge, a small native library written in Rust by the YoluPainter author (MIT; source: the `yolu-bridge` crate in
+https://github.com/YozoraKurage/YoluPainter-rs). They are loaded only by the editor and only when Live Link is used. They are statically linked with these Rust crates (versions as built):
 
 | Crate | Version | Licence used | Notes |
 |---|---|---|---|
