@@ -84,6 +84,8 @@ if [[ "$UNITY_RUNNER" != 0 && ( "$op" == snippet || "$op" == compile ) ]]; then
 fi
 case "$arg" in *'"'* | *'\'* ) die 'arg に " と \ は使えない' ;; esac
 
+# 残った依頼（ロックを持たない前の呼び出しの分）が終わってから書く。
+python3 "$SCRIPT_DIR/daemon-request.py" wait "$DAEMON_DIR" >&2 || exit $?
 rm -f "$DAEMON_DIR/done" "$DAEMON_DIR/exec-result.txt"
 printf '{"op":"%s","arg":"%s"}' "$op" "$arg" > "$DAEMON_DIR/request.json"
 

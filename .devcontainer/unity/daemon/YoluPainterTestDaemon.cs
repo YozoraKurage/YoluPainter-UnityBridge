@@ -40,14 +40,28 @@ namespace Yozolab.YoluPainterTestDaemon
 
         static string RequestPath => Path.Combine(Dir, "request.json");
         static string RunningPath => Path.Combine(Dir, "running.json");
-        static string ResultXmlPath => Path.Combine(Dir, "result.xml");
+        // ID は running.json に保持するのでドメインリロードを越える。
+        static string RequestId
+        {
+            get
+            {
+                try
+                {
+                    if (!File.Exists(RunningPath)) return null;
+                    var id = JsonUtility.FromJson<Request>(File.ReadAllText(RunningPath))?.id;
+                    return !string.IsNullOrEmpty(id) && System.Text.RegularExpressions.Regex.IsMatch(id, "^[a-f0-9]{32}$") ? id : null;
+                }
+                catch (Exception) { return null; }
+            }
+        }
+        static string ResultXmlPath => Path.Combine(Dir, RequestId == null ? "result.xml" : "result-" + RequestId + ".xml");
         // テストごとの時間（1 行 1 件: 完全名 TAB 秒 TAB 結果）。1 件ずつ足すので、途中のドメインリロードの前の分も残る。
         // run-tests.sh が実行の後に台ごとの履歴へ写し、遅いテストを探すのに使う（test-durations.sh）。
-        static string DurationsPath => Path.Combine(Dir, "durations.tsv");
+        static string DurationsPath => Path.Combine(Dir, RequestId == null ? "durations.tsv" : "durations-" + RequestId + ".tsv");
         static string ExecResultPath => Path.Combine(Dir, "exec-result.txt");
         // 直近のコンパイルのメッセージ。リロードで static は消えるが、これは残る。
         static string CompileLogPath => Path.Combine(Dir, "compile.txt");
-        static string DonePath => Path.Combine(Dir, "done");
+        static string DonePath => Path.Combine(Dir, RequestId == null ? "done" : "done-" + RequestId);
         static string AlivePath => Path.Combine(Dir, "alive");
         static string QuitPath => Path.Combine(Dir, "quit");
 
@@ -81,6 +95,7 @@ namespace Yozolab.YoluPainterTestDaemon
             // 走らせない運用だが、逆(コールド中に受け口が動く)はここで確実に殺す。
             Inert = Array.IndexOf(args, "-runTests") >= 0 || !File.Exists(Path.Combine(Dir, "enabled"));
             if (Inert) return;
+            File.WriteAllText(Path.Combine(Dir, "protocol"), "request-id-v1:" + Process.GetCurrentProcess().Id);
             // 非フォーカスのエディタは既定でループが間引かれ、EditMode ランナーは
             // 1 tick ずつしか進まない — 全件 1305 件が実行 9 秒 + 待ち 160 秒になる
             // (実測)。テスト専用プロジェクトなので常時フルスロットルで良い。
@@ -180,8 +195,6 @@ namespace Yozolab.YoluPainterTestDaemon
                 {
                     // 主張してから Refresh。リロードで自分が死んでも running.json が残り、
                     // 次のドメインが続きをやる。
-                    File.Delete(DonePath);
-                    File.Delete(ResultXmlPath);
                     File.Move(RequestPath, RunningPath);
                     Trace("claim: " + File.ReadAllText(RunningPath).Trim());
                     AssetDatabase.Refresh();
@@ -737,8 +750,11 @@ namespace Yozolab.YoluPainterTestDaemon
                 s_locked = false;
                 try { EditorApplication.UnlockReloadAssemblies(); } catch { }
             }
+            var done = DonePath;
+            File.WriteAllText(done + ".tmp", code + "\n" + (note ?? ""));
             if (File.Exists(RunningPath)) File.Delete(RunningPath);
-            File.WriteAllText(DonePath, code + "\n" + (note ?? ""));
+            if (File.Exists(done)) File.Delete(done); // ID 無しの旧クライアントとの互換
+            File.Move(done + ".tmp", done);
         }
 
         static DateTime s_lastBeat;
@@ -757,6 +773,7 @@ namespace Yozolab.YoluPainterTestDaemon
         [Serializable]
         class Request
         {
+            public string id;
             public string filter;
             public string category;
             public string exec;      // 空でなければテストではなくメソッド実行の依頼
@@ -773,6 +790,8 @@ namespace Yozolab.YoluPainterTestDaemon
             public void TestStarted(ITestAdaptor test)
             {
                 if (!s_testSeen) Trace("first test started");
+                if (!test.IsSuite && RequestId != null)
+                    File.WriteAllText(Path.Combine(Dir, "status-" + RequestId), test.FullName);
                 s_testSeen = true;
                 YoluPainterTestDaemon.Beat();
             }

@@ -31,6 +31,8 @@ esac
 # 相対パスの引数は、デーモン側のカレントディレクトリに依存しないよう絶対化する。
 [[ -n "$ARG" && -f "$ARG" ]] && ARG="$(realpath "$ARG")"
 
+# 残った依頼（ロックを持たない前の呼び出しの分）が終わってから書く。
+python3 "$SCRIPT_DIR/daemon-request.py" wait "$DAEMON_DIR" >&2 || exit $?
 rm -f "$DAEMON_DIR/done" "$DAEMON_DIR/exec-result.txt"
 printf '{"exec":"%s","execArg":"%s"}' "$TARGET" "$ARG" > "$DAEMON_DIR/request.json"
 
