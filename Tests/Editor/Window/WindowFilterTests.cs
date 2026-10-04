@@ -99,7 +99,7 @@ namespace Yozolab.YoluPainter.Tests
             fake.File = NewTempPath(".psd"); fake.Asked.Clear();
             window.ExportPsd();
             Assert.That(fake.Asked, Is.EqualTo(new[] { "Inform: PSD export unavailable" })); Assert.That(File.Exists(fake.File), Is.False);
-            Assert.That(window.StatusMessage, Does.Contain("Bake"));
+            Assert.That(window.StatusMessage, Does.Contain("non-destructive filters"));
             int steps = d.UndoCount;
             window.BakeFilters();
             Assert.That(d.UndoCount, Is.EqualTo(steps + 1)); Assert.That(layer.Filters, Is.Empty);

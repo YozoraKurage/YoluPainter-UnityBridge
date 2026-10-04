@@ -146,7 +146,7 @@ namespace Yozolab.YoluPainter.Tests
             w.SetMaterialValue(builtin, props.Single(p => p.Name == "_Glossiness"), new Vector4(.9f, 0, 0, 0));
             w.ApplyMaterialEdits();
             Assert.That(answers.Asked, Is.EqualTo(new[] { "Inform: Cannot apply to the material" }));
-            Assert.That(answers.LastMessage, Does.Contain("Extract the material"));
+            Assert.That(answers.LastMessage, Does.Contain("an imported model or a built-in asset"));
             Assert.That(builtin.GetFloat("_Glossiness"), Is.EqualTo(before));
         }
 
