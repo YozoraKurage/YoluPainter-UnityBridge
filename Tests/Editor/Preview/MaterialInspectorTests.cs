@@ -250,7 +250,9 @@ namespace Yozolab.YoluPainter.Tests
             var source = Track(new Material(shader)); var model = Track(new GameObject("Inspector failure model"));
             model.AddComponent<MeshFilter>().sharedMesh = Resources.GetBuiltinResource<Mesh>("Cube.fbx"); model.AddComponent<MeshRenderer>().sharedMaterial = source;
             var w = Track(ScriptableObject.CreateInstance<TexturePaintWindow>()); w.SetModel(model); w.DockLayoutForTests.SetActive("material");
-            foreach (var id in new[] { "layers", "properties" }) w.DockLayoutForTests.GroupOf(id).collapsed = true;
+            // 高さを空けるためにほかの組を畳む。マテリアルと同じ組（今の既定ではレイヤーとタブで並ぶ）は畳まない
+            foreach (var id in new[] { "layers", "properties" })
+                if (w.DockLayoutForTests.GroupOf(id) != w.DockLayoutForTests.GroupOf("material")) w.DockLayoutForTests.GroupOf(id).collapsed = true;
             FailingInspectorGUI.Fail = true; FailingInspectorGUI.DrawCalls = 0;
             try
             {

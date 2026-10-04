@@ -41,6 +41,19 @@ namespace Yozolab.YoluPainter.Tests
             AssetDatabase.DeleteAsset(folder); PainterSettings.ProjectRoot = null;
             if (Directory.Exists(project)) Directory.Delete(project, true);
         }
+        /// <summary>確かめにはすべて「はい」と答えるダイアログ（ファイルの窓は使わない）。</summary>
+        sealed class AcceptingDialogs : IPainterDialogs
+        {
+            public string SaveFolder(string title, string folder, string defaultName) => "";
+            public string OpenFolder(string title, string folder) => "";
+            public string OpenFile(string title, string folder, string extension) => "";
+            public string SaveFile(string title, string folder, string defaultName, string extension) => "";
+            public bool Confirm(string title, string message, string ok, string cancel) => true;
+            public void Inform(string title, string message) { }
+            public void Progress(string title, string info, float progress) { }
+            public void ClearProgress() { }
+        }
+
         TexturePaintWindow NewWindow()
         {
             var w = ScriptableObject.CreateInstance<TexturePaintWindow>(); w.MeshBakeProgress = (t, i, p) => false;
@@ -162,7 +175,9 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(other.StatusMessage, Does.Contain("Prefab asset"));
             Assert.That(other.Document.UndoCount, Is.EqualTo(otherSteps));
             // シーンのモデルでも、シーンに無い物・選んでいないときは断る
-            var root = SceneModel(Vector3.zero, Quaternion.identity, Vector3.one); window.SetModel(root);
+            var root = SceneModel(Vector3.zero, Quaternion.identity, Vector3.one);
+            window.Dialogs = new AcceptingDialogs(); // デモのキューブからの差し替えは確かめを出す（描いたものを保つ差し替え）。受ける
+            Assert.That(window.ChangeModel(root), Is.True, window.StatusMessage);
             var hidden = Made(new GameObject("Not in a scene") { hideFlags = HideFlags.HideAndDontSave });
             Assert.That(hidden.scene.IsValid(), Is.False);
             Assert.That(window.CopyShapeFromScene(gen.Id, hidden), Is.False); Assert.That(window.StatusMessage, Does.Contain("not an object in an open scene"));
