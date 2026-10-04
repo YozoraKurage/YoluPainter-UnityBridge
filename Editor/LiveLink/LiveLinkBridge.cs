@@ -25,7 +25,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
     internal static unsafe class LiveLinkBridge
     {
         /// <summary>この C# が知っているブリッジの版。</summary>
-        public const uint ExpectedAbi = 2;
+        public const uint ExpectedAbi = 3;
         const string LoadedKey = "Yozolab.YoluPainter.LiveLink.BridgeLoaded";
         static bool s_checked; static string s_problem; static uint s_abi, s_protocols;
 
@@ -73,12 +73,28 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             return Encoding.UTF8.GetString(buf, 0, Math.Min(n, buf.Length));
         }
 
-        /// <summary>つなぎ始める（待たない）。0 なら名前が使えない。</summary>
-        public static ulong Connect(string name, string agent)
+        /// <summary>つなぎ始める（待たない）。0 なら名前が使えない。<paramref name="appVersion"/> は Unity のパッケージの版（「0.3.0」など。
+        /// 読めない・空なら名乗らない）で、挨拶でスタンドアロンに伝わる。</summary>
+        public static ulong Connect(string name, string agent, string appVersion = "")
         {
             if (!Available) return 0;
-            byte[] n = Utf8(name), a = Utf8(agent);
-            fixed (byte* pn = n) fixed (byte* pa = a) return LiveLinkNative.ylb_connect(pn, n.Length, pa, a.Length);
+            byte[] n = Utf8(name), a = Utf8(agent), v = Utf8(appVersion);
+            fixed (byte* pn = n) fixed (byte* pa = a) fixed (byte* pv = v) return LiveLinkNative.ylb_connect_with(pn, n.Length, pa, a.Length, pv, v.Length);
+        }
+
+        /// <summary>このつながりで使える機能の印（双方が出した印の共通部分。つながるまでは 0）。印の要る新しい命令は、立っているときだけ送る。</summary>
+        public static ulong CommonFeatures(ulong handle) => handle == 0 || !Available ? 0 : LiveLinkNative.ylb_common_features(handle);
+
+        /// <summary>相手（スタンドアロン）のアプリの版。つながっていない・版を名乗らない古い相手は null。</summary>
+        public static Version PeerAppVersion(ulong handle) => handle == 0 || !Available ? null : LiveLinkVersions.Unpack(LiveLinkNative.ylb_peer_app_version(handle));
+
+        /// <summary>版のずれと機能の印の様子（まだ無ければ <see cref="LiveLinkReport.State"/> が None）。</summary>
+        public static LiveLinkReport Report(ulong handle)
+        {
+            if (handle == 0 || !Available) return LiveLinkReport.Empty;
+            YlbLinkReport raw;
+            int state = LiveLinkNative.ylb_link_report(handle, &raw);
+            return state < 0 ? LiveLinkReport.Empty : LiveLinkReport.From(raw);
         }
 
         public static void Disconnect(ulong handle) { if (handle != 0 && Available) LiveLinkNative.ylb_disconnect(handle); }
@@ -210,6 +226,14 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         /// <summary>マテリアルの番号のセットの、タイル [x0, x1) × [y0, y1) を塗って知らせる。塗ったタイルの数を返す。</summary>
         public static int Paint(ulong server, uint material, PaintChannel channel, uint x0, uint y0, uint x1, uint y1, UnityEngine.Color32 color)
             => LiveLinkNative.ylb_test_server_paint(server, material, (int)channel, x0, y0, x1, y1, color.r | (uint)color.g << 8 | (uint)color.b << 16 | (uint)color.a << 24);
+
+        /// <summary>自己診断のスタンドアロンの名乗りを決める（次につなぐものから効く）。<paramref name="appVersion"/> が null なら版を名乗らない古いスタンドアロンの役、
+        /// <paramref name="minPeer"/> は求める Unity のパッケージの版（null は要求なし）、<paramref name="features"/> は出す機能の印。</summary>
+        public static bool Configure(ulong server, Version appVersion, Version minPeer, ulong features)
+            => LiveLinkNative.ylb_test_server_configure(server, LiveLinkVersions.Pack(appVersion), LiveLinkVersions.Pack(minPeer ?? new Version(0, 0, 0)), features) == 0;
+
+        /// <summary>読めるプロトコルの版の範囲を決める（次につなぐものから効く。つなぐ側の範囲と重ならなければ、版の範囲の断りを返す）。</summary>
+        public static bool SetProtocol(ulong server, int min, int max) => LiveLinkNative.ylb_test_server_set_protocol(server, (uint)Math.Max(0, min), (uint)Math.Max(0, max)) == 0;
 
         /// <summary>鍵のファイルを別の鍵に差し替える（つなぎ直すと鍵の断りを受ける）。</summary>
         public static bool ReplaceKey(ulong server) => LiveLinkNative.ylb_test_server_replace_key(server) == 0;

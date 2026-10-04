@@ -41,12 +41,28 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         public LiveLinkStatus Status => Handle == 0 ? LiveLinkStatus.Closed : LiveLinkBridge.Status(Handle);
         public string StatusText => Handle == 0 ? L.Tr("Not connected.") : LiveLinkBridge.StatusText(Handle);
 
+        /// <summary>版のずれと使える機能の様子（ブリッジが挨拶から決めたもの）。つながるまでは <see cref="LiveLinkReport.Empty"/>。</summary>
+        public LiveLinkReport Report => LiveLinkBridge.Report(Handle);
+
+        /// <summary>画面に出す版のずれの様子: つながっている間だけ（相手が終わったあと・失敗したあとは <see cref="LiveLinkReport.Empty"/>。
+        /// 閉じたつながりの版のずれを、状態の行に残さない）。</summary>
+        public LiveLinkReport LiveReport => Status == LiveLinkStatus.Connected ? Report : LiveLinkReport.Empty;
+
+        /// <summary>つないだまま版がずれているときのツールチップ（両方の版・どちらを上げるか・使えない機能の名前）。ずれが無い・つながっていないときは null。</summary>
+        public string VersionTooltip => LiveLinkNotice.Tooltip(LiveReport, LiveLinkNotice.OwnVersion);
+
+        /// <summary>画面に出す状態の文: プロトコルの版の範囲が合わずに断られたときは、どちらを何版以上に上げるかを自分の言語で。それ以外はブリッジの文。</summary>
+        public string DisplayStatusText => Handle == 0 ? StatusText : LiveLinkNotice.Refusal(Report) ?? StatusText;
+
+        /// <summary>使える機能（双方の印の共通部分）。印の要る新しい命令は、立っているときだけ送る。</summary>
+        public ulong CommonFeatures => LiveLinkBridge.CommonFeatures(Handle);
+
         /// <summary>つなぎ始める（待たない。前のつながりは切る）。使えなければ理由を投げる。</summary>
         public static LiveLinkSession Start(string linkName)
         {
             if (!LiveLinkBridge.Available) throw new InvalidOperationException(LiveLinkBridge.Problem);
             Active?.Dispose();
-            ulong handle = LiveLinkBridge.Connect(linkName, "YoluPainter " + PackagePaths.Version + " (Unity " + Application.unityVersion + ")");
+            ulong handle = LiveLinkBridge.Connect(linkName, "YoluPainter " + PackagePaths.Version + " (Unity " + Application.unityVersion + ")", LiveLinkNotice.OwnVersion ?? "");
             if (handle == 0) throw new ArgumentException(L.Tr("The link name must be 1–64 letters, digits, '.', '_' or '-'."));
             var s = new LiveLinkSession(linkName, handle);
             Active = s;

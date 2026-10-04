@@ -77,9 +77,14 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             }
             string state = StateText(session, out MessageType? warning);
             if (warning != null) EditorGUILayout.HelpBox(state, warning.Value);
-            else EditorGUILayout.LabelField(state, EditorStyles.miniLabel);
+            else EditorGUILayout.LabelField(StateContent(session, state), EditorStyles.miniLabel);
             if (!string.IsNullOrEmpty(message)) EditorGUILayout.HelpBox(message, MessageType.Warning);
         }
+
+        /// <summary>状態の行: 文字と、つないだまま版か機能がずれているときの警告の印・ツールチップ（両方の版・どちらを上げるか・使えない機能の名前）。
+        /// つながりが閉じたあとは付けない（<see cref="LiveLinkSession.LiveReport"/>）。</summary>
+        internal static GUIContent StateContent(LiveLinkSession session, string state)
+            => session == null || LiveLinkOpen.Running != null ? new GUIContent(state) : LiveLinkNotice.StateContent(state, session.LiveReport, LiveLinkNotice.OwnVersion);
 
         /// <summary>今の状態を短い文で。失敗の理由は警告の枠で出す。</summary>
         internal static string StateText(LiveLinkSession session, out MessageType? warning)
@@ -97,7 +102,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                         return L.Tr("Connecting…");
                     case LiveLinkStatus.Failed:
                         warning = MessageType.Warning;
-                        return session.StatusText ?? "";
+                        return session.DisplayStatusText ?? "";
                 }
             }
             var last = LiveLinkOpen.Last;
@@ -134,7 +139,16 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                 using (new EditorGUI.DisabledScope(session.Model == null))
                     if (GUILayout.Button(L.Tr("Stop showing"))) session.CloseModel();
             }
-            if (!string.IsNullOrEmpty(session.StatusText)) EditorGUILayout.LabelField(session.StatusText, EditorStyles.wordWrappedMiniLabel);
+            string line = DetailsStatusLine(session);
+            if (!string.IsNullOrEmpty(line)) EditorGUILayout.LabelField(line, EditorStyles.wordWrappedMiniLabel);
+        }
+
+        /// <summary>詳しくの一番下の、ブリッジの今の文（断られたときは自分の言語の理由。警告の枠が同じ文を出しているときは重ねない）。</summary>
+        internal static string DetailsStatusLine(LiveLinkSession session)
+        {
+            string text = session.DisplayStatusText;
+            if (string.IsNullOrEmpty(text)) return null;
+            return StateText(session, out MessageType? warning) == text && warning != null ? null : text;
         }
 
         /// <summary>スタンドアロンの実行ファイル（空なら、Windows はインストーラーの場所を使う）。</summary>

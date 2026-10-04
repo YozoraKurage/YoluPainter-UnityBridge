@@ -46,7 +46,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         public LiveLinkStatus Status => session.Status;
         public LiveLinkEventKind? EndedBy => session.EndedBy;
         public int EndedCode => session.EndedCode;
-        public string StatusText => session.StatusText;
+        public string StatusText => session.DisplayStatusText;
         public bool Replaced => LiveLinkSession.Active != session;
         public void Tick() => session.Tick();
         public string SendModel(GameObject root) => session.SendModel(root);

@@ -213,3 +213,61 @@ msgstr "マテリアルの更新を送れません（つながっていません
 
 msgid "The shaders, keywords or textures of the materials changed; sent the material information again."
 msgstr "マテリアルのシェーダー・キーワード・テクスチャが変わったので、マテリアルの情報を送り直しました。"
+
+# ── 版のずれ（つないだままの警告）と、スタンドアロンが断ったとき ──
+
+msgid "Unity package {0} · standalone {1}"
+msgstr "Unity のパッケージ {0}・スタンドアロン {1}"
+
+msgid "The standalone must be updated."
+msgstr "スタンドアロンを更新する必要があります。"
+
+msgid "The standalone must be {0} or newer."
+msgstr "スタンドアロンを {0} 以上に上げる必要があります。"
+
+msgid "The Unity package must be updated."
+msgstr "Unity のパッケージを更新する必要があります。"
+
+msgid "The Unity package must be {0} or newer."
+msgstr "Unity のパッケージを {0} 以上に上げる必要があります。"
+
+msgid "Unavailable: {0}"
+msgstr "使えない機能: {0}"
+
+msgid "Protocol versions do not match (Unity {0}–{1}, standalone {2}–{3})."
+msgstr "プロトコルの版が合いません（Unity 側 {0}〜{1}、スタンドアロン {2}〜{3}）。"
+
+msgid "Material values"
+msgstr "マテリアルの値"
+
+msgid "Project transfer"
+msgstr "プロジェクトの転送"
+
+msgid "Animation"
+msgstr "アニメーション"
+
+msgid "Newer features"
+msgstr "新しい機能"
+
+# ── スタンドアロン版のおすすめ ──
+
+msgid "The standalone YoluPainter is available"
+msgstr "スタンドアロン版の YoluPainter があります"
+
+msgid "Only in the standalone: user channels, noise and grunge, CLIP STUDIO brushes (.sut)"
+msgstr "スタンドアロン版だけの機能: ユーザーチャンネル・ノイズとグランジ・CLIP STUDIO のブラシ（.sut）"
+
+msgid "Open the download page"
+msgstr "ダウンロードのページを開く"
+
+msgid "Later"
+msgstr "あとで"
+
+msgid "Don't show again"
+msgstr "今後表示しない"
+
+msgid "Suggest the standalone YoluPainter"
+msgstr "スタンドアロン版をすすめる"
+
+msgid "Shows a small window once per editor session when the YoluPainter window is opened."
+msgstr "YoluPainter の窓を開いたとき、エディタを起動するごとに 1 回、小さな窓を出します。"

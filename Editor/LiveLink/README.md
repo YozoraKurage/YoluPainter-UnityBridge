@@ -72,6 +72,30 @@ copied. The library's functions never wait on the standalone, so the editor's ma
 - Diagnostics ▸ *Connect to the test pattern* starts a test server inside the library (a checker per material) to check
   the link, the shared memory and the property blocks without the standalone.
 
+## Versions
+
+In the greeting each side tells the other its app version (the Unity package's version and the standalone's version, which are numbered
+separately), the oldest version of the other side it works with, and its feature marks. A mismatch never stops the link; only protocol
+versions that do not overlap are refused.
+
+- The Live Link window's state row gets a warning mark when the link is up but a version or a feature is off: the other side is older
+  than the version this side asks for (or does not tell its version, because it predates this check), or one side has features the other
+  lacks. The mark's tooltip names both versions, which side to update (and to which version) and the features that cannot be used. The
+  state itself stays a short name. The mark is shown only while the link is up; it goes when the standalone is closed.
+- A feature mark is a bit in the greeting (material values, assets, project transfer, animation). The marks both sides set are the
+  features usable on this link; a command that needs a mark is sent only when the other side has it (`ylb_common_features`).
+- When the protocol versions do not overlap the standalone refuses, and the window's warning says which side to update and to which
+  version ("The Unity package must be 0.6.0 or newer.").
+- The bridge library answers these through `ylb_link_report`, `ylb_peer_app_version` and `ylb_common_features` (library version 3). The
+  answers are about the link that is up: once it has ended they are empty (no peer version, no common features).
+
+## Moving to the standalone
+
+The Unity package no longer grows: Live Link is its main job. When the YoluPainter painting window is opened, a small window recommends
+the standalone once per editor session (a one-line list of what only the standalone has, and three buttons: open the download page,
+Later, Don't show again). **Edit ▸ Preferences ▸ YoluPainter ▸ Suggest the standalone YoluPainter** turns it off (on by default;
+*Don't show again* is the same switch). The painting window itself is not changed.
+
 ## Who can connect
 
 Only programs of the same user. The standalone creates a random key every time it starts listening and stores it in a folder
