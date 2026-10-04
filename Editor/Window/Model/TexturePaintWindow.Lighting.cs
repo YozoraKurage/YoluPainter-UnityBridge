@@ -24,7 +24,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             Texture current = null;
             // マテリアル表示が Normal を使うなら、照明を切っていても出力を作る（_BumpMap などに入れる）
-            bool wanted = previewNormals || MaterialMaps(materialSlot, PaintChannel.Normal) || ModelShowWantsNormal; // Normal だけを見せるときも
+            bool wanted = previewNormals || MaterialMaps(CurrentFirstSlot, PaintChannel.Normal) || ModelShowWantsNormal || CanvasShowWantsNormal; // Normal だけを見せるときも
             if (!wanted || !YlpContent.UsedChannels(document).Contains(PaintChannel.Normal)) DisposeLighting();
             else if (ShowsNormalOutput && normalOutput?.Texture != null) current = normalOutput.Texture; // 表示用の出力をそのまま使う
             else
@@ -43,11 +43,16 @@ namespace Yozolab.YoluPainter.Editor
             PreviewNormalTexture = previewNormals ? current : null;
             if (preview == null) return;
             var normals = new System.Collections.Generic.Dictionary<int, Texture>();
-            if (previewNormals && current != null) normals[materialSlot] = current;
+            if (previewNormals && current != null) foreach (int slot in CurrentSlots) normals[slot] = current;
             if (previewNormals && preview.HasModel)
                 foreach (var set in textureSets)
-                    if (set != currentSet && set.MaterialSlot < preview.MaterialSlotCount && !normals.ContainsKey(set.MaterialSlot))
-                    { var n = SetLighting(set); if (n != null) normals[set.MaterialSlot] = n; }
+                    if (set != currentSet && set.InModel)
+                    {
+                        bool used = YlpContent.UsedChannels(set.Document).Contains(PaintChannel.Normal);
+                        bool cached = set.Lighting != null && set.LightingKey == SetLightingKey(set.Document);
+                        var n = !used || cached || AdmitPreviewDisplayWork() ? SetLighting(set) : set.Lighting;
+                        if (n != null) foreach (int slot in set.Slots) if (!normals.ContainsKey(slot)) normals[slot] = n; // マテリアルを使う全部のスロット
+                    }
             preview.SetNormalTextures(normals);
         }
         void DisposeLighting() { lightingOutput?.Dispose(); lightingOutput = null; lightingCompositor?.Dispose(); lightingCompositor = null; lightingRevision = -1; }

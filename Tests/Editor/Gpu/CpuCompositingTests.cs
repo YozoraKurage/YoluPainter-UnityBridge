@@ -43,15 +43,8 @@ namespace Yozolab.YoluPainter.Tests
 
         static byte[] Read(TileGpuCompositor c) => c.Texture is RenderTexture ? GpuTests.Read(c.Texture) : GpuTests.ReadCpu(c.Texture);
 
-        /// <summary>バイト単位で同じか（NUnit の Is.EqualTo は大きな配列で 1 要素ずつ箱に入れて比べ、1100×700 の比較 1 回に数秒かかる）。
-        /// 違えば最初の画素を示す。</summary>
         internal static void AssertSameBytes(byte[] expected, byte[] actual, string context)
-        {
-            Assert.That(actual.Length, Is.EqualTo(expected.Length), context + ": length");
-            if (expected.AsSpan().SequenceEqual(actual)) return;
-            int at = 0; while (expected[at] == actual[at]) at++;
-            Assert.Fail($"{context}: first difference at pixel {at / 4} channel {at % 4} (expected {expected[at]}, got {actual[at]})");
-        }
+            => PixelAssert.SameBytes(expected, actual, context);
 
         /// <summary>CPU を選んだ合成器（表示は RenderTexture）。グラフィックスデバイスや写す手段が無ければスキップ。</summary>
         static TileGpuCompositor CpuToRenderTexture(PaintDocument doc, bool allowCopyTexture = true)

@@ -26,6 +26,8 @@ namespace Yozolab.YoluPainter.Editor
         public float weight = 1;
         /// <summary>別のウィンドウの位置（スクリーン座標。大きさが 0 なら持ち主の窓の脇に出す）。</summary>
         public Rect window;
+        /// <summary>true は Unity のレイアウトにドッキングできる普通の窓。false はいつも手前のユーティリティ窓。</summary>
+        public bool dockableWindow;
         /// <summary>別のウィンドウを閉じたときに戻る列と、その列の何番目か。</summary>
         public DockPlace home; public int homeIndex;
 
@@ -41,20 +43,36 @@ namespace Yozolab.YoluPainter.Editor
     [Serializable]
     internal sealed class DockLayout
     {
-        /// <summary>知っているパネル（既定の配置の上からの順。マテリアルは畳んでプロパティの上に置く: 列の一番下を畳んだ見出しにすると、
-        /// 列の下の端へ落としたパネルがその見出しのタブになってしまう）。</summary>
-        public static readonly string[] KnownPanels = { "color", "textureSet", "layers", "material", "assets", "properties" };
-        /// <summary>初めて置くときに畳んでおくパネル（既定の配置でも、前の配置の記録に無くて右の列の最後に足すときも）。</summary>
+        /// <summary>知っているパネル。前の版の配置に無かったパネルは、この順で右の列の最後に足す（テクスチャセットの設定だけは
+        /// レイヤーのタブにする。<see cref="Normalized"/>）。</summary>
+        public static readonly string[] KnownPanels = { "color", "textureSet", "layers", "textureSetSettings", "material", "assets", "properties" };
+        /// <summary>前の版の配置の記録に無くて右の列の最後に足すときに畳んでおくパネル（今までの列の高さを変えないように）。</summary>
         static readonly string[] FoldedAtFirst = { "material", "assets" };
+        /// <summary>前の版の配置に無ければ、このパネルのタブとして足すパネル（Substance Painter の「レイヤー｜テクスチャセットの設定」）。</summary>
+        static readonly Dictionary<string, string> TabbedWithAtFirst = new Dictionary<string, string> { { "textureSetSettings", "layers" } };
         public const float MinWidth = 220, MaxWidth = 560;
         /// <summary>保存の形式。0 は最初の形式（列ごとのパネルの ID の並びと、パネルごとの畳み・高さの比。<see cref="DockLayoutV0"/>）。</summary>
-        public const int CurrentVersion = 1;
+        public const int CurrentVersion = 2;
         public int version = CurrentVersion;
         public List<DockGroup> groups = new List<DockGroup>();
         public float leftWidth = 260, rightWidth = 300;
 
-        /// <summary>既定の配置: 右の列にカラー・テクスチャセット・レイヤー・マテリアル（畳んだ）・プロパティを 1 つずつ。</summary>
-        public static DockLayout Default() => new DockLayout { groups = KnownPanels.Select(Added).ToList() };
+        /// <summary>
+        /// 既定の配置（Substance Painter 3D の並び）: 左の列にアセット（Substance のシェルフ）とカラー、中央に 2D と 3D、右の列に上から
+        /// テクスチャセットの一覧・「レイヤー｜テクスチャセットの設定｜マテリアル」のタブ・プロパティ。カラー（Substance に無い）は、ツールの帯の
+        /// 下の描画色・背景色の隣に置き、右の列をレイヤーとプロパティの高さに使う。マテリアル（3D に見せるマテリアルの設定。Substance の
+        /// シェーダーの設定）はテクスチャセットごとの設定なのでレイヤーのタブに並べる。左の列の幅は右と同じ 300。
+        /// </summary>
+        public static DockLayout Default()
+        {
+            var stack = Single("layers", DockPlace.Right);
+            stack.panels.Add("textureSetSettings"); stack.panels.Add("material");
+            return new DockLayout
+            {
+                groups = new List<DockGroup> { Single("assets", DockPlace.Left), Single("color", DockPlace.Left), Single("textureSet", DockPlace.Right), stack, Single("properties", DockPlace.Right) },
+                leftWidth = 300, // アセットとカラーのパネルは右の列の幅（300）で文字が収まるように作ってある
+            };
+        }
 
         static DockGroup Single(string id, DockPlace place) => new DockGroup { id = NewId(), panels = new List<string> { id }, active = id, place = place, home = place == DockPlace.Left ? DockPlace.Left : DockPlace.Right };
         static DockGroup Added(string id) { var g = Single(id, DockPlace.Right); g.collapsed = FoldedAtFirst.Contains(id); return g; }
@@ -66,7 +84,10 @@ namespace Yozolab.YoluPainter.Editor
             var probe = JsonUtility.FromJson<VersionProbe>(json);
             if (probe == null) return Default();
             if (probe.version <= 0) return FromV0(JsonUtility.FromJson<DockLayoutV0>(json));
-            return (JsonUtility.FromJson<DockLayout>(json) ?? Default()).Normalized(); // 新しい版は、わかる所だけ読んで直す
+            var layout = JsonUtility.FromJson<DockLayout>(json) ?? Default();
+            // 版1で別窓だったものは普通の窓として戻す（既存のUnityレイアウトへのドッキングを保つ）。新しい切り離しは手前が既定。
+            if (probe.version == 1 && layout.groups != null) foreach (var group in layout.groups) if (group != null && group.Floating) group.dockableWindow = true;
+            return layout.Normalized();
         }
         [Serializable] sealed class VersionProbe { public int version; }
 
@@ -87,7 +108,7 @@ namespace Yozolab.YoluPainter.Editor
             Add(old.left, DockPlace.Left); Add(old.right, DockPlace.Right);
             // 列に無かったパネルも、畳み・高さの比を持ったまま右の列の最後へ（前の版の直し方と同じ）
             var placed = new HashSet<string>(layout.groups.SelectMany(g => g.panels));
-            Add(KnownPanels.Where(id => !placed.Contains(id)).ToList(), DockPlace.Right, true);
+            Add(KnownPanels.Where(id => !placed.Contains(id) && !TabbedWithAtFirst.ContainsKey(id)).ToList(), DockPlace.Right, true); // タブにするものは Normalized が足す
             return layout.Normalized();
         }
 
@@ -109,7 +130,13 @@ namespace Yozolab.YoluPainter.Editor
                 if (string.IsNullOrEmpty(g.id) || !seenIds.Add(g.id)) { g.id = NewId(); seenIds.Add(g.id); }
             }
             groups.RemoveAll(g => g.panels.Count == 0);
-            foreach (var id in KnownPanels) if (!seenPanels.Contains(id)) groups.Add(Added(id));
+            foreach (var id in KnownPanels)
+            {
+                if (seenPanels.Contains(id)) continue;
+                var host = TabbedWithAtFirst.TryGetValue(id, out var with) ? groups.FirstOrDefault(g => g.panels.Contains(with)) : null;
+                if (host != null) { host.panels.Insert(host.panels.IndexOf(with) + 1, id); seenPanels.Add(id); } // 見えるタブは変えない
+                else groups.Add(Added(id));
+            }
             leftWidth = Mathf.Clamp(float.IsNaN(leftWidth) ? 260 : leftWidth, MinWidth, MaxWidth);
             rightWidth = Mathf.Clamp(float.IsNaN(rightWidth) ? 300 : rightWidth, MinWidth, MaxWidth);
             version = CurrentVersion;
@@ -141,7 +168,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>まとまりごと列（左か右）の index 番目（列の中のまとまりの数え方）へ動かす（同じ列の中の移動も、別のウィンドウからの戻しも）。</summary>
         public void MoveGroup(string groupId, DockPlace column, int index)
         {
-            if (column == DockPlace.Floating) throw new ArgumentException("Use Float to put a group in a separate window.", nameof(column));
+            if (column == DockPlace.Floating) throw new ArgumentException("Floating is not a dock column.", nameof(column));
             var g = Group(groupId);
             var before = Column(column); int old = before.IndexOf(g);
             groups.Remove(g);
@@ -155,7 +182,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             var from = GroupOf(panel);
             if (from.panels.Count == 1) { MoveGroup(from.id, column, index); return; }
-            if (column == DockPlace.Floating) throw new ArgumentException("Use Float to put a panel in a separate window.", nameof(column));
+            if (column == DockPlace.Floating) throw new ArgumentException("Floating is not a dock column.", nameof(column));
             Detach(from, panel);
             Insert(Single(panel, column), column, index);
         }
@@ -205,7 +232,7 @@ namespace Yozolab.YoluPainter.Editor
             var from = GroupOf(panel);
             if (from.panels.Count == 1) return FloatGroup(from.id, window);
             var g = Single(panel, DockPlace.Floating);
-            if (from.Floating) { g.home = from.home; g.homeIndex = from.homeIndex; }
+            if (from.Floating) { g.dockableWindow = from.dockableWindow; g.home = from.home; g.homeIndex = from.homeIndex; }
             else { g.home = from.place; g.homeIndex = Column(from.place).IndexOf(from) + 1; }
             Detach(from, panel);
             g.window = window;

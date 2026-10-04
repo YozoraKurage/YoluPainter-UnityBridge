@@ -206,7 +206,7 @@ namespace Yozolab.YoluPainter.Editor
 
         // ───────── メニューと見出し ─────────
 
-        void CanvasViewMenuItems(GenericMenu m)
+        void CanvasViewMenuItems(PaintMenu m)
         {
             bool free = stroke == null && !toolDragging;
             Item(m, "Rotate View Left", () => RotateCanvasView(-CanvasRotateStep), free, keys: "-");

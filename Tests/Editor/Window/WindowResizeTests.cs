@@ -95,7 +95,7 @@ namespace Yozolab.YoluPainter.Tests
                 Sets = window.TextureSets.Select(s =>
                 {
                     int size = sizes.Where(z => z.name == s.Name).Select(z => z.size).DefaultIfEmpty(0).First();
-                    return new TextureSetDraft { Id = s.Id, Name = s.Name, Slot = s.MaterialSlot, CurrentWidth = s.Document.Width, CurrentHeight = s.Document.Height,
+                    return new TextureSetDraft { Id = s.Id, Name = s.Name, Material = s.MaterialGroup, Key = s.Material, CurrentWidth = s.Document.Width, CurrentHeight = s.Document.Height,
                         Width = size > 0 ? size : s.Document.Width, Height = size > 0 ? size : s.Document.Height };
                 }).ToList(),
             };
@@ -275,10 +275,10 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void AnAddedSetTakesTheSizeOfItsDraft()
         {
             var model = TextureSetModels.Prefab(folder, "Grow", "Body", "Hair");
-            window.CreateProject(new NewProjectSettings { Model = model, Resolution = 512, Template = ProjectTemplate.ColorOnly, Slots = new[] { 0 } });
+            window.CreateProject(new NewProjectSettings { Model = model, Resolution = 512, Template = ProjectTemplate.ColorOnly, Materials = new[] { 0 } });
             var settings = Configuration(model);
-            settings.Sets.Add(new TextureSetDraft { Name = "Hair", Slot = 1, Width = 2048, Height = 2048 });
-            settings.Sets.Add(new TextureSetDraft { Name = "Extra", Slot = 2 });
+            settings.Sets.Add(new TextureSetDraft { Name = "Hair", Material = 1, Width = 2048, Height = 2048 });
+            settings.Sets.Add(new TextureSetDraft { Name = "Extra", Material = -1 });
             window.ApplyProjectConfiguration(settings);
             Assert.That(DialogsOf(window).Asked, Is.Empty, "adding a set is not a resize");
             Assert.That(window.TextureSets.Select(s => (s.Name, s.Document.Width)), Is.EqualTo(new[] { ("Body", 512), ("Hair", 2048), ("Extra", 512) }), "no size: like the open set");
@@ -331,9 +331,9 @@ namespace Yozolab.YoluPainter.Tests
                     Resolution = 2048,
                     Sets = new List<TextureSetDraft>
                     {
-                        new TextureSetDraft { Id = Guid.NewGuid(), Name = "Body", Slot = 0, Width = 4096, Height = 4096, CurrentWidth = 2048, CurrentHeight = 2048 },
-                        new TextureSetDraft { Id = Guid.NewGuid(), Name = "Imported", Slot = 1, Width = 1000, Height = 600, CurrentWidth = 1000, CurrentHeight = 600 },
-                        new TextureSetDraft { Name = "Eyes", Slot = 2, Width = 512, Height = 512 },
+                        new TextureSetDraft { Id = Guid.NewGuid(), Name = "Body", Material = 0, Width = 4096, Height = 4096, CurrentWidth = 2048, CurrentHeight = 2048 },
+                        new TextureSetDraft { Id = Guid.NewGuid(), Name = "Imported", Material = 1, Width = 1000, Height = 600, CurrentWidth = 1000, CurrentHeight = 600 },
+                        new TextureSetDraft { Name = "Eyes", Material = 2, Width = 512, Height = 512 },
                     },
                 };
                 if (Application.isBatchMode && SystemInfo.graphicsDeviceType != UnityEngine.Rendering.GraphicsDeviceType.Null)

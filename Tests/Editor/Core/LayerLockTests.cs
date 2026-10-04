@@ -357,8 +357,14 @@ namespace Yozolab.YoluPainter.Tests
             var d = NewDocument(); var l = d.AddLayer("L"); d.SetLayerLocks(l.Id, LayerLocks.Position);
             var bytes = DocumentBinary.Write(d); int at = AttributeByte(l);
             Assert.That(bytes[at], Is.EqualTo(2));
-            var unknownAttribute = (byte[])bytes.Clone(); unknownAttribute[at] = 2 | 16;
+            var unknownAttribute = (byte[])bytes.Clone(); unknownAttribute[at] = 2 | 64; // bit4 は Anchor、bit5 は直接の勾配。bit6 はまだ知らない
             Assert.That(() => DocumentBinary.Read(unknownAttribute), Throws.InstanceOf<InvalidDataException>().With.Message.Contains("Unknown layer attribute flags"));
+            // ビット 4（版 20 の Anchor）は、その導入より前の正本では知らないビット
+            var noAnchors = (byte[])bytes.Clone(); noAnchors[at] = 2 | 16; BitConverter.GetBytes(19).CopyTo(noAnchors, 8);
+            Assert.That(() => DocumentBinary.Read(noAnchors), Throws.InstanceOf<InvalidDataException>().With.Message.Contains("Unknown layer attribute flags"));
+            // ビット 5（版 21 の直接の勾配）を Anchor の版 20 として読ませると断る
+            var noGradients = (byte[])bytes.Clone(); noGradients[at] = 2 | 32; BitConverter.GetBytes(20).CopyTo(noGradients, 8);
+            Assert.That(() => DocumentBinary.Read(noGradients), Throws.InstanceOf<InvalidDataException>().With.Message.Contains("Unknown layer attribute flags"));
             // ビット 3（版 16 の塗りつぶしの画像と投影）は、版 15 までの正本では知らないビット
             foreach (int older in new[] { 15, 14 })
             {

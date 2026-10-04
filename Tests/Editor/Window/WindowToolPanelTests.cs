@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 using Yozolab.YoluPainter.Core;
 using Yozolab.YoluPainter.Editor;
@@ -14,17 +15,55 @@ namespace Yozolab.YoluPainter.Tests
     /// Unity の標準の部品の区画（LegacySection）を使わない。</summary>
     public sealed partial class WindowTests
     {
+        OptionPopupProbe popupProbe;
+        [TearDown] public void ClosePopupProbe() { if (popupProbe != null) popupProbe.Close(); popupProbe = null; }
+
+        /// <summary>部品を出す: 今の欄に無ければプロパティの欄のほかのタブ（ブラシ｜マテリアル｜マスク）、それでも無ければオプションバーの小さな窓
+        /// （<see cref="OptionPopupProbe"/>）。小さな窓の部品なら、その窓を返す（欄の部品なら null）。</summary>
+        OptionPopupProbe RevealToolControl(string id)
+        {
+            bool Shown() => window.ToolControlScreenRects.ContainsKey(id) && !(window.ToolControlOwner(id) ?? "").StartsWith("popup.", StringComparison.Ordinal);
+            Repaint(window);
+            if (Shown()) return null;
+            var context = window.PropertyContextNow();
+            foreach (var tab in window.PropertyTabsNow()) { window.SetPropertyTab(context, tab); Repaint(window); if (Shown()) return null; }
+            foreach (OptionPopupKind kind in Enum.GetValues(typeof(OptionPopupKind)))
+            {
+                if (popupProbe == null)
+                {
+                    popupProbe = EditorWindow.CreateWindow<OptionPopupProbe>();
+                    popupProbe.position = new Rect(window.position.xMax + 10, window.position.y, TexturePaintWindow.OptionPopupWidth, 900);
+                }
+                popupProbe.Owner = window; popupProbe.Kind = kind;
+                popupProbe.SendEvent(new Event { type = EventType.Repaint });
+                if (window.ToolControlOwner(id) == "popup." + kind) return popupProbe;
+            }
+            return null;
+        }
+
         /// <summary>覚えた部品の位置（ウィンドウの GUI の座標。Mouse に渡す）。見えるところまでプロパティの欄を送ってから測る。</summary>
         Vector2 ToolControlPoint(string id, float fx = .5f)
         {
-            Repaint(window); window.ScrollPropertiesTo(id); Repaint(window);
+            Assert.That(RevealToolControl(id), Is.Null, id + " is in an options-bar popup; use ClickToolControl");
+            window.ScrollPropertiesTo(id); Repaint(window);
             Assert.That(window.ToolControlScreenRects.TryGetValue(id, out var r), Is.True, id + " was not drawn");
             // 画面の座標から窓の左上（position）とタブの高さ（rootVisualElement.worldBound、21 px）を引くと GUI の座標（GUI モードで実測）
             var at = new Vector2(r.x + r.width * fx, r.center.y) - window.position.position - window.rootVisualElement.worldBound.position;
             Assert.That(at.y, Is.InRange(0f, window.position.height - 24), id + " is outside the window; the Properties panel did not scroll to it");
             return at;
         }
-        void ClickToolControl(string id, float fx = .5f) { var at = ToolControlPoint(id, fx); Mouse(window, EventType.MouseDown, at); Mouse(window, EventType.MouseUp, at); }
+        void ClickToolControl(string id, float fx = .5f)
+        {
+            var probe = RevealToolControl(id);
+            if (probe == null) { var at = ToolControlPoint(id, fx); Mouse(window, EventType.MouseDown, at); Mouse(window, EventType.MouseUp, at); return; }
+            // オプションバーの小さな窓の部品: その窓のホストの座標で押す
+            var screen = window.ToolControlScreenRects[id];
+            var host = new Vector2(screen.x + screen.width * fx, screen.center.y) - HostScreenPosition(probe);
+            EditorShaderCompiler.TolerateErrorLogsIfBroken();
+            probe.SendEvent(new Event { type = EventType.MouseDown, mousePosition = host, button = 0, pressure = 1 });
+            probe.SendEvent(new Event { type = EventType.MouseUp, mousePosition = host, button = 0, pressure = 1 });
+            probe.SendEvent(new Event { type = EventType.Repaint }); Repaint(window);
+        }
 
         void ToolPanelDot(int x, int y) { var at = At(window, x, y); Mouse(window, EventType.MouseDown, at); Mouse(window, EventType.MouseUp, at); }
 
@@ -42,14 +81,15 @@ namespace Yozolab.YoluPainter.Tests
                 window.Document.SetSelection(SelectionMask.All(window.Document));
                 window.Tool = TexturePaintWindow.PaintTool.Eyedropper; // ツールのセクションが無いツール
                 Repaint(window); Repaint(window);
-                var baseline = new HashSet<string>(legacy.Keys);
+                var baseline = new HashSet<string>(legacy.Keys); var seen = new HashSet<string>();
                 foreach (TexturePaintWindow.PaintTool tool in Enum.GetValues(typeof(TexturePaintWindow.PaintTool)))
                 {
                     window.Tool = tool; Repaint(window); Repaint(window); // 2 回目は測った高さで描き直す
                     Assert.That(legacy.Keys.Except(baseline), Is.Empty, tool + " drew a tool section with Unity's controls");
                     Assert.That(legacy.Keys.Intersect(TexturePaintWindow.ToolSectionKeys), Is.Empty, tool.ToString());
+                    seen.UnionWith(window.ToolControlScreenRects.Keys); // 欄の部品は描き直すたびに覚え直す（見えているタブ・文脈の分だけ）
                 }
-                Assert.That(window.ToolControlScreenRects.Keys, Is.SupersetOf(new[] { "spacing", "texture", "radius", "grow", "flip-horizontal", "offset-x", "apply-transform" }),
+                Assert.That(seen, Is.SupersetOf(new[] { "spacing", "texture", "radius", "grow", "flip-horizontal", "offset-x", "apply-transform" }),
                     "every tool panel was drawn with its controls");
             }
             finally { Application.logMessageReceived -= onLog; }

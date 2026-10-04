@@ -14,8 +14,7 @@ namespace Yozolab.YoluPainter.Editor
 
         public override void OnInspectorGUI()
         {
-            if (targets.Length == 1) DrawSummary(((AssetImporter)target).assetPath);
-            else EditorGUILayout.HelpBox("Select a single file to see its channels or open it in YoluPainter.", MessageType.None);
+            if (targets.Length == 1) DrawSummary(((AssetImporter)target).assetPath); // 複数を選んだときは何も出さない
         }
 
         void DrawSummary(string assetPath)
@@ -33,10 +32,11 @@ namespace Yozolab.YoluPainter.Editor
                     EditorGUILayout.LabelField("Texture Sets", sets.Length.ToString());
                     EditorGUI.indentLevel++;
                     foreach (var set in sets)
-                        EditorGUILayout.LabelField(set.name + (set.current ? " (current)" : ""), "slot " + set.materialSlot + " · " + set.width + " x " + set.height + " · "
+                        EditorGUILayout.LabelField(set.name + (set.current ? " (current)" : ""), set.material + " · " + set.width + " x " + set.height + " · "
                             + (set.channels.Length == 0 ? "(none painted)" : string.Join(", ", set.channels.Select(c => c.ToString()))));
                     EditorGUI.indentLevel--;
                 }
+                EditorGUILayout.LabelField(L.Tr("Resources"), L.Tr("{0} images, {1} brushes, {2} materials, {3} smart materials, {4} smart masks", info.imageCount, info.brushCount, info.materialCount, info.smartMaterialCount, info.smartMaskCount));
                 EditorGUILayout.LabelField("File Format", info.format <= 1 ? "1 (before the format was recorded)" : info.format.ToString());
                 if (!string.IsNullOrEmpty(info.savedBy)) EditorGUILayout.LabelField("Saved By", info.savedBy);
                 if (!string.IsNullOrEmpty(info.createdBy)) EditorGUILayout.LabelField("Created By", info.createdBy);

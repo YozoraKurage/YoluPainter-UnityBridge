@@ -136,13 +136,15 @@ namespace Yozolab.YoluPainter.Core
             if (topId == Guid.Empty) throw new ArgumentException("Layer ID must not be empty.", nameof(newId));
             foreach (var existing in layers) if (existing.Id == topId) throw new ArgumentException("Duplicate layer ID.", nameof(newId));
             var block = Block(layer); var ids = new Dictionary<Guid, Guid>(); var copies = new List<PaintLayer>(); long bytes = 0;
+            var anchors = new Dictionary<Guid, Guid>();
             foreach (var l in block) ids[l.Id] = l == layer ? topId : Guid.NewGuid();
             foreach (var l in block)
             {
-                var copy = CloneLayer(l, ids[l.Id], l == layer ? (name ?? l.Name) : l.Name);
+                var copy = CloneLayer(l, ids[l.Id], l == layer ? (name ?? l.Name) : l.Name, anchors);
                 copy.ParentId = ids.TryGetValue(l.ParentId, out var parent) ? parent : l.ParentId;
                 copies.Add(copy); bytes += copy.AllocatedBytes;
             }
+            RemapAnchorReferences(copies, anchors); // 写しの中の Anchor を読む段は、写しの Anchor を読む（外の Anchor はそのまま）
             var before = SnapshotStructure();
             layers.InsertRange(layers.IndexOf(layer) + 1, copies);
             var after = SnapshotStructure(); RestoreStructure(before);
@@ -152,36 +154,44 @@ namespace Yozolab.YoluPainter.Core
 
         /// <summary>A deep copy of a layer of this document under a new ID (not inserted; ParentId is the original's): attributes, channels
         /// (tiles shared copy-on-write), fill values, images and projection, adjustment, mask with its filters, content filters and the path, each effect and path
-        /// with a new ID.</summary>
-        PaintLayer CloneLayer(PaintLayer source, Guid id, string name)
+        /// with a new ID, and the anchors (layer and mask) with new IDs and the same names (old → new added to anchors when given; the
+        /// copies' references are pointed at them by <see cref="RemapAnchorReferences"/>). With preserveIds (the snapshot for saving in the
+        /// background) effects, paths and anchors keep their IDs.</summary>
+        PaintLayer CloneLayer(PaintLayer source, Guid id, string name, IDictionary<Guid, Guid> anchors = null, bool preserveIds = false)
         {
             var copy = new PaintLayer(this, name, id, source.Kind)
             { Visible = source.Visible, Opacity = source.Opacity, BlendMode = source.BlendMode, Clipping = source.Clipping, ParentId = source.ParentId, Adjustment = source.Adjustment, Locks = source.Locks };
             copy.CopyChannelBlendsFrom(source);
             foreach (var entry in source.FillValues) copy.SetFillValueInternal(entry.Key, entry.Value);
             if (source.Kind == LayerKind.Fill && (source.FillImages.Count > 0 || !source.Projection.Equals(FillProjection.Default))) SetFillImagesForLoad(copy, source.FillImages, source.Projection);
+            if (source.FillGradients.Count > 0) SetFillGradientsForLoad(copy, source.FillGradients);
             foreach (var entry in source.Channels)
             {
                 var surface = copy.GetChannel(entry.Key);
                 foreach (var coord in entry.Value.EnumerateTileCoordinates()) surface.Restore(coord, entry.Value.Capture(coord));
             }
             foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel))) copy.Enable(c, source.IsChannelEnabled(c));
-            foreach (var e in source.FilterList) copy.FilterList.Add(CloneEffect(e));
+            foreach (var e in source.FilterList) copy.FilterList.Add(preserveIds ? e : CloneEffect(e));
             if (source.FilterList.Count > 0) copy.FilterRevision = ++filterRevisionCounter;
-            if (source.Mask != null) copy.Mask = CloneMask(source.Mask, copy);
-            if (source.Path is SurfacePath surfacePath) copy.Path = new SurfacePath(Guid.NewGuid(), surfacePath.Channel, surfacePath.ModelFingerprint, surfacePath.Brush, surfacePath.Points);
-            else if (source.Path is CanvasPath canvasPath) copy.Path = new CanvasPath(Guid.NewGuid(), canvasPath.Channel, canvasPath.Brush, canvasPath.Points);
+            if (source.Mask != null) copy.Mask = CloneMask(source.Mask, copy, anchors, preserveIds);
+            if (source.Anchor != null) copy.Anchor = preserveIds ? SameAnchor(source.Anchor) : CloneAnchor(source.Anchor, anchors);
+            if (source.Path is SurfacePath surfacePath) copy.Path = new SurfacePath(preserveIds ? surfacePath.Id : Guid.NewGuid(), surfacePath.Channel, surfacePath.ModelFingerprint, surfacePath.Brush, surfacePath.Points, surfacePath.Material);
+            else if (source.Path is CanvasPath canvasPath) copy.Path = new CanvasPath(preserveIds ? canvasPath.Id : Guid.NewGuid(), canvasPath.Channel, canvasPath.Brush, canvasPath.Points, canvasPath.Material);
             return copy;
         }
         static FilterEffect CloneEffect(FilterEffect e) => new FilterEffect(Guid.NewGuid(), e.Settings, e.Enabled, e.Strength, e.Channels.Count == 0 ? null : e.Channels);
-        /// <summary>A copy of a mask (tiles shared copy-on-write, parameters, filters with new IDs) owned by another layer.</summary>
-        RasterMask CloneMask(RasterMask source, PaintLayer owner)
+        /// <summary>An anchor with the same ID, name and placement (its name can change, so the snapshot does not share the object).</summary>
+        static AnchorPoint SameAnchor(AnchorPoint source) => new AnchorPoint(source.Id, source.Name, source.Placement);
+        /// <summary>A copy of a mask (tiles shared copy-on-write, parameters, filters with new IDs, its anchor with a new ID; with preserveIds
+        /// the same IDs) owned by another layer.</summary>
+        RasterMask CloneMask(RasterMask source, PaintLayer owner, IDictionary<Guid, Guid> anchors = null, bool preserveIds = false)
         {
             var mask = NewMask(owner);
             foreach (var coord in source.Surface.EnumerateTileCoordinates()) mask.Surface.Restore(coord, source.Surface.Capture(coord));
             mask.Enabled = source.Enabled; mask.Inverted = source.Inverted; mask.Density = source.Density;
-            foreach (var e in source.FilterList) mask.FilterList.Add(CloneEffect(e));
+            foreach (var e in source.FilterList) mask.FilterList.Add(preserveIds ? e : CloneEffect(e));
             if (source.FilterList.Count > 0) mask.FilterRevision = ++filterRevisionCounter;
+            if (source.Anchor != null) mask.Anchor = preserveIds ? SameAnchor(source.Anchor) : CloneAnchor(source.Anchor, anchors);
             return mask;
         }
         /// <summary>An empty mask wired to this document like <see cref="AddLayerMask"/>'s (not attached to the owner yet).</summary>
@@ -235,7 +245,7 @@ namespace Yozolab.YoluPainter.Core
                 }));
             }
             if (layer.Kind == LayerKind.Group || layer.Kind == LayerKind.Adjustment)
-                throw new LayerOpException(LayerOpRefusal.NoPixels, layer.Kind == LayerKind.Group ? "A group has no pixels to copy. Select a layer inside it, or use Copy Merged." : "An adjustment layer has no pixels to copy.");
+                throw new LayerOpException(LayerOpRefusal.NoPixels, layer.Kind == LayerKind.Group ? "A group has no pixels to copy." : "An adjustment layer has no pixels to copy.");
             return CopyRegion(ClipboardSource.Layer, channel, maxBytes, coords => ReadTiles(coords, (coord, tile) => layer.CopyTile(channel, coord, tile)));
         }
 
@@ -257,10 +267,10 @@ namespace Yozolab.YoluPainter.Core
             {
                 if (layer.Kind != LayerKind.Raster)
                     throw new LayerOpException(layer.Kind == LayerKind.Fill ? LayerOpRefusal.NotPaintLayer : LayerOpRefusal.NoPixels,
-                        layer.Kind == LayerKind.Fill ? "A fill layer is generated from its value and cannot be cut. Copy it, or paint on its mask." : "This layer has no pixels to cut.");
-                if (layer.Path != null) throw new LayerOpException(LayerOpRefusal.PathLayer, "This layer is drawn by a path. Edit the path, or rasterize the layer to cut from it.");
+                        layer.Kind == LayerKind.Fill ? "A fill layer is generated from its value and cannot be cut." : "This layer has no pixels to cut.");
+                if (layer.Path != null) throw new LayerOpException(LayerOpRefusal.PathLayer, "This layer is drawn by a path.");
             }
-            if (!fromMask && !layer.IsChannelEnabled(channel)) throw new InvalidOperationException("Enable the channel before cutting from it.");
+            if (!fromMask && !layer.IsChannelEnabled(channel)) throw new InvalidOperationException("The channel is not enabled on this layer.");
             if (fromMask) RefuseLockedAttributes(layer); else RefuseLockedPixels(layer, erase: true); // 写す前に断る（クリップボードも変えない）
             var copied = CopyPixels(layerId, channel, fromMask, maxBytes);
             if (fromMask) FillMask(layerId, 1, null, reveal: true);

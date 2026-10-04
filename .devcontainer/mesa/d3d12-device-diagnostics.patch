@@ -1,0 +1,271 @@
+--- a/src/gallium/drivers/d3d12/d3d12_device_diagnostics.h
++++ b/src/gallium/drivers/d3d12/d3d12_device_diagnostics.h
+@@ -0,0 +1,11 @@
++/* 開発環境のデバイス消失の記録。製品の復旧処理は変更しない。 */
++#ifndef D3D12_DEVICE_DIAGNOSTICS_H
++#define D3D12_DEVICE_DIAGNOSTICS_H
++#include "d3d12_common.h"
++struct d3d12_screen;
++struct util_dl_library;
++void d3d12_diagnostics_enable(util_dl_library *mod, ID3D12DeviceFactory *factory);
++void d3d12_diagnostics_start(struct d3d12_screen *screen);
++void d3d12_diagnostics_stop(struct d3d12_screen *screen);
++void d3d12_diagnostics_check(struct d3d12_screen *screen, const char *where, HRESULT operation = S_OK);
++#endif
+--- a/src/gallium/drivers/d3d12/d3d12_device_diagnostics.cpp
++++ b/src/gallium/drivers/d3d12/d3d12_device_diagnostics.cpp
+@@ -0,0 +1,195 @@
++/* 開発環境のデバイス消失の記録。アセット名・オブジェクト名は出力しない。 */
++#include "d3d12_device_diagnostics.h"
++#include "d3d12_screen.h"
++#include "util/u_debug.h"
++#include "util/u_dl.h"
++#include "c11/threads.h"
++#include <dxguids/dxguids.h>
++#include <atomic>
++#include <new>
++#include <stdio.h>
++#include <time.h>
++#ifndef _WIN32
++#include <unistd.h>
++#endif
++
++struct d3d12_device_diagnostics {
++   thrd_t thread;
++   std::atomic<bool> stop{false};
++   mtx_t mutex;
++   bool logged = false;
++   bool started = false;
++};
++
++static bool enabled()
++{
++   return debug_get_bool_option("D3D12_DEVICE_DIAGNOSTICS", true);
++}
++
++static void prefix()
++{
++   struct timespec now;
++   timespec_get(&now, TIME_UTC);
++#ifdef _WIN32
++   unsigned pid = GetCurrentProcessId();
++#else
++   unsigned pid = getpid();
++#endif
++   fprintf(stderr, "D3D12-DIAG time_unix=%lld.%09ld pid=%u ", (long long)now.tv_sec, now.tv_nsec, pid);
++}
++
++static const char *reason_name(HRESULT reason)
++{
++   switch (reason) {
++   case S_OK: return "S_OK";
++   case DXGI_ERROR_DEVICE_HUNG: return "DXGI_ERROR_DEVICE_HUNG";
++   case DXGI_ERROR_DEVICE_REMOVED: return "DXGI_ERROR_DEVICE_REMOVED";
++   case DXGI_ERROR_DEVICE_RESET: return "DXGI_ERROR_DEVICE_RESET";
++   case DXGI_ERROR_DRIVER_INTERNAL_ERROR: return "DXGI_ERROR_DRIVER_INTERNAL_ERROR";
++   case DXGI_ERROR_INVALID_CALL: return "DXGI_ERROR_INVALID_CALL";
++   case E_OUTOFMEMORY: return "E_OUTOFMEMORY";
++   default: return "OTHER";
++   }
++}
++
++void d3d12_diagnostics_enable(util_dl_library *mod, ID3D12DeviceFactory *factory)
++{
++   if (!enabled()) return;
++   ID3D12DeviceRemovedExtendedDataSettings *settings = nullptr;
++   HRESULT hr = E_NOINTERFACE;
++   if (factory)
++      hr = factory->GetConfigurationInterface(CLSID_D3D12DeviceRemovedExtendedData, IID_PPV_ARGS(&settings));
++   if (!settings) {
++      typedef HRESULT (WINAPI *get_debug_fn)(REFIID, void **);
++      auto get_debug = (get_debug_fn)util_dl_get_proc_address(mod, "D3D12GetDebugInterface");
++      if (get_debug) hr = get_debug(IID_PPV_ARGS(&settings));
++   }
++   prefix(); fprintf(stderr, "DRED settings hr=0x%08x enabled=%u (before CreateDevice)\n", (unsigned)hr, settings != nullptr);
++   if (settings) {
++      settings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
++      settings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
++      settings->Release();
++   }
++   fflush(stderr);
++}
++
++template <class Node> static void breadcrumbs(const Node *node)
++{
++   unsigned count = 0;
++   for (; node && count < 64; node = node->pNext, ++count) {
++      unsigned last = node->pLastBreadcrumbValue ? *node->pLastBreadcrumbValue : 0;
++      prefix(); fprintf(stderr, "breadcrumb node=%u count=%u completed=%u history=%u\n",
++         count, node->BreadcrumbCount, last, node->pCommandHistory != nullptr);
++      if (!node->pCommandHistory) continue;
++      unsigned end = MIN2(node->BreadcrumbCount, last + (last < UINT32_MAX ? 1 : 0));
++      unsigned begin = end > 8 ? end - 8 : 0;
++      for (unsigned index = begin; index < end; ++index) {
++         unsigned op = node->pCommandHistory[index % 65536];
++         prefix(); fprintf(stderr, "breadcrumb node=%u index=%u op=%u%s\n", count, index, op,
++            index < last ? " completed" : " pending");
++      }
++   }
++   prefix(); fprintf(stderr, "breadcrumb nodes=%u truncated=%u\n", count, node != nullptr);
++}
++
++template <class Node> static void allocations(const char *kind, const Node *node)
++{
++   unsigned count = 0;
++   for (; node && count < 64; node = node->pNext, ++count) {
++      prefix(); fprintf(stderr, "pagefault allocation=%s node=%u type=%u\n", kind, count, (unsigned)node->AllocationType);
++   }
++   prefix(); fprintf(stderr, "pagefault allocations=%s count=%u truncated=%u\n", kind, count, node != nullptr);
++}
++
++static void dump_dred(ID3D12Device *device)
++{
++   ID3D12DeviceRemovedExtendedData1 *data1 = nullptr;
++   HRESULT hr = device->QueryInterface(IID_PPV_ARGS(&data1));
++   prefix(); fprintf(stderr, "DRED interface1 hr=0x%08x\n", (unsigned)hr);
++   if (data1) {
++      D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT1 bc = {};
++      hr = data1->GetAutoBreadcrumbsOutput1(&bc);
++      prefix(); fprintf(stderr, "DRED breadcrumbs1 hr=0x%08x\n", (unsigned)hr);
++      if (SUCCEEDED(hr)) breadcrumbs(bc.pHeadAutoBreadcrumbNode);
++      D3D12_DRED_PAGE_FAULT_OUTPUT1 pf = {};
++      hr = data1->GetPageFaultAllocationOutput1(&pf);
++      prefix(); fprintf(stderr, "DRED pagefault1 hr=0x%08x va=0x%llx\n", (unsigned)hr, (unsigned long long)pf.PageFaultVA);
++      if (SUCCEEDED(hr)) {
++         allocations("existing", pf.pHeadExistingAllocationNode);
++         allocations("freed", pf.pHeadRecentFreedAllocationNode);
++      }
++      data1->Release();
++      return;
++   }
++   ID3D12DeviceRemovedExtendedData *data = nullptr;
++   hr = device->QueryInterface(IID_PPV_ARGS(&data));
++   prefix(); fprintf(stderr, "DRED interface0 hr=0x%08x\n", (unsigned)hr);
++   if (!data) return;
++   D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT bc = {};
++   hr = data->GetAutoBreadcrumbsOutput(&bc);
++   prefix(); fprintf(stderr, "DRED breadcrumbs0 hr=0x%08x\n", (unsigned)hr);
++   if (SUCCEEDED(hr)) breadcrumbs(bc.pHeadAutoBreadcrumbNode);
++   D3D12_DRED_PAGE_FAULT_OUTPUT pf = {};
++   hr = data->GetPageFaultAllocationOutput(&pf);
++   prefix(); fprintf(stderr, "DRED pagefault0 hr=0x%08x va=0x%llx\n", (unsigned)hr, (unsigned long long)pf.PageFaultVA);
++   if (SUCCEEDED(hr)) {
++      allocations("existing", pf.pHeadExistingAllocationNode);
++      allocations("freed", pf.pHeadRecentFreedAllocationNode);
++   }
++   data->Release();
++}
++
++void d3d12_diagnostics_check(struct d3d12_screen *screen, const char *where, HRESULT operation)
++{
++   if (!enabled() || !screen->dev) return;
++   HRESULT reason = screen->dev->GetDeviceRemovedReason();
++   if (SUCCEEDED(reason) && SUCCEEDED(operation)) return;
++   auto state = screen->device_diagnostics;
++   if (state) mtx_lock(&state->mutex);
++   if (FAILED(operation)) {
++      prefix(); fprintf(stderr, "operation=%s hr=0x%08x reason=0x%08x (%s)\n", where, (unsigned)operation, (unsigned)reason, reason_name(reason));
++   }
++   if (FAILED(reason) && (!state || !state->logged)) {
++      if (state) state->logged = true;
++      prefix(); fprintf(stderr, "device-removed where=%s reason=0x%08x (%s)\n", where, (unsigned)reason, reason_name(reason));
++      dump_dred(screen->dev);
++   }
++   fflush(stderr);
++   if (state) mtx_unlock(&state->mutex);
++}
++
++static int watch_device(void *arg)
++{
++   auto screen = (struct d3d12_screen *)arg;
++   auto state = screen->device_diagnostics;
++   while (!state->stop.load()) {
++      d3d12_diagnostics_check(screen, "watch");
++      struct timespec delay = {0, 100000000};
++      thrd_sleep(&delay, nullptr);
++   }
++   return 0;
++}
++
++void d3d12_diagnostics_start(struct d3d12_screen *screen)
++{
++   if (!enabled()) return;
++   auto state = new (std::nothrow) d3d12_device_diagnostics;
++   if (!state) return;
++   if (mtx_init(&state->mutex, mtx_plain) != thrd_success) { delete state; return; }
++   screen->device_diagnostics = state;
++   state->started = thrd_create(&state->thread, watch_device, screen) == thrd_success;
++   prefix(); fprintf(stderr, "watch started=%u interval_ms=100 reason=0x%08x\n", state->started, (unsigned)screen->dev->GetDeviceRemovedReason());
++   fflush(stderr);
++}
++
++void d3d12_diagnostics_stop(struct d3d12_screen *screen)
++{
++   auto state = screen->device_diagnostics;
++   if (!state) return;
++   state->stop.store(true);
++   if (state->started) thrd_join(state->thread, nullptr);
++   d3d12_diagnostics_check(screen, "deinit");
++   screen->device_diagnostics = nullptr;
++   mtx_destroy(&state->mutex);
++   delete state;
++}
+--- a/src/gallium/drivers/d3d12/d3d12_screen.h
++++ b/src/gallium/drivers/d3d12/d3d12_screen.h
+@@ -68,0 +69 @@
++   struct d3d12_device_diagnostics *device_diagnostics;
+--- a/src/gallium/drivers/d3d12/d3d12_screen.cpp
++++ b/src/gallium/drivers/d3d12/d3d12_screen.cpp
+@@ -24,0 +25 @@
++#include "d3d12_device_diagnostics.h"
+@@ -743,0 +745 @@
++   d3d12_diagnostics_stop(screen);
+@@ -1556,0 +1559 @@
++      d3d12_diagnostics_enable(screen->d3d12_mod, factory);
+@@ -1569,0 +1573 @@
++   d3d12_diagnostics_start(screen);
+--- a/src/gallium/drivers/d3d12/d3d12_bufmgr.cpp
++++ b/src/gallium/drivers/d3d12/d3d12_bufmgr.cpp
+@@ -27,0 +28 @@
++#include "d3d12_device_diagnostics.h"
+@@ -152 +153,2 @@
+-   if (FAILED(hres))
++   if (FAILED(hres)) {
++      d3d12_diagnostics_check(screen, "CreateCommittedResource(buffer)", hres);
+@@ -153,0 +156 @@
++   }
+@@ -238 +241,3 @@
+-   if (FAILED(base_bo->res->Map(0, range, &ptr)))
++   HRESULT hr = base_bo->res->Map(0, range, &ptr);
++   if (FAILED(hr)) {
++      d3d12_diagnostics_check(base_bo->screen, "Map(buffer)", hr);
+@@ -239,0 +245 @@
++   }
+--- a/src/gallium/drivers/d3d12/d3d12_resource.cpp
++++ b/src/gallium/drivers/d3d12/d3d12_resource.cpp
+@@ -29,0 +30 @@
++#include "d3d12_device_diagnostics.h"
+@@ -381 +382,2 @@
+-   if (FAILED(hres))
++   if (FAILED(hres)) {
++      d3d12_diagnostics_check(screen, "CreateResource(texture)", hres);
+@@ -382,0 +385 @@
++   }
+--- a/src/gallium/drivers/d3d12/d3d12_context_common.cpp
++++ b/src/gallium/drivers/d3d12/d3d12_context_common.cpp
+@@ -35,0 +36 @@
++#include "d3d12_device_diagnostics.h"
+@@ -301,0 +303 @@
++   if (FAILED(hr)) d3d12_diagnostics_check(screen, "get_reset_status");
+@@ -335,0 +338 @@
++      d3d12_diagnostics_check(screen, "context_create/recovery");
+--- a/src/gallium/drivers/d3d12/d3d12_residency.cpp
++++ b/src/gallium/drivers/d3d12/d3d12_residency.cpp
+@@ -28,0 +29 @@
++#include "d3d12_device_diagnostics.h"
+@@ -217,0 +219 @@
++            if (FAILED(hr)) d3d12_diagnostics_check(screen, "EnqueueMakeResident", hr);
+--- a/src/gallium/drivers/d3d12/meson.build
++++ b/src/gallium/drivers/d3d12/meson.build
+@@ -26,0 +27 @@
++  'd3d12_device_diagnostics.cpp',

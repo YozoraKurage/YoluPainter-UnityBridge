@@ -47,7 +47,7 @@ namespace Yozolab.YoluPainter.Editor
 
         /// <summary>double の値のスライダー（<see cref="FitSlider"/>）。触っていなければ受け取った値のまま返す（float に丸めた値や欄の
         /// 範囲で切った値で、文書や保存した条件を黙って変えない）。scale は表示の倍率（0〜1 を 0〜100 % で見せるなど）。</summary>
-        public static double KeepSlider(Rect r, string label, double value, double min, double max, string format = "0.##", string suffix = "", string tooltip = null, bool enabled = true, double scale = 1, bool labelIsData = false)
+        public static double KeepSlider(Rect r, string label, double value, double min, double max, string format = "0.##", string suffix = "", string tooltip = null, bool enabled = true, double scale = 1, bool labelIsData = false, float trackInset = 0)
         {
             enabled &= GUI.enabled;
             float lo = (float)(min * scale), hi = (float)(max * scale);
@@ -59,7 +59,7 @@ namespace Yozolab.YoluPainter.Editor
                 string fitted = Fit(label, r.width - 14 - valueWidth - 8, PaintTheme.Label, false);
                 if (fitted != label) { tooltip = label + (string.IsNullOrEmpty(tooltip) ? "" : "\n" + tooltip); label = fitted; }
             }
-            float picked = FitSlider(r, label, shown, lo, hi, format, suffix, tooltip, enabled);
+            float picked = FitSlider(r, label, shown, lo, hi, format, suffix, tooltip, enabled, trackInset);
             return picked != shown ? picked / scale : value;
         }
 

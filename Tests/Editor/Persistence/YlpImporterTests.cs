@@ -9,6 +9,7 @@ using UnityEngine;
 using UnityEngine.TestTools;
 using Yozolab.YoluPainter.Core;
 using Yozolab.YoluPainter.Core.Persistence;
+using Yozolab.YoluPainter.Core.Shelf;
 using Yozolab.YoluPainter.Editor;
 using Object = UnityEngine.Object;
 
@@ -97,6 +98,20 @@ namespace Yozolab.YoluPainter.Tests
                 Assert.That(material.mainTexture, Is.Null, "even a direct assignment finds no texture in the .ylp");
             }
             finally { Object.DestroyImmediate(material); }
+        }
+
+        [Test] public void TheImporterCountsEveryResourceKindWithoutMakingTextures()
+        {
+            var d=ThreeChannelDocument();var files=Files(d);var r=new ProjectResources();
+            r.Add("Image",ImageContent.Adopt(new byte[4],1,1),null,ResourceColorSpace.Linear,out _);
+            r.AddBrush("Brush",BrushResourceFile.Write(new Dictionary<string,byte[]>{{BrushResourceFile.StateName,System.Text.Encoding.UTF8.GetBytes("{\"schema\":3}")}}),null,out _);
+            var m=BuiltInSmartMaterials.Make("rusty-metal");var mask=BuiltInSmartMaterials.Make("edges");
+            var bytes=SmartMaterialFile.Write(m,YlpContent.Writer);r.AddSmart("Smart",bytes,m,null,out _);r.AddSmart("Material",bytes,m,null,out _,resourceKind:ResourceKind.Material);
+            r.AddSmart("Mask",SmartMaterialFile.Write(mask,YlpContent.Writer),mask,null,out _);ResourceIndex.AddTo(files,r);
+            var opened=YlpFormat.Open(files);YlpFormat.Stamp(opened.Files,YlpContent.Writer,null);string path=Import("Resources",YlpArchive.Write(opened.Files));var info=YlpImporter.LoadInfo(path);
+            Assert.That(info.error,Is.Empty);Assert.That(info.resourceCount,Is.EqualTo(5));
+            Assert.That(new[]{info.imageCount,info.brushCount,info.materialCount,info.smartMaterialCount,info.smartMaskCount},Is.EqualTo(new[]{1,1,1,1,1}));
+            AssertNoTexture(path,"resource copies stay inside the project file");
         }
 
         [Test] public void WithoutUsableCompositesTheNativeDocumentIsRead()

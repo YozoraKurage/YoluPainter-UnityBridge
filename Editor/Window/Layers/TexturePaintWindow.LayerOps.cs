@@ -47,7 +47,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>レイヤーの操作を 1 つ行う。ストロークやドラッグの最中は断る（知らせるだけで何も変えない）。</summary>
         internal void RunLayerCommand(LayerCommand command)
         {
-            if (stroke != null || toolDragging) { message = L.Tr("Finish the stroke first."); return; }
+            if (stroke != null || toolDragging) { message = L.Tr("A stroke is in progress."); return; }
             try
             {
                 switch (command)
@@ -70,6 +70,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             catch (LayerOpException ex) { message = RefusalText(ex); }
             catch (Exception ex) { message = L.Tr(ex.Message); Debug.LogWarning("Texture Painter: " + ex.Message); }
+            NoteNewAnchorIssues(); // 並べ替え・結合・複製で Anchor の参照が使えなくなったら知らせる
             Repaint();
         }
 
@@ -82,7 +83,7 @@ namespace Yozolab.YoluPainter.Editor
         /// それぞれを複製し（1 回の Undo）、複製を選ぶ。</summary>
         internal void DuplicateSelectedLayer()
         {
-            var active = SelectedOrNull; if (active == null) { message = L.Tr("Select a layer first."); return; }
+            var active = SelectedOrNull; if (active == null) { message = L.Tr("No layer is selected."); return; }
             var ids = SelectedLayers;
             if (ids.Count > 1)
             {
@@ -100,7 +101,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>下のレイヤーと結合（選んでいるのがグループならグループを結合）。見た目が丸めの 1 段より大きく変わるなら確かめる。</summary>
         internal void MergeDownSelected()
         {
-            var active = SelectedOrNull; if (active == null) { message = L.Tr("Select a layer first."); return; }
+            var active = SelectedOrNull; if (active == null) { message = L.Tr("No layer is selected."); return; }
             var ids = SelectedLayers;
             if (document.TopmostOf(ids).Count > 1) { RunMerge(tolerance => document.MergeLayers(ids, tolerance)); return; } // 複数選んでいればレイヤーを結合
             if (active.IsGroup) { MergeGroupSelected(); return; }
@@ -109,7 +110,7 @@ namespace Yozolab.YoluPainter.Editor
 
         internal void MergeGroupSelected()
         {
-            var active = SelectedOrNull; if (active == null) { message = L.Tr("Select a layer first."); return; }
+            var active = SelectedOrNull; if (active == null) { message = L.Tr("No layer is selected."); return; }
             RunMerge(tolerance => document.MergeGroup(active.Id, tolerance));
         }
 
@@ -161,7 +162,7 @@ namespace Yozolab.YoluPainter.Editor
             if (merged) copied = document.CopyMerged(channel, PainterClipboard.LimitBytes);
             else
             {
-                var active = SelectedOrNull; if (active == null) { message = L.Tr("Select a layer first."); return; }
+                var active = SelectedOrNull; if (active == null) { message = L.Tr("No layer is selected."); return; }
                 bool mask = editMask && active.Mask != null;
                 copied = document.CopyPixels(active.Id, channel, mask, PainterClipboard.LimitBytes);
             }
@@ -174,7 +175,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>写してから消す（1 回の Undo）。マスクを編集中ならマスクを（消すと見えるようになる）。</summary>
         internal void CutPixels()
         {
-            var active = SelectedOrNull; if (active == null) { message = L.Tr("Select a layer first."); return; }
+            var active = SelectedOrNull; if (active == null) { message = L.Tr("No layer is selected."); return; }
             bool mask = editMask && active.Mask != null;
             var copied = document.CutPixels(active.Id, channel, mask, PainterClipboard.LimitBytes);
             PainterClipboard.Content = copied;
@@ -186,7 +187,7 @@ namespace Yozolab.YoluPainter.Editor
         internal void PasteClipboard()
         {
             var clip = PainterClipboard.Content;
-            if (clip == null) { message = L.Tr("The clipboard is empty. Copy pixels first (Ctrl+C)."); return; }
+            if (clip == null) { message = L.Tr("The clipboard is empty."); return; }
             if (clip.ByteSize > PainterClipboard.LimitBytes) { message = L.Tr("The clipboard holds {0} MiB, more than the one-operation budget of {1} MiB. Nothing was pasted.", clip.ByteSize >> 20, PainterClipboard.LimitBytes >> 20); return; }
             var result = document.PasteAsLayer(clip, channel, L.Tr("Layer") + " " + (document.Layers.Count + 1), AboveSelected());
             selectedLayer = result.Layer.Id; editMask = false;
@@ -201,10 +202,10 @@ namespace Yozolab.YoluPainter.Editor
             string text;
             switch (ex.Lock)
             {
-                case LayerLocks.Transparency: text = L.Tr("{0} has its transparent pixels locked: this would change their transparency. Unlock transparent pixels to erase, cut, draw a path or move a selected part."); break;
-                case LayerLocks.Pixels: text = L.Tr("{0} has its image pixels locked. Unlock it to change its pixels."); break;
-                case LayerLocks.Position: text = L.Tr("{0} has its position locked. Unlock it to move or transform it."); break;
-                default: text = L.Tr("{0} is locked. Unlock it to change it."); break;
+                case LayerLocks.Transparency: text = L.Tr("{0} has its transparent pixels locked: this would change their transparency."); break;
+                case LayerLocks.Pixels: text = L.Tr("{0} has its image pixels locked."); break;
+                case LayerLocks.Position: text = L.Tr("{0} has its position locked."); break;
+                default: text = L.Tr("{0} is locked."); break;
             }
             return string.Format(text, ex.LockedBy == ex.LayerId ? L.Tr("“{0}”", ex.LockedByName) : L.Tr("The group “{0}”", ex.LockedByName)) + " " + L.Tr("Nothing was changed.");
         }
@@ -215,19 +216,20 @@ namespace Yozolab.YoluPainter.Editor
             switch (ex.Reason)
             {
                 case LayerOpRefusal.NoLayerBelow: return L.Tr("There is no layer below in the same group to merge into.");
-                case LayerOpRefusal.LayerBelowIsGroup: return L.Tr("The layer below is a group. Merge the group first (Ctrl+E with the group selected).");
+                case LayerOpRefusal.LayerBelowIsGroup: return L.Tr("The layer below is a group.");
                 case LayerOpRefusal.LayerBelowIsAdjustment: return L.Tr("The layer below is an adjustment layer, which has no pixels to merge into.");
-                case LayerOpRefusal.HiddenLayer: return L.Tr("Hidden layers are not merged. Show both layers first.");
-                case LayerOpRefusal.IsGroup: case LayerOpRefusal.NotGroup: return L.Tr("Select a group to merge it.");
+                case LayerOpRefusal.HiddenLayer: return L.Tr("Hidden layers are not merged.");
+                case LayerOpRefusal.IsGroup: return L.Tr("This is a group.");
+                case LayerOpRefusal.NotGroup: return L.Tr("This is not a group.");
                 case LayerOpRefusal.EmptyGroup: return L.Tr("The group is empty: there is nothing to merge.");
                 case LayerOpRefusal.NothingVisible: return L.Tr("No layer shows anything: there is nothing to merge.");
-                case LayerOpRefusal.NoPixels: return L.Tr("This layer has no pixels to copy. Copy Merged (Ctrl+Shift+C) copies what shows.");
+                case LayerOpRefusal.NoPixels: return L.Tr("This layer has no pixels to copy.");
                 case LayerOpRefusal.NothingToCopy: return L.Tr("There is nothing to copy here.");
                 case LayerOpRefusal.ClipboardTooLarge: return L.Tr("The copy needs {0} MiB, more than the clipboard limit of {1} MiB (the one-operation budget in Project Settings ▸ YoluPainter). Nothing was copied.", (ex.Bytes + (1 << 20) - 1) >> 20, ex.Limit >> 20);
                 case LayerOpRefusal.OperationBudget: return L.Tr("The result needs more than the one-operation budget of {0} MiB (Project Settings ▸ YoluPainter). Nothing was changed.", ex.Limit >> 20);
-                case LayerOpRefusal.PathLayer: return L.Tr("This layer is drawn by a path. Rasterize it to cut from it.");
-                case LayerOpRefusal.NotPaintLayer: return L.Tr("A fill layer cannot be cut. Copy it, or paint on its mask.");
-                case LayerOpRefusal.DifferentGroups: return L.Tr("Only layers in the same group can be merged together. Move them into one group first.");
+                case LayerOpRefusal.PathLayer: return L.Tr("This layer is drawn by a path.");
+                case LayerOpRefusal.NotPaintLayer: return L.Tr("A fill layer cannot be cut.");
+                case LayerOpRefusal.DifferentGroups: return L.Tr("Only layers in the same group can be merged together.");
                 case LayerOpRefusal.Locked: return LockedText((LayerLockedException)ex);
                 default: return L.Tr(ex.Message);
             }
@@ -236,7 +238,7 @@ namespace Yozolab.YoluPainter.Editor
         // ───────── メニュー ─────────
 
         /// <summary>編集メニューのクリップボードの項目。</summary>
-        void ClipboardMenuItems(UnityEditor.GenericMenu m)
+        void ClipboardMenuItems(PaintMenu m)
         {
             var active = SelectedOrNull; bool idle = stroke == null && !toolDragging;
             bool mask = editMask && active?.Mask != null;
@@ -249,7 +251,7 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>レイヤーメニュー（と右クリック）の複製・結合の項目。結合できない理由があれば使えない項目にする。</summary>
-        void LayerOpMenuItems(UnityEditor.GenericMenu m)
+        void LayerOpMenuItems(PaintMenu m)
         {
             var active = SelectedOrNull; bool idle = stroke == null && !toolDragging;
             var members = document.TopmostOf(SelectedLayers);

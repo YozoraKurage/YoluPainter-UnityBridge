@@ -18,7 +18,9 @@ namespace Yozolab.YoluPainter.Editor
         const int PanelDragControl = 0x59500003;
 
         /// <summary>ドックのパネル。FixedHeight が null なら残りを高さの比で分け合う。</summary>
-        sealed class DockPanel { public string Id, Title, Icon; public Func<float> FixedHeight; public float MinHeight = 60; public Action<Rect> Draw; }
+        sealed class DockPanel { public string Id, Title, Icon; public Func<float> FixedHeight; public float MinHeight = 60; public Action<Rect> Draw;
+            /// <summary>見えているタブの名前の後に「 ― 」で添える今の中身（プロパティの「ブラシ」など。null は添えない）。</summary>
+            public Func<string> Subtitle; }
 
         /// <summary>見出しに落とす先: JoinGroup があればそのまとまりの Tab 番目のタブに、無ければ列 Place の Index 番目に。</summary>
         struct PanelDrop { public DockPlace Place; public int Index; public string JoinGroup; public int Tab; public Rect Header; }
@@ -37,10 +39,10 @@ namespace Yozolab.YoluPainter.Editor
         float colorColumnHeight = 800;
 
         DockLayout Layout => dockLayout ?? (dockLayout = DockLayoutStore.Load().Normalized());
-        internal DockLayout DockLayoutForTests => Layout;
+        internal DockLayout DockLayoutForTests { get => Layout; set => dockLayout = value.Normalized(); }
 
         /// <summary>パネルの名前（訳す前）。別のウィンドウは持ち主を失っていてもタブの名前に使う。</summary>
-        static readonly Dictionary<string, string> PanelTitles = new Dictionary<string, string> { { "color", "Color" }, { "textureSet", "Texture Set" }, { "layers", "Layers" }, { "properties", "Properties" }, { "material", "Material" }, { "assets", "Assets" } };
+        static readonly Dictionary<string, string> PanelTitles = new Dictionary<string, string> { { "color", "Color" }, { "textureSet", "Texture Set" }, { "layers", "Layers" }, { "properties", "Properties" }, { "material", "Material" }, { "assets", "Assets" }, { "textureSetSettings", "Texture Set Settings" } };
         internal static string PanelTitle(string id) => PanelTitles.TryGetValue(id, out var title) ? L.Tr(title) : id;
 
         DockPanel[] Panels => dockPanels ?? (dockPanels = new[]
@@ -48,7 +50,8 @@ namespace Yozolab.YoluPainter.Editor
             new DockPanel { Id = "color", Title = PanelTitles["color"], Icon = "palette", FixedHeight = () => ColorPanelHeight, Draw = DrawColorPanel },
             new DockPanel { Id = "textureSet", Title = PanelTitles["textureSet"], Icon = "deployed_code", FixedHeight = () => TextureSetHeight, Draw = DrawTextureSetPanel },
             new DockPanel { Id = "layers", Title = PanelTitles["layers"], Icon = "layers", MinHeight = 140, Draw = DrawLayersPanel },
-            new DockPanel { Id = "properties", Title = PanelTitles["properties"], Icon = "tune", MinHeight = 80, Draw = DrawPropertiesPanel },
+            new DockPanel { Id = "properties", Title = PanelTitles["properties"], Icon = "tune", MinHeight = 80, Draw = DrawPropertiesPanel, Subtitle = PropertyContextTitle },
+            new DockPanel { Id = "textureSetSettings", Title = PanelTitles["textureSetSettings"], Icon = "settings", MinHeight = 80, Draw = DrawTextureSetSettingsPanel, Subtitle = TextureSetSettingsSubtitle },
             new DockPanel { Id = "material", Title = PanelTitles["material"], Icon = "auto_awesome", MinHeight = 160, Draw = DrawMaterialPanel },
             new DockPanel { Id = "assets", Title = PanelTitles["assets"], Icon = "library", MinHeight = 240, Draw = DrawAssetsPanel },
         });
@@ -134,17 +137,46 @@ namespace Yozolab.YoluPainter.Editor
 
         // ───────── 見出しとタブ ─────────
 
-        /// <summary>見出しの中のタブの矩形。1 つだけのまとまりは見出し全体（列では左の畳む印を除く）。収まらなければ幅を比で縮める。</summary>
+        /// <summary>タブの幅（名前を出す幅の下限の目安。これより狭いタブはアイコンだけ）。</summary>
+        const float TabIconOnlyWidth = 28;
+
+        /// <summary>見出しの中のタブの矩形。1 つだけのまとまりは見出し全体（列では左の畳む印を除く）。収まらなければ、見えているタブの名前を先に取り、
+        /// ほかはアイコンだけ（名前はツールチップ）にする。余りがあれば、左から名前の全部が入るタブを広げる。名前を … で詰めたタブは作らない。</summary>
         Rect[] TabRects(Rect head, DockGroup g)
         {
             float x = head.x + (g.Floating ? 4 : 22), available = head.xMax - 4 - x;
             int n = g.panels.Count;
             if (n == 1) return new[] { new Rect(x, head.y, available, head.height) };
-            var natural = g.panels.Select(id => 20 + PaintGui.TextWidth(L.Tr(Panel(id).Title), PaintTheme.Header) + 12).ToArray();
-            float scale = Mathf.Min(1, available / natural.Sum());
+            var natural = g.panels.Select(id => TabNaturalWidth(Panel(id))).ToArray();
+            var widths = (float[])natural.Clone();
+            if (natural.Sum() > available)
+            {
+                int shown = Mathf.Max(0, g.panels.IndexOf(g.Active));
+                for (int i = 0; i < n; i++) widths[i] = Mathf.Min(TabIconOnlyWidth, natural[i]);
+                float rest = available - widths.Sum();
+                if (rest >= natural[shown] - widths[shown]) { rest -= natural[shown] - widths[shown]; widths[shown] = natural[shown]; }
+                for (int i = 0; i < n; i++)
+                    if (widths[i] < natural[i] && rest >= natural[i] - widths[i]) { rest -= natural[i] - widths[i]; widths[i] = natural[i]; }
+                float total = widths.Sum();
+                if (total > available) for (int i = 0; i < n; i++) widths[i] *= available / total; // アイコンの数すら入らない狭さ
+            }
             var rects = new Rect[n];
-            for (int i = 0; i < n; i++) { rects[i] = new Rect(x, head.y, Mathf.Floor(natural[i] * scale), head.height); x = rects[i].xMax; }
+            for (int i = 0; i < n; i++) { rects[i] = new Rect(x, head.y, Mathf.Floor(widths[i]), head.height); x = rects[i].xMax; }
             return rects;
+        }
+
+        /// <summary>タブにアイコンと名前の全部を出すのに要る幅。</summary>
+        static float TabNaturalWidth(DockPanel panel) => 20 + PaintGui.TextWidth(L.Tr(panel.Title), PaintTheme.Header) + 12;
+
+        /// <summary>タブに名前が（詰めずに全部）入るか。入らなければアイコンだけを描く。</summary>
+        static bool TabShowsName(Rect t, DockPanel panel) => t.width >= 44 && PaintGui.TextWidth(L.Tr(panel.Title), PaintTheme.Header) <= t.width - 24;
+
+        /// <summary>テスト用: 見出しの幅 headWidth でのまとまりのタブの矩形と、名前を出すか。</summary>
+        internal (Rect[] rects, bool[] showsName, float available) TabLayoutForTests(string groupId, float headWidth)
+        {
+            var g = Layout.Group(groupId); var head = new Rect(0, 0, headWidth, PanelHeaderHeight);
+            var rects = TabRects(head, g);
+            return (rects, rects.Select((r, i) => TabShowsName(r, Panel(g.panels[i]))).ToArray(), head.xMax - 4 - (head.x + (g.Floating ? 4 : 22)));
         }
 
         /// <summary>x の位置に入れるときのタブの番号（タブの中央より左ならその前）。</summary>
@@ -177,7 +209,7 @@ namespace Yozolab.YoluPainter.Editor
                     if (shown) PaintGui.Fill(new Rect(face.x, face.y, face.width, 2), g.collapsed ? PaintTheme.TextDim : PaintTheme.Accent);
                 }
                 DrawTabLabel(t, panel, single || shown);
-                PaintGui.Tooltip(t, single ? HeaderTooltip(g) : L.Tr(panel.Title) + "\n" + HeaderTooltip(g));
+                PaintGui.Tooltip(t, TabTooltip(g, panel, t));
             }
             if (!GUI.enabled) return;
             if (e.type == EventType.MouseDown && e.button == 0 && r.Contains(e.mousePosition))
@@ -195,18 +227,41 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
 
-        string HeaderTooltip(DockGroup g) => g.Floating
+        /// <summary>タブのツールチップ: 先頭に名前（アイコンだけのタブでは、名前が読める唯一の場所）。1 つだけのまとまりで名前が見出しに出ているときだけ省く。</summary>
+        static string TabTooltip(DockGroup g, DockPanel panel, Rect t) => g.panels.Count == 1 && TabShowsName(t, panel) ? HeaderTooltip(g) : L.Tr(panel.Title) + "\n" + HeaderTooltip(g);
+
+        /// <summary>テスト用: 見出しの幅 headWidth でのまとまりの index 番目のタブのツールチップ。</summary>
+        internal string TabTooltipForTests(string groupId, int index, float headWidth)
+        {
+            var g = Layout.Group(groupId); var head = new Rect(0, 0, headWidth, PanelHeaderHeight);
+            return TabTooltip(g, Panel(g.panels[index]), TabRects(head, g)[index]);
+        }
+
+        /// <summary>テスト用: まとまりの見出しだけを head に描く（本体は描かない）。</summary>
+        internal void DrawGroupHeaderForTests(string groupId, Rect head) => DrawGroupHeader(head, Layout.Group(groupId), null);
+
+        static string HeaderTooltip(DockGroup g) => g.Floating
             ? L.Tr("Drag a tab onto the painter window's dock to put it back, or onto another header to make tabs. Right-click for more.")
             : L.Tr("Click to fold; drag to move, onto another header to make tabs, or out of the window to open it in a separate window. Right-click for more.");
 
-        /// <summary>タブの中身（アイコンと名前）。幅が足りなければ名前を … で詰め、さらに狭ければアイコンだけ。</summary>
+        /// <summary>タブの中身（アイコンと名前）。名前が入りきらなければアイコンだけ（… で詰めない。名前はツールチップ）。「プロパティ ― ブラシ」の
+        /// 続き（今の中身）は入るときだけ出す。</summary>
         void DrawTabLabel(Rect t, DockPanel panel, bool bright)
         {
             var color = bright ? PaintTheme.Text : PaintTheme.TextDim;
-            if (t.width < 44) { PaintGui.Icon(new Rect(t.x, t.y + 1, t.width, t.height), panel.Icon, color, 15); return; }
-            PaintGui.Icon(new Rect(t.x, t.y + 1, 16, t.height), panel.Icon, PaintTheme.TextDim, 15);
+            string title = L.Tr(panel.Title);
+            float titleWidth = PaintGui.TextWidth(title, PaintTheme.Header);
             var text = new Rect(t.x + 20, t.y + 1, t.width - 24, t.height);
-            PaintGui.Text(text, PaintGui.Fit(L.Tr(panel.Title), text.width, PaintTheme.Header, false), PaintTheme.Header, color);
+            if (!TabShowsName(t, panel)) { PaintGui.Icon(new Rect(t.x, t.y + 1, t.width, t.height), panel.Icon, color, 15); return; }
+            PaintGui.Icon(new Rect(t.x, t.y + 1, 16, t.height), panel.Icon, PaintTheme.TextDim, 15);
+            string subtitle = bright && panel.Subtitle != null && document != null ? panel.Subtitle() : null;
+            if (string.IsNullOrEmpty(subtitle)) { PaintGui.Text(text, title, PaintTheme.Header, color); return; }
+            // 「プロパティ ― ブラシ」: 名前を太字で、今の中身を続けて。中身は入るときだけ（利用者の名前が長いだけなら、余裕のあるときに限り … で詰める）
+            PaintGui.Text(new Rect(text.x, text.y, titleWidth, text.height), title, PaintTheme.Header, color);
+            var rest = new Rect(text.x + titleWidth, text.y, text.width - titleWidth, text.height);
+            string tail = " ― " + subtitle;
+            if (PaintGui.TextWidth(tail, PaintTheme.Label) <= rest.width) PaintGui.Text(rest, tail, PaintTheme.Label, bright ? PaintTheme.Text : PaintTheme.TextDim);
+            else if (rest.width >= 80) PaintGui.Text(rest, PaintGui.Fit(tail, rest.width, PaintTheme.Label, false), PaintTheme.Label, bright ? PaintTheme.Text : PaintTheme.TextDim);
         }
 
         // ───────── ドラッグ ─────────
@@ -422,7 +477,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>見出しの右クリック: 別のウィンドウにする・タブを分ける・左右の列へ・畳む（別のウィンドウでは、列に戻す・自分のウィンドウにする）。</summary>
         void PanelHeaderMenu(DockGroup g, string panel)
         {
-            var menu = new GenericMenu();
+            var menu = new PaintMenu();
             foreach (var (text, action) in PanelHeaderMenuItems(g, panel))
             {
                 if (text == null) { menu.AddSeparator(""); continue; }
@@ -450,6 +505,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             else
             {
+                items.Add((g.dockableWindow ? L.Tr("Keep in Front of Unity Windows") : L.Tr("Use a Dockable Unity Window"), () => SetPanelWindowMode(gid, !Layout.Group(gid).dockableWindow)));
                 items.Add((L.Tr("Return to the Dock"), () => DockPanelGroup(gid)));
                 if (tabs)
                 {

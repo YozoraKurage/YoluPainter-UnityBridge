@@ -127,7 +127,7 @@ namespace Yozolab.YoluPainter.Tests
 
             // 削除はメニューから（選んだ全部、1 回の Undo）
             ClickRow(b); ClickRow(c, Ctrl); undo = d.UndoCount;
-            var menu = new GenericMenu(); Invoke(window, "LayerMenu", menu);
+            var menu = new PaintMenu(); Invoke(window, "LayerMenu", menu);
             Assert.That(LayerMenuTexts(menu), Does.Contain("Delete Layers"));
             Assert.That(LayerMenuTexts(menu), Does.Contain("Merge Layers    Ctrl+E"));
             Assert.That(LayerMenuTexts(menu), Does.Contain("Group Layers    Ctrl+G"));
@@ -154,7 +154,7 @@ namespace Yozolab.YoluPainter.Tests
             BeginLine(300, 300);
             Key(window, KeyCode.G, Ctrl); Key(window, KeyCode.N, Ctrl | EventModifiers.Shift);
             Assert.That(d.Layers.Count, Is.EqualTo(count), "not during a stroke");
-            Assert.That(window.StatusMessage, Does.Contain("Finish the stroke first"));
+            Assert.That(window.StatusMessage, Does.Contain("A stroke is in progress"));
             Assert.That(window.IsStroking, Is.True);
             Mouse(window, EventType.MouseUp, At(window, 360, 300));
             Key(window, KeyCode.N, Ctrl | EventModifiers.Shift);
@@ -230,7 +230,7 @@ namespace Yozolab.YoluPainter.Tests
             ClickRow(b); ClickRow(c, Ctrl);
             d.SetLayerLocks(b.Id, LayerLocks.Transparency | LayerLocks.Position);
             var first = window.CurrentTextureSet;
-            window.AddTextureSet(1);
+            window.AddTextureSet(-1); // モデルが無い: マテリアルに結び付けないセット
             Assert.That(window.SelectedLayers.Count, Is.EqualTo(1));
             window.SwitchTextureSet(first.Id);
             Assert.That(window.SelectedLayers, Is.EqualTo(new[] { c.Id }), "only the painted layer, not the old selection");

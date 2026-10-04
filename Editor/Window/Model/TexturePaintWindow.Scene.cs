@@ -23,7 +23,7 @@ namespace Yozolab.YoluPainter.Editor
         internal void ApplyLightPreset(PreviewLightPreset preset) { PreviewScene.Apply(preset, preview.CameraYaw, preview.CameraPitch); BindPreviewScene(); Repaint(); }
         internal void ResetPreviewScene() { previewScene = PreviewSceneSettings.Default(); BindPreviewScene(); Repaint(); }
 
-        void SceneMenuItems(GenericMenu m)
+        void SceneMenuItems(PaintMenu m)
         {
             bool model = preview.HasModel;
             Item(m, L.Tr("Camera") + "/" + L.TrIn("camera", "Front"), () => ViewFrom(PreviewCameraView.Front), model);
@@ -87,8 +87,7 @@ namespace Yozolab.YoluPainter.Editor
                 SceneColor(rows, L.Tr("Ambient"), s.ambient, v => s.ambient = v, L.Tr("The light on the shaded side"));
                 SceneColor(rows, L.Tr("Background"), s.background, v => s.background = v);
                 rows.Space(2);
-                if (PaintGui.FitButton(rows.Row(24), L.Tr("Reset Scene"), false, GUI.enabled, L.Tr("The light, the ambient, the background, the environment, the shadows and the tone mapping back to the default (the camera stays)"))) ResetPreviewScene();
-                PaintGui.Text(rows.Row(18), L.Tr("Only the preview; the scene's lights are not changed."), PaintTheme.LabelSmall);
+                if (PaintGui.FitButton(rows.Row(24), L.Tr("Reset Scene"), false, GUI.enabled, L.Tr("The light, the ambient, the background, the environment, the shadows and the tone mapping back to the default (the camera stays)") + "\n" + L.Tr("Only the preview; the scene's lights are not changed."))) ResetPreviewScene();
             }
             finally { GUI.enabled = was; }
         }

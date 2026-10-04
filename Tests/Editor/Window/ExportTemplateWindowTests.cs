@@ -48,7 +48,7 @@ namespace Yozolab.YoluPainter.Tests
                 string status = w.ExportTemplateTo(folder, ExportTemplate.UnityStandard, "Tex");
                 Assert.That(Directory.GetFiles(folder).Select(Path.GetFileName).OrderBy(x => x), Is.EqualTo(new[] { "Tex_Albedo.png", "Tex_MetallicSmoothness.png" }),
                     "only the images that read a used channel (the first layer uses Color; no height, normal, emission or AO)");
-                Assert.That(status, Does.Contain("no current AO bake").And.Contain("load the model").And.Contain("No material was changed"));
+                Assert.That(status, Does.Contain("no current AO bake").And.Contain("the UVs are unknown").And.Contain("No material was changed"));
                 var expected = ExportTemplates.Build(doc, ExportTemplate.UnityStandard.Images.Single(i => i.Suffix == "MetallicSmoothness"));
                 var written = Read(Path.Combine(folder, "Tex_MetallicSmoothness.png"));
                 for (int i = 0; i < n; i += 97)

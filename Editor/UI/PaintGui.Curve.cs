@@ -155,6 +155,11 @@ namespace Yozolab.YoluPainter.Editor
         /// 位置の入力→出力を % で出す。GUI が止められているあいだ（ストローク中など）は動かさない。変えたら新しいカーブを返す
         /// （GUI.changed も立てる）。カーブの形は <see cref="PressureCurve"/>。
         /// </summary>
+        internal static void CancelCurveEditor()
+        {
+            if (s_curveId != 0 && GUIUtility.hotControl == s_curveId) GUIUtility.hotControl = 0;
+            s_curveId = 0; s_curvePoints = null; s_curveIndex = -1; s_curveOutside = false;
+        }
         public static AnimationCurve CurveEditor(Rect r, AnimationCurve curve, string tooltip = null, bool enabled = true)
         {
             int id = GUIUtility.GetControlID("YoluPainterCurve".GetHashCode(), FocusType.Passive, r);

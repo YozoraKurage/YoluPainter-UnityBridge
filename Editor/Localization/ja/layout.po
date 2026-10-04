@@ -71,9 +71,6 @@ msgstr "このパネルの持ち主の YoluPainter のウィンドウが開い�
 msgid "Open YoluPainter"
 msgstr "YoluPainter を開く"
 
-msgid "Several YoluPainter windows are open. Choose the one this panel belongs to."
-msgstr "YoluPainter のウィンドウが複数開いています。このパネルをつなぐウィンドウを選んでください。"
-
 msgid "Attach to {0}"
 msgstr "{0} につなぐ"
 

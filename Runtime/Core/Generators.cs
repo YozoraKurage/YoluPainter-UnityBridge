@@ -9,7 +9,7 @@ namespace Yozolab.YoluPainter.Core
 {
     /// <summary>Built-in generators: values made from the texture set's baked mesh maps and parameters. Values are stored in the
     /// native format; append only.</summary>
-    public enum GeneratorType { EdgeWear = 0, Dirt = 1, PositionGradient = 2, Thickness = 3, Direction = 4, ShapeGradient = 5, IdColor = 6 }
+    public enum GeneratorType { EdgeWear = 0, Dirt = 1, PositionGradient = 2, Thickness = 3, Direction = 4, ShapeGradient = 5, IdColor = 6, Anchor = 7 }
 
     /// <summary>How a generator's value g is combined with its stage input s. On a mask s is the visibility (1 = the layer shows,
     /// 1 − the stored hide amount), on layer pixels the channel value. Values are stored in the native format; append only.</summary>
@@ -40,6 +40,10 @@ namespace Yozolab.YoluPainter.Core
     /// <item>IdColor (Id): b = 1 where the ID map's colour (8-bit RGB, see <see cref="IdMapColors"/>) is within <see cref="IdTolerance"/>
     /// (largest channel difference) of one of <see cref="IdColors"/>, else 0 (Substance Painter's colour selection as a mask). Without
     /// colours the stage passes its input through and says so.</item>
+    /// <item>Anchor (no mesh map): b = what the anchor point <see cref="AnchorId"/> holds at the pixel (<see cref="AnchorPoint"/>): for a layer
+    /// anchor the <see cref="AnchorChannel"/> of the stack there, read as <see cref="AnchorRead"/> (value × coverage, colour by luminance, or
+    /// the coverage); for a mask anchor how much its layer shows. It reads the layers below its own layer, never the mesh maps; without an
+    /// anchor chosen, or when the anchor is gone or not below this layer, the stage passes its input through and says so.</item>
     /// </list></item>
     /// <item>Levels: t = clamp((b − Low) / (High − Low)), then t + Softness (t² (3 − 2t) − t) (0 = linear ramp, 1 = smoothstep),
     /// then 1 − t when <see cref="Invert"/>.</item>
@@ -99,16 +103,25 @@ namespace Yozolab.YoluPainter.Core
         public IReadOnlyDictionary<MeshMapKind, string> Pins { get; private set; }
         /// <summary>ShapeGradient: the shape and where it is in the model root's space. Other types keep <see cref="ShapeVolume.Default"/>.</summary>
         public ShapeVolume Volume { get; private set; }
+        /// <summary>ShapeGradient: optional colour/value ramp; null preserves the original scalar formula.</summary>
+        public GradientRamp Ramp { get; private set; }
         /// <summary>IdColor: the ID colours (0xRRGGBB) that give 1, in the order they were added; no repeats. Other types keep none.</summary>
         public IReadOnlyList<int> IdColors { get; private set; }
         /// <summary>IdColor: how far (largest 8-bit channel difference, 0..255) a texel's ID colour may be from a listed colour. Other types keep
         /// <see cref="IdMapColors.DefaultTolerance"/>.</summary>
         public int IdTolerance { get; private set; }
+        /// <summary>Anchor: the anchor point read (Guid.Empty until one is chosen). Other types keep Guid.Empty.</summary>
+        public Guid AnchorId { get; private set; }
+        /// <summary>Anchor: the channel of a layer anchor that is read (any but Normal; ignored for a mask anchor). Other types keep Color.</summary>
+        public PaintChannel AnchorChannel { get; private set; }
+        /// <summary>Anchor: how the channel is read (ignored for a mask anchor). Other types keep <see cref="Core.AnchorRead.Value"/>.</summary>
+        public AnchorRead AnchorRead { get; private set; }
 
         GeneratorSettings(GeneratorType type)
         {
             Type = type; High = 1; NoiseScale = .05; Balance = DefaultBalance; Axis = DefaultAxis; DirectionY = 1; Pins = NoPins; Volume = ShapeVolume.Default;
             IdColors = NoColors; IdTolerance = IdMapColors.DefaultTolerance;
+            if (type == GeneratorType.Anchor) AnchorChannel = PaintChannel.Height; // 下の層の Height を読むのがいちばんよくある使い方
         }
 
         /// <summary>The settings a newly added generator of the type starts with.</summary>
@@ -120,7 +133,7 @@ namespace Yozolab.YoluPainter.Core
                 case GeneratorType.EdgeWear: g.Low = .04; g.High = .3; g.Softness = .5; g.NoiseAmount = .6; break;
                 case GeneratorType.Dirt: g.Low = .15; g.High = .6; g.Softness = .5; g.NoiseAmount = .4; break;
                 case GeneratorType.Direction: g.Low = .6; g.High = .95; g.Softness = .5; g.NoiseAmount = .3; break;
-                default: break; // PositionGradient, Thickness, ShapeGradient, IdColor: the map (the shape's value, the match) as it is
+                default: break; // PositionGradient, Thickness, ShapeGradient, IdColor, Anchor: the map (the shape's value, the match, the anchor) as it is
             }
             return Checked(g);
         }
@@ -140,12 +153,18 @@ namespace Yozolab.YoluPainter.Core
         public static GeneratorSettings FromValues(GeneratorType type, double low, double high, double softness, bool invert, double noiseAmount, double noiseScale, int noiseSeed,
             GeneratorNoiseSpace noiseSpace, GeneratorBlend blend, double balance, int axis, double directionX, double directionY, double directionZ, bool useBentNormal,
             IEnumerable<KeyValuePair<MeshMapKind, string>> pins, ShapeVolume volume, IEnumerable<int> idColors, int idTolerance)
+            => FromValues(type, low, high, softness, invert, noiseAmount, noiseScale, noiseSeed, noiseSpace, blend, balance, axis, directionX, directionY, directionZ, useBentNormal, pins, volume,
+                idColors, idTolerance, Guid.Empty, type == GeneratorType.Anchor ? PaintChannel.Height : PaintChannel.Color, AnchorRead.Value);
+        /// <summary>Settings from stored values with the anchor reference (Guid.Empty, Color and Value for other types).</summary>
+        public static GeneratorSettings FromValues(GeneratorType type, double low, double high, double softness, bool invert, double noiseAmount, double noiseScale, int noiseSeed,
+            GeneratorNoiseSpace noiseSpace, GeneratorBlend blend, double balance, int axis, double directionX, double directionY, double directionZ, bool useBentNormal,
+            IEnumerable<KeyValuePair<MeshMapKind, string>> pins, ShapeVolume volume, IEnumerable<int> idColors, int idTolerance, Guid anchorId, PaintChannel anchorChannel, AnchorRead anchorRead)
         {
             var g = new GeneratorSettings(type)
             {
                 Low = low, High = high, Softness = softness, Invert = invert, NoiseAmount = noiseAmount, NoiseScale = noiseScale, NoiseSeed = noiseSeed, NoiseSpace = noiseSpace,
                 Blend = blend, Balance = balance, Axis = axis, DirectionX = directionX, DirectionY = directionY, DirectionZ = directionZ, UseBentNormal = useBentNormal, Volume = volume,
-                IdColors = ColorList(idColors), IdTolerance = idTolerance,
+                IdColors = ColorList(idColors), IdTolerance = idTolerance, AnchorId = anchorId, AnchorChannel = anchorChannel, AnchorRead = anchorRead,
             };
             g.Pins = PinTable(pins);
             return Checked(g);
@@ -161,6 +180,7 @@ namespace Yozolab.YoluPainter.Core
         public GeneratorSettings WithDirection(double x, double y, double z) { var g = Copy(); g.DirectionX = x; g.DirectionY = y; g.DirectionZ = z; return Checked(g); }
         public GeneratorSettings WithBentNormal(bool value) { var g = Copy(); g.UseBentNormal = value; return Checked(g); }
         /// <summary>ShapeGradient: another shape or placement.</summary>
+        public GeneratorSettings WithRamp(GradientRamp value) { var g = Copy(); g.Ramp = value; return Checked(g); }
         public GeneratorSettings WithVolume(ShapeVolume value) { var g = Copy(); g.Volume = value; return Checked(g); }
         /// <summary>IdColor: another list of colours (0xRRGGBB, no repeats, at most <see cref="MaxIdColors"/>).</summary>
         public GeneratorSettings WithIdColors(IEnumerable<int> colors) { var g = Copy(); g.IdColors = ColorList(colors); return Checked(g); }
@@ -170,6 +190,11 @@ namespace Yozolab.YoluPainter.Core
         public GeneratorSettings WithIdColorRemoved(int rgb) => WithIdColors(IdColors.Where(c => c != rgb));
         /// <summary>IdColor: another tolerance (0..255).</summary>
         public GeneratorSettings WithIdTolerance(int value) { var g = Copy(); g.IdTolerance = value; return Checked(g); }
+        /// <summary>Anchor: reads another anchor (Guid.Empty: none chosen), channel and way. Whether the anchor exists and is below the reading
+        /// layer is the document's business (<see cref="PaintDocument.SetGeneratorAnchor"/> checks it; a stored reference may point at an anchor
+        /// that is gone).</summary>
+        public GeneratorSettings WithAnchor(Guid anchorId, PaintChannel channel, AnchorRead read)
+        { var g = Copy(); g.AnchorId = anchorId; g.AnchorChannel = channel; g.AnchorRead = read; return Checked(g); }
         /// <summary>Pins the kind to one bake (its condition key), or follows the current map again when key is null.</summary>
         public GeneratorSettings WithPin(MeshMapKind kind, string key)
         {
@@ -186,7 +211,7 @@ namespace Yozolab.YoluPainter.Core
             {
                 Low = Low, High = High, Softness = Softness, Invert = Invert, NoiseAmount = NoiseAmount, NoiseScale = NoiseScale, NoiseSeed = NoiseSeed, NoiseSpace = NoiseSpace,
                 Blend = Blend, Balance = Balance, Axis = Axis, DirectionX = DirectionX, DirectionY = DirectionY, DirectionZ = DirectionZ, UseBentNormal = UseBentNormal, Pins = Pins,
-                Volume = Volume, IdColors = IdColors, IdTolerance = IdTolerance,
+                Volume = Volume, Ramp = Ramp, IdColors = IdColors, IdTolerance = IdTolerance, AnchorId = AnchorId, AnchorChannel = AnchorChannel, AnchorRead = AnchorRead,
             };
         }
         static IReadOnlyList<int> ColorList(IEnumerable<int> colors)
@@ -210,6 +235,7 @@ namespace Yozolab.YoluPainter.Core
 
         void Validate()
         {
+            if (Ramp != null && Type != GeneratorType.ShapeGradient) throw new ArgumentException("The ramp belongs to the shape gradient.", nameof(Ramp));
             if (!Enum.IsDefined(typeof(GeneratorType), Type)) throw new ArgumentOutOfRangeException(nameof(Type), "Unknown generator type " + (int)Type + ".");
             foreach (double v in new[] { Low, High, Softness, NoiseAmount, NoiseScale, Balance, DirectionX, DirectionY, DirectionZ }) MathUtil.RequireFinite(v, "generator");
             if (Low < 0 || Low > 1 || High < 0 || High > 1 || High - Low < MinLevelRange)
@@ -240,6 +266,13 @@ namespace Yozolab.YoluPainter.Core
                 if (IdTolerance < 0 || IdTolerance > IdMapColors.MaxTolerance) throw new ArgumentOutOfRangeException(nameof(IdTolerance), "The tolerance must be 0–" + IdMapColors.MaxTolerance + ".");
             }
             else if (IdColors.Count != 0 || IdTolerance != IdMapColors.DefaultTolerance) throw new ArgumentException("ID colours belong to the ID colour generator.", nameof(IdColors));
+            if (Type == GeneratorType.Anchor)
+            {
+                if (!Enum.IsDefined(typeof(PaintChannel), AnchorChannel)) throw new ArgumentOutOfRangeException(nameof(AnchorChannel), "Unknown channel " + (int)AnchorChannel + ".");
+                if (AnchorChannel == PaintChannel.Normal) throw new ArgumentException("The Normal channel holds unit vectors, not one value per pixel.", nameof(AnchorChannel));
+                if (!Enum.IsDefined(typeof(AnchorRead), AnchorRead)) throw new ArgumentOutOfRangeException(nameof(AnchorRead), "Unknown anchor read " + (int)AnchorRead + ".");
+            }
+            else if (AnchorId != Guid.Empty || AnchorChannel != PaintChannel.Color || AnchorRead != AnchorRead.Value) throw new ArgumentException("The anchor belongs to the anchor generator.", nameof(AnchorId));
             var candidates = CandidateMaps(Type);
             foreach (var pin in Pins)
             {
@@ -255,7 +288,7 @@ namespace Yozolab.YoluPainter.Core
         }
 
         /// <summary>Version of the type's formula. Stored with every generator; a reader refuses versions it does not implement.</summary>
-        public int AlgorithmVersion { get { return AlgorithmVersionOf(Type); } }
+        public int AlgorithmVersion { get { return Ramp == null ? AlgorithmVersionOf(Type) : 2; } }
         public static int AlgorithmVersionOf(GeneratorType type) { return 1; }
 
         /// <summary>Every map kind the type can read (whatever its parameters): what it may be pinned to.</summary>
@@ -269,6 +302,7 @@ namespace Yozolab.YoluPainter.Core
                 case GeneratorType.Thickness: return new[] { MeshMapKind.Thickness, MeshMapKind.Position };
                 case GeneratorType.ShapeGradient: return new[] { MeshMapKind.Position };
                 case GeneratorType.IdColor: return new[] { MeshMapKind.Id, MeshMapKind.Position };
+                case GeneratorType.Anchor: return new[] { MeshMapKind.Position }; // 崩しをモデルの上に置くときだけ
                 default: return new[] { MeshMapKind.WorldNormal, MeshMapKind.BentNormal, MeshMapKind.Position };
             }
         }
@@ -290,6 +324,7 @@ namespace Yozolab.YoluPainter.Core
                     case GeneratorType.Thickness: kinds.Add(MeshMapKind.Thickness); break;
                     case GeneratorType.ShapeGradient: kinds.Add(MeshMapKind.Position); break;
                     case GeneratorType.IdColor: kinds.Add(MeshMapKind.Id); break;
+                    case GeneratorType.Anchor: break; // 値は下の層から（メッシュマップは読まない）
                     default: kinds.Add(UseBentNormal ? MeshMapKind.BentNormal : MeshMapKind.WorldNormal); break;
                 }
                 if (NoiseAmount > 0 && NoiseSpace == GeneratorNoiseSpace.Model && !kinds.Contains(MeshMapKind.Position)) kinds.Add(MeshMapKind.Position);
@@ -310,6 +345,7 @@ namespace Yozolab.YoluPainter.Core
                     case GeneratorType.Thickness: return "Thickness";
                     case GeneratorType.ShapeGradient: return "Shape gradient";
                     case GeneratorType.IdColor: return "ID color";
+                    case GeneratorType.Anchor: return "Anchor";
                     default: return "Direction";
                 }
             }
@@ -320,20 +356,23 @@ namespace Yozolab.YoluPainter.Core
             if (other == null || Type != other.Type || Low != other.Low || High != other.High || Softness != other.Softness || Invert != other.Invert || NoiseAmount != other.NoiseAmount
                 || NoiseScale != other.NoiseScale || NoiseSeed != other.NoiseSeed || NoiseSpace != other.NoiseSpace || Blend != other.Blend || Balance != other.Balance || Axis != other.Axis
                 || DirectionX != other.DirectionX || DirectionY != other.DirectionY || DirectionZ != other.DirectionZ || UseBentNormal != other.UseBentNormal || Pins.Count != other.Pins.Count
-                || !Volume.Equals(other.Volume) || IdTolerance != other.IdTolerance || !IdColors.SequenceEqual(other.IdColors)) return false;
+                || !Equals(Ramp, other.Ramp) || !Volume.Equals(other.Volume) || IdTolerance != other.IdTolerance || !IdColors.SequenceEqual(other.IdColors)
+                || AnchorId != other.AnchorId || AnchorChannel != other.AnchorChannel || AnchorRead != other.AnchorRead) return false;
             foreach (var p in Pins) if (!other.Pins.TryGetValue(p.Key, out var key) || key != p.Value) return false;
             return true;
         }
         public override bool Equals(object obj) { return Equals(obj as GeneratorSettings); }
         public override int GetHashCode()
         {
-            unchecked { return ((int)Type * 397) ^ Low.GetHashCode() ^ (High.GetHashCode() * 7) ^ (NoiseAmount.GetHashCode() * 31) ^ (NoiseSeed * 17) ^ ((int)Blend << 8) ^ Pins.Count ^ (Volume.GetHashCode() * 3) ^ (IdColors.Count << 20) ^ (IdTolerance << 12); }
+            unchecked { return ((int)Type * 397) ^ Low.GetHashCode() ^ (High.GetHashCode() * 7) ^ (NoiseAmount.GetHashCode() * 31) ^ (NoiseSeed * 17) ^ ((int)Blend << 8) ^ Pins.Count ^ (Volume.GetHashCode() * 3) ^ (IdColors.Count << 20) ^ (IdTolerance << 12)
+                ^ (AnchorId.GetHashCode() * 13) ^ ((int)AnchorChannel << 24) ^ ((int)AnchorRead << 28); }
         }
         public override string ToString()
         {
             var c = CultureInfo.InvariantCulture;
             return string.Format(c, "{0} {1:0.###}–{2:0.###}{3} {4}", Name, Low, High, Invert ? " inverted" : "", Blend) + (Pins.Count > 0 ? " pinned" : "")
-                + (Type == GeneratorType.IdColor ? " " + string.Join(",", IdColors.Select(IdMapColors.Hex)) + " ±" + IdTolerance : "");
+                + (Type == GeneratorType.IdColor ? " " + string.Join(",", IdColors.Select(IdMapColors.Hex)) + " ±" + IdTolerance : "")
+                + (Type == GeneratorType.Anchor ? " " + (AnchorId == Guid.Empty ? "(none)" : AnchorId.ToString("N").Substring(0, 8)) + " " + AnchorChannel + (AnchorRead == AnchorRead.Coverage ? " coverage" : "") : "");
         }
     }
 
@@ -396,10 +435,12 @@ namespace Yozolab.YoluPainter.Core
         readonly double[] shapeMatrix, shapeOffset; readonly ShapeEvaluator shape;
         // IdColor: the colours and the tolerance
         readonly int[] idColors; readonly int idTolerance;
+        // Anchor: the anchor's pixels over the evaluated region
+        readonly AnchorSample anchor;
 
-        BoundGenerator(GeneratorSettings g, int width, int height, BakedMeshMap primary, BakedMeshMap secondary, BakedMeshMap position, GeneratorModelFrame frame)
+        BoundGenerator(GeneratorSettings g, int width, int height, BakedMeshMap primary, BakedMeshMap secondary, BakedMeshMap position, GeneratorModelFrame frame, AnchorSample anchor)
         {
-            this.g = g; this.width = width; this.height = height;
+            this.g = g; this.width = width; this.height = height; this.anchor = anchor;
             if (primary != null) { this.primary = primary.Data; primaryCoverage = primary.Coverage; }
             if (secondary != null) { this.secondary = secondary.Data; secondaryCoverage = secondary.Coverage; }
             balance = g.Balance; axis = g.Axis; low = g.Low; range = g.High - g.Low; softness = g.Softness; invert = g.Invert; amount = g.NoiseAmount;
@@ -442,6 +483,10 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>Binds the settings to resolved maps (indexed by <see cref="MeshMapKind"/>), or null with the reason when a map it
         /// uses is not there, has another size, is another bake than its pin, or the model has no extent for a model-space breakup.</summary>
         internal static BoundGenerator Bind(GeneratorSettings g, IReadOnlyList<BakedMeshMap> maps, GeneratorModelFrame frame, int width, int height, out string reason)
+            => Bind(g, maps, frame, width, height, null, out reason);
+        /// <summary><see cref="Bind(GeneratorSettings, IReadOnlyList{BakedMeshMap}, GeneratorModelFrame, int, int, out string)"/> with the anchor's
+        /// pixels (an anchor generator without them is not bound: its reference is not usable).</summary>
+        internal static BoundGenerator Bind(GeneratorSettings g, IReadOnlyList<BakedMeshMap> maps, GeneratorModelFrame frame, int width, int height, AnchorSample anchor, out string reason)
         {
             reason = null;
             foreach (var kind in g.UsedMaps)
@@ -470,6 +515,9 @@ namespace Yozolab.YoluPainter.Core
                     primary = Get(MeshMapKind.Id);
                     if (g.IdColors.Count == 0) { reason = "No ID colours are chosen yet: pick parts with the eyedropper on the 2D canvas or the 3D view."; return null; }
                     break;
+                case GeneratorType.Anchor:
+                    if (anchor == null) { reason = "The anchor it reads is not usable here."; return null; }
+                    break;
                 default: primary = Get(g.UseBentNormal ? MeshMapKind.BentNormal : MeshMapKind.WorldNormal); break;
             }
             if (g.NoiseAmount > 0 && g.NoiseSpace == GeneratorNoiseSpace.Model)
@@ -478,7 +526,7 @@ namespace Yozolab.YoluPainter.Core
                 for (int a = 0; a < 3; a++) { double e = p.BoundsMax(a) - p.BoundsMin(a); diag += e * e; }
                 if (!(diag > 0)) { reason = "The Position map's bounding box has no size, so the breakup cannot be placed on the model; use UV space."; return null; }
             }
-            return new BoundGenerator(g, width, height, primary, secondary, position, frame);
+            return new BoundGenerator(g, width, height, primary, secondary, position, frame, anchor);
         }
 
         /// <summary>The generator's value g (0..1) at the pixel, or false where a map it reads has no data (Empty texel).</summary>
@@ -512,6 +560,9 @@ namespace Yozolab.YoluPainter.Core
                     foreach (int c in idColors) if (IdMapColors.Near(rgb, c, idTolerance)) { b = 1; break; }
                     break;
                 }
+                case GeneratorType.Anchor:
+                    b = anchor.Value(x, y);
+                    break;
                 case GeneratorType.ShapeGradient:
                 {
                     if (positionCoverage[i] == 0) return false;

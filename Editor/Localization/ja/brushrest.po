@@ -1,0 +1,22 @@
+# 合成クローンと表面の画素輸送
+
+msgid "Sample all visible layers"
+msgstr "全表示レイヤーを参照"
+
+msgid "A mask cannot sample the channel composite."
+msgstr "マスクにはチャンネルの合成を写せません。"
+
+msgid "Surface sampling exceeded its memory budget. Stroke canceled."
+msgstr "面の参照がメモリの予算を超えたため、ストロークを取り消しました。"
+
+msgid "Surface sampling exceeded its triangle or memory budget. Stroke canceled."
+msgstr "面の参照が三角形かメモリの予算を超えたため、ストロークを取り消しました。"
+
+msgid "Surface sampling exceeded its lookup budget. Stroke canceled."
+msgstr "面の参照が問い合わせの予算を超えたため、ストロークを取り消しました。"
+
+msgid "Smudge picked up again on a disconnected surface."
+msgstr "つながっていない面に移ったため、指先の色を拾い直しました。"
+
+msgid "The model snapshot changed."
+msgstr "モデルのスナップショットが変わりました。"

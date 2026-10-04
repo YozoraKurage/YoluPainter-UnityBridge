@@ -84,6 +84,22 @@ namespace Yozolab.YoluPainter.Editor
             x = ux / scale + width * .5; y = -uy / scale + height * .5;
         }
 
+        /// <summary>キャンバスの点 (x, y) から GUI の座標への写しの係数（double）: gui.x = XX·x + XY·y + X0、gui.y = YX·x + YY·y + Y0。
+        /// <see cref="ToGui(double, double)"/> と同じ写し（回っていないときの float の式とは丸めだけが違う。ステンシルの写しが使う）。</summary>
+        public void GuiAffine(out double xx, out double xy, out double x0, out double yx, out double yy, out double y0)
+        {
+            if (AxisAligned)
+            {
+                xx = (double)Image.width / width; xy = 0; x0 = Image.x;
+                yx = 0; yy = -(double)Image.height / height; y0 = (double)Image.y + Image.height;
+                return;
+            }
+            // ux = f·s·(x − w/2)、uy = −s·(y − h/2)、gui = c + [cos −sin; sin cos]·(ux, uy)
+            double f = Flip ? -1 : 1, hx = width * .5, hy = height * .5;
+            xx = cos * f * scale; xy = sin * scale; x0 = cx - xx * hx - xy * hy;
+            yx = sin * f * scale; yy = -cos * scale; y0 = cy - yx * hx - yy * hy;
+        }
+
         /// <summary>画像を描くときに GL.modelview に掛ける行列（画像の中心のまわりに反転してから回す。<see cref="Image"/> の矩形をそのまま
         /// 描くと、回って反転した画像になる）。GUI.matrix ではなく GL の行列に掛けるのは、GUI.matrix だとクリップも一緒に回ってしまい
         /// （GUI のシェーダーはクリップを GUI.matrix の前の座標で切る）、表示域の外に画像がはみ出すため。</summary>

@@ -72,6 +72,12 @@ namespace Yozolab.YoluPainter.Core
         /// since the provider was set). True when the resolved maps changed.</summary>
         internal bool PollGeneratorInputs()
         {
+            bool changed = PollMapsAndImages();
+            RefreshAnchors(); // Anchor の置き場・参照が変わっていれば、読む層を「全部変わった」にする（PaintDocument.Anchors.cs）
+            return changed;
+        }
+        bool PollMapsAndImages()
+        {
             bool images = PollImageResources(); // 塗りつぶしの画像（プロジェクトのリソース）も同じ所で見る
             if (!HasGenerators && !HasMapProjections) return images;
             long seen = InputsRevision();
@@ -139,8 +145,11 @@ namespace Yozolab.YoluPainter.Core
             return generatorMaps;
         }
 
-        /// <summary>What the generator would read now: each map it uses (or why it cannot), and whether it has an effect.</summary>
-        public GeneratorStatus GetGeneratorStatus(GeneratorSettings settings)
+        /// <summary>What the generator would read now: each map it uses (or why it cannot), and whether it has an effect. For an anchor generator
+        /// this can only tell whether its anchor exists (not whether it is below the layer that would hold it): use the overload with the layer.</summary>
+        public GeneratorStatus GetGeneratorStatus(GeneratorSettings settings) => GeneratorStatusOf(settings, null);
+        /// <summary>The status of a generator; with the reading stage's anchor binding (an anchor generator on a layer), its reference too.</summary>
+        GeneratorStatus GeneratorStatusOf(GeneratorSettings settings, AnchorBinding binding)
         {
             if (settings == null) throw new ArgumentNullException(nameof(settings));
             PollGeneratorInputs();
@@ -161,7 +170,15 @@ namespace Yozolab.YoluPainter.Core
                 uses.Add(new GeneratorMapUse(kind, map, reason, pin, available));
             }
             string extra = null;
-            if (all && BoundGenerator.Bind(settings, generatorMaps, generatorFrame, Width, Height, out var why) == null) extra = generatorFrameReason != null && settings.Type == GeneratorType.ShapeGradient ? generatorFrameReason : why;
+            if (settings.Type == GeneratorType.Anchor) extra = binding != null ? (binding.Valid ? null : binding.Reason) : AnchorSettingsReason(settings); // 値は Anchor から（マップの束縛は崩しだけ）
+            else if (all && BoundGenerator.Bind(settings, generatorMaps, generatorFrame, Width, Height, out var why) == null) extra = generatorFrameReason != null && settings.Type == GeneratorType.ShapeGradient ? generatorFrameReason : why;
+            if (settings.Type == GeneratorType.Anchor && extra == null && all && settings.NoiseAmount > 0 && settings.NoiseSpace == GeneratorNoiseSpace.Model)
+            {
+                // 崩しをモデルの上に置くなら Position の境界箱が要る（Bind と同じ確かめ）
+                var p = generatorMaps[(int)MeshMapKind.Position].Provenance; double diag = 0;
+                for (int a = 0; a < 3; a++) { double e = p.BoundsMax(a) - p.BoundsMin(a); diag += e * e; }
+                if (!(diag > 0)) extra = "The Position map's bounding box has no size, so the breakup cannot be placed on the model; use UV space.";
+            }
             return new GeneratorStatus(uses.AsReadOnly(), extra);
         }
         /// <summary>The status of a generator stage of a layer (content or mask stack).</summary>
@@ -170,7 +187,14 @@ namespace Yozolab.YoluPainter.Core
             var effect = FindFilter(layerId, filterId, out _);
             if (effect == null) throw new KeyNotFoundException("Filter not found on layer: " + filterId);
             if (!effect.Settings.IsGenerator) throw new ArgumentException(effect.Settings.Name + " is not a generator.", nameof(filterId));
-            return GetGeneratorStatus(effect.Settings.Generator);
+            return StatusOfStage(effect);
+        }
+        /// <summary>The status of a generator stage of this document (an anchor generator with its reference).</summary>
+        GeneratorStatus StatusOfStage(FilterEffect effect)
+        {
+            if (!effect.Settings.ReadsAnchor) return GetGeneratorStatus(effect.Settings.Generator);
+            RefreshAnchors();
+            return GeneratorStatusOf(effect.Settings.Generator, AnchorBindingOf(effect.Id));
         }
 
         /// <summary>One line per generator that is switched on but has no effect now (its maps are not usable), naming the layer, the
@@ -179,6 +203,7 @@ namespace Yozolab.YoluPainter.Core
         public IReadOnlyList<string> InactiveGenerators()
         {
             var notes = new List<string>();
+            notes.AddRange(InactiveFillGradients());
             if (!HasGenerators) return notes;
             foreach (var layer in layers)
             {
@@ -189,7 +214,7 @@ namespace Yozolab.YoluPainter.Core
             void Note(PaintLayer layer, FilterEffect e, bool mask)
             {
                 if (!e.Settings.IsGenerator || !e.IsActive) return;
-                var status = GetGeneratorStatus(e.Settings.Generator);
+                var status = StatusOfStage(e);
                 if (!status.Active) notes.Add("'" + layer.Name + "'" + (mask ? " (mask)" : "") + ": " + e.Settings.Name + " has no effect: " + status.Reason);
             }
         }
@@ -198,6 +223,7 @@ namespace Yozolab.YoluPainter.Core
         void RefuseInactiveGenerators(PaintLayer layer, bool content, bool mask)
         {
             PollGeneratorInputs();
+            if (content) RefuseUnplacedDecal(layer); // 置けないデカール（PaintDocument.FillImages.cs）
             var stacks = new List<(IEnumerable<FilterEffect> effects, string where)>();
             if (content) stacks.Add((layer.FilterList, ""));
             if (mask && layer.Mask != null) stacks.Add((layer.Mask.FilterList, " (mask)"));
@@ -205,10 +231,10 @@ namespace Yozolab.YoluPainter.Core
                 foreach (var e in effects)
                 {
                     if (!e.Settings.IsGenerator || !e.IsActive) continue;
-                    var status = GetGeneratorStatus(e.Settings.Generator);
+                    var status = StatusOfStage(e);
                     if (!status.Active)
                         throw new InvalidOperationException("'" + layer.Name + "'" + where + ": " + e.Settings.Name + " cannot be baked because it has no effect now (" + status.Reason
-                            + ") Baking would leave its effect out. Bake the mesh maps again (or turn the generator off) first. Nothing was changed.");
+                            + ") Baking would leave its effect out. Nothing was changed.");
                 }
         }
     }

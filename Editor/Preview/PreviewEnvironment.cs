@@ -323,10 +323,11 @@ namespace Yozolab.YoluPainter.Editor.Preview
         {
             bool full = SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBFloat);
             var rt = RenderTexture.GetTemporary(new RenderTextureDescriptor(w, h, full ? RenderTextureFormat.ARGBFloat : RenderTextureFormat.ARGBHalf, 0) { sRGB = false, useMipMap = false, msaaSamples = 1 });
-            var read = new Texture2D(w, h, full ? TextureFormat.RGBAFloat : TextureFormat.RGBAHalf, false, true);
+            Texture2D read = null;
             var active = RenderTexture.active;
             try
             {
+                read = new Texture2D(w, h, full ? TextureFormat.RGBAFloat : TextureFormat.RGBAHalf, false, true);
                 m.SetTexture("_YPSrcCube", cubeTexture);
                 m.SetVector("_YPSource", new Vector4(0, lod, 1, 0));
                 Graphics.SetRenderTarget(rt);

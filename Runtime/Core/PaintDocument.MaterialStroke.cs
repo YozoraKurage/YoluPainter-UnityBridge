@@ -32,7 +32,7 @@ namespace Yozolab.YoluPainter.Core
         {
             EnsureNoStroke(); RefuseInBatch("A stroke"); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
             if (channels == null) throw new ArgumentNullException(nameof(channels));
-            if (channels.Count == 0) throw new ArgumentException("Choose at least one channel to paint.", nameof(channels));
+            if (channels.Count == 0) throw new ArgumentException("No channel is chosen to paint.", nameof(channels));
             var seen = new HashSet<PaintChannel>();
             foreach (var c in channels)
             {
@@ -40,9 +40,9 @@ namespace Yozolab.YoluPainter.Core
                 if (!seen.Add(c.Channel)) throw new ArgumentException("The " + c.Channel + " channel is listed twice.", nameof(channels));
             }
             var layer = GetLayer(layerId);
-            if (layer.Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers are generated from their values and cannot be painted. Paint on the layer's mask, or add a paint layer.");
-            if (layer.Kind == LayerKind.Adjustment) throw new InvalidOperationException("Adjustment layers have no pixel surface. Change the adjustment, or paint on the layer's mask.");
-            if (layer.IsGroup) throw new InvalidOperationException("A group has no pixels. Select a layer inside it to paint, or paint the group's mask.");
+            if (layer.Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers are generated from their values and cannot be painted.");
+            if (layer.Kind == LayerKind.Adjustment) throw new InvalidOperationException("Adjustment layers have no pixel surface.");
+            if (layer.IsGroup) throw new InvalidOperationException("A group has no pixels.");
             RefuseLockedPixels(layer, settings.Erase);
             RefusePathLayer(layer);
             IHistoryCommand enabling = null;

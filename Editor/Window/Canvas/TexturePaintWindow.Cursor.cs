@@ -7,7 +7,7 @@ namespace Yozolab.YoluPainter.Editor
     /// 白と黒の二重の線で、明るい所でも暗い所でも見える（Photoshop の「ブラシ先端」のカーソルと同じ考え方）。</summary>
     public sealed partial class TexturePaintWindow
     {
-        bool ShowsBrushCursor => IsBrushTool;
+        bool ShowsBrushCursor => IsBrushTool && !StencilHandling; // T でステンシルを動かすあいだは出さない
 
         /// <summary>キャンバスのクリップの中（view はクリップの中の座標の写し）。円なので回転・反転では変わらず、拡大率だけを掛ける。
         /// R を押して表示を回すあいだは出さない。</summary>
@@ -24,6 +24,7 @@ namespace Yozolab.YoluPainter.Editor
         void DrawSurfaceBrushCursor(Vector2 mouse)
         {
             if (Event.current.type != EventType.Repaint || !ShowsBrushCursor || !preview.HasModel) return;
+            DrawSurfaceCloneSource();
             if (!surfaceRect.Contains(mouse) || !preview.TryPick(surfaceRect, mouse, out var hit)) return;
             float worldRadius = Mathf.Max(.000001f, preview.Bounds.size.magnitude) * brush.radius / document.Width;
             Circle(mouse, preview.WorldRadiusToGuiPoints(hit.Position, worldRadius));

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Diagnostics;
 using UnityEngine;
 
 namespace Yozolab.YoluPainter.Editor.Preview
@@ -11,6 +13,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public int RendererIndex;
         /// <summary>Global flattened renderer/submesh slot, not the renderer-local index.</summary>
         public int MaterialSlot;
+        /// <summary>マテリアルの組（同じ Material のスロットの組。テクスチャセット 1 つに当たる。<see cref="SurfaceTriangle.Material"/>）。</summary>
+        public int Material;
         public int TriangleIndex;
         public Vector3 Position;
         public Vector3 Normal;
@@ -24,7 +28,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>Texture pixel coordinates, with (0,0) at bottom left.</summary>
         public int X, Y;
         public float Coverage;
-        public SurfacePixel(int x, int y, float coverage) { X = x; Y = y; Coverage = coverage; }
+        /// <summary>最大の被覆率を与えた面の来歴。重複 UV では同率なら先に訪れた面。</summary>
+        public int TriangleIndex;
+        public Vector3 Position;
+        public SurfacePixel(int x, int y, float coverage) : this(x, y, coverage, -1, default) { }
+        public SurfacePixel(int x, int y, float coverage, Vector3 position) : this(x, y, coverage, -1, position) { }
+        public SurfacePixel(int x, int y, float coverage, int triangleIndex, Vector3 position)
+        { X = x; Y = y; Coverage = coverage; TriangleIndex = triangleIndex; Position = position; }
     }
 
     public sealed class SurfaceDabResult
@@ -35,6 +45,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public int CandidatePixels { get; internal set; }
         public int VisibilityRays { get; internal set; }
         public int RayTriangleTests { get; internal set; }
+        public int VisitedTriangles { get; internal set; }
+        public long RayNodeVisits { get; internal set; }
         internal SurfaceDabResult Reject(string message)
         {
             Pixels.Clear();
@@ -80,11 +92,14 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public Vector3 A, B, C;
         public Vector2 UvA, UvB, UvC;
         public int RendererIndex, MaterialSlot;
+        /// <summary>マテリアルの組の番号: 同じ Material のオブジェクトを使うスロットは同じ組（マテリアルの無いスロットは 1 つの組）。テクスチャセット
+        /// 1 つが 1 つの組を描く。範囲（マテリアルの種類）・対称・UV の点の三角形は組で比べる。省けば（負なら）スロットの番号と同じ。</summary>
+        public int Material;
         public SurfaceTriangle(Vector3 a, Vector3 b, Vector3 c, Vector2 uvA, Vector2 uvB, Vector2 uvC,
-            int rendererIndex = 0, int materialSlot = 0)
+            int rendererIndex = 0, int materialSlot = 0, int material = -1)
         {
             A = a; B = b; C = c; UvA = uvA; UvB = uvB; UvC = uvC;
-            RendererIndex = rendererIndex; MaterialSlot = materialSlot;
+            RendererIndex = rendererIndex; MaterialSlot = materialSlot; Material = material >= 0 ? material : materialSlot;
         }
         public Vector3 Normal
         {
@@ -107,13 +122,17 @@ namespace Yozolab.YoluPainter.Editor.Preview
     /// Vertices coincident within weldTolerance may join UV seams; nonmanifold edges do not join.
     /// This is a bounded spherical surface footprint, not a geodesic, GPU or Burst backend.
     /// </summary>
-    public sealed class SurfaceGeometry
+    public sealed partial class SurfaceGeometry
     {
         readonly SurfaceTriangle[] triangles;
         readonly int[][] adjacency;
         readonly int[] indices;
         readonly List<BvhNode> nodes = new List<BvhNode>();
-        readonly float visibilityEpsilon;
+        readonly float visibilityEpsilon, seamTolerance;
+        internal double SnapshotMilliseconds { get; }
+        internal double AdjacencyMilliseconds { get; }
+        internal double BvhMilliseconds { get; }
+        internal IReadOnlyList<int[]> Neighbors => adjacency;
         public int SnapshotRevision { get; }
         public int TriangleCount => triangles.Length;
         /// <summary>スナップショットの三角形（読むだけ。並びは TriangleIndex と同じ）。</summary>
@@ -122,98 +141,200 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public Bounds Bounds { get; }
 
         struct BvhNode { public Bounds Bounds; public int Left, Right, Start, Count; }
+        struct BuildBox { public Vector3 Min, Max, Center; }
         sealed class RayQueryBudget
         {
             public int RemainingTriangleTests, RemainingNodeVisits;
             public bool Exceeded;
         }
-        readonly struct PositionKey : IEquatable<PositionKey>, IComparable<PositionKey>
+        readonly struct PositionKey : IEquatable<PositionKey>
         {
             readonly long x, y, z;
             public PositionKey(Vector3 p, double tolerance)
             { x = (long)Math.Round(p.x / tolerance); y = (long)Math.Round(p.y / tolerance); z = (long)Math.Round(p.z / tolerance); }
             public bool Equals(PositionKey other) => x == other.x && y == other.y && z == other.z;
             public override bool Equals(object obj) => obj is PositionKey other && Equals(other);
-            public override int GetHashCode() { unchecked { return ((x.GetHashCode() * 397) ^ y.GetHashCode()) * 397 ^ z.GetHashCode(); } }
-            public int CompareTo(PositionKey other)
-            { int c = x.CompareTo(other.x); if (c != 0) return c; c = y.CompareTo(other.y); return c != 0 ? c : z.CompareTo(other.z); }
+            public override int GetHashCode()
+            {
+                unchecked { return (int)Mix(Mix((ulong)x) ^ Mix((ulong)y + 0x9e3779b97f4a7c15UL) ^ Mix((ulong)z + 0x3c6ef372fe94f82aUL)); }
+            }
+        }
+        static ulong Mix(ulong value)
+        {
+            unchecked { value ^= value >> 30; value *= 0xbf58476d1ce4e5b9UL; value ^= value >> 27; value *= 0x94d049bb133111ebUL; return value ^ (value >> 31); }
         }
         readonly struct EdgeKey : IEquatable<EdgeKey>
         {
-            readonly PositionKey a, b;
-            readonly int renderer, material;
-            public EdgeKey(Vector3 p, Vector3 q, int renderer, int material, float tolerance)
-            {
-                var k1 = new PositionKey(p, tolerance); var k2 = new PositionKey(q, tolerance);
-                a = k1.CompareTo(k2) <= 0 ? k1 : k2; b = k1.CompareTo(k2) <= 0 ? k2 : k1;
-                this.renderer = renderer; this.material = material;
-            }
-            public bool Equals(EdgeKey other) => a.Equals(other.a) && b.Equals(other.b) && renderer == other.renderer && material == other.material;
+            readonly int a, b, renderer, material;
+            public EdgeKey(int p, int q, int renderer, int material)
+            { a = Math.Min(p, q); b = Math.Max(p, q); this.renderer = renderer; this.material = material; }
+            public bool Equals(EdgeKey other) => a == other.a && b == other.b && renderer == other.renderer && material == other.material;
             public override bool Equals(object obj) => obj is EdgeKey other && Equals(other);
-            public override int GetHashCode() { unchecked { return ((a.GetHashCode() * 397 ^ b.GetHashCode()) * 397 ^ renderer) * 397 ^ material; } }
+            public override int GetHashCode()
+            {
+                unchecked { return (int)Mix(((ulong)(uint)a << 32 | (uint)b) ^ Mix((ulong)(uint)renderer << 32 | (uint)material)); }
+            }
         }
+        struct EdgeUse { public int First, Second, Count; }
 
         public SurfaceGeometry(IList<SurfaceTriangle> source, int snapshotRevision = 1, float weldTolerance = 0.000001f)
+            : this(source, snapshotRevision, weldTolerance, CancellationToken.None, null) { }
+
+        // Unity オブジェクトを持たない配列の計算。作りかけを公開せず、取消は呼出し元へ返す。
+        internal SurfaceGeometry(IList<SurfaceTriangle> source, int snapshotRevision, float weldTolerance, CancellationToken cancellation, Action<float> progress)
         {
             if (source == null) throw new ArgumentNullException(nameof(source));
             if (!Finite(weldTolerance) || weldTolerance <= 0) throw new ArgumentOutOfRangeException(nameof(weldTolerance));
-            SnapshotRevision = snapshotRevision;
+            cancellation.ThrowIfCancellationRequested();
+            var clock = Stopwatch.StartNew();
+            SnapshotRevision = snapshotRevision; seamTolerance = weldTolerance;
             triangles = new SurfaceTriangle[source.Count]; source.CopyTo(triangles, 0);
             indices = new int[triangles.Length];
+            var boxes = new BuildBox[triangles.Length]; var centers = new Vector3[triangles.Length];
             var bounds = triangles.Length == 0 ? new Bounds(Vector3.zero, Vector3.zero) : triangles[0].Bounds;
             for (int i = 0; i < triangles.Length; i++)
             {
+                if ((i & 255) == 0) cancellation.ThrowIfCancellationRequested();
                 SurfaceTriangle t = triangles[i];
                 if (!Finite(t.A) || !Finite(t.B) || !Finite(t.C) || !Finite(t.UvA) || !Finite(t.UvB) || !Finite(t.UvC) || !Finite(Vector3.Cross(t.B - t.A, t.C - t.A)))
                     throw new ArgumentException("Mesh contains non-finite position or UV data.", nameof(source));
-                indices[i] = i; bounds.Encapsulate(t.Bounds);
+                var box = t.Bounds; centers[i] = box.center; boxes[i] = new BuildBox { Min = box.min, Max = box.max, Center = box.center };
+                indices[i] = i; bounds.Encapsulate(box);
             }
             if (!Finite(bounds.size)) throw new ArgumentException("Mesh bounds exceed supported numeric range.", nameof(source));
             Bounds = bounds;
             visibilityEpsilon = Mathf.Max(0.0000001f, bounds.size.magnitude * 0.000001f);
-            adjacency = BuildAdjacency(weldTolerance);
-            if (triangles.Length != 0) BuildBvh(0, triangles.Length);
+            SnapshotMilliseconds = clock.Elapsed.TotalMilliseconds; progress?.Invoke(.1f); clock.Restart();
+            adjacency = BuildAdjacency(weldTolerance, cancellation, progress);
+            AdjacencyMilliseconds = clock.Elapsed.TotalMilliseconds; progress?.Invoke(.65f); clock.Restart();
+            if (triangles.Length != 0) BuildBvh(0, triangles.Length, boxes, centers, cancellation, progress);
+            BvhMilliseconds = clock.Elapsed.TotalMilliseconds;
+            cancellation.ThrowIfCancellationRequested(); progress?.Invoke(1);
         }
 
-        int[][] BuildAdjacency(float tolerance)
+        readonly bool[] visibleTriangles;
+        readonly int queryRevision;
+        static int viewRevision;
+        /// <summary>表示用の読み取り専用の問い合わせ。元の三角形・BVH・隣接は共有し、非表示面の印だけを別に持つ。</summary>
+        internal SurfaceGeometry VisibleView(Func<SurfaceTriangle, bool> visible)
         {
-            var edges = new Dictionary<EdgeKey, List<int>>();
-            var neighbors = new List<int>[triangles.Length];
+            if (visible == null) throw new ArgumentNullException(nameof(visible));
+            var flags = new bool[triangles.Length]; for (int i = 0; i < flags.Length; i++) flags[i] = Visible(i) && visible(triangles[i]);
+            return new SurfaceGeometry(this, flags);
+        }
+        SurfaceGeometry(SurfaceGeometry source, bool[] visible)
+        {
+            triangles = source.triangles; adjacency = source.adjacency; indices = source.indices; nodes = source.nodes;
+            visibilityEpsilon = source.visibilityEpsilon; seamTolerance = source.seamTolerance; SnapshotRevision = source.SnapshotRevision; Bounds = source.Bounds; NonManifoldEdgeCount = source.NonManifoldEdgeCount;
+            SnapshotMilliseconds = source.SnapshotMilliseconds; AdjacencyMilliseconds = source.AdjacencyMilliseconds; BvhMilliseconds = source.BvhMilliseconds;
+            visibleTriangles = visible; queryRevision = -System.Threading.Interlocked.Increment(ref viewRevision);
+        }
+        bool Visible(int triangle) => visibleTriangles == null || visibleTriangles[triangle];
+
+        int[][] BuildAdjacency(float tolerance, CancellationToken cancellation, Action<float> progress)
+        {
+            var vertices = new Dictionary<PositionKey, int>(triangles.Length);
+            var edges = new Dictionary<EdgeKey, int>(triangles.Length * 2);
+            var uses = new List<EdgeUse>(triangles.Length * 2);
             for (int i = 0; i < triangles.Length; i++)
             {
-                neighbors[i] = new List<int>(3); var t = triangles[i];
-                AddEdge(edges, new EdgeKey(t.A, t.B, t.RendererIndex, t.MaterialSlot, tolerance), i);
-                AddEdge(edges, new EdgeKey(t.B, t.C, t.RendererIndex, t.MaterialSlot, tolerance), i);
-                AddEdge(edges, new EdgeKey(t.C, t.A, t.RendererIndex, t.MaterialSlot, tolerance), i);
+                if ((i & 255) == 0) { cancellation.ThrowIfCancellationRequested(); progress?.Invoke(.1f + .4f * i / Math.Max(1, triangles.Length)); }
+                var t = triangles[i]; int a = Weld(t.A), b = Weld(t.B), c = Weld(t.C);
+                AddEdge(new EdgeKey(a, b, t.RendererIndex, t.MaterialSlot), i);
+                AddEdge(new EdgeKey(b, c, t.RendererIndex, t.MaterialSlot), i);
+                AddEdge(new EdgeKey(c, a, t.RendererIndex, t.MaterialSlot), i);
             }
-            foreach (var edge in edges.Values)
+            var counts = new int[triangles.Length];
+            for (int i = 0; i < uses.Count; i++)
             {
-                if (edge.Count == 2 && edge[0] != edge[1])
-                { neighbors[edge[0]].Add(edge[1]); neighbors[edge[1]].Add(edge[0]); }
-                else if (edge.Count > 2) NonManifoldEdgeCount++;
+                if ((i & 1023) == 0) cancellation.ThrowIfCancellationRequested();
+                var e = uses[i];
+                if (e.Count == 2 && e.First != e.Second) { counts[e.First]++; counts[e.Second]++; }
+                else if (e.Count > 2) NonManifoldEdgeCount++;
             }
             var result = new int[triangles.Length][];
-            for (int i = 0; i < result.Length; i++) result[i] = neighbors[i].ToArray();
+            for (int i = 0; i < result.Length; i++) { result[i] = counts[i] == 0 ? Array.Empty<int>() : new int[counts[i]]; counts[i] = 0; }
+            // 辺の初出順を保つ。隣接を辿る順番とダブの予算の使い方が変わらない。
+            for (int i = 0; i < uses.Count; i++)
+            {
+                if ((i & 1023) == 0) cancellation.ThrowIfCancellationRequested();
+                var e = uses[i];
+                if (e.Count == 2 && e.First != e.Second) { result[e.First][counts[e.First]++] = e.Second; result[e.Second][counts[e.Second]++] = e.First; }
+            }
             return result;
-        }
-        static void AddEdge(Dictionary<EdgeKey, List<int>> edges, EdgeKey key, int index)
-        { if (!edges.TryGetValue(key, out var items)) { items = new List<int>(2); edges.Add(key, items); } items.Add(index); }
 
-        int BuildBvh(int start, int count)
+            int Weld(Vector3 p)
+            {
+                var key = new PositionKey(p, tolerance);
+                if (!vertices.TryGetValue(key, out int id)) { id = vertices.Count; vertices.Add(key, id); }
+                return id;
+            }
+            void AddEdge(EdgeKey key, int triangle)
+            {
+                if (!edges.TryGetValue(key, out int id)) { edges.Add(key, uses.Count); uses.Add(new EdgeUse { First = triangle, Count = 1 }); return; }
+                var e = uses[id]; if (e.Count == 1) e.Second = triangle; e.Count++; uses[id] = e;
+            }
+        }
+
+        int BuildBvh(int start, int count, BuildBox[] boxes, Vector3[] positions, CancellationToken cancellation, Action<float> progress)
         {
-            var bounds = triangles[indices[start]].Bounds;
-            var centers = new Bounds(bounds.center, Vector3.zero);
+            cancellation.ThrowIfCancellationRequested();
+            var first = boxes[indices[start]];
+            Vector3 min = first.Min, max = first.Max, centerMin = first.Center, centerMax = first.Center;
             for (int i = start + 1; i < start + count; i++)
-            { var b = triangles[indices[i]].Bounds; bounds.Encapsulate(b); centers.Encapsulate(b.center); }
+            {
+                if ((i & 1023) == 0) cancellation.ThrowIfCancellationRequested();
+                var box = boxes[indices[i]]; min = Vector3.Min(min, box.Min); max = Vector3.Max(max, box.Max);
+                centerMin = Vector3.Min(centerMin, box.Center); centerMax = Vector3.Max(centerMax, box.Center);
+            }
+            var bounds = new Bounds(); bounds.SetMinMax(min, max); var size = centerMax - centerMin;
             int id = nodes.Count;
             nodes.Add(new BvhNode { Bounds = bounds, Start = start, Count = count, Left = -1, Right = -1 });
-            if (count <= 8) return id;
-            int axis = centers.size.x >= centers.size.y && centers.size.x >= centers.size.z ? 0 : centers.size.y >= centers.size.z ? 1 : 2;
-            Array.Sort(indices, start, count, Comparer<int>.Create((a, b) => triangles[a].Bounds.center[axis].CompareTo(triangles[b].Bounds.center[axis])));
+            if (count <= 8) { progress?.Invoke(.65f + .35f * (start + count) / triangles.Length); return id; }
+            int axis = size.x >= size.y && size.x >= size.z ? 0 : size.y >= size.z ? 1 : 2;
             int half = count / 2;
-            int left = BuildBvh(start, half), right = BuildBvh(start + half, count - half);
+            SelectMedian(start, start + count - 1, start + half, axis, positions, cancellation);
+            int left = BuildBvh(start, half, boxes, positions, cancellation, progress), right = BuildBvh(start + half, count - half, boxes, positions, cancellation, progress);
             nodes[id] = new BvhNode { Bounds = bounds, Start = start, Count = 0, Left = left, Right = right };
             return id;
+        }
+
+        void SelectMedian(int low, int high, int middle, int axis, Vector3[] positions, CancellationToken cancellation)
+        {
+            // 3 方向の分割で同じ中心の面も一度に進む。偏りが続く入力はヒープソートに切り替えて仕事量を抑える。
+            int depth = 2 * (int)Math.Log(high - low + 1, 2) + 1;
+            while (low < high)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                if (depth-- == 0) { HeapSort(low, high, axis, positions, cancellation); return; }
+                float a = positions[indices[low]][axis], b = positions[indices[(low + high) / 2]][axis], c = positions[indices[high]][axis];
+                float pivot = Math.Max(Math.Min(a, b), Math.Min(Math.Max(a, b), c));
+                int lt = low, scan = low, gt = high;
+                while (scan <= gt)
+                {
+                    if ((scan & 1023) == 0) cancellation.ThrowIfCancellationRequested();
+                    float value = positions[indices[scan]][axis];
+                    if (value < pivot) Swap(lt++, scan++); else if (value > pivot) Swap(scan, gt--); else scan++;
+                }
+                if (middle < lt) high = lt - 1; else if (middle > gt) low = gt + 1; else return;
+            }
+        }
+        void Swap(int a, int b) { int t = indices[a]; indices[a] = indices[b]; indices[b] = t; }
+        void HeapSort(int low, int high, int axis, Vector3[] positions, CancellationToken cancellation)
+        {
+            int count = high - low + 1;
+            for (int i = count / 2 - 1; i >= 0; i--) Sift(i, count);
+            for (int end = count - 1; end > 0; end--) { if ((end & 255) == 0) cancellation.ThrowIfCancellationRequested(); Swap(low, low + end); Sift(0, end); }
+            void Sift(int i, int length)
+            {
+                while (i * 2 + 1 < length)
+                {
+                    int child = i * 2 + 1;
+                    if (child + 1 < length && positions[indices[low + child]][axis] < positions[indices[low + child + 1]][axis]) child++;
+                    if (positions[indices[low + i]][axis] >= positions[indices[low + child]][axis]) break;
+                    Swap(low + i, low + child); i = child;
+                }
+            }
         }
 
         public bool TryRaycast(Ray ray, out SurfaceHit hit, bool cullBackfaces = true, float maximumDistance = float.PositiveInfinity)
@@ -231,7 +352,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             var t = triangles[triangle];
             hit = new SurfaceHit
             {
-                SnapshotRevision = SnapshotRevision, TriangleIndex = triangle, RendererIndex = t.RendererIndex, MaterialSlot = t.MaterialSlot,
+                SnapshotRevision = SnapshotRevision, TriangleIndex = triangle, RendererIndex = t.RendererIndex, MaterialSlot = t.MaterialSlot, Material = t.Material,
                 Position = ray.GetPoint(nearest), Normal = t.Normal, Distance = nearest, Barycentric = barycentric,
                 UV = t.UvA * barycentric.x + t.UvB * barycentric.y + t.UvC * barycentric.z
             };
@@ -246,8 +367,9 @@ namespace Yozolab.YoluPainter.Editor.Preview
             { RaycastNode(node.Left, ray, cull, ref nearest, ref triangle, ref barycentric, work); RaycastNode(node.Right, ray, cull, ref nearest, ref triangle, ref barycentric, work); return; }
             for (int i = node.Start; i < node.Start + node.Count; i++)
             {
-                if (work != null && work.RemainingTriangleTests-- <= 0) { work.Exceeded = true; return; }
                 int index = indices[i];
+                if (!Visible(index)) continue;
+                if (work != null && work.RemainingTriangleTests-- <= 0) { work.Exceeded = true; return; }
                 if (IntersectTriangle(ray, triangles[index], cull, out float distance, out var weights) && distance < nearest)
                 { nearest = distance; triangle = index; barycentric = weights; }
             }
@@ -284,6 +406,11 @@ namespace Yozolab.YoluPainter.Editor.Preview
             barycentric = new Vector3(1 - u - v, u, v); return true;
         }
 
+        /// <summary>The soft edge's coverage, 1 − SmoothStep. Single-precision rounding gives about −2.4e−7 at the very edge, and
+        /// BrushStroke.ApplyPixel refuses a negative coverage, so it is held at 0
+        /// (a coverage of 0 changes nothing).</summary>
+        internal static float EdgeCoverage(float t) => Mathf.Max(0f, 1 - Mathf.SmoothStep(0, 1, t));
+
         /// <summary>
         /// The texture pixels a spherical surface dab covers, with coverage. Triangles are visited breadth-first from the hit (the same
         /// order as always) and their candidate texels collected in that order; the visibility rays from the camera, which dominate the
@@ -292,7 +419,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <see cref="BuildSurfaceDabsReference"/> at any degree of parallelism (Core's CoreParallelism).
         /// </summary>
         public SurfaceDabResult BuildSurfaceDabs(SurfaceHit hit, float radiusWorld, int width, int height, Vector3 cameraPosition,
-            float hardness = 0.8f, SurfaceBrushBudget budget = null, SurfaceVisibilityCache cache = null)
+            float hardness = 0.8f, SurfaceBrushBudget budget = null, SurfaceVisibilityCache cache = null, bool ignoreVisibility = false)
         {
             var result = new SurfaceDabResult();
             if (hit.SnapshotRevision != SnapshotRevision || hit.TriangleIndex < 0 || hit.TriangleIndex >= triangles.Length)
@@ -300,7 +427,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (width <= 0 || height <= 0 || width > 32768 || height > 32768 || !Finite(radiusWorld) || radiusWorld <= 0 || !Finite(cameraPosition) || !Finite(hit.Position))
             { result.Diagnostic = "Invalid surface brush size, resolution or camera."; return result; }
             var seed = triangles[hit.TriangleIndex];
-            if (seed.RendererIndex != hit.RendererIndex || seed.MaterialSlot != hit.MaterialSlot)
+            if (!Visible(hit.TriangleIndex) || seed.RendererIndex != hit.RendererIndex || seed.MaterialSlot != hit.MaterialSlot)
             { result.Diagnostic = "Surface binding does not match the current snapshot."; return result; }
             budget = budget ?? new SurfaceBrushBudget(); hardness = Mathf.Clamp01(hardness);
 
@@ -311,10 +438,11 @@ namespace Yozolab.YoluPainter.Editor.Preview
             while (queue.Count > 0 && stop == null)
             {
                 int triangleIndex = queue.Dequeue(); var t = triangles[triangleIndex];
-                if (++processed > budget.MaxTriangles) { stop = "Surface dab exceeded the triangle budget. No pixels were changed; reduce the brush radius."; break; }
-                if (t.RendererIndex != hit.RendererIndex || t.MaterialSlot != hit.MaterialSlot || t.Bounds.SqrDistance(hit.Position) > radiusSquared) continue;
+                result.VisitedTriangles = ++processed;
+                if (processed > budget.MaxTriangles) { stop = "Surface dab exceeded the triangle budget. No pixels were changed; reduce the brush radius."; break; }
+                if (!Visible(triangleIndex) || t.RendererIndex != hit.RendererIndex || t.MaterialSlot != hit.MaterialSlot || t.Bounds.SqrDistance(hit.Position) > radiusSquared) continue;
                 if ((ClosestPoint(hit.Position, t) - hit.Position).sqrMagnitude > radiusSquared) continue;
-                if (Vector3.Dot(t.Normal, cameraPosition - (t.A + t.B + t.C) / 3) <= 0) continue;
+                if (ignoreVisibility ? Vector3.Dot(t.Normal, hit.Normal) <= 0 : Vector3.Dot(t.Normal, cameraPosition - (t.A + t.B + t.C) / 3) <= 0) continue;
                 foreach (int neighbor in adjacency[triangleIndex]) if (visited.Add(neighbor)) queue.Enqueue(neighbor);
                 if (!UvFootprintBounds(t, hit.Position, radiusWorld, out var uvMin, out var uvMax)) continue;
                 int minX = Mathf.Max(0, Mathf.CeilToInt(uvMin.x * width - 0.5f));
@@ -337,6 +465,22 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 }
             }
 
+            // 対称先の足跡はカメラから独立。連結・同じスロット・法線の向き・候補画素の予算は守る。
+            if (ignoreVisibility)
+            {
+                if (stop != null) return result.Reject(stop);
+                var merged = new Dictionary<int, float>();
+                foreach (var candidate in candidates)
+                {
+                    float coverage = candidate.Distance <= hardness || hardness >= .9999f ? 1 : 1 - Mathf.SmoothStep(0, 1, (candidate.Distance - hardness) / (1 - hardness));
+                    int key = candidate.Y * width + candidate.X;
+                    if (!merged.TryGetValue(key, out float old) || coverage > old) merged[key] = coverage;
+                }
+                var sorted = new List<int>(merged.Keys); sorted.Sort();
+                foreach (int key in sorted) result.Pixels.Add(new SurfacePixel(key % width, key / width, merged[key]));
+                return result;
+            }
+
             // 2・3. 可視のレイを組ごとに並列に撃ち、組ごとに並びのとおりに予算を数えて受け入れる。予算を超える所が見つかればすぐ断る
             // （元の逐次の処理と同じく、超えた後のレイは撃たない。無駄に撃つのは多くても 1 組）。レイの数の予算を超える候補は撃たない。
             int rays = Math.Min(candidates.Count, budget.MaxVisibilityRays);
@@ -344,7 +488,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             var outcomes = new RayOutcome[Math.Min(rays, Chunk)];
             var options = new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Yozolab.YoluPainter.Core.CoreParallelism.Degree };
             int chunkStart = 0, chunkEnd = 0;
-            cache?.Prepare(SnapshotRevision, cameraPosition, width, height);
+            cache?.Prepare(visibleTriangles == null ? SnapshotRevision : queryRevision, cameraPosition, width, height);
             long Key(DabCandidate c) => (long)c.Triangle << 31 | (long)c.Y * width + c.X;
             void Shoot(int k)
             {
@@ -362,7 +506,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 outcomes[k] = new RayOutcome { HasHit = hasHit, Hit = visible, CameraDistance = distance,
                     Tests = budget.MaxRayTriangleTests - work.RemainingTriangleTests, Visits = budget.MaxRayNodeVisits - work.RemainingNodeVisits, Exceeded = work.Exceeded };
             }
-            long tests = 0, visits = 0; var pixels = new Dictionary<int, float>(); int collected = result.CandidatePixels;
+            long tests = 0, visits = 0; var pixels = new Dictionary<int, SurfacePixel>(); int collected = result.CandidatePixels;
             for (int i = 0; i < candidates.Count; i++)
             {
                 // 元の逐次の処理がこの候補を見ていた時点の、候補の画素の数（断るときに同じ数を返す）
@@ -387,6 +531,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 var o = outcomes[i - chunkStart];
                 if (o.Skipped) continue;
                 tests += o.Tests; visits += o.Visits;
+                result.RayNodeVisits = visits;
                 bool exceeded = o.Exceeded || tests > budget.MaxRayTriangleTests || visits > budget.MaxRayNodeVisits;
                 result.RayTriangleTests = (int)Math.Min(tests, (long)budget.MaxRayTriangleTests + 1);
                 if (exceeded) return result.Reject("Surface visibility exceeded the BVH work budget. No pixels were changed; reduce the radius or simplify overlapping geometry.");
@@ -400,15 +545,15 @@ namespace Yozolab.YoluPainter.Editor.Preview
                         (o.Hit.Position - c.Position).sqrMagnitude > visibilityEpsilon * visibilityEpsilon ||
                         Array.IndexOf(adjacency[c.Triangle], o.Hit.TriangleIndex) < 0) continue;
                 }
-                float coverage = c.Distance <= hardness || hardness >= 0.9999f ? 1 : 1 - Mathf.SmoothStep(0, 1, (c.Distance - hardness) / (1 - hardness));
+                float coverage = c.Distance <= hardness || hardness >= 0.9999f ? 1 : EdgeCoverage((c.Distance - hardness) / (1 - hardness));
                 int key = c.Y * width + c.X;
-                if (!pixels.TryGetValue(key, out float current) || coverage > current) pixels[key] = coverage;
+                if (!pixels.TryGetValue(key, out var current) || coverage > current.Coverage) pixels[key] = new SurfacePixel(c.X, c.Y, coverage, c.Triangle, c.Position);
             }
             result.CandidatePixels = collected;
             if (stop != null) return result.Reject(stop);
             // Deterministic bottom-left row order and max-union prevent shared-edge double paint.
             var keys = new List<int>(pixels.Keys); keys.Sort();
-            foreach (int key in keys) result.Pixels.Add(new SurfacePixel(key % width, key / width, pixels[key]));
+            foreach (int key in keys) result.Pixels.Add(pixels[key]);
             return result;
         }
 
@@ -426,18 +571,18 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (width <= 0 || height <= 0 || width > 32768 || height > 32768 || !Finite(radiusWorld) || radiusWorld <= 0 || !Finite(cameraPosition) || !Finite(hit.Position))
             { result.Diagnostic = "Invalid surface brush size, resolution or camera."; return result; }
             var seed = triangles[hit.TriangleIndex];
-            if (seed.RendererIndex != hit.RendererIndex || seed.MaterialSlot != hit.MaterialSlot)
+            if (!Visible(hit.TriangleIndex) || seed.RendererIndex != hit.RendererIndex || seed.MaterialSlot != hit.MaterialSlot)
             { result.Diagnostic = "Surface binding does not match the current snapshot."; return result; }
             budget = budget ?? new SurfaceBrushBudget(); hardness = Mathf.Clamp01(hardness);
             var rayWork = new RayQueryBudget { RemainingTriangleTests = budget.MaxRayTriangleTests, RemainingNodeVisits = budget.MaxRayNodeVisits };
-            var queue = new Queue<int>(); var visited = new HashSet<int>(); var pixels = new Dictionary<int, float>();
+            var queue = new Queue<int>(); var visited = new HashSet<int>(); var pixels = new Dictionary<int, SurfacePixel>();
             queue.Enqueue(hit.TriangleIndex); visited.Add(hit.TriangleIndex);
             float radiusSquared = radiusWorld * radiusWorld; int processed = 0;
             while (queue.Count > 0)
             {
                 int triangleIndex = queue.Dequeue(); var t = triangles[triangleIndex];
                 if (++processed > budget.MaxTriangles) return result.Reject("Surface dab exceeded the triangle budget. No pixels were changed; reduce the brush radius.");
-                if (t.RendererIndex != hit.RendererIndex || t.MaterialSlot != hit.MaterialSlot || t.Bounds.SqrDistance(hit.Position) > radiusSquared) continue;
+                if (!Visible(triangleIndex) || t.RendererIndex != hit.RendererIndex || t.MaterialSlot != hit.MaterialSlot || t.Bounds.SqrDistance(hit.Position) > radiusSquared) continue;
                 if ((ClosestPoint(hit.Position, t) - hit.Position).sqrMagnitude > radiusSquared) continue;
                 if (Vector3.Dot(t.Normal, cameraPosition - (t.A + t.B + t.C) / 3) <= 0) continue;
                 foreach (int neighbor in adjacency[triangleIndex]) if (visited.Add(neighbor)) queue.Enqueue(neighbor);
@@ -476,14 +621,14 @@ namespace Yozolab.YoluPainter.Editor.Preview
                             (visible.Position - position).sqrMagnitude > visibilityEpsilon * visibilityEpsilon ||
                             Array.IndexOf(adjacency[triangleIndex], visible.TriangleIndex) < 0) continue;
                     }
-                    float coverage = normalizedDistance <= hardness || hardness >= 0.9999f ? 1 : 1 - Mathf.SmoothStep(0, 1, (normalizedDistance - hardness) / (1 - hardness));
+                    float coverage = normalizedDistance <= hardness || hardness >= 0.9999f ? 1 : EdgeCoverage((normalizedDistance - hardness) / (1 - hardness));
                     int key = y * width + x;
-                    if (!pixels.TryGetValue(key, out float current) || coverage > current) pixels[key] = coverage;
+                    if (!pixels.TryGetValue(key, out var current) || coverage > current.Coverage) pixels[key] = new SurfacePixel(x, y, coverage, triangleIndex, position);
                 }
             }
             // Deterministic bottom-left row order and max-union prevent shared-edge double paint.
             var keys = new List<int>(pixels.Keys); keys.Sort();
-            foreach (int key in keys) result.Pixels.Add(new SurfacePixel(key % width, key / width, pixels[key]));
+            foreach (int key in keys) result.Pixels.Add(pixels[key]);
             return result;
         }
 
@@ -494,7 +639,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// true にする（重なり合った幾何で問い合わせが止まらないように）。返す当たりの Distance は point からの距離、Barycentric と UV は
         /// その点のもの、Normal は三角形の法線。
         /// </summary>
-        public bool TryFindClosestPoint(Vector3 point, float maxDistance, Vector3 facing, int maxNodeVisits, out SurfaceHit hit, out bool exceeded)
+        /// <param name="material">0 以上なら、そのマテリアルの組（<see cref="SurfaceTriangle.Material"/>）の三角形だけ。</param>
+        public bool TryFindClosestPoint(Vector3 point, float maxDistance, Vector3 facing, int maxNodeVisits, out SurfaceHit hit, out bool exceeded, int material = -1)
         {
             hit = default; exceeded = false;
             if (triangles.Length == 0 || !Finite(point) || !Finite(facing) || float.IsNaN(maxDistance) || maxDistance < 0) return false;
@@ -516,8 +662,9 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 }
                 for (int i = node.Start; i < node.Start + node.Count; i++)
                 {
-                    int index = indices[i]; var t = triangles[index];
+                    int index = indices[i]; if (!Visible(index)) continue; var t = triangles[index];
                     if (useFacing && Vector3.Dot(t.Normal, facing) <= 0) continue;
+                    if (material >= 0 && t.Material != material) continue;
                     var closest = ClosestPoint(point, t); float squared = (closest - point).sqrMagnitude;
                     if (squared < bestSquared || (squared == bestSquared && (best < 0 || index < best))) { bestSquared = squared; best = index; bestPoint = closest; }
                 }
@@ -526,7 +673,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             var found = triangles[best]; var weights = Barycentric(bestPoint, found);
             hit = new SurfaceHit
             {
-                SnapshotRevision = SnapshotRevision, TriangleIndex = best, RendererIndex = found.RendererIndex, MaterialSlot = found.MaterialSlot,
+                SnapshotRevision = SnapshotRevision, TriangleIndex = best, RendererIndex = found.RendererIndex, MaterialSlot = found.MaterialSlot, Material = found.Material,
                 Position = bestPoint, Normal = found.Normal, Distance = Mathf.Sqrt(bestSquared), Barycentric = weights,
                 UV = found.UvA * weights.x + found.UvB * weights.y + found.UvC * weights.z
             };

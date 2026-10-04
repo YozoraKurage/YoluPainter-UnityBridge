@@ -18,12 +18,20 @@ namespace Yozolab.YoluPainter.Editor
     {
         /// <summary>UI の文字が欄に収まらず、末尾を … にした回数（ツールチップに全文を出す）。利用者のデータ（ブラシの名前など）は数えない。</summary>
         internal static int ShortenedTexts;
+        /// <summary>最後に詰めた UI の文字（新しいものから最大 8 つ。テストの失敗の知らせに、どの文字が収まらなかったかを出す）。</summary>
+        internal static readonly LinkedList<string> LastShortenedTexts = new LinkedList<string>();
+        internal static string ShortenedTextsSummary => string.Join(" | ", LastShortenedTexts);
 
         /// <summary>width に収まる文字。収まらなければ末尾を … にする（count なら <see cref="ShortenedTexts"/> を数える）。</summary>
         public static string Fit(string text, float width, GUIStyle style, bool count = true)
         {
             if (string.IsNullOrEmpty(text) || TextWidth(text, style) <= width) return text;
-            if (count) ShortenedTexts++;
+            if (count)
+            {
+                ShortenedTexts++;
+                LastShortenedTexts.AddFirst(text + " (" + Mathf.RoundToInt(width) + " px)");
+                while (LastShortenedTexts.Count > 8) LastShortenedTexts.RemoveLast();
+            }
             int lo = 0, hi = text.Length - 1;
             while (lo < hi) { int mid = (lo + hi + 1) / 2; if (TextWidth(text.Substring(0, mid) + "…", style) <= width) lo = mid; else hi = mid - 1; }
             return text.Substring(0, lo).TrimEnd() + "…";
@@ -43,11 +51,11 @@ namespace Yozolab.YoluPainter.Editor
 
         /// <summary><see cref="Slider"/> の、名前が値に重なるときは名前を … で詰める版（値の幅は min・max・今の値の広いほうで見るので、
         /// 動かしても詰め方が揺れない）。</summary>
-        public static float FitSlider(Rect r, string label, float value, float min, float max, string format = "0.##", string suffix = "", string tooltip = null, bool enabled = true)
+        public static float FitSlider(Rect r, string label, float value, float min, float max, string format = "0.##", string suffix = "", string tooltip = null, bool enabled = true, float trackInset = 0)
         {
             float valueWidth = Mathf.Max(ValueWidth(min, format, suffix), ValueWidth(max, format, suffix), ValueWidth(value, format, suffix));
             string shown = Fit(label, r.width - 14 - valueWidth - 8, PaintTheme.Label);
-            return Slider(r, shown, value, min, max, format, suffix, shown != label ? Joined(label, tooltip) : tooltip, enabled);
+            return Slider(r, shown, value, min, max, format, suffix, shown != label ? Joined(label, tooltip) : tooltip, enabled, trackInset);
         }
         public static int FitIntSlider(Rect r, string label, int value, int min, int max, string suffix = "", string tooltip = null, bool enabled = true)
             => Mathf.RoundToInt(FitSlider(r, label, value, min, max, "0", suffix, tooltip, enabled));
@@ -160,6 +168,7 @@ namespace Yozolab.YoluPainter.Editor
         public static void Paragraph(UiRows rows, string text, Color? color = null)
         {
             if (string.IsNullOrEmpty(text)) return;
+            if (Repainting) TextDrawn?.Invoke(text);
             var lines = WrapLines(text, rows.Width, PaintTheme.Wrap);
             float lh = LineHeight(PaintTheme.Wrap);
             DrawLines(rows.Row(lines.Length * lh, 6), lines, lh, color);
@@ -169,6 +178,7 @@ namespace Yozolab.YoluPainter.Editor
         public static void Notice(UiRows rows, string text, string icon, Color color)
         {
             if (string.IsNullOrEmpty(text)) return;
+            if (Repainting) TextDrawn?.Invoke(text);
             var lines = WrapLines(text, rows.Width - 22, PaintTheme.Wrap);
             float lh = LineHeight(PaintTheme.Wrap);
             var r = rows.Row(Mathf.Max(16, lines.Length * lh), 6);

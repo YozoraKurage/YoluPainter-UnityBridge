@@ -85,14 +85,8 @@ msgstr "テクスチャセット"
 msgid "{0} note(s) while loading"
 msgstr "読み込みの注意 {0} 件"
 
-msgid "Finish the stroke first."
-msgstr "先にストロークを終えてください。"
-
 msgid "New project for {0} ({1})."
 msgstr "{0}（{1}）の新規プロジェクトを作りました。"
-
-msgid "New project without a model. Choose one in Texture Set or File ▸ Project Configuration."
-msgstr "モデル無しの新規プロジェクトです。テクスチャセットか ファイル ▸ プロジェクト設定 でモデルを選んでください。"
 
 msgid "Project configuration applied."
 msgstr "プロジェクト設定を適用しました。"

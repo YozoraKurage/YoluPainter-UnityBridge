@@ -31,7 +31,7 @@ namespace Yozolab.YoluPainter.Core.Paths
         public IReadOnlyList<CanvasPoint> Points { get; }
         public override int PointCount => Points.Count;
 
-        public CanvasPath(Guid id, PaintChannel channel, PathBrush brush, IEnumerable<CanvasPoint> points)
+        public CanvasPath(Guid id, PaintChannel channel, PathBrush brush, IEnumerable<CanvasPoint> points, IEnumerable<ChannelPaint> material = null)
         {
             PaintLayer.ValidateChannel(channel);
             if (brush == null) throw new ArgumentNullException(nameof(brush));
@@ -39,10 +39,11 @@ namespace Yozolab.YoluPainter.Core.Paths
             if (brush.RadiusWorld > 4096) throw new ArgumentOutOfRangeException(nameof(brush), "A canvas path's brush radius is at most 4096 px.");
             var list = new List<CanvasPoint>(points ?? throw new ArgumentNullException(nameof(points)));
             if (list.Count > MaxPointCount) throw new ArgumentException("A path has at most " + MaxPointCount + " points.", nameof(points));
-            Id = id; Channel = channel; Brush = brush.Clone(); Points = list.AsReadOnly();
+            Id = id; Channel = channel; Brush = brush.Clone(); Material = CopyMaterial(material); Points = list.AsReadOnly();
         }
-        public CanvasPath WithPoints(IEnumerable<CanvasPoint> points) => new CanvasPath(Id, Channel, Brush, points);
-        public CanvasPath WithBrush(PathBrush brush) => new CanvasPath(Id, Channel, brush, Points);
+        public CanvasPath WithPoints(IEnumerable<CanvasPoint> points) => new CanvasPath(Id, Channel, Brush, points, Material);
+        public CanvasPath WithBrush(PathBrush brush) => new CanvasPath(Id, Channel, brush, Points, Material);
+        public CanvasPath WithMaterial(IEnumerable<ChannelPaint> material) => new CanvasPath(Id, Channel, Brush, Points, material);
     }
 
     /// <summary>
@@ -57,6 +58,10 @@ namespace Yozolab.YoluPainter.Core.Paths
         public const int MaxSamples = 4000000;
 
         public static SparseTileSurface Render(PaintDocument document, CanvasPath path)
+            => RenderChannels(document, path)[path.Material == null ? path.Channel : path.Material[0].Channel];
+
+        /// <summary>組全体を同じ入力で描く。作業文書のソースとストロークの予算は組の合計。</summary>
+        public static IReadOnlyDictionary<PaintChannel, SparseTileSurface> RenderChannels(PaintDocument document, CanvasPath path)
         {
             if (document == null) throw new ArgumentNullException(nameof(document));
             if (path == null) throw new ArgumentNullException(nameof(path));
@@ -65,7 +70,7 @@ namespace Yozolab.YoluPainter.Core.Paths
             var layer = scratch.AddLayer("path");
             if (!layer.IsChannelEnabled(path.Channel)) scratch.SetChannelEnabled(layer.Id, path.Channel, true);
             var settings = brush.StrokeSettings(); settings.Radius = brush.RadiusWorld;
-            using (var stroke = scratch.BeginStroke(layer.Id, path.Channel, settings))
+            using (var stroke = path.Material == null ? scratch.BeginStroke(layer.Id, path.Channel, settings) : scratch.BeginMaterialStroke(layer.Id, path.Material, settings))
             {
                 var points = path.Points; int n = points.Count;
                 if (n > 0) stroke.Add(new BrushSample(points[0].X, points[0].Y, points[0].Pressure));
@@ -87,7 +92,9 @@ namespace Yozolab.YoluPainter.Core.Paths
                 }
                 stroke.Commit();
             }
-            return layer.GetChannel(path.Channel);
+            var rendered = new Dictionary<PaintChannel, SparseTileSurface>();
+            foreach (var m in path.Paints) rendered.Add(m.Channel, layer.GetChannel(m.Channel));
+            return rendered;
         }
 
         /// <summary>centripetal Catmull-Rom（α = 0.5）の p1 → p2 の区間の t。重なった点では直線に戻る。</summary>

@@ -4,7 +4,7 @@ The PNG files in this folder are rasterized (white, 48 px) from two icon sets. W
 `Documentation~/tools/icons.txt`, and `Documentation~/tools/fetch-icons.sh` rebuilds them.
 
 - Microsoft Fluent UI System Icons — https://github.com/microsoft/fluentui-system-icons
-- Phosphor Icons — https://github.com/phosphor-icons/core (Tools/brush, Tools/gradient, Tools/select-ellipse, Tools/id-select, Tools/clone, uv_wireframe)
+- Phosphor Icons — https://github.com/phosphor-icons/core (Tools/brush, Tools/gradient, Tools/select-ellipse, Tools/id-select, Tools/clone, uv_wireframe, anchor)
 
 ## Fluent UI System Icons
 

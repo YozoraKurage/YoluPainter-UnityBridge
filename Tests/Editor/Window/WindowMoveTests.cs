@@ -82,8 +82,13 @@ namespace Yozolab.YoluPainter.Tests
             b = d.TransformBounds(layer.Id).Value;
             Assert.That(b.x1, Is.InRange(599, 602)); Assert.That((b.y0, b.y1), Is.EqualTo((300, 500)), "an edge handle scales one axis");
             d.Undo();
-            // 右上の角の少し外を掴み、中心のまわりに 90° 回す（Shift で 15° 刻み）
-            Drag(512, 512, 288, 512, EventModifiers.Shift);
+            // 右上の角の少し外を掴み、中心のまわりに 90° 回す（Shift で 15° 刻み）。「少し外」は画面の点で決まる（角のハンドルの
+            // HandleHitPoints の外、RotateReachPoints の内）ので、今の表示の倍率で画素の数を選ぶ（既定の配置で表示の幅が変わっても同じ所）
+            Repaint(window);
+            int k = 1;
+            while (k < 200 && Vector2.Distance(window.PixelToGui(500 + k, 500 + k), window.PixelToGui(500, 500)) <= TexturePaintWindow.HandleHitPoints + 2) k++;
+            Assert.That(Vector2.Distance(window.PixelToGui(500 + k, 500 + k), window.PixelToGui(500, 500)), Is.LessThan(TexturePaintWindow.RotateReachPoints - 2), "the grab point is in the rotate ring");
+            Drag(500 + k, 500 + k, 300 - k, 500 + k, EventModifiers.Shift);
             Assert.That(window.StatusMessage, Does.Contain("Rotated 90"));
             Assert.That(layer.GetPixel(PaintChannel.Color, 499, 300), Is.EqualTo(red), "bottom-left goes to bottom-right, pixel-exact");
             Assert.That(d.TransformBounds(layer.Id).Value, Is.EqualTo((300, 300, 500, 500)));

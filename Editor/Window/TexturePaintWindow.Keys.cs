@@ -21,11 +21,13 @@ namespace Yozolab.YoluPainter.Editor
 
         void HandleKeys(Event e)
         {
-            NoteViewKeyUp(e);
+            NoteViewKeyUp(e); NoteStencilKeyUp(e);
             if(e.type!=EventType.KeyDown)return;
             // キーが届いた時点で文字の欄にフォーカスがあったか（Enter で確定して外れる前の状態を見る）
             editingText=GUIUtility.keyboardControl!=0; tookKey=KeyCode.None;
-            if(ShapeDragging){if(e.keyCode==KeyCode.Escape)CancelShapeDrag();e.Use();Repaint();} // 形のハンドルのドラッグ中は Esc で取り消すだけ（Undo などのキーも使わない）
+            if(GradientDraftActive){if(e.keyCode==KeyCode.Escape)CancelGradientDrafts();e.Use();Repaint();}
+            else if(ShapeDragging){if(e.keyCode==KeyCode.Escape)CancelShapeDrag();e.Use();Repaint();} // 形のハンドルのドラッグ中は Esc で取り消すだけ（Undo などのキーも使わない）
+            else if(pathDrag>=0){if(e.keyCode==KeyCode.Escape)CancelToolDrag();e.Use();Repaint();}
             else if(e.keyCode==KeyCode.Escape && toolDragging){CancelToolDrag();GUIUtility.hotControl=0;e.Use();Repaint();}
             else if(e.keyCode==KeyCode.Escape && stroke!=null){FinishStroke(false);e.Use();}
             else if(stroke==null && !toolDragging && tool==PaintTool.Move && GUIUtility.keyboardControl==0 && !(e.control||e.command) && ArrowDelta(e.keyCode)!=Vector2Int.zero)
@@ -62,9 +64,11 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>修飾キー無しの 1 文字のショートカット（ツール・色・ブラシの大きさ・表示）。文字の入力中は使わない。</summary>
         bool HandleToolKeys(Event e)
         {
+            if (HandleStencilKeys(e)) return true; // T・N を押しているあいだ（ステンシル。Tools/TexturePaintWindow.Stencil.cs）
             if (HandleViewKeys(e)) return true; // 表示の回転・反転（ストロークの最中は断る）
-            if (HandleModelShowKeys(e)) return true; // 3D ビューで見せるもの: C・Shift+C・Shift+B（Model/TexturePaintWindow.ModelShow.cs。ストロークの最中は断る）
+            if (HandleModelShowKeys(e)) return true; // ポインタの2D/3Dビューで見せるもの: C・Shift+C・Shift+B（ストロークの最中は断る）
             if (e.type != EventType.KeyDown || stroke != null || toolDragging || GUIUtility.keyboardControl != 0 || e.control || e.command || e.alt) return false;
+            if (HandlePolygonOverlapKey(e)) { NoteTookKey(e); e.Use(); Repaint(); return true; }
             switch (e.keyCode)
             {
                 case KeyCode.B: SelectTool(PaintTool.Brush); break;
@@ -78,6 +82,7 @@ namespace Yozolab.YoluPainter.Editor
                 case KeyCode.V: SelectTool(PaintTool.Move); break;
                 case KeyCode.P: SelectTool(PaintTool.Path); break;
                 case KeyCode.I: SelectTool(PaintTool.Eyedropper); break;
+                case KeyCode.Q: if (e.shift) return false; ProjectionHandlesHidden = !ProjectionHandlesHidden; message = ProjectionHandlesHidden ? L.Tr("Projection handles hidden (Q shows them).") : L.Tr("Projection handles shown (Q hides them)."); break; // Substance と同じ Q（Model/TexturePaintWindow.ShapeGizmo.cs）
                 case KeyCode.Alpha4: case KeyCode.Keypad4: if (e.shift) return false; SelectTool(PaintTool.PolygonFill); break; // Substance Painter と同じ 4
                 case KeyCode.X: if (tool == PaintTool.PolygonFill && EditingMask) PolygonFillErase = !polyFillErase; else SwapColors(); break; // マスクのポリゴン塗りつぶしでは白と黒（Substance の X）
                 case KeyCode.D: DefaultColors(); break;

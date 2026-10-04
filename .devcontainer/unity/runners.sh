@@ -21,6 +21,19 @@ if [[ $# -gt 0 ]]; then numbers=("$@"); else mapfile -t numbers < <(runner_numbe
 for n in "${numbers[@]}"; do [[ "$n" =~ ^[1-9][0-9]*$ ]] || die "台の番号は 1 以上（台 0 は test-daemon.sh で扱う）: $n"; done
 
 source_project="$(runner_project 0)"
+source "$SCRIPT_DIR/daemon-lock.sh"
+
+# 台ごとに、同期・停止・起動の準備が終わるまで同じ依頼ロックを持つ。
+# 裏の再起動では親からの fd 8 を使い、別の台なら取り直す。
+with_runner_lock() (
+  local n="$1"; shift
+  readonly DAEMON_DIR="$(runner_project "$n")/TestDaemon"
+  acquire_daemon_client_lock
+  export YOLUPAINTER_RUNNER="$n" YOLUPAINTER_LOCK_HELD=1
+  "$@" "$n"
+)
+
+restart_one() { stop_one "$1"; start_one "$1"; }
 
 # パッケージの写しを、/workspace のコミット（既定 HEAD）と同じ中身にする
 sync_from_commit() {
@@ -59,7 +72,11 @@ setup_one() {
   info "台 $n をコールドで取り込む（初回は数分。ログ: $project/Logs/setup.log）"
   restore_license
   have_license || { license_hint; exit 4; }
-  if ! "$UNITY_EDITOR" -nographics -projectPath "$project" -logFile "$project/Logs/setup.log" -quit; then
+  if ! (
+    close_inherited_daemon_lock
+    unset YOLUPAINTER_LOCK_HELD YOLUPAINTER_DAEMON_SWITCHING
+    exec "$UNITY_EDITOR" -nographics -projectPath "$project" -logFile "$project/Logs/setup.log" -quit
+  ); then
     grep -o '[^ ]*\.cs([0-9]*,[0-9]*): error CS[0-9]*: .*' "$project/Logs/setup.log" 2>/dev/null | sort -u | head -20 >&2
     die "台 $n の取り込みに失敗した（$project/Logs/setup.log）"
   fi
@@ -71,7 +88,11 @@ start_one() {
   mode="$(runner_conf_mode "$n")"; [[ -n "$mode" ]] || die "runners.conf に台 $n が無い"
   [[ -f "$(runner_project "$n")/Packages/manifest.json" ]] || die "台 $n はまだ無い。先に runners.sh setup $n"
   local flag=""; [[ "$mode" == batch-gl ]] && flag=--batch-gl; [[ "$mode" == batch ]] && flag=--batch
-  YOLUPAINTER_RUNNER="$n" "$SCRIPT_DIR/test-daemon.sh" start $flag
+  YOLUPAINTER_RUNNER="$n" "$SCRIPT_DIR/test-daemon.sh" start $flag || return $?
+  # 全台で 1 つの記録常駐。二重起動は flock が防ぐ。Unity の生死には触れない。
+  if [[ -e /dev/dxg && -x "$SCRIPT_DIR/gpu-memory-daemon.sh" ]]; then
+    "$SCRIPT_DIR/gpu-memory-daemon.sh" start || warn "GPU メモリの記録を起動できなかった"
+  fi
 }
 
 stop_one() { YOLUPAINTER_RUNNER="$1" "$SCRIPT_DIR/test-daemon.sh" stop; }
@@ -87,10 +108,10 @@ status_all() {
 }
 
 case "$cmd" in
-  setup)   for n in "${numbers[@]}"; do setup_one "$n"; done ;;
-  start)   for n in "${numbers[@]}"; do start_one "$n"; done ;;  # xvfb-run -a の画面番号の取り合いを避けて 1 台ずつ
-  stop)    for n in "${numbers[@]}"; do stop_one "$n"; done ;;
-  restart) for n in "${numbers[@]}"; do stop_one "$n"; start_one "$n"; done ;;
+  setup)   for n in "${numbers[@]}"; do with_runner_lock "$n" setup_one; done ;;
+  start)   for n in "${numbers[@]}"; do with_runner_lock "$n" start_one; done ;;  # xvfb-run -a の画面番号の取り合いを避けて 1 台ずつ
+  stop)    for n in "${numbers[@]}"; do with_runner_lock "$n" stop_one; done ;;
+  restart) for n in "${numbers[@]}"; do with_runner_lock "$n" restart_one; done ;;
   status)  status_all ;;
   -h|--help) sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
   *) die "不明なコマンド: $cmd" ;;

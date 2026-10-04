@@ -5,6 +5,7 @@
 # 選択中の <id>_selected.png）で、利用者やプラグインが差し替えられる（Editor/UI/PainterToolIcons.cs）。4 列目は選択中の版の太さ
 # （既定は fluent の filled・phosphor の fill。塗ると形が分からなくなるものは bold）。
 add fluent add
+anchor phosphor anchor
 arrow_drop_down fluent chevron_down
 auto_awesome fluent sparkle
 blur_on fluent blur
@@ -68,6 +69,7 @@ tools/id-select phosphor swatches
 close fluent dismiss
 search fluent search
 target fluent target
+sticker fluent sticker
 sync fluent arrow_sync
 local_fire_department fluent fire
 grid_on fluent grid

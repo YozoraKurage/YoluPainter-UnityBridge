@@ -13,6 +13,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
     {
         /// <summary>パスのチャンネルの画素（文書と同じ大きさ）。</summary>
         public SparseTileSurface Surface { get; internal set; }
+        public IReadOnlyDictionary<PaintChannel, SparseTileSurface> Channels { get; internal set; }
         public int Dabs { get; internal set; }
         /// <summary>面へ投影できなかった（穴・面の外・反対の面へ飛ぶ）サンプルの数。そこは描かない。</summary>
         public int Gaps { get; internal set; }
@@ -57,14 +58,15 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (document == null) throw new ArgumentNullException(nameof(document));
             if (geometry == null) throw new ArgumentNullException(nameof(geometry));
             if (path == null) throw new ArgumentNullException(nameof(path));
-            if (path.ModelFingerprint != Fingerprint(geometry)) throw new InvalidOperationException("This path belongs to another model snapshot (its triangles or UVs differ). Load that model, or rasterize the layer.");
+            if (path.ModelFingerprint != Fingerprint(geometry)) throw new InvalidOperationException("This path belongs to another model snapshot (its triangles or UVs differ).");
             foreach (var p in path.Points) if (p.Triangle >= geometry.TriangleCount) throw new InvalidOperationException("A path point refers to a triangle the snapshot does not have.");
             var brush = path.Brush;
             var scratch = new PaintDocument(document.Width, document.Height, document.TileSize, 0) { SourceBudgetBytes = document.SourceBudgetBytes, ActiveStrokeBudgetBytes = document.ActiveStrokeBudgetBytes };
             var layer = scratch.AddLayer("path");
             if (!layer.IsChannelEnabled(path.Channel)) scratch.SetChannelEnabled(layer.Id, path.Channel, true);
             var result = new SurfacePathRender();
-            using (var stroke = scratch.BeginStroke(layer.Id, path.Channel, brush.StrokeSettings()))
+            using (var stroke = path.Material == null ? scratch.BeginStroke(layer.Id, path.Channel, brush.StrokeSettings())
+                : scratch.BeginMaterialStroke(layer.Id, path.Material, brush.StrokeSettings()))
             {
                 void Dab(SurfaceHit hit, double pressure)
                 {
@@ -82,7 +84,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 if (n == 1)
                 {
                     var t = geometry.Triangles[points[0].Triangle];
-                    Dab(new SurfaceHit { SnapshotRevision = geometry.SnapshotRevision, RendererIndex = t.RendererIndex, MaterialSlot = t.MaterialSlot, TriangleIndex = points[0].Triangle,
+                    Dab(new SurfaceHit { SnapshotRevision = geometry.SnapshotRevision, RendererIndex = t.RendererIndex, MaterialSlot = t.MaterialSlot, Material = t.Material, TriangleIndex = points[0].Triangle,
                         Position = positions[0], Normal = normals[0], Barycentric = new Vector3((float)(1 - points[0].U - points[0].V), (float)points[0].U, (float)points[0].V) }, points[0].Pressure);
                 }
                 else if (n > 1)
@@ -111,7 +113,10 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 }
                 stroke.Commit();
             }
-            result.Surface = layer.GetChannel(path.Channel);
+            var rendered = new Dictionary<PaintChannel, SparseTileSurface>();
+            foreach (var m in path.Paints) rendered.Add(m.Channel, layer.GetChannel(m.Channel));
+            result.Channels = rendered;
+            result.Surface = rendered[path.Material == null ? path.Channel : path.Material[0].Channel];
             return result;
         }
 

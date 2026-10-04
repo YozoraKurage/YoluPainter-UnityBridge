@@ -25,9 +25,6 @@ msgstr "面はモデルのローカルの {0} 軸に直交します"
 msgid "Center"
 msgstr "中心"
 
-msgid "Where the plane is: the distance from the model's origin along the axis, in scene units. Drag to change it (Shift: ×10), or click to type."
-msgstr "面の位置: モデルの原点から軸の向きに測った距離（シーンの単位）。ドラッグで変え（Shift で 10 倍）、クリックで数値を打てます。"
-
 msgid "Model origin"
 msgstr "モデルの原点"
 
@@ -51,16 +48,56 @@ msgstr "映したダブは、このテクスチャセットのいちばん近い
 
 # ── 3D ビューの見出し ──
 
-msgid "Symmetry: mirror 3D brush strokes across the model's plane (set the axis in the Brush tool's Symmetry section)"
-msgstr "シンメトリー: 3D のブラシのストロークを、モデルの対称の面で映した所にも描きます（軸はブラシツールのシンメトリーの欄で選びます）"
-
 # ── 映した側を塗らなかったときの知らせ ──
 
-msgid "Symmetry: no surface of the model at the mirrored point; only this side was painted."
-msgstr "シンメトリー: 映した点の近くにモデルの面が無いので、こちら側だけ塗りました。"
+msgid "Symmetry: some copies have no surface nearby and were skipped."
+msgstr "シンメトリー: 近くに面の無い対称先は塗っていません。"
 
-msgid "Symmetry: the mirrored point is on another texture set; only this side was painted."
-msgstr "シンメトリー: 映した点は別のテクスチャセットの面なので、こちら側だけ塗りました。"
+msgid "Symmetry: some copies are on another texture set and were skipped."
+msgstr "シンメトリー: 別のテクスチャセットにある対称先は塗っていません。"
 
-msgid "Symmetry: the mirrored side cannot be seen from this view and was not painted. Turn the model so that both sides are visible."
-msgstr "シンメトリー: 映した側はこの向きからは見えないので塗っていません。両側が見えるようにモデルを回してください。"
+msgid "Reflect dabs across the model root's plane, within the active texture set."
+msgstr "モデルのルートを基準にした面で、今のテクスチャセットの中へダブを映します。"
+
+msgid "Radial 3D strokes"
+msgstr "3D のストロークを放射状に描く"
+
+msgid "Copies"
+msgstr "対称の数"
+
+msgid "Ignore visibility"
+msgstr "可視性を無視"
+
+msgid "Symmetry copies paint back-facing and occluded surfaces. The original dab still paints visible surfaces only."
+msgstr "対称先では裏側や隠れた面にも塗ります。元のダブは見える面だけを塗ります。"
+
+msgid "Show symmetry axes"
+msgstr "対称の軸を表示"
+
+msgid "2D canvas symmetry"
+msgstr "2D キャンバスの対称"
+
+msgid "Off"
+msgstr "なし"
+
+msgid "Vertical"
+msgstr "縦"
+
+msgid "Horizontal"
+msgstr "横"
+
+msgid "Both"
+msgstr "両方"
+
+msgid "Center X"
+msgstr "中心 X"
+
+msgid "Center Y"
+msgstr "中心 Y"
+
+msgid "Canvas center"
+msgstr "キャンバスの中心"
+
+msgctxt "Symmetry"
+msgid "Radial"
+msgstr "放射状"

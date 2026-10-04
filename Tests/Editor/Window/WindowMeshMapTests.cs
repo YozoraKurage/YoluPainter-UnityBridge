@@ -70,7 +70,7 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void BakeIsRefusedWithoutAModelOrOverTheBudget()
         {
             QuickBake(window);
-            Assert.That(window.BakeMeshMaps(), Is.Null); Assert.That(window.StatusMessage, Does.Contain("Load a model"));
+            Assert.That(window.BakeMeshMaps(), Is.Null); Assert.That(window.StatusMessage, Does.Contain("No model"));
             window.Preview.LoadDemoMesh();
             PainterSettings.UpdatePersonal(p => p.strokeBudgetMiB = PainterSettings.MinStrokeMiB);
             Assert.That(window.BakeMeshMaps(), Is.Null); Assert.That(window.StatusMessage, Does.Contain("budget"));
@@ -203,7 +203,7 @@ namespace Yozolab.YoluPainter.Tests
         {
             Invoke(window, "CreateDocument", 256); Invoke(window, "BindDocument");
             Assert.That(window.Preview.LoadDemoMesh().CanPaint, Is.True); QuickBake(window);
-            OpenLayerPanels();
+            OpenLayerPanels(); ShowTextureSetSettings();
             ClickLayerControl("meshmap.bake");
             var bake = MeshBakeWindow.For(window);
             Assert.That(bake, Is.Not.Null, "Bake… in the panel opens the bake window");

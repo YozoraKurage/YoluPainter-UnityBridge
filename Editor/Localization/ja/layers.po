@@ -32,9 +32,6 @@ msgstr "このチャンネルに値を追加"
 msgid "The fill starts with the brush color"
 msgstr "ブラシの色で始めます"
 
-msgid "A fill covers the whole canvas. Paint its mask to choose where it shows."
-msgstr "塗りつぶしはキャンバス全体を覆います。どこに出すかはマスクを描いて決めます。"
-
 msgctxt "adjustment"
 msgid "Hue"
 msgstr "色相"
@@ -46,12 +43,6 @@ msgstr "彩度"
 msgctxt "adjustment"
 msgid "Lightness"
 msgstr "明度"
-
-msgid "Inverts the colour of everything below."
-msgstr "下にあるものすべての色を反転します。"
-
-msgid "Applies to the layers below."
-msgstr "下のレイヤーに効きます。"
 
 msgid "{0} does not apply to the {1} channel."
 msgstr "{0}は{1}のチャンネルには効きません。"
@@ -117,22 +108,10 @@ msgstr "反転"
 msgid "Swap what the mask hides and reveals"
 msgstr "マスクで隠す所と見せる所を入れ替えます"
 
-msgid "One mask for all channels."
-msgstr "マスクはすべてのチャンネルで共通です。"
-
 # ── フィルター ──
 
 msgid "Filters"
 msgstr "フィルター"
-
-msgid "Added {0} to the mask (non-destructive: the painted pixels are unchanged)."
-msgstr "マスクに{0}を追加しました（非破壊: 描いた画素は変わりません）。"
-
-msgid "Added {0} to the {1} pixels (non-destructive: the painted pixels are unchanged)."
-msgstr "{1}の画素に{0}を追加しました（非破壊: 描いた画素は変わりません）。"
-
-msgid "Baked the filters into the layer's pixels (one undo step); the filter stack is now empty."
-msgstr "フィルターをレイヤーの画素に焼き込みました（Undo 1 回で戻せます）。フィルターは空になりました。"
 
 msgid "The layer has no filters to bake."
 msgstr "このレイヤーには焼き込むフィルターがありません。"
@@ -202,9 +181,6 @@ msgstr "輪郭を強める量"
 msgid "Differences smaller than this (0–255) are left alone"
 msgstr "これより小さな差（0〜255）はそのままにします"
 
-msgid "The same seed gives the same noise. Drag to change, click to type."
-msgstr "同じシードからは同じノイズができます。ドラッグで変え、クリックで入力します。"
-
 msgid "Uses the whole layer (global)."
 msgstr "レイヤー全体を見て処理します。"
 
@@ -252,20 +228,11 @@ msgstr "ファイルの Y"
 msgid "Green direction of Normal images written by Export Images / PNG / PSD. Unity uses OpenGL (Y+); the .ylp texture and the preview always do."
 msgstr "画像の書き出し・PNG・PSD で書くノーマルの画像の緑の向き。Unity は OpenGL（Y+）で、.ylp のテクスチャとプレビューは常に OpenGL です。"
 
-msgid "Height also shapes the Normal output. Switch to the Normal channel to see it."
-msgstr "ハイトはノーマルの出力にも効きます。見るにはノーマルのチャンネルに切り替えてください。"
-
 msgid "Show output"
 msgstr "出力を表示"
 
 msgid "On: the Normal output (renormalized, flat where unpainted, Height → Normal included). Off: the painted Normal layers with transparency."
 msgstr "オン: ノーマルの出力（正規化し、描いていない所は平ら、ハイト → ノーマル込み）。オフ: 描いたノーマルのレイヤーを透明のまま。"
-
-msgid "{0} has no meaning for normals: in the Normal channel this layer replaces what is below, like Normal. Use Overlay to add it as detail (reoriented normal mapping)."
-msgstr "{0}は法線には意味がありません。ノーマルのチャンネルでは、このレイヤーは「通常」のように下を置き換えます。細部として足すにはオーバーレイを使ってください（法線の向きを合わせて合成します）。"
-
-msgid "Adjustments change the encoded values of the Normal channel (not the vectors); the output renormalizes them."
-msgstr "調整レイヤーはノーマルのチャンネルの値（ベクトルではなく色の値）を変えます。出力では正規化し直します。"
 
 msgid "Brush value (normal)"
 msgstr "ブラシの値（法線）"
@@ -286,15 +253,6 @@ msgstr "+1 で上に傾く（OpenGL / Unity）"
 
 msgid "Flat brush value (128, 128, 255): paints a flat normal"
 msgstr "平らな値（128, 128, 255）に戻す: 平らな法線を描きます"
-
-msgid "Height → Normal on: the Normal output now has the normal derived from Height under the painted Normal layers (nothing is painted into a layer)."
-msgstr "ハイト → ノーマルをオンにしました: ノーマルの出力に、描いたノーマルのレイヤーの下でハイトから作った法線が入ります（レイヤーには何も描きません）。"
-
-msgid "Height → Normal off: the Normal output is the painted Normal layers only."
-msgstr "ハイト → ノーマルをオフにしました: ノーマルの出力は描いたノーマルのレイヤーだけです。"
-
-msgid "Normal files (Export Images / PNG / PSD) are now written in {0} order. The .ylp texture and the preview stay OpenGL (Unity)."
-msgstr "ノーマルのファイル（画像の書き出し・PNG・PSD）を {0} の向きで書きます。.ylp のテクスチャとプレビューは OpenGL（Unity）のままです。"
 
 # ── メッシュマップのベイク ──
 
@@ -385,9 +343,6 @@ msgstr "アンビエントオクルージョン・ベントノーマル・厚み
 
 msgid "High Poly (optional)"
 msgstr "高ポリ（任意）"
-
-msgid "None (drop a high poly here)"
-msgstr "なし（高ポリをここにドロップ）"
 
 msgid "A second model whose detail is projected onto this one (meshes are read only; nothing is instantiated or changed)"
 msgstr "細部をこのモデルへ投影するもう一つのモデル（メッシュを読むだけで、インスタンス化も変更もしません）"
@@ -496,9 +451,6 @@ msgstr "メッシュマップをベイク"
 msgid "Bake the checked maps from the loaded model. The model, its materials and textures are not changed."
 msgstr "チェックしたマップを読み込んだモデルからベイクします。モデル・マテリアル・テクスチャは変えません。"
 
-msgid "Load a model in Texture Set (or 3D ▸ Demo Cube) to bake."
-msgstr "ベイクするには、テクスチャセットでモデルを読み込んでください（または 3D ▸ デモのキューブ）。"
-
 msgid "Baked Maps"
 msgstr "ベイク済みのマップ"
 
@@ -517,12 +469,6 @@ msgstr "未確認"
 msgctxt "mesh map"
 msgid "missing"
 msgstr "なし"
-
-msgid "{0} is stale and is not used: {1} Bake again to update it."
-msgstr "{0}は古いので使いません: {1} もう一度ベイクすると更新されます。"
-
-msgid "No model is loaded, so the maps cannot be checked against it."
-msgstr "モデルを読み込んでいないので、マップがモデルに合っているか確かめられません。"
 
 msgid "Show on canvas"
 msgstr "重ねて表示"
@@ -543,23 +489,11 @@ msgstr "ベイク済み"
 msgid "Overlapping UVs"
 msgstr "UV の重なり"
 
-msgid "These mesh maps are not in the saved file yet. Save keeps them in the .ylp (they are not part of Undo)."
-msgstr "このメッシュマップはまだ保存したファイルに入っていません。保存すると .ylp に入ります（Undo の対象ではありません）。"
-
 msgid "Clear Mesh Maps"
 msgstr "メッシュマップを消去"
 
 msgid "Remove the baked maps (derived data; the layers do not change)"
 msgstr "ベイクしたマップを消します（派生データで、レイヤーは変わりません）"
-
-msgid "Cleared the mesh maps (derived data; nothing in the layers changed)."
-msgstr "メッシュマップを消しました（派生データで、レイヤーは何も変わっていません）。"
-
-msgid "Load a model (or the demo cube) before baking mesh maps."
-msgstr "メッシュマップをベイクする前にモデル（またはデモのキューブ）を読み込んでください。"
-
-msgid "Mesh maps are baked only from a complete static snapshot that can be painted; this one is incomplete (see the load diagnostics)."
-msgstr "メッシュマップは、描ける完全な静的スナップショットからだけベイクします。このスナップショットは不完全です（読み込みの診断を見てください）。"
 
 msgid "Mesh maps were not baked: {0}"
 msgstr "メッシュマップをベイクしませんでした: {0}"
@@ -573,8 +507,8 @@ msgstr "メッシュマップのベイクが時間の上限に達しました。
 msgid "The mesh-map bake was canceled; the previous maps are unchanged."
 msgstr "メッシュマップのベイクを取り消しました。前のマップはそのままです。"
 
-msgid "Baked {0} at {1}×{2} for slot {3} (rays: {4}): {5}. Mesh maps are derived data, not layers; Save keeps them in the .ylp."
-msgstr "{0}を {1}×{2}、スロット {3} でベイクしました（レイ: {4}）: {5}。メッシュマップはレイヤーではない派生データで、保存すると .ylp に入ります。"
+msgid "Baked {0} at {1}×{2} for slot {3} (rays: {4}): {5}."
+msgstr "{0}を {1}×{2}、スロット {3} でベイクしました（レイ: {4}）: {5}。"
 
 msgid "Baking mesh maps"
 msgstr "メッシュマップをベイク中"
@@ -599,14 +533,11 @@ msgstr "このモデルにはブレンドシェイプがありません。"
 msgid "No BlendShape matches the filter."
 msgstr "絞り込みに合うブレンドシェイプはありません。"
 
-msgid "… {0} more; narrow the filter."
-msgstr "…ほか {0} 件。絞り込んでください。"
+msgid "… {0} more."
+msgstr "…ほか {0} 件。"
 
 msgid "Animation Clip"
 msgstr "アニメーションクリップ"
-
-msgid "None (drop a clip here)"
-msgstr "なし（クリップをここにドロップ）"
 
 msgid "An animation clip to pose the bones with: Generic clips follow bone paths, Humanoid clips use the model's Avatar"
 msgstr "ボーンにポーズを付けるアニメーションクリップ。Generic のクリップはボーンのパスで、Humanoid のクリップはモデルの Avatar で当てます"
@@ -632,9 +563,3 @@ msgstr "ポーズを戻す"
 
 msgid "Back to the pose and BlendShapes the model had when it was loaded"
 msgstr "読み込んだときのポーズとブレンドシェイプに戻します"
-
-msgid "Finish the stroke before changing the pose."
-msgstr "ポーズを変える前にストロークを終えてください。"
-
-msgid "Pose applied to the preview (the model itself is unchanged). Painting follows the posed surface; the texture stays in UV space."
-msgstr "プレビューにポーズを当てました（モデルそのものは変わりません）。描くとポーズを付けた面に沿い、テクスチャは UV 空間のままです。"

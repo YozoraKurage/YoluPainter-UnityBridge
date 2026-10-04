@@ -16,10 +16,11 @@ namespace Yozolab.YoluPainter.Editor.MaterialApply
         public string Property => Edit.property;
         public Vector4 Before { get; internal set; }
         public bool KeywordBefore { get; internal set; }
+        internal MaterialPropertyEdit BeforeEdit;
         public string Describe()
         {
-            var sb = new StringBuilder(Property).Append(": ").Append(MaterialPropertyEdit.Format(Before, Edit.type)).Append(" → ").Append(MaterialPropertyEdit.Format(Edit.value, Edit.type));
-            if (!string.IsNullOrEmpty(Edit.keyword) && KeywordBefore != Edit.keywordEnabled) sb.Append(" (").Append(L.Tr("keyword {0} {1}", Edit.keyword, Edit.keywordEnabled ? L.Tr("on") : L.Tr("off"))).Append(")");
+            var sb = new StringBuilder(Property).Append(": ").Append(BeforeEdit.DescribeValue()).Append(" → ").Append(Edit.DescribeValue());
+            if (Edit.kind == MaterialEditKind.Property && !string.IsNullOrEmpty(Edit.keyword) && KeywordBefore != Edit.keywordEnabled) sb.Append(" (").Append(L.Tr("keyword {0} {1}", Edit.keyword, Edit.keywordEnabled ? L.Tr("on") : L.Tr("off"))).Append(")");
             return sb.ToString();
         }
     }
@@ -28,6 +29,7 @@ namespace Yozolab.YoluPainter.Editor.MaterialApply
     public sealed class MaterialApplyPlan
     {
         public Material Material { get; internal set; }
+        internal Shader Shader;
         public string MaterialPath { get; internal set; }
         public IReadOnlyList<MaterialApplyChange> Changes { get; internal set; } = Array.Empty<MaterialApplyChange>();
         /// <summary>入れられない（シェーダーが変わってプロパティが無い・型が違う）ので外した変更。</summary>
@@ -58,21 +60,26 @@ namespace Yozolab.YoluPainter.Editor.MaterialApply
     {
         public static MaterialApplyPlan Plan(Material material, PreviewMaterialEdits edits)
         {
-            var plan = new MaterialApplyPlan { Material = material };
+            var plan = new MaterialApplyPlan { Material = material, Shader = material != null ? material.shader : null };
             var refusals = new List<string>();
             if (material == null) { refusals.Add(L.Tr("This material slot has no source material.")); plan.Refusals = refusals; return plan; }
             string path = AssetDatabase.GetAssetPath(material);
             plan.MaterialPath = path;
             if (!string.IsNullOrEmpty(path) && !path.EndsWith(".mat", StringComparison.OrdinalIgnoreCase))
-                refusals.Add(L.Tr("The material is part of {0} (an imported model or a built-in asset), which Unity re-creates or does not save. Extract the material (the model's Materials tab) and use the extracted one.", path));
+                refusals.Add(L.Tr("The material is part of {0} (an imported model or a built-in asset), which Unity re-creates or does not save.", path));
             else if (!string.IsNullOrEmpty(path) && !AssetDatabase.IsOpenForEdit(material))
                 refusals.Add(L.Tr("The material {0} is not open for editing (version control).", path));
             var changes = new List<MaterialApplyChange>(); var skipped = new List<string>();
             foreach (var e in edits?.For(material) ?? Enumerable.Empty<MaterialPropertyEdit>())
             {
                 int i = material.shader != null ? material.shader.FindPropertyIndex(e.property) : -1;
-                if (i < 0 || material.shader.GetPropertyType(i) != e.type) { skipped.Add(L.Tr("{0}: the material's shader no longer has this property with the same type.", e.property)); continue; }
-                changes.Add(new MaterialApplyChange { Edit = e, Before = MaterialPropertyEdit.Read(material, e.property, e.type), KeywordBefore = !string.IsNullOrEmpty(e.keyword) && material.IsKeywordEnabled(e.keyword) });
+                if (e.kind == MaterialEditKind.Property && (i < 0 || material.shader.GetPropertyType(i) != e.type)) { skipped.Add(L.Tr("{0}: the material's shader no longer has this property with the same type.", e.property)); continue; }
+                if (e.kind == MaterialEditKind.Property && e.type == ShaderPropertyType.Texture && e.texture != null && (!EditorUtility.IsPersistent(e.texture) || string.IsNullOrEmpty(AssetDatabase.GetAssetPath(e.texture))))
+                { skipped.Add(L.Tr("{0}: a preview-only texture cannot be saved in the material.", e.property)); continue; }
+                if (e.kind == MaterialEditKind.Property && e.type == ShaderPropertyType.Texture && e.texture != null && material.shader.GetPropertyTextureDimension(i) != UnityEngine.Rendering.TextureDimension.Any && e.texture.dimension != material.shader.GetPropertyTextureDimension(i))
+                { skipped.Add(L.Tr("{0}: the texture dimension does not match this shader property.", e.property)); continue; }
+                var before = e.ReadCurrent(material);
+                changes.Add(new MaterialApplyChange { Edit = e.Snapshot(), Before = before.value, BeforeEdit = before, KeywordBefore = !string.IsNullOrEmpty(e.keyword) && material.IsKeywordEnabled(e.keyword) });
             }
             if (changes.Count == 0 && refusals.Count == 0) refusals.Add(L.Tr("Nothing to apply: no property of this material was changed in the Material panel."));
             plan.Changes = changes; plan.Skipped = skipped; plan.Refusals = refusals;
@@ -85,12 +92,13 @@ namespace Yozolab.YoluPainter.Editor.MaterialApply
             if (plan == null) throw new ArgumentNullException(nameof(plan));
             if (!plan.CanApply) throw new InvalidOperationException(string.Join(" ", plan.Refusals.Count > 0 ? plan.Refusals : new[] { "Nothing to apply." }));
             var material = plan.Material;
+            if (material == null || material.shader != plan.Shader) throw new InvalidOperationException(L.Tr("The material changed since the list was made; nothing was applied."));
             // 確かめの間に変わっていないこと（シェーダーの差し替え・値の変更）
             foreach (var c in plan.Changes)
             {
                 int i = material.shader != null ? material.shader.FindPropertyIndex(c.Property) : -1;
-                if (i < 0 || material.shader.GetPropertyType(i) != c.Edit.type || MaterialPropertyEdit.Read(material, c.Property, c.Edit.type) != c.Before)
-                    throw new InvalidOperationException(L.Tr("The material changed since the list was made; nothing was applied. Try again."));
+                if (c.Edit.kind == MaterialEditKind.Property && (i < 0 || material.shader.GetPropertyType(i) != c.Edit.type) || !c.Edit.ReadCurrent(material).SameValue(c.BeforeEdit))
+                    throw new InvalidOperationException(L.Tr("The material changed since the list was made; nothing was applied."));
             }
             Undo.IncrementCurrentGroup();
             int group = Undo.GetCurrentGroup();

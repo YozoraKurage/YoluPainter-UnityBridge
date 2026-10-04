@@ -8,6 +8,25 @@ using Object = UnityEngine.Object;
 
 namespace Yozolab.YoluPainter.Editor.Preview
 {
+    /// <summary>モデルの中のマテリアル 1 つと、それを使うスロット（テクスチャセット 1 つに当たる）。</summary>
+    public sealed class PreviewMaterialGroup
+    {
+        /// <summary>マテリアルの無いスロットの組の名前（Substance Painter の DefaultMaterial に当たる）。</summary>
+        public const string UnassignedName = "Unassigned";
+        public int Index { get; }
+        /// <summary>元のマテリアル（参照だけ。マテリアルの無いスロットの組とデモキューブは null）。</summary>
+        public Material Material { get; }
+        public bool Unassigned => Material == null;
+        public string Name { get; }
+        /// <summary>このマテリアルを使うスロット（平らにした番号、昇順）。</summary>
+        public IReadOnlyList<int> Slots { get; }
+        /// <summary>このマテリアルを使うメッシュ（レンダラー）の名前（重ねない、現れた順）。</summary>
+        public IReadOnlyList<string> Meshes { get; }
+        internal PreviewMaterialGroup(int index, Material material, string name, int[] slots, string[] meshes)
+        { Index = index; Material = material; Name = name ?? ""; Slots = Array.AsReadOnly(slots); Meshes = Array.AsReadOnly(meshes); }
+        public override string ToString() => Name + " (" + string.Join(", ", Slots) + ")";
+    }
+
     public sealed class PreviewLoadReport
     {
         public int LoadedRendererCount { get; internal set; }
@@ -36,6 +55,10 @@ namespace Yozolab.YoluPainter.Editor.Preview
         readonly List<Material> sourceMaterials = new List<Material>();
         readonly List<Color> sourceColors = new List<Color>();
         readonly List<string> slotNames = new List<string>();
+        // スロットごとのメッシュ（レンダラー）の名前と、マテリアルの組（同じ Material のスロットをまとめたもの。テクスチャセット 1 つに当たる）
+        readonly List<string> slotMeshNames = new List<string>();
+        readonly List<PreviewMaterialGroup> materialGroups = new List<PreviewMaterialGroup>();
+        int[] slotGroups = new int[0];
         // 表示するレンダラーと、そのサブメッシュごとのスロット（描き方を切り替えるときに sharedMaterials を入れ替える）
         readonly List<(MeshRenderer renderer, int[] slots)> slotRenderers = new List<(MeshRenderer, int[])>();
         PreviewMaterialView materialView;
@@ -49,12 +72,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
         Vector3 target;
         Rect lastRect;
         public bool HasModel => geometry != null && geometry.TriangleCount > 0;
+        internal bool HasSnapshot => HasModel || pendingTriangleCount > 0;
         /// <summary>今のスナップショットの幾何（読むだけ）。モデルが無ければ null。</summary>
         public SurfaceGeometry Geometry => geometry;
         /// <summary>今のスナップショットの三角形ごとの頂点の属性（法線・接線・頂点カラー・レンダラー名。<see cref="Geometry"/> と同じ並び）。</summary>
         public SurfaceAttributes Attributes => attributes;
-        public bool CanPaint => HasModel && report.CanPaint;
-        public Bounds Bounds => geometry != null ? geometry.Bounds : new Bounds(Vector3.zero, Vector3.one);
+        public bool CanPaint => geometry != null && !IsPreparing && report.CanPaint;
+        public Bounds Bounds => geometry != null ? geometry.Bounds : snapshotBounds;
         public float ModelRadius => Mathf.Max(0.0001f, Bounds.extents.magnitude);
         public float CameraDistance => distance;
         public int SnapshotRevision => revision;
@@ -62,6 +86,14 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>スロットの元のマテリアル（読み込んだモデルの Renderer のもの）。デモキューブや範囲外は null。</summary>
         public Material SourceMaterial(int slot) => slot >= 0 && slot < sourceMaterials.Count ? sourceMaterials[slot] : null;
         public IReadOnlyList<string> MaterialSlotNames => slotNames;
+        /// <summary>マテリアルの組（Substance Painter のテクスチャセットと同じく、モデルの中のマテリアル 1 つ）。同じ Material のオブジェクトを
+        /// 使うスロット（レンダラー × サブメッシュ）を 1 つにまとめ、マテリアルの無いスロットは 1 つの Unassigned にまとめる。並びは最初に
+        /// 現れたスロットの順。デモキューブは Unassigned の 1 つ。</summary>
+        public IReadOnlyList<PreviewMaterialGroup> MaterialGroups => materialGroups;
+        /// <summary>スロットのマテリアルの組の番号（範囲外は −1）。</summary>
+        public int MaterialGroupOfSlot(int slot) => slot >= 0 && slot < slotGroups.Length ? slotGroups[slot] : -1;
+        /// <summary>スロットのメッシュ（レンダラー）の名前（範囲外は null）。</summary>
+        public string SlotMeshName(int slot) => slot >= 0 && slot < slotMeshNames.Count ? slotMeshNames[slot] : null;
         public IReadOnlyList<string> Diagnostics => report.Diagnostics;
         public SurfaceBrushBudget BrushBudget { get; } = new SurfaceBrushBudget();
         public bool LitPreview { get; set; } = true;
@@ -74,7 +106,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>カメラを (yaw, pitch) の向きにして、モデル全体が入るように置き直す（モデルが無ければ何もしない）。</summary>
         public void ViewFrom(float viewYaw, float viewPitch)
         {
-            if (!HasModel) return;
+            if (!HasSnapshot) return;
             target = Bounds.center; yaw = viewYaw; pitch = Mathf.Clamp(viewPitch, -89, 89);
             distance = ModelRadius / Mathf.Sin(15 * Mathf.Deg2Rad) * 1.15f;
             UpdateCamera(lastRect.width > 0 ? lastRect : new Rect(0, 0, 500, 500));
@@ -181,7 +213,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 if (shading != PreviewShading.Material || !ShaderUtil.anythingCompiling) return false;
                 foreach (var (renderer, _) in slotRenderers)
                 {
-                    if (renderer == null) continue;
+                    if (renderer == null || !renderer.enabled) continue;
                     foreach (var m in renderer.sharedMaterials) if (m != null && m.shader != null && !ForwardPassesCompiled(m)) return true;
                 }
                 return false;
@@ -233,11 +265,26 @@ namespace Yozolab.YoluPainter.Editor.Preview
             }
         }
 
-        public PreviewLoadReport Load(GameObject source, PreviewLoadOptions options = null)
+        /// <summary>モデルを読んだ・デモキューブにした後（失敗・モデル無しでも。別スレッドの準備が済んだときにも、もう一度）。持ち主はスロットと
+        /// マテリアルの組の結び付きを作り直す（組は準備の前に決まる）。</summary>
+        public event Action Loaded;
+
+        public PreviewLoadReport Load(GameObject source, PreviewLoadOptions options = null) => LoadCore(source, options, false);
+        internal PreviewLoadReport BeginLoad(GameObject source, PreviewLoadOptions options = null) => LoadCore(source, options, true);
+        PreviewLoadReport LoadCore(GameObject source, PreviewLoadOptions options, bool asynchronous)
+        {
+            try { return LoadSnapshot(source, options, asynchronous); }
+            finally { Loaded?.Invoke(); }
+        }
+
+        PreviewLoadReport LoadSnapshot(GameObject source, PreviewLoadOptions options, bool asynchronous)
         {
             ThrowIfDisposed();
-            ClearModel(); revision++; report = new PreviewLoadReport(); loadOptions = options ?? new PreviewLoadOptions();
-            if (source == null) { report.Diagnostics.Add("Choose a model GameObject or Prefab to load."); return report; }
+            ClearModel(); visibilityRoot = source != null ? source.transform : null; revision++; report = new PreviewLoadReport(); loadOptions = options ?? new PreviewLoadOptions();
+            LoadCount++; Timings = new PreviewLoadTimings();
+            var loadClock = System.Diagnostics.Stopwatch.StartNew();
+            LoadedSource = source; SourceFingerprint = PreviewSourceFingerprint.Of(source);
+            if (source == null) { report.Diagnostics.Add("No model."); return report; }
             EnsurePreview();
             var shader = Shader.Find("Hidden/YoluPainter/PreviewSurface");
             if (shader == null) { report.Diagnostics.Add("The package's neutral preview shader could not be loaded."); return report; }
@@ -283,7 +330,9 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 var matrix = renderer.localToWorldMatrix;
                 AddEntry(renderer, input, matrix, matrix.determinant < 0, origin, shader, ref incomplete, null);
             }
+            Timings.SnapshotMilliseconds = loadClock.Elapsed.TotalMilliseconds; loadClock.Restart();
             var triangles = BuildTriangles();
+            Timings.TrianglesMilliseconds = loadClock.Elapsed.TotalMilliseconds; loadClock.Restart();
             var animator = source.GetComponentInChildren<Animator>(true);
             if (skeleton != null && animator != null && animator.avatar != null && animator.avatar.isValid && animator.avatar.isHuman && skeleton[animator.transform] != null)
             { humanAvatar = animator.avatar; humanRoot = animator.transform; }
@@ -291,24 +340,28 @@ namespace Yozolab.YoluPainter.Editor.Preview
             {
                 if (triangles.Count > 0)
                 {
-                    geometry = new SurfaceGeometry(triangles, revision);
-                    report.TriangleCount = geometry.TriangleCount;
-                    if (geometry.NonManifoldEdgeCount > 0) report.Diagnostics.Add("Nonmanifold edges are not crossed by the surface brush.");
+                    PrepareGeometry(triangles, incomplete, asynchronous);
                     FrameModel();
                 }
             }
             catch (Exception exception)
             { incomplete = true; geometry = null; report.Diagnostics.Add("Invalid mesh snapshot: " + exception.Message); }
-            report.CanPaint = HasModel && !incomplete;
+            report.CanPaint = geometry != null && !incomplete;
             MaterialView.Reset(materials.Count); ApplyRendererMaterials();
-            report.Diagnostics.Add("G1 uses UV0, 0–1 UVs, static readable meshes and an opaque neutral shader. UV tiling, alpha cutouts, shader displacement, exact lilToon/SRP appearance and shader-driven vertex motion are not represented. Skinned meshes show their current pose and BlendShapes, baked on the CPU.");
+            report.Diagnostics.Add("G1 uses UV0, 0–1 UVs, editor mesh snapshots and an opaque neutral shader. UV tiling, alpha cutouts, shader displacement, exact lilToon/SRP appearance and shader-driven vertex motion are not represented. Skinned meshes show their current pose and BlendShapes, baked on the CPU.");
             report.Diagnostics.Add("Overlapping UVs share pixels. Duplicate-position edges may join seams; surface filtering cannot make overlapping UVs independent.");
-            if (incomplete) report.Diagnostics.Add("Surface painting is disabled for this incomplete snapshot, so omitted geometry cannot silently allow painting through clothes. Choose a supported static-mesh root.");
+            if (incomplete) report.Diagnostics.Add("Surface painting is disabled for this incomplete snapshot, so omitted geometry cannot silently allow painting through clothes.");
             return report;
         }
 
         /// <summary>Loads a tool-created cube with six separated UV islands. No source assets or scene objects are needed.</summary>
         public PreviewLoadReport LoadDemoMesh()
+        {
+            try { return LoadDemoSnapshot(); }
+            finally { Loaded?.Invoke(); }
+        }
+
+        PreviewLoadReport LoadDemoSnapshot()
         {
             ThrowIfDisposed(); ClearModel(); revision++; report = new PreviewLoadReport(); EnsurePreview();
             var shader = Shader.Find("Hidden/YoluPainter/PreviewSurface");
@@ -326,11 +379,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 var mesh = new Mesh { name = "Texture painter UV seam demo", hideFlags = HideFlags.HideAndDontSave };
                 meshes.Add(mesh); mesh.SetVertices(vertices); mesh.SetUVs(0, uvs); mesh.SetTriangles(indices, 0); mesh.RecalculateNormals(); mesh.RecalculateTangents(); mesh.RecalculateBounds();
                 var material = new Material(shader) { name = "Seam demo (preview only)", hideFlags = HideFlags.HideAndDontSave };
-                materials.Add(material); sourceTextures.Add(null); sourceColors.Add(Color.white); sourceMaterials.Add(null); slotNames.Add("Seam cube / 0 / Neutral");
+                materials.Add(material); sourceTextures.Add(null); sourceColors.Add(Color.white); sourceMaterials.Add(null); slotNames.Add("Seam cube / 0 / Neutral"); slotMeshNames.Add("Seam cube");
                 var go = new GameObject("Texture painter seam cube (preview only)") { hideFlags = HideFlags.HideAndDontSave };
                 objects.Add(go); preview.AddSingleGO(go);
                 go.AddComponent<MeshFilter>().sharedMesh = mesh;
                 var renderer = go.AddComponent<MeshRenderer>(); renderer.sharedMaterial = material; slotRenderers.Add((renderer, new[] { 0 }));
+                demoIndices = new[] { mesh.GetTriangles(0) };
+                rendererInfos.Add(new PreviewRendererInfo { Index = 0, Key = "demo:0", Names = new[] { "Demo cube" }, Slots = new[] { 0 } });
                 renderer.shadowCastingMode = ShadowCastingMode.Off; renderer.receiveShadows = false;
                 renderer.lightProbeUsage = LightProbeUsage.Off; renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
                 var triangles = new List<SurfaceTriangle>(); var attribute = new SurfaceAttributes.Builder();
@@ -342,6 +397,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                     attribute.Add(demoNormals, demoTangents, null, a, b, c);
                 }
                 attributes = attribute.Build(new[] { "Seam cube" });
+                BuildMaterialGroups();
                 geometry = new SurfaceGeometry(triangles, revision);
                 report.LoadedRendererCount = 1; report.TriangleCount = geometry.TriangleCount; report.CanPaint = true;
                 report.Diagnostics.Add("Demo: a tool-owned cube with six separate UV islands. Paint across a visible cube edge to check seam propagation, then orbit to check that hidden faces stayed unchanged. No source object or asset is created.");
@@ -375,8 +431,6 @@ namespace Yozolab.YoluPainter.Editor.Preview
 
         bool CheckInput(Renderer renderer, Mesh input, ref bool incomplete, ref long triangleTotal)
         {
-            if (!input.isReadable)
-            { incomplete = true; report.Diagnostics.Add(renderer.name + ": mesh is not CPU-readable. Import settings were not changed."); return false; }
             if (input.vertexCount > loadOptions.MaxVerticesPerMesh)
             { incomplete = true; report.Diagnostics.Add(renderer.name + ": exceeds the vertex budget (" + loadOptions.MaxVerticesPerMesh.ToString("N0") + " per mesh)."); return false; }
             long inputTriangles = 0; bool unsupported = false;
@@ -398,7 +452,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             int firstSlot = materials.Count, firstMesh = meshes.Count, firstObject = objects.Count;
             try
             {
-                Mesh mesh = Object.Instantiate(input); // Mesh only: no source GameObject or behaviour is instantiated.
+                Mesh mesh = CopyReadableMesh(input); // メッシュだけを複製し、元のオブジェクトやスクリプトは作らない。
                 mesh.name = input.name + " (paint snapshot)"; mesh.hideFlags = HideFlags.HideAndDontSave; meshes.Add(mesh);
                 var vertices = mesh.vertices;
                 var normalMatrix = matrix.inverse.transpose;
@@ -459,7 +513,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                     material.SetColor("_Color", color); material.SetFloat("_PreviewLit", LitPreview ? 1 : 0);
                     int slot = materials.Count;
                     materials.Add(material); sourceTextures.Add(texture); sourceColors.Add(color); sourceMaterials.Add(original);
-                    slotNames.Add(renderer.name + " / " + sub + " / " + (original != null ? original.name : "Unassigned"));
+                    slotNames.Add(renderer.name + " / " + sub + " / " + (original != null ? original.name : "Unassigned")); slotMeshNames.Add(renderer.name);
                     clonedMaterials[sub] = material;
                     var indices = mesh.GetTriangles(sub);
                     if (mirrored) { for (int i = 0; i < indices.Length; i += 3) { int temp = indices[i + 1]; indices[i + 1] = indices[i + 2]; indices[i + 2] = temp; } mesh.SetTriangles(indices, sub, false); }
@@ -475,7 +529,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 var copy = go.AddComponent<MeshRenderer>(); copy.sharedMaterials = clonedMaterials; slotRenderers.Add((copy, (int[])entry.Slots.Clone()));
                 copy.shadowCastingMode = ShadowCastingMode.Off; copy.receiveShadows = false;
                 copy.lightProbeUsage = LightProbeUsage.Off; copy.reflectionProbeUsage = ReflectionProbeUsage.Off;
-                entries.Add(entry);
+                entries.Add(entry); rendererInfos.Add(RendererInfo(renderer, visibilityRoot, entry.RendererIndex, entry.Slots));
                 report.LoadedRendererCount++;
                 return true;
             }
@@ -488,7 +542,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 sourceMaterials.RemoveRange(firstSlot, sourceMaterials.Count - firstSlot);
                 sourceColors.RemoveRange(firstSlot, sourceColors.Count - firstSlot);
                 slotNames.RemoveRange(firstSlot, slotNames.Count - firstSlot);
-                report.Diagnostics.Add(renderer.name + ": could not build safe mesh snapshot: " + exception.Message);
+                slotMeshNames.RemoveRange(firstSlot, slotMeshNames.Count - firstSlot);
+                report.Diagnostics.Add(renderer.name + ": " + L.Tr("The mesh could not be read in the Editor: Read/Write is off in its model import settings (YoluPainter does not change those settings).") + " " + exception.Message);
                 return false;
             }
         }
@@ -515,15 +570,18 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public void SetBlendShapeWeight(PoseBlendShape shape, float weight)
         {
             if (float.IsNaN(weight) || float.IsInfinity(weight)) throw new ArgumentOutOfRangeException(nameof(weight));
-            SkinAt(shape.Mesh).SetBlendShapeWeight(shape.Index, weight);
+            SkinAt(shape.Mesh).SetBlendShapeWeight(shape.Index, weight); poseChanged = true;
         }
+        bool poseChanged;
+        /// <summary>今の形が、読み込んだときのポーズと BlendShape から変えたものか（ポーズを当てて焼き直した後。戻して焼き直せば false）。</summary>
+        public bool Posed { get; private set; }
         /// <summary>アニメーションクリップの time 秒の姿勢を複製の骨に置く。汎用（Generic）はパスで骨を動かし、Humanoid は元のモデルの
         /// Avatar で筋肉の値から骨の向きを決める（HumanPoseHandler。複製の骨だけを動かす）。形に反映するのは <see cref="ApplyPose"/> のとき。</summary>
         public void SamplePose(AnimationClip clip, float time)
         {
             if (clip == null) throw new ArgumentNullException(nameof(clip));
             if (skeleton == null) throw new InvalidOperationException("The loaded model has no skinned mesh to pose.");
-            time = Mathf.Clamp(time, 0, clip.length);
+            time = Mathf.Clamp(time, 0, clip.length); poseChanged = true;
             if (!clip.humanMotion) { clip.SampleAnimation(skeleton.Root, time); return; }
             if (humanAvatar == null) throw new InvalidOperationException("This is a Humanoid clip, but the loaded model has no valid Humanoid Avatar on its Animator.");
             using (var handler = new HumanPoseHandler(humanAvatar, skeleton[humanRoot]))
@@ -566,12 +624,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>Humanoid のクリップでポーズできるモデルか（元のモデルの Animator に有効な Humanoid の Avatar がある）。</summary>
         public bool HasHumanoidAvatar => humanAvatar != null;
         /// <summary>骨と BlendShape を読み込んだときの状態に戻す。形に反映するのは <see cref="ApplyPose"/> のとき。</summary>
-        public void ResetPose() { skeleton?.Reset(); foreach (var skin in Skins) skin.ResetBlendShapes(); }
+        public void ResetPose() { skeleton?.Reset(); foreach (var skin in Skins) skin.ResetBlendShapes(); poseChanged = false; }
         /// <summary>今の骨と BlendShape でスキンメッシュを焼き直し、表示と当たり判定の形を新しい世代（<see cref="SnapshotRevision"/>）に
         /// 切り替える。UV と三角形の並びは変わらない。ストロークの最中に呼ばない（呼ぶ側が止める）。</summary>
         public bool ApplyPose()
         {
             ThrowIfDisposed();
+            if (IsPreparing) throw new InvalidOperationException(L.Tr("The model is being prepared."));
             if (!HasSkinnedMeshes) return false;
             foreach (var e in entries)
             {
@@ -582,14 +641,18 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 if (vertices.Length != e.Vertices.Length) throw new InvalidOperationException("The baked mesh changed its vertex count.");
                 for (int v = 0; v < vertices.Length; v++) vertices[v] = matrix.MultiplyPoint3x4(vertices[v]) - loadOrigin;
                 e.Vertices = vertices; e.Display.vertices = vertices;
+                // 法線・接線は表示の目に依存させない。隠したインデックスを一時的に戻してから属性を更新する。
+                for (int sub = 0; sub < e.Indices.Length; sub++) e.Display.SetTriangles(e.Indices[sub], sub, false);
                 if (normals.Length == vertices.Length) { for (int n = 0; n < normals.Length; n++) normals[n] = NormalizeNonzero(normalMatrix.MultiplyVector(normals[n])); e.Display.normals = normals; }
                 else e.Display.RecalculateNormals();
                 if (e.HasUv) e.Display.RecalculateTangents();
                 e.Display.RecalculateBounds();
                 e.Normals = e.Display.normals; e.Tangents = e.Display.tangents;
+                for (int sub = 0; sub < e.Indices.Length; sub++) e.Display.SetTriangles(IsVisible(e.RendererIndex, e.Slots[sub]) ? e.Indices[sub] : Array.Empty<int>(), sub, false);
             }
             revision++;
             geometry = new SurfaceGeometry(BuildTriangles(), revision);
+            Posed = poseChanged;
             return true;
         }
 
@@ -598,6 +661,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         {
             var triangles = new List<SurfaceTriangle>(); var attribute = new SurfaceAttributes.Builder(); var names = new List<string>();
             foreach (var e in entries) names.Add(e.Name);
+            BuildMaterialGroups();
             foreach (var e in entries)
                 for (int sub = 0; sub < e.Indices.Length; sub++)
                 {
@@ -608,7 +672,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                         if (Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).sqrMagnitude < 1e-20f) continue;
                         triangles.Add(new SurfaceTriangle(vertices[a], vertices[b], vertices[c],
                             e.HasUv ? e.Uv[a] : Vector2.zero, e.HasUv ? e.Uv[b] : Vector2.zero, e.HasUv ? e.Uv[c] : Vector2.zero,
-                            e.RendererIndex, e.Slots[sub]));
+                            e.RendererIndex, e.Slots[sub], slotGroups[e.Slots[sub]]));
                         attribute.Add(e.Normals, e.HasUv ? e.Tangents : null, e.Colors, a, b, c);
                     }
                 }
@@ -651,7 +715,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         }
         public void FrameModel()
         {
-            if (!HasModel) return;
+            if (!HasSnapshot) return;
             target = Bounds.center; yaw = 25; pitch = 10;
             distance = ModelRadius / Mathf.Sin(15 * Mathf.Deg2Rad) * 1.15f;
             UpdateCamera(lastRect.width > 0 ? lastRect : new Rect(0, 0, 500, 500));
@@ -675,7 +739,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         {
             ThrowIfDisposed();
             if (Event.current != null && Event.current.type != EventType.Repaint) return;
-            if (!HasModel || rect.width < 2 || rect.height < 2) return;
+            if (!HasSnapshot || rect.width < 2 || rect.height < 2) return;
             var texture = RenderCached(rect, EditorGUIUtility.pixelsPerPoint);
             if (texture != null) GUI.DrawTexture(rect, texture, ScaleMode.StretchToFill, false);
         }
@@ -714,6 +778,16 @@ namespace Yozolab.YoluPainter.Editor.Preview
             gui = new Vector2(viewRect.x + v.x * viewRect.width, viewRect.y + (1 - v.y) * viewRect.height);
             return true;
         }
+        /// <summary>カメラの写し（射影 × ワールドからカメラ。rect に合わせてから読む）。点を多く写すとき（ステンシルがテクセルの点を画面へ写す）に、
+        /// 点ごとの <see cref="TryWorldToGui"/> の代わりに使う（<see cref="GuiProjection"/>）。カメラが無ければ false。</summary>
+        public bool TryGetGuiProjection(Rect viewRect, out GuiProjection projection)
+        {
+            projection = default;
+            if (preview == null || viewRect.width <= 0 || viewRect.height <= 0) return false;
+            UpdateCamera(viewRect);
+            projection = new GuiProjection(preview.camera.projectionMatrix * preview.camera.worldToCameraMatrix, viewRect);
+            return true;
+        }
         /// <summary>The camera ray through a GUI point of the 3D view (also outside the model). False without a camera or view.</summary>
         public bool TryGuiRay(Rect viewRect, Vector2 guiPosition, out Ray ray)
         {
@@ -739,13 +813,13 @@ namespace Yozolab.YoluPainter.Editor.Preview
             UpdateCamera(viewRect);
             var viewport = new Vector3((guiPosition.x - viewRect.x) / viewRect.width, 1 - (guiPosition.y - viewRect.y) / viewRect.height, 0);
             // Normalized viewport coordinates are independent of EditorGUIUtility.pixelsPerPoint.
-            return geometry.TryRaycast(preview.camera.ViewportPointToRay(viewport), out hit, true);
+            return PickingGeometry.TryRaycast(preview.camera.ViewportPointToRay(viewport), out hit, true);
         }
         /// <param name="cache">1 回のストロークのあいだテクセルの見え方を覚えるもの（ストロークごとに 1 つ。null なら覚えない）。</param>
         public SurfaceDabResult BuildSurfaceDabs(SurfaceHit hit, float radiusWorld, int width, int height, float hardness = 0.8f, SurfaceVisibilityCache cache = null)
         {
             if (!CanPaint) return new SurfaceDabResult { Diagnostic = "Load a complete supported static mesh snapshot before surface painting." };
-            return geometry.BuildSurfaceDabs(hit, radiusWorld, width, height, preview.camera.transform.position, hardness, BrushBudget, cache);
+            return PickingGeometry.BuildSurfaceDabs(hit, radiusWorld, width, height, preview.camera.transform.position, hardness, BrushBudget, cache);
         }
         // ───────────── シンメトリー ─────────────
 
@@ -756,14 +830,14 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>モデルのローカルの axis に直交し、ルートから offset（シーンの単位）ずらした対称の面。</summary>
         public MirrorPlane SymmetryPlane(SymmetryAxis axis, float offset) => MirrorPlane.FromModel(ModelRootPosition, ModelRootRotation, axis, offset);
         /// <summary><see cref="BuildSurfaceDabs"/> に、対称の面で映した側のダブを合わせたもの（<see cref="SurfaceSymmetry"/>）。</summary>
-        public SymmetricSurfaceDab BuildSymmetricSurfaceDabs(SurfaceHit hit, MirrorPlane plane, float radiusWorld, int width, int height, float hardness = 0.8f, SurfaceVisibilityCache cache = null)
+        public SymmetricSurfaceDab BuildSymmetricSurfaceDabs(SurfaceHit hit, MirrorPlane plane, float radiusWorld, int width, int height, float hardness = 0.8f, SurfaceVisibilityCache cache = null, bool ignoreVisibility = false)
         {
             if (!CanPaint)
             {
                 var refused = new SurfaceDabResult { Diagnostic = "Load a complete supported static mesh snapshot before surface painting." };
                 return new SymmetricSurfaceDab { Original = refused, Result = refused, Outcome = MirrorOutcome.OnPlane };
             }
-            return SurfaceSymmetry.Build(geometry, hit, plane, radiusWorld, width, height, preview.camera.transform.position, hardness, BrushBudget, cache);
+            return SurfaceSymmetry.Build(PickingGeometry, hit, plane, radiusWorld, width, height, preview.camera.transform.position, hardness, BrushBudget, cache, ignoreVisibility);
         }
         /// <summary>今のカメラの位置（プレビューの空間。最後に描いた・当たりを調べた矩形での位置）。</summary>
         public Vector3 CameraPosition => preview != null ? preview.camera.transform.position : Vector3.zero;
@@ -852,11 +926,11 @@ namespace Yozolab.YoluPainter.Editor.Preview
             o.Apply(shapeOverlayMaterial);
             foreach (var (renderer, slots) in slotRenderers)
             {
-                if (renderer == null) continue;
+                if (renderer == null || !renderer.enabled) continue;
                 var filter = renderer.GetComponent<MeshFilter>(); var mesh = filter != null ? filter.sharedMesh : null;
                 if (mesh == null) continue;
                 for (int sub = 0; sub < slots.Length && sub < mesh.subMeshCount; sub++)
-                    if (slots[sub] == o.Slot) { preview.DrawMesh(mesh, renderer.transform.localToWorldMatrix, shapeOverlayMaterial, sub); ShapeOverlayDrawn = true; }
+                    if (MaterialGroupOfSlot(slots[sub]) == o.Material) { preview.DrawMesh(mesh, renderer.transform.localToWorldMatrix, shapeOverlayMaterial, sub); ShapeOverlayDrawn = true; }
             }
         }
         void DisposeShapeOverlay() { if (shapeOverlayMaterial != null) Object.DestroyImmediate(shapeOverlayMaterial); shapeOverlayMaterial = null; }
@@ -935,7 +1009,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         }
         public bool HandleNavigation(Rect rect, Event current)
         {
-            if (current == null || !HasModel) return false;
+            if (current == null || !HasSnapshot) return false;
             int id = GUIUtility.GetControlID("YoluPainterPreviewNavigation".GetHashCode(), FocusType.Passive, rect);
             if (current.type == EventType.MouseDown && rect.Contains(current.mousePosition) && GUIUtility.hotControl == 0 &&
                 (current.button == 1 || current.button == 2 || (current.alt && current.button == 0)))
@@ -972,15 +1046,38 @@ namespace Yozolab.YoluPainter.Editor.Preview
         }
         void ClearModel()
         {
+            CancelPreparation(); PreparationCanceled = false; pendingTriangleCount = 0; snapshotBounds = new Bounds(Vector3.zero, Vector3.one);
             contentVersion++;
-            CancelNavigation(); geometry = null; attributes = null;
+            CancelNavigation(); ClearVisibility(); geometry = null; attributes = null;
             ModelRootPosition = Vector3.zero; ModelRootRotation = Quaternion.identity;
             foreach (var e in entries) e.Skin?.Dispose();
             entries.Clear();
             skeleton?.Dispose(); skeleton = null; humanAvatar = null; humanRoot = null;
             slotRenderers.Clear(); materialView?.Reset(0); DisposeUnlit(); materialChoices.Clear(); materialChoiceKeys.Clear();
             DestroyTail(objects, 0); DestroyTail(meshes, 0); DestroyTail(materials, 0);
-            sourceTextures.Clear(); sourceColors.Clear(); sourceMaterials.Clear(); slotNames.Clear();
+            sourceTextures.Clear(); sourceColors.Clear(); sourceMaterials.Clear(); slotNames.Clear(); slotMeshNames.Clear();
+            materialGroups.Clear(); slotGroups = new int[0]; Posed = false; poseChanged = false;
+        }
+
+        /// <summary>スロットをマテリアルの組にまとめる（同じ Material のオブジェクト。無いスロットは 1 つの Unassigned）。</summary>
+        void BuildMaterialGroups()
+        {
+            materialGroups.Clear(); slotGroups = new int[sourceMaterials.Count];
+            var byMaterial = new Dictionary<Material, int>(); int unassigned = -1;
+            var slots = new List<List<int>>();
+            for (int slot = 0; slot < sourceMaterials.Count; slot++)
+            {
+                var m = sourceMaterials[slot]; int group;
+                if (m == null) { if (unassigned < 0) { unassigned = slots.Count; slots.Add(new List<int>()); } group = unassigned; }
+                else if (!byMaterial.TryGetValue(m, out group)) { group = slots.Count; byMaterial.Add(m, group); slots.Add(new List<int>()); }
+                slots[group].Add(slot); slotGroups[slot] = group;
+            }
+            for (int g = 0; g < slots.Count; g++)
+            {
+                var first = sourceMaterials[slots[g][0]];
+                var meshes = slots[g].Select(s => slotMeshNames.Count > s ? slotMeshNames[s] : null).Where(n => n != null).Distinct().ToArray();
+                materialGroups.Add(new PreviewMaterialGroup(g, first, first != null ? first.name : PreviewMaterialGroup.UnassignedName, slots[g].ToArray(), meshes));
+            }
         }
         static void DestroyTail<T>(List<T> items, int start) where T : Object
         {

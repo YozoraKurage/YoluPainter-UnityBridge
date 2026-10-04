@@ -5,7 +5,7 @@ using Yozolab.YoluPainter.Editor.Preview;
 
 namespace Yozolab.YoluPainter.Editor
 {
-    /// <summary>2D キャンバスに、今のテクスチャセット（マテリアルのスロット）の UV のワイヤーフレームを重ねる（Substance Painter の 2D ビューと同じ）。
+    /// <summary>2D キャンバスに、今のテクスチャセット（マテリアルを使う全部のスロット）の UV のワイヤーフレームを重ねる（Substance Painter の 2D ビューと同じ）。
     /// 表示だけで、文書には何も足さない。辺は 3D ビューのスナップショットの三角形から作り、UV で同じ辺は 1 本にする（UV の継ぎ目では別の辺になる）。</summary>
     public sealed partial class TexturePaintWindow
     {
@@ -15,17 +15,18 @@ namespace Yozolab.YoluPainter.Editor
         internal const int MaxUvWireframeEdges = 1 << 20;
         static readonly Color UvWireframeColor = new Color(.35f, .85f, 1f, .6f);
 
-        SurfaceGeometry uvEdgesGeometry; int uvEdgesSlot = -1; Vector2[] uvEdges; bool uvEdgesTruncated;
+        SurfaceGeometry uvEdgesGeometry; int uvEdgesMaterial = -1; Vector2[] uvEdges; bool uvEdgesTruncated;
         Vector3[] uvEdgesGui; (int, int, float, Vector2, float, bool, Vector2, int) uvEdgesGuiKey;
 
-        /// <summary>スロットの三角形の UV の辺（2 点ずつ並べた UV 座標）。UV で両端が同じ辺は 1 本。上限を超えたら null と truncated。</summary>
-        internal static Vector2[] UvEdges(IReadOnlyList<SurfaceTriangle> triangles, int slot, int maxEdges, out bool truncated)
+        /// <summary>マテリアルの組（<see cref="SurfaceTriangle.Material"/>。テクスチャセット 1 つの全部のスロット）の三角形の UV の辺（2 点ずつ並べた
+        /// UV 座標）。UV で両端が同じ辺は 1 本。上限を超えたら null と truncated。</summary>
+        internal static Vector2[] UvEdges(IReadOnlyList<SurfaceTriangle> triangles, int material, int maxEdges, out bool truncated)
         {
             truncated = false;
             var seen = new HashSet<(float, float, float, float)>(); var edges = new List<Vector2>();
             foreach (var t in triangles)
             {
-                if (t.MaterialSlot != slot) continue;
+                if (t.Material != material) continue;
                 if (!Add(t.UvA, t.UvB) || !Add(t.UvB, t.UvC) || !Add(t.UvC, t.UvA)) { truncated = true; return null; }
             }
             return edges.ToArray();
@@ -45,10 +46,10 @@ namespace Yozolab.YoluPainter.Editor
         {
             var geometry = preview != null && preview.HasModel ? preview.Geometry : null;
             if (geometry == null) return null;
-            if (!ReferenceEquals(geometry, uvEdgesGeometry) || uvEdgesSlot != materialSlot)
+            if (!ReferenceEquals(geometry, uvEdgesGeometry) || uvEdgesMaterial != CurrentMaterialGroup)
             {
-                uvEdges = UvEdges(geometry.Triangles, materialSlot, MaxUvWireframeEdges, out uvEdgesTruncated);
-                uvEdgesGeometry = geometry; uvEdgesSlot = materialSlot; uvEdgesGui = null;
+                uvEdges = UvEdges(geometry.Triangles, CurrentMaterialGroup, MaxUvWireframeEdges, out uvEdgesTruncated);
+                uvEdgesGeometry = geometry; uvEdgesMaterial = CurrentMaterialGroup; uvEdgesGui = null;
             }
             return uvEdges;
         }

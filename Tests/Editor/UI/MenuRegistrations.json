@@ -1,0 +1,397 @@
+{
+  "files": [
+    {
+      "path": "Editor/UI/PaintGui.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(name(item)), Equals(item, value), () => changed(item))"
+      ]
+    },
+    {
+      "path": "Editor/Window/Canvas/TexturePaintWindow.CanvasView.cs",
+      "calls": [
+        "Item(m, \"Rotate View Left\", () => RotateCanvasView(-CanvasRotateStep), free, keys: \"-\")",
+        "Item(m, \"Rotate View Right\", () => RotateCanvasView(CanvasRotateStep), free, keys: \"^\")",
+        "Item(m, \"Reset Rotation\", () => ResetCanvasRotation(), free && canvasAngle != 0, keys: \"Shift+R\")",
+        "Item(m, \"Flip View Horizontally\", () => FlipCanvasView(), free, canvasFlip, \"H\")"
+      ]
+    },
+    {
+      "path": "Editor/Window/Layers/TexturePaintWindow.Anchors.cs",
+      "calls": [
+        "Item(m, \"Add Anchor\", () => AddAnchorTo(AnchorPlacement.Layer), idle && active != null)",
+        "Item(m, \"Remove Anchor\", () => RemoveAnchorOf(a), idle)",
+        "Item(m, \"Add Anchor to Mask\", () => AddAnchorTo(AnchorPlacement.Mask), idle)",
+        "Item(m, \"Remove Mask Anchor\", () => RemoveAnchorOf(a), idle)",
+        "menu.AddItem(new GUIContent(AnchorChoiceName(choice)), choice == g.AnchorId, () => { if (choice != g.AnchorId) TryAction(() => { document.SetGeneratorAnchor(selectedLayer, e.Id, choice, g.AnchorChannel, g.AnchorRead); repaintPixels = true; }); Repaint(); })"
+      ]
+    },
+    {
+      "path": "Editor/Window/Layers/TexturePaintWindow.FillImages.cs",
+      "calls": [
+        "menu.AddDisabledItem(new GUIContent(L.Tr(\"No images\")))",
+        "menu.AddItem(new GUIContent(image.Name + \" (\" + image.Width + \" × \" + image.Height + \")\"), image.Id == current, () => { TryAction(() => SetFillImage(layerId, target, image.Id)); Repaint(); })",
+        "menu.AddSeparator(\"\")",
+        "menu.AddItem(new GUIContent(L.Tr(\"None (use the value)\")), false, () => { TryAction(() => document.SetFillImage(layerId, target, null)); Repaint(); })"
+      ]
+    },
+    {
+      "path": "Editor/Window/Layers/TexturePaintWindow.Filters.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(label), false, () => { AddFilter(target, settings); Repaint(); })",
+        "menu.AddDisabledItem(new GUIContent(label + \" — \" + why))"
+      ]
+    },
+    {
+      "path": "Editor/Window/Layers/TexturePaintWindow.Generators.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(label), false, () => { AddGenerator(target, type); Repaint(); })",
+        "menu.AddDisabledItem(new GUIContent(label + \" — \" + why))"
+      ]
+    },
+    {
+      "path": "Editor/Window/Layers/TexturePaintWindow.GradientRamp.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(RampPresetName(p)), false, () => { var fg = (Color32)brush.color; var bg = (Color32)brush.secondaryColor; Commit(GradientRamp.Preset(preset, new Rgba32(fg.r, fg.g, fg.b, fg.a), new Rgba32(bg.r, bg.g, bg.b, bg.a))); })",
+        "menu.AddItem(new GUIContent(CurvePresetTitle(k)), false, () => Commit(curveRamp.WithCurve(PressureCurve.Presets[k].Points.Select(p => new GradientCurvePoint(p.x, p.y)))))"
+      ]
+    },
+    {
+      "path": "Editor/Window/Layers/TexturePaintWindow.LayerOps.cs",
+      "calls": [
+        "Item(m, \"Cut\", () => RunLayerCommand(LayerCommand.Cut), idle && cuttable, keys: \"Ctrl+X\")",
+        "Item(m, \"Copy\", () => RunLayerCommand(LayerCommand.Copy), idle && copyable, keys: \"Ctrl+C\")",
+        "Item(m, \"Copy Merged\", () => RunLayerCommand(LayerCommand.CopyMerged), idle, keys: \"Ctrl+Shift+C\")",
+        "Item(m, \"Paste\", () => RunLayerCommand(LayerCommand.Paste), idle && PainterClipboard.Content != null, keys: \"Ctrl+V\")",
+        "Item(m, members.Count > 1 ? \"Duplicate Layers\" : \"Duplicate Layer\", () => RunLayerCommand(LayerCommand.Duplicate), idle && active != null, keys: \"Ctrl+J\")",
+        "Item(m, \"Merge Layers\", () => RunLayerCommand(LayerCommand.MergeDown), idle && members.All(l => l.ParentId == members[0].ParentId), keys: \"Ctrl+E\")",
+        "Item(m, \"Merge Group\", () => RunLayerCommand(LayerCommand.MergeDown), idle && document.MergeGroupRefusal(active.Id) == null, keys: \"Ctrl+E\")",
+        "Item(m, \"Merge Down\", () => RunLayerCommand(LayerCommand.MergeDown), idle && active != null && document.MergeDownRefusal(active.Id) == null, keys: \"Ctrl+E\")",
+        "Item(m, \"Merge Visible\", () => RunLayerCommand(LayerCommand.MergeVisible), idle && document.MergeVisibleRefusal() == null, keys: \"Ctrl+Shift+E\")"
+      ]
+    },
+    {
+      "path": "Editor/Window/Layers/TexturePaintWindow.LayerPanels.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(name(item)), Equals(item, value), () => { changed(item); Repaint(); })"
+      ]
+    },
+    {
+      "path": "Editor/Window/Layers/TexturePaintWindow.LayerSelection.cs",
+      "calls": [
+        "m.AddItem(new GUIContent(L.Tr(\"Lock Layers\") + \"/\" + L.Tr(text)), own, () => { if (idle) TryAction(() => ToggleLock(f, !own)); Repaint(); })"
+      ]
+    },
+    {
+      "path": "Editor/Window/Model/TexturePaintWindow.MaterialView.cs",
+      "calls": [
+        "Item(m, \"Neutral Shading\", () => { ShowMaterialIn3D(); Shading = PreviewShading.Neutral; }, true, previewShading == PreviewShading.Neutral)",
+        "Item(m, \"Material Shading\", () => { ShowMaterialIn3D(); Shading = PreviewShading.Material; }, preview.HasModel, previewShading == PreviewShading.Material)"
+      ]
+    },
+    {
+      "path": "Editor/Window/Model/TexturePaintWindow.MeshBake.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(name(item)), Equals(item, value), () => { changed(item); Repaint(); host.Repaint(); })"
+      ]
+    },
+    {
+      "path": "Editor/Window/Model/TexturePaintWindow.ModelShow.cs",
+      "calls": [
+        "AddItem(m, prefix + item.path, item.choose, item.reason == null, item.on, item.keys)",
+        "m.AddSeparator(\"\")",
+        "m.AddHeading(next)",
+        "m.AddRadioItem(content, item.on, () => { TryAction(item.choose); Repaint(); })",
+        "m.AddDisabledItem(content, item.on)",
+        "AddItem(PaintMenu m, string text, Action action, bool enabled, bool on, string keys = null)",
+        "m.AddItem(content, on, () => { TryAction(action); Repaint(); })",
+        "m.AddDisabledItem(content, on)"
+      ]
+    },
+    {
+      "path": "Editor/Window/Model/TexturePaintWindow.PreviewMaterial.cs",
+      "calls": [
+        "Item(m, \"Own Material\", () => UseOriginalMaterial(), true, source == PreviewMaterialSource.Original)",
+        "Item(m, \"Project Material…\", () => { previewMaterialPickerPending = true; Repaint(); RepaintPanelWindowsSoon(); }, true, source == PreviewMaterialSource.Material)",
+        "m.AddSeparator(\"\")",
+        "m.AddItem(new GUIContent(L.Tr(\"Shader\") + \"/\" + name), source == PreviewMaterialSource.Shader && choice.shaderName == name, () => { TryAction(() => UsePreviewShader(s)); Repaint(); })",
+        "m.AddItem(new GUIContent(L.Tr(\"Automatic\")), route == null, () => { TryAction(() => SetChannelRoute(c, null)); Repaint(); })",
+        "m.AddItem(new GUIContent(L.Tr(\"Not Shown\")), route != null && route.property.Length == 0, () => { TryAction(() => SetChannelRoute(c, \"\")); Repaint(); })",
+        "m.AddSeparator(\"\")",
+        "m.AddItem(new GUIContent(text), on, () => { TryAction(() => SetChannelRoute(c, p, k)); Repaint(); })"
+      ]
+    },
+    {
+      "path": "Editor/Window/Model/TexturePaintWindow.Scene.cs",
+      "calls": [
+        "Item(m, L.Tr(\"Camera\") + \"/\" + L.TrIn(\"camera\", \"Front\"), () => ViewFrom(PreviewCameraView.Front), model)",
+        "Item(m, L.Tr(\"Camera\") + \"/\" + L.TrIn(\"camera\", \"Back\"), () => ViewFrom(PreviewCameraView.Back), model)",
+        "Item(m, L.Tr(\"Camera\") + \"/\" + L.TrIn(\"camera\", \"Left\"), () => ViewFrom(PreviewCameraView.Left), model)",
+        "Item(m, L.Tr(\"Camera\") + \"/\" + L.TrIn(\"camera\", \"Right\"), () => ViewFrom(PreviewCameraView.Right), model)",
+        "Item(m, L.Tr(\"Camera\") + \"/\" + L.TrIn(\"camera\", \"Top\"), () => ViewFrom(PreviewCameraView.Top), model)",
+        "Item(m, L.Tr(\"Camera\") + \"/\" + L.Tr(\"Fit to Model\"), FitView, model)",
+        "Item(m, L.Tr(\"Lighting\") + \"/\" + L.TrIn(\"light\", \"Default\"), () => ApplyLightPreset(PreviewLightPreset.Default))",
+        "Item(m, L.Tr(\"Lighting\") + \"/\" + L.Tr(\"From the View\"), () => ApplyLightPreset(PreviewLightPreset.View))",
+        "Item(m, L.Tr(\"Lighting\") + \"/\" + L.Tr(\"From the Left\"), () => ApplyLightPreset(PreviewLightPreset.Left))",
+        "Item(m, L.Tr(\"Lighting\") + \"/\" + L.Tr(\"From the Right\"), () => ApplyLightPreset(PreviewLightPreset.Right))",
+        "Item(m, L.Tr(\"Lighting\") + \"/\" + L.Tr(\"From Behind (Rim)\"), () => ApplyLightPreset(PreviewLightPreset.Rim))",
+        "Item(m, L.Tr(\"Lighting\") + \"/\" + L.Tr(\"From Above\"), () => ApplyLightPreset(PreviewLightPreset.Above))",
+        "Item(m, \"Scene Settings…\", () => OpenScenePopup(new Rect(surfaceRect.xMax - 300, surfaceRect.y, 0, 0)))",
+        "Item(m, \"Reset Scene\", ResetPreviewScene)"
+      ]
+    },
+    {
+      "path": "Editor/Window/Panels/TexturePaintWindow.AssetsPanel.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(L.Tr(AssetKindName(k))), k == assetKind, () => AssetPanelKind = kind)"
+      ]
+    },
+    {
+      "path": "Editor/Window/Panels/TexturePaintWindow.EffectRows.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(L.Tr(\"Remove Anchor\")), false, () => { RemoveAnchorOf(a); if (selectedFilter == a.Id) selectedFilter = Guid.Empty; })",
+        "menu.AddDisabledItem(new GUIContent(L.Tr(\"Remove Anchor\")))",
+        "m.AddItem(new GUIContent(e.Enabled ? L.Tr(\"Turn the filter off\") : L.Tr(\"Turn the filter on\")), false, () => SetEffectEnabled(layerId, id, !e.Enabled))",
+        "m.AddItem(new GUIContent(L.Tr(\"Move up (applied later)\")), false, () => MoveEffect(layerId, id, row.StackIndex + 1))",
+        "m.AddDisabledItem(new GUIContent(L.Tr(\"Move up (applied later)\")))",
+        "m.AddItem(new GUIContent(L.Tr(\"Move down (applied earlier)\")), false, () => MoveEffect(layerId, id, row.StackIndex - 1))",
+        "m.AddDisabledItem(new GUIContent(L.Tr(\"Move down (applied earlier)\")))",
+        "m.AddItem(new GUIContent(L.Tr(\"Remove the filter\")), false, () => RemoveEffect(layerId, id))",
+        "m.AddSeparator(\"\")",
+        "m.AddSeparator(\"\")",
+        "m.AddItem(new GUIContent(L.Tr(\"Bake Filters into Pixels\")), false, BakeFilters)",
+        "m.AddItem(new GUIContent(at + label), false, () => AddFilter(t, st))",
+        "m.AddDisabledItem(new GUIContent(at + label + \" — \" + why))",
+        "m.AddItem(new GUIContent(item), false, () => AddGenerator(t, ty))",
+        "m.AddDisabledItem(new GUIContent(item + \" — \" + why))",
+        "m.AddItem(new GUIContent(L.Tr(\"Paint on Mask\")), editMask && selectedLayer == id, () => { SelectSingleLayer(id); selectedFilter = Guid.Empty; editMask = !(editMask && selectedLayer == id); })",
+        "m.AddItem(new GUIContent(L.TrIn(\"mask\", \"Enabled\")), mask.Enabled, () => TryAction(() => document.SetLayerMaskEnabled(id, !mask.Enabled)))",
+        "m.AddItem(new GUIContent(L.TrIn(\"mask\", \"Invert\")), mask.Inverted, () => TryAction(() => document.SetLayerMaskInverted(id, !mask.Inverted)))",
+        "m.AddSeparator(\"\")",
+        "m.AddItem(new GUIContent(item), false, () => { SelectSingleLayer(id); AddFilter(FilterTarget.Mask, st); })",
+        "m.AddDisabledItem(new GUIContent(item + \" — \" + why))",
+        "m.AddItem(new GUIContent(item), false, () => { SelectSingleLayer(id); AddGenerator(FilterTarget.Mask, ty); })",
+        "m.AddDisabledItem(new GUIContent(item + \" — \" + why))",
+        "m.AddSeparator(\"\")",
+        "m.AddItem(new GUIContent(L.Tr(\"Add Anchor to Mask\")), false, () => { SelectSingleLayer(id); selectedFilter = Guid.Empty; var added = AddAnchorTo(AnchorPlacement.Mask); if (added != null) selectedFilter = added.Id; })",
+        "m.AddItem(new GUIContent(L.Tr(\"Remove Mask Anchor\")), false, () => RemoveAnchorOf(a))",
+        "m.AddSeparator(\"\")",
+        "m.AddItem(new GUIContent(L.Tr(\"Delete Layer Mask\")), false, () => TryAction(() => { document.RemoveLayerMask(id); if (selectedLayer == id) editMask = false; selectedFilter = Guid.Empty; }))"
+      ]
+    },
+    {
+      "path": "Editor/Window/Panels/TexturePaintWindow.LayersPanel.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(L.Tr(lb)), false, () => TryAction(() => selectedLayer = document.AddAdjustmentLayer(L.Tr(lb), mk(), above: AboveSelected()).Id))"
+      ]
+    },
+    {
+      "path": "Editor/Window/Project/NewProjectWindow.cs",
+      "calls": [
+        "menu.AddDisabledItem(content, g == d.Material)",
+        "menu.AddItem(content, g == d.Material, () => { d.Material = material; d.Key = TexturePaintWindow.MaterialKeyOf(groups[material]); error = null; })",
+        "menu.AddItem(new GUIContent(d.CurrentWidth + \" × \" + d.CurrentHeight + \" (\" + L.TrIn(\"size\", \"current\") + \")\"), w == d.CurrentWidth && h == d.CurrentHeight, () => { d.Width = d.CurrentWidth; d.Height = d.CurrentHeight; error = null; })",
+        "menu.AddItem(new GUIContent(label), w == size && h == size, () => { d.Width = chosen; d.Height = chosen; error = null; })"
+      ]
+    },
+    {
+      "path": "Editor/Window/Project/TexturePaintWindow.ExportTemplates.cs",
+      "calls": [
+        "m.AddItem(new GUIContent(L.Tr(\"Export\") + \"/\" + L.Tr(\"Images for {0}…\", t.Name)), false, () => TryAction(() => ExportWithTemplate(t)))"
+      ]
+    },
+    {
+      "path": "Editor/Window/Project/TexturePaintWindow.Library.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(L.Tr(\"Rename…\")), false, () => AssetNameWindow.Open(name, next => { if (this == null) return; if (source == AssetSource.Library) RenameLibraryAsset(id, next); else RenameResource(Guid.Parse(id), next); }))",
+        "menu.AddItem(new GUIContent(L.Tr(\"Remove…\")), false, () => TryAction(() => { if (source == AssetSource.Library) RemoveLibraryAsset(id); else if (ImageResources.TryGetSmart(Guid.Parse(id), out _)) RemoveSmartResource(Guid.Parse(id)); else RemoveResource(Guid.Parse(id)); }))"
+      ]
+    },
+    {
+      "path": "Editor/Window/Shell/TexturePaintWindow.DockLayout.cs",
+      "calls": [
+        "menu.AddSeparator(\"\")",
+        "menu.AddItem(new GUIContent(text), false, () => TryAction(run))"
+      ]
+    },
+    {
+      "path": "Editor/Window/Shell/TexturePaintWindow.Menus.cs",
+      "calls": [
+        "Item(PaintMenu menu, string text, Action action, bool enabled = true, bool on = false, string keys = null)",
+        "menu.AddItem(content, on, () => { TryAction(action); Repaint(); })",
+        "menu.AddDisabledItem(content, on)",
+        "Item(m, \"New Project…\", NewProjectDialog, keys: \"Ctrl+N\")",
+        "Item(m, \"Open…\", OpenProject, keys: \"Ctrl+O\")",
+        "Item(m, \"Recovery…\", ShowRecovery)",
+        "m.AddSeparator(\"\")",
+        "Item(m, \"Save\", () => SaveProject(false), keys: \"Ctrl+S\")",
+        "Item(m, \"Save As…\", () => SaveProject(true), keys: \"Ctrl+Shift+S\")",
+        "m.AddSeparator(\"\")",
+        "Item(m, \"Import PSD…\", ImportPsd)",
+        "Item(m, \"Import Image Resource…\", ImportImageResourceDialog)",
+        "m.AddItem(new GUIContent(L.Tr(\"Export\") + \"/\" + L.Tr(\"Channel as PNG…\")), false, () => TryAction(ExportPng))",
+        "m.AddItem(new GUIContent(L.Tr(\"Export\") + \"/\" + L.Tr(\"All Channels as Images…\")), false, () => TryAction(ExportImages))",
+        "m.AddItem(new GUIContent(L.Tr(\"Export\") + \"/\" + L.Tr(\"Channel as PSD…\")), false, () => TryAction(ExportPsd))",
+        "m.AddSeparator(L.Tr(\"Export\") + \"/\")",
+        "Item(m, \"Assign to lilToon Material…\", AssignToLilToon)",
+        "m.AddSeparator(\"\")",
+        "Item(m, \"Project Configuration…\", ProjectConfigurationDialog)",
+        "Item(m, \"Project Settings…\", OpenSettings)",
+        "Item(m, \"Undo\", () => document.Undo(), document.CanUndo, keys: \"Ctrl+Z\")",
+        "Item(m, \"Redo\", () => document.Redo(), document.CanRedo, keys: \"Ctrl+Shift+Z / Ctrl+Y\")",
+        "m.AddSeparator(\"\")",
+        "m.AddSeparator(\"\")",
+        "Item(m, \"Free Transform\", () => Tool = PaintTool.Move, keys: \"V\")",
+        "Item(m, \"Flip Horizontal\", () => TransformSelected(0, 0, 0, -1, 1, L.Tr(\"Flipped horizontally.\")))",
+        "Item(m, \"Flip Vertical\", () => TransformSelected(0, 0, 0, 1, -1, L.Tr(\"Flipped vertically.\")))",
+        "Item(m, \"Rotate 90° Clockwise\", () => TransformSelected(0, 0, -90, 1, 1, L.Tr(\"Rotated 90° clockwise.\")))",
+        "Item(m, \"Rotate 90° Counter-clockwise\", () => TransformSelected(0, 0, 90, 1, 1, L.Tr(\"Rotated 90° counter-clockwise.\")))",
+        "m.AddSeparator(\"\")",
+        "Item(m, \"Preferences…\", OpenSettings)",
+        "Item(m, \"New Layer\", AddPaintLayer, keys: \"Ctrl+Shift+N\")",
+        "Item(m, \"New Fill Layer\", AddFillLayerHere)",
+        "m.AddItem(new GUIContent(L.Tr(\"New Adjustment Layer\") + \"/\" + L.Tr(lb)), false, () => TryAction(() => selectedLayer = document.AddAdjustmentLayer(L.Tr(lb), mk(), above: AboveSelected()).Id))",
+        "Item(m, \"Group Layers\", GroupSelectedLayers, active != null, keys: \"Ctrl+G\")",
+        "Item(m, \"Ungroup\", UngroupSelected, active != null && active.IsGroup, keys: \"Ctrl+Shift+G\")",
+        "m.AddSeparator(\"\")",
+        "Item(m, \"Save Brush to Assets\", () => SaveShelfBrush(), stroke == null && !toolDragging)",
+        "Item(m, \"Save Material to Assets\", () => SaveShelfMaterial(), stroke == null && !toolDragging)",
+        "Item(m, \"Save as Smart Material\", () => SaveSmartMaterial(), active != null && stroke == null && !toolDragging)",
+        "Item(m, \"Save Mask as Smart Mask\", () => SaveSmartMask(), active?.Mask != null && stroke == null && !toolDragging)",
+        "m.AddSeparator(\"\")",
+        "Item(m, \"Add Layer Mask\", () => { document.AddLayerMask(selectedLayer); editMask = true; }, active != null)",
+        "Item(m, \"Edit Layer Mask\", () => editMask = !editMask, true, editMask)",
+        "Item(m, \"Delete Layer Mask\", () => { document.RemoveLayerMask(selectedLayer); editMask = false; })",
+        "Item(m, \"Clip to Layer Below\", () => document.SetLayerClipping(selectedLayer, !active.Clipping), active != null, active != null && active.Clipping, \"Ctrl+Alt+G\")",
+        "m.AddSeparator(\"\")",
+        "Item(m, \"Rasterize Path\", () => document.Rasterize(selectedLayer), active?.Path != null)",
+        "Item(m, \"Bake Filters into Pixels\", BakeFilters, active != null && (active.Filters.Count > 0 || active.Mask != null && active.Mask.Filters.Count > 0))",
+        "m.AddSeparator(\"\")",
+        "Item(m, \"Move Layer Up\", () => MoveSelectedLayer(+1), active != null, keys: \"Ctrl+]\")",
+        "Item(m, \"Move Layer Down\", () => MoveSelectedLayer(-1), active != null, keys: \"Ctrl+[\")",
+        "Item(m, \"Show Layers\", ToggleSelectedVisibility, true, keys: \"Ctrl+,\")",
+        "Item(m, \"Hide Layers\", ToggleSelectedVisibility, chosen.Count > 0, keys: \"Ctrl+,\")",
+        "m.AddSeparator(\"\")",
+        "Item(m, \"Delete Layers\", DeleteSelectedLayer, document.Layers.Count > 1)",
+        "Item(m, \"Delete Layer\", DeleteSelectedLayer, document.Layers.Count > 1)",
+        "m.AddItem(paint, on, () => { TryAction(() => document.SetChannelEnabled(id, ch, !on)); Repaint(); })",
+        "m.AddDisabledItem(paint)",
+        "m.AddItem(new GUIContent(text), false, () => { TryAction(() => document.SetChannelBlend(id, ch, default)); Repaint(); })",
+        "Item(m, \"All\", () => document.SetSelection(SelectionMask.All(document)), keys: \"Ctrl+A\")",
+        "Item(m, \"Deselect\", () => document.ClearSelection(), document.Selection != null, keys: \"Ctrl+D\")",
+        "Item(m, \"Inverse\", () => document.SetSelection(document.Selection.Invert()), document.Selection != null, keys: \"Ctrl+Shift+I\")",
+        "m.AddSeparator(\"\")",
+        "Item(m, \"Grow\", () => ModifySelection(SelectionModifyKind.Grow), any)",
+        "Item(m, \"Shrink\", () => ModifySelection(SelectionModifyKind.Shrink), any)",
+        "Item(m, \"Border\", () => ModifySelection(SelectionModifyKind.Border), any)",
+        "Item(m, \"Feather\", () => ModifySelection(SelectionModifyKind.Feather), any)",
+        "Item(m, \"Sharpen Edge\", () => ModifySelection(SelectionModifyKind.Sharpen), any)",
+        "m.AddItem(content, false, () => AddFilter(t, settings))",
+        "m.AddDisabledItem(new GUIContent(prefix + L.Tr(label) + \" — \" + why))",
+        "m.AddSeparator(\"\")",
+        "m.AddItem(new GUIContent(prefix + label), false, () => AddGenerator(t, ty))",
+        "m.AddDisabledItem(new GUIContent(prefix + label + \" — \" + why))",
+        "Item(m, \"Choose Model…\", () => EditorGUIUtility.ShowObjectPicker<GameObject>(model, false, \"t:Model t:Prefab\", ModelPickerId))",
+        "Item(m, \"Demo Cube\", LoadDemoCube)",
+        "Item(m, \"Bake Mesh Maps…\", () => OpenMeshBakeWindow())",
+        "m.AddSeparator(\"\")",
+        "Item(m, \"Light with Normal Output\", () => PreviewNormals = !previewNormals, true, previewNormals)",
+        "m.AddSeparator(\"\")",
+        "m.AddSeparator(\"\")",
+        "Item(m, \"2D Canvas\", () => View = ViewMode.Canvas, true, viewMode == ViewMode.Canvas, \"F1\")",
+        "Item(m, \"3D View\", () => View = ViewMode.Model, true, viewMode == ViewMode.Model, \"F2\")",
+        "Item(m, \"2D + 3D\", () => View = ViewMode.Split, true, viewMode == ViewMode.Split, \"F3\")",
+        "Item(m, \"Swap 2D and 3D\", () => ViewsSwapped = !viewsSwapped, true, viewsSwapped)",
+        "Item(m, \"UV Wireframe\", () => ShowUvWireframe = !showUvWireframe, preview.HasModel, showUvWireframe)",
+        "Item(m, \"Redraw Rate in the Status Bar\", () => ShowRedrawRate = !showRedrawRate, true, showRedrawRate)",
+        "m.AddSeparator(\"\")",
+        "Item(m, \"Zoom In\", () => ZoomCanvasView(canvasZoom * 1.25f), keys: \"Ctrl++\")",
+        "Item(m, \"Zoom Out\", () => ZoomCanvasView(canvasZoom / 1.25f), keys: \"Ctrl+-\")",
+        "Item(m, \"Fit on Screen\", () => FitCanvasView(), stroke == null, keys: \"Ctrl+0\")",
+        "m.AddSeparator(\"\")",
+        "Item(m, panel.Title, () => ShowOrHidePanel(id), true, PanelShown(id))",
+        "m.AddSeparator(\"\")",
+        "m.AddItem(new GUIContent(L.Tr(\"Open in Separate Window\") + \"/\" + L.Tr(panel.Title)), Layout.IsFloating(id), () => { TryAction(() => ToggleFloating(id)); Repaint(); })",
+        "Item(m, \"Return All Panels to the Dock\", DockAllPanels, Layout.Column(DockPlace.Floating).Count > 0)",
+        "Item(m, \"Reset Panel Layout\", ResetDockLayout)",
+        "m.AddSeparator(\"\")",
+        "m.AddItem(new GUIContent(L.Tr(\"Language\") + \"/\" + label), L.Language == lang, () => { L.Language = lang; Repaint(); })",
+        "Item(m, \"Keyboard Shortcuts\", () => Dialogs.Inform(L.Tr(\"Keyboard Shortcuts\"), L.Tr(ShortcutHelp) + \"\\n\" + L.Tr(\"2D view: - / ^ (or =) rotate 15° · R + drag rotates (with Shift in 15° steps) · Shift + middle drag rotates · Shift+R resets the rotation · H flips horizontally · Ctrl+0 also resets the rotation\") + \"\\n\" + L.Tr(\"Shift+W ID colour select (click a part on the 2D canvas or the 3D view; needs a baked ID map)\") + \"\\n\" + L.Tr(\"3D view: C shows one channel at a time (unlit) · Shift+B one baked mesh map at a time · Shift+C the material · Ctrl + right drag turns the environment and the light\") + \"\\n\" + L.Tr(\"Stencil (Properties ▸ Stencil): hold T and drag on a view, left turns it (with Shift in 15° steps), middle or Ctrl+left moves it, right or Alt+left resizes it · hold N to paint without it\") + \"\\n\" + L.Tr(\"Q shows or hides the handles of the selected fill layer's projection or decal\") + \"\\n\" + L.Tr(\"Projection box and shape handles: Ctrl snaps (Unity's Scene snap settings) · Shift resizes both faces\") + \"\\n\" + L.Tr(\"Selection tools: Shift adds · Ctrl subtracts · Shift+Ctrl intersects\") + \"\\n\" + L.Tr(\"Move: drag moves · a corner scales · outside the box rotates · arrow keys nudge (Shift: 10 px)\") + \"\\n\" + L.Tr(\"Path: click adds a point · drag moves a point · Delete removes the last point\") + \"\\n\" + L.Tr(\"Clone Stamp: Alt+click sets the source · Polygon Fill: click or drag over the model or its UVs\")))",
+        "Item(m, \"Implementation Limits\", () => Dialogs.Inform(L.Tr(\"Implementation Limits\"), L.Tr(LimitsHelp)))",
+        "Item(m, \"Plugins…\", ShowPluginList)",
+        "m.AddSeparator(\"\")",
+        "m.AddItem(new GUIContent(L.Tr(\"Developer: Pen Input\")), PenInputEnabled, () => PenInputEnabled = !PenInputEnabled)"
+      ]
+    },
+    {
+      "path": "Editor/Window/Shell/TexturePaintWindow.Shell.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(p.Category + \"/\" + p.Name), brush.presetId == p.Id, () => ApplyPreset(p))",
+        "menu.AddItem(new GUIContent(p.Category + \"/\" + p.Name), brush.presetId == p.Id, () => ApplyPreset(p))",
+        "menu.AddItem(new GUIContent(library.MenuName + \"/\" + (string.IsNullOrEmpty(p.Category) ? \"\" : p.Category + \"/\") + p.Name), brush.presetId == p.Id, () => ApplyPreset(p))",
+        "menu.AddSeparator(\"\")",
+        "menu.AddItem(new GUIContent(L.Tr(\"Import Brushes…\")), false, () => TryAction(ImportBrushes))",
+        "menu.AddItem(new GUIContent(L.Tr(\"Change Icon…\")), false, () => PickToolIcon(id, false))",
+        "menu.AddItem(new GUIContent(L.Tr(\"Change Selected Icon…\")), false, () => PickToolIcon(id, true))",
+        "menu.AddItem(new GUIContent(L.Tr(\"Reset Icon\")), false, () => TryAction(() => { PainterToolIcons.ResetUserIcon(id); message = L.Tr(\"The tool icon is back to the bundled one.\"); }))",
+        "menu.AddDisabledItem(new GUIContent(L.Tr(\"Reset Icon\")))",
+        "menu.AddSeparator(\"\")",
+        "menu.AddItem(new GUIContent(L.Tr(\"Open Icon Folder\")), false, () => { System.IO.Directory.CreateDirectory(PainterToolIcons.UserFolder); EditorUtility.RevealInFinder(PainterToolIcons.UserFolder); })"
+      ]
+    },
+    {
+      "path": "Editor/Window/TexturePaintWindow.Plugins.cs",
+      "calls": [
+        "menu.AddSeparator(\"\")",
+        "menu.AddItem(content, false, () => RunPluginCommand(c))",
+        "menu.AddDisabledItem(content)"
+      ]
+    },
+    {
+      "path": "Editor/Window/Tools/TexturePaintWindow.BrushDynamics.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(DualModeName(m)), (int)m == brush.dualMode, () => brush.dualMode = (int)m)",
+        "menu.AddItem(new GUIContent(L.TrIn(\"brush\", \"Round\")), string.IsNullOrEmpty(brush.dualTipId), () => brush.dualTipId = \"\")",
+        "menu.AddItem(new GUIContent(L.Tr(\"Same as the main tip\")), brush.dualTipId == brush.tipId, () => brush.dualTipId = brush.tipId)",
+        "menu.AddItem(new GUIContent(L.TrIn(\"brush\", \"Built-in\") + \"/\" + id), brush.dualTipId == full, () => brush.dualTipId = full)",
+        "menu.AddItem(new GUIContent(L.Tr(\"None\")), string.IsNullOrEmpty(brush.textureId), () => brush.textureId = \"\")",
+        "menu.AddItem(new GUIContent(L.TrIn(\"brush\", \"Built-in\") + \"/\" + id), brush.textureId == full, () => SetTexture(full))",
+        "menu.AddItem(new GUIContent(library.MenuName + \"/\" + preset.Name), brush.textureId == id, () => SetTexture(id))"
+      ]
+    },
+    {
+      "path": "Editor/Window/Tools/TexturePaintWindow.IdColors.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(PartName(part)), part == idEditPart, () => { idEditPart = selected; repaint(); Repaint(); })"
+      ]
+    },
+    {
+      "path": "Editor/Window/Tools/TexturePaintWindow.PolygonFill.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(SurfacePickName(k)), k == surfacePick, () => { surfacePick = k; Repaint(); })"
+      ]
+    },
+    {
+      "path": "Editor/Window/Tools/TexturePaintWindow.PolygonOverlap.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(L.Tr(\"Candidate {0} · triangle {1}\", i + 1, overlapCandidates[i] + 1)), i == overlapChoice, () => { if (ReferenceEquals(geometry, overlapGeometry) && slot == overlapSlot && kind == overlapKind && candidates.SequenceEqual(overlapCandidates)) ChoosePolygonOverlap(choice); })"
+      ]
+    },
+    {
+      "path": "Editor/Window/Tools/TexturePaintWindow.Stencil.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(StencilTilingName(item)), item == stencilTiling, () => { stencilTiling = item; Repaint(); })",
+        "menu.AddDisabledItem(new GUIContent(L.Tr(\"No images\")))",
+        "menu.AddItem(new GUIContent(image.Name + \" (\" + image.Width + \" × \" + image.Height + \")\"), image.Id == current, () => { TryAction(() => SetStencil(image.Id)); Repaint(); })",
+        "menu.AddSeparator(\"\")",
+        "menu.AddItem(new GUIContent(L.Tr(\"None (no stencil)\")), false, () => { TryAction(() => SetStencil(null)); Repaint(); })"
+      ]
+    },
+    {
+      "path": "Editor/Window/Tools/TexturePaintWindow.ToolPanels.cs",
+      "calls": [
+        "menu.AddItem(new GUIContent(CurvePresetTitle(k)), k == shape, () => SetPressureCurve(PressureCurve.Presets[k].Points))",
+        "menu.AddItem(new GUIContent(L.Tr(m.ToString())), m == moveResampling, () => moveResampling = m)"
+      ]
+    }
+  ]
+}

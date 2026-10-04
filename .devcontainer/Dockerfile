@@ -18,8 +18,8 @@ ARG UNITY_IMAGE_VERSION=3
 FROM ubuntu:22.04 AS mesa-builder
 ARG MESA_VERSION=24.2.8
 ENV DEBIAN_FRONTEND=noninteractive
-COPY mesa/build-mesa-d3d12.sh /tmp/build-mesa-d3d12.sh
-RUN MESA_VERSION="${MESA_VERSION}" bash /tmp/build-mesa-d3d12.sh
+COPY mesa/build-mesa-d3d12.sh mesa/d3d12-buffer-cache.patch mesa/d3d12-device-diagnostics.patch /tmp/mesa-build/
+RUN MESA_VERSION="${MESA_VERSION}" bash /tmp/mesa-build/build-mesa-d3d12.sh
 
 # --- 本体 ---------------------------------------------------------------------------------
 FROM unityci/editor:ubuntu-${UNITY_VERSION}-base-${UNITY_IMAGE_VERSION}

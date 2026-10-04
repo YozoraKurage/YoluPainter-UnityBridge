@@ -135,7 +135,7 @@ namespace Yozolab.YoluPainter.Core
                 Tip = Tip, Tips = Tips == null ? null : (BrushTip[])Tips.Clone(), TipSelection = TipSelection, Angle = Angle, Roundness = Roundness, FollowDirection = FollowDirection,
                 SizeJitter = SizeJitter, AngleJitter = AngleJitter, RoundnessJitter = RoundnessJitter, OpacityJitter = OpacityJitter, FlowJitter = FlowJitter,
                 Scatter = Scatter, Count = Count, Seed = Seed, Texture = Texture, TextureDepth = TextureDepth, TextureScale = TextureScale,
-                Stabilizer = Stabilizer, TaperIn = TaperIn, TaperOut = TaperOut, CurveInterpolation = CurveInterpolation }.WithDynamicsOf(this);
+                Stabilizer = Stabilizer, TaperIn = TaperIn, TaperOut = TaperOut, CurveInterpolation = CurveInterpolation, CanvasSymmetry = CanvasSymmetry?.Clone() }.WithDynamicsOf(this).WithStencilOf(this);
         }
         public void Validate()
         {
@@ -159,6 +159,7 @@ namespace Yozolab.YoluPainter.Core
             if (Tips != null && (Tips.Length > 256 || Array.IndexOf(Tips, null) >= 0)) throw new ArgumentException("Tips must hold 1..256 non-null tips.", nameof(Tips));
             if (!Enum.IsDefined(typeof(TipSelection), TipSelection)) throw new ArgumentOutOfRangeException(nameof(TipSelection));
             ValidateDynamics();
+            ValidateCanvasSymmetry();
             if (!Enum.IsDefined(typeof(BrushEffect), Effect)) throw new ArgumentOutOfRangeException(nameof(Effect));
             if (BlurRadius < 1 || BlurRadius > 64) throw new ArgumentOutOfRangeException(nameof(BlurRadius));
             MathUtil.RequireFinite(SmudgeStrength, nameof(SmudgeStrength));
@@ -199,7 +200,7 @@ namespace Yozolab.YoluPainter.Core
         public static int MaxDegreeOfParallelism
         {
             get { return maxDegree; }
-            set { if (value < 0) throw new ArgumentOutOfRangeException(nameof(value), "Use 0 for one thread per processor, or a positive count."); maxDegree = value; }
+            set { if (value < 0) throw new ArgumentOutOfRangeException(nameof(value), "The thread count is 0 (one per processor) or positive."); maxDegree = value; }
         }
         /// <summary>The number of threads an operation starting now may use (at least 1).</summary>
         public static int Degree { get { int d = maxDegree; return d > 0 ? d : Math.Max(1, Environment.ProcessorCount); } }

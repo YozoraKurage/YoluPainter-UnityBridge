@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using Yozolab.YoluPainter.Core.Paths;
 
 namespace Yozolab.YoluPainter.Core
@@ -58,7 +59,11 @@ namespace Yozolab.YoluPainter.Core
         /// throws and leaves nothing behind (this document is untouched either way). Filters that would exceed
         /// <see cref="MaxFilterStackHalo"/> or the filter working budget at the new size are refused the same way.</para>
         /// </summary>
-        public ResampledDocument Resampled(int width, int height, CanvasResampling resampling, long? sourceBudgetBytes = null)
+        public ResampledDocument Resampled(int width, int height, CanvasResampling resampling, long? sourceBudgetBytes = null) => Resampled(width, height, resampling, sourceBudgetBytes, TileSize);
+
+        /// <summary><see cref="Resampled(int, int, CanvasResampling, long?)"/> into a document of another tile size (a smart material placed
+        /// into a texture set that uses another one; at the same size with Nearest the pixels are copied as they are).</summary>
+        internal ResampledDocument Resampled(int width, int height, CanvasResampling resampling, long? sourceBudgetBytes, int tileSize)
         {
             EnsureNoStroke();
             if (width < 1 || height < 1 || width > MaxNativeSide || height > MaxNativeSide)
@@ -69,13 +74,14 @@ namespace Yozolab.YoluPainter.Core
             double sx = width / (double)Width, sy = height / (double)Height, scale = Math.Sqrt(sx * sy);
             var xs = new ResampleAxis(Width, width, resampling); var ys = new ResampleAxis(Height, height, resampling);
             var notes = new List<string>(); var surfacePaths = new List<Guid>();
-            var copy = new PaintDocument(width, height, TileSize, undoBudgetBytes, Id)
+            var copy = new PaintDocument(width, height, tileSize, undoBudgetBytes, Id)
             {
                 sourceBudgetBytes = budget, activeStrokeBudgetBytes = activeStrokeBudgetBytes, minimumUndoSteps = minimumUndoSteps,
                 filterWorkingBudget = filterWorkingBudget, filterCacheBudget = filterCacheBudget, filterBlockPixels = filterBlockPixels,
                 fillImageCacheBudget = fillImageCacheBudget, imageResources = imageResources,
             };
             copy.normalSettings = ScaledNormalSettings(normalSettings, scale, notes);
+            copy.idColors = idColors;
             string size = width + "×" + height;
             Action<long> ensure = growth =>
             {
@@ -90,7 +96,7 @@ namespace Yozolab.YoluPainter.Core
                 foreach (var entry in layer.Channels)
                 {
                     var surface = target.GetChannel(entry.Key);
-                    if (canvasPath != null && canvasPath.Channel == entry.Key) continue; // 下で縮尺したパスから描き直す
+                    if (canvasPath != null && canvasPath.Paints.Any(m => m.Channel == entry.Key)) continue; // 下で縮尺したパスから描き直す
                     CanvasResampler.Resample(entry.Value, surface, xs, ys, resampling, entry.Key == PaintChannel.Normal, ensure);
                 }
                 foreach (PaintChannel channel in Enum.GetValues(typeof(PaintChannel)))
@@ -106,25 +112,29 @@ namespace Yozolab.YoluPainter.Core
                 {
                     var scaled = ScaledCanvasPath(canvasPath, sx, sy, scale, layer.Name, notes);
                     target.Path = scaled;
-                    SparseTileSurface rendered;
-                    try { rendered = CanvasPathRenderer.Render(copy, scaled); }
+                    IReadOnlyDictionary<PaintChannel, SparseTileSurface> rendered;
+                    try { rendered = CanvasPathRenderer.RenderChannels(copy, scaled); }
                     catch (InvalidOperationException ex) { throw new InvalidOperationException("The path on '" + layer.Name + "' cannot be drawn at " + size + ": " + ex.Message + " Nothing was changed.", ex); }
-                    var surface = target.GetChannel(scaled.Channel);
-                    foreach (var coord in rendered.EnumerateTileCoordinates())
+                    foreach (var entry in rendered)
                     {
-                        var tile = rendered.Capture(coord);
-                        ensure(tile.ByteSize); surface.EnsureGrowth(tile.ByteSize); surface.Restore(coord, tile);
+                        var surface = target.GetChannel(entry.Key);
+                        foreach (var coord in entry.Value.EnumerateTileCoordinates())
+                        {
+                            var tile = entry.Value.Capture(coord);
+                            ensure(tile.ByteSize); surface.EnsureGrowth(tile.ByteSize); surface.Restore(coord, tile);
+                        }
                     }
                 }
                 else if (layer.Path is SurfacePath) { target.Path = layer.Path; surfacePaths.Add(layer.Id); }
                 CopyFilters(copy, layer, target, scale, size, notes);
+                CopyAnchors(copy, layer, target); // Anchor は同じ ID・名前のまま（読む段の参照もそのまま通じる）
             }
             copy.ValidateStructure();
             // ロックは最後に写す（写しの層へのフィルターなどの追加をロックが断らないように）。大きさの変更はロックに関わらず全部の層に効く（Photoshop の画像解像度と同じ）
             foreach (var layer in layers) copy.SetLocksForLoad(copy.GetLayer(layer.Id), layer.Locks);
             if (selection != null)
             {
-                var resized = selection.ResampledTo(width, height, xs, ys, resampling);
+                var resized = selection.ResampledTo(width, height, xs, ys, resampling, tileSize);
                 copy.selection = resized.IsEmpty ? null : resized;
                 if (copy.selection == null) notes.Add("The selection was too small to keep at " + size + "; nothing is selected.");
             }
@@ -144,6 +154,7 @@ namespace Yozolab.YoluPainter.Core
                     target = copy.AddFillLayer(layer.Name, values, layer.Id);
                     // 画像と投影は UV・モデルの空間で決まるので、大きさによらずそのまま写す
                     if (layer.FillImages.Count > 0 || !layer.Projection.Equals(FillProjection.Default)) copy.SetFillImagesForLoad(target, layer.FillImages, layer.Projection);
+                    if (layer.FillGradients.Count > 0) copy.SetFillGradientsForLoad(target, layer.FillGradients);
                     break;
                 case LayerKind.Adjustment: target = copy.AddAdjustmentLayer(layer.Name, layer.Adjustment, layer.EnabledChannels, layer.Id); break;
                 case LayerKind.Group: target = copy.AddGroup(layer.Name, layer.Id); break;
@@ -204,7 +215,7 @@ namespace Yozolab.YoluPainter.Core
                 points.Add(new CanvasPoint(x, y, p.Pressure));
             }
             if (clamped) notes.Add("The path on '" + owner + "': points far outside the canvas were moved in to ±" + CanvasPoint.Limit.ToString(CultureInfo.InvariantCulture) + " px.");
-            return new CanvasPath(path.Id, path.Channel, brush, points);
+            return new CanvasPath(path.Id, path.Channel, brush, points, path.Material);
         }
 
         static string Format(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
@@ -213,9 +224,9 @@ namespace Yozolab.YoluPainter.Core
     public sealed partial class SelectionMask
     {
         /// <summary>The selection at another canvas size (amounts resampled like a mask).</summary>
-        internal SelectionMask ResampledTo(int width, int height, ResampleAxis xs, ResampleAxis ys, CanvasResampling resampling)
+        internal SelectionMask ResampledTo(int width, int height, ResampleAxis xs, ResampleAxis ys, CanvasResampling resampling, int tileSize)
         {
-            var mask = new SelectionMask(width, height, TileSize);
+            var mask = new SelectionMask(width, height, tileSize);
             CanvasResampler.Resample(surface, mask.surface, xs, ys, resampling, false, null);
             return mask;
         }

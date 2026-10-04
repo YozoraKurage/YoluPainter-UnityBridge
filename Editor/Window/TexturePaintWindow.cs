@@ -30,7 +30,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>キャンバスでの左ボタンの働き。</summary>
         internal enum PaintTool { Brush, Fill, Gradient, SelectRectangle, SelectEllipse, Lasso, MagicWand, Move, Path, Eyedropper, PolygonFill, IdSelect, Blur, Smudge, Clone }
         PaintTool tool;
-        int materialSlot, resolution = 1024;
+        int resolution = 1024;
         double lastRecovery, lastExternalCheck;
         /// <summary>このドキュメントを取り込んだ PSD のパス（取り込んでからまだ .ylp に保存していなければ保存先の提案に使う）。</summary>
         string importedPsdPath;
@@ -60,6 +60,8 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
         internal bool HasExternalConflict => externalConflict;
+        /// <summary>プロジェクトのモデル（無ければ null。デモキューブも null）。</summary>
+        internal GameObject Model => model;
         internal PaintChannel Channel { get => channel; set { channel = value; repaintPixels = true; } }
         /// <summary>true のあいだ、ストロークは選択レイヤーの画素ではなくマスクに入る。</summary>
         internal bool EditMask { get => editMask; set => editMask = value; }
@@ -71,33 +73,32 @@ namespace Yozolab.YoluPainter.Editor
 
         void OnEnable()
         {
+            var rememberedVisibility = visibility;
+            MigrateSymmetryState();
+            UpgradeBrushState(brush); NormalizeBrushAlpha(brush);
             minSize = new Vector2(980,640); wantsMouseMove = true; wantsMouseEnterLeaveWindow = true; L.LanguageChanged += Repaint; PainterToolIcons.Changed += Repaint;
-            compositor = CreateCompositor(); preview = new IsolatedModelPreview(); ApplyPreviewFrameRate(); // 3D を描く回数の上限（Model/TexturePaintWindow.RedrawRate.cs）
+            compositor = CreateCompositor(); preview = new IsolatedModelPreview(); preview.Loaded += PreviewLoaded; ApplyPreviewFrameRate(); // 3D を描く回数の上限（Model/TexturePaintWindow.RedrawRate.cs）
             if (materialEdits == null) materialEdits = new PreviewMaterialEdits();
             materialEdits.Touch(); preview.MaterialEdits = materialEdits; preview.Shading = previewShading; BindPreviewScene();
-            if (String.IsNullOrEmpty(recoveryRoot)) recoveryRoot=Path.GetFullPath(Path.Combine("Library","YoluPainter","recovery-"+Guid.NewGuid().ToString("N")));
+            if (String.IsNullOrEmpty(recoveryRoot)) recoveryRoot=RecoveryCatalog.NewRoot();
             try
             {
                 if (File.Exists(Path.Combine(recoveryRoot,"current")))
                 {
-                    var snapshot=GenerationStore.Load(recoveryRoot); var recovered=YlpFormat.Open(snapshot.Files);
-                    var sets=ReadTextureSets(recovered); var recoveredResources=ResourceIndex.Load(recovered.Files,recovered.Resources);
-                    ReplaceProject(sets,sets.First(s=>s.Id==recovered.Project.CurrentSet)); AdoptResources(recoveredResources);
-                    ResetSetsBaseline(false); recoveryToken=snapshot.Token; projectCreatedBy=recovered.Info.CreatedBy;
-                    var recoveryNotes=new List<string>();
-                    foreach(var set in sets)RestoreSavedSelection(set,recovered.SetFiles(set.Id),recoveryNotes);
-                    var missingImages=MissingFillImageNote(); if(missingImages!=null)recoveryNotes.Add(missingImages);
-                    message="Recovered native source from the last durable checkpoint. Unsaved edits after that checkpoint may be missing."+(recoveryNotes.Count>0?" "+String.Join(" ",recoveryNotes):"");
+                    RestoreRecovery(recoveryRoot);
                 }
             }
-            catch (Exception ex) { message="Recovery was not loaded: "+ex.Message; }
+            catch (Exception ex) { message=L.Tr("Recovery was not loaded: {0}",ex.Message); }
             resolution=PainterSettings.DefaultResolution;
             if (document==null) CreateDocument(resolution);
             BindDocument(); RestorePenInput();
-            if (model!=null) TryAction(()=>preview.Load(model));
+            if (model!=null) TryAction(()=>{preview.Load(model);ResolveSetMaterials();});
+            visibility = rememberedVisibility ?? new VisibilityState(); appliedVisibility = null; ApplyVisibility();
             EditorApplication.update+=Tick; PainterSettings.Changed+=SettingsChanged; EditorApplication.projectChanged+=OnUnityProjectChanged; HookResources();
             AssemblyReloadEvents.beforeAssemblyReload+=BeforeReload;
             EditorApplication.playModeStateChanged+=PlayModeChanged;
+            CheckRecoveryStorage();
+            NotifyBrushAlphaMigration();
         }
         /// <summary>設定のメモリ予算をドキュメントに入れる。今の画素がすでに予算を超えているときは画素を捨てず、予算を今の量まで
         /// 広げてそう知らせる。</summary>
@@ -134,8 +135,7 @@ namespace Yozolab.YoluPainter.Editor
         void CreateDocument(int size)
         {
             var next=new PaintDocument(size,size,128,PainterSettings.UndoBudgetBytes);
-            int slot=currentSet!=null?materialSlot:0;
-            var set=new TextureSet(next.Id,BaseSetName(slot),slot,next);
+            var set=new TextureSet(next.Id,NumberedSetName(1),YlpMaterialRef.PendingSlot(0),next);
             ReplaceProject(new[]{set},set);
             ApplyBudgets();
             selectedLayer=document.AddLayer(L.Tr("Layer")+" 1").Id; document.ClearHistory(); pristineRevision=document.Revision;
@@ -147,20 +147,27 @@ namespace Yozolab.YoluPainter.Editor
             projectPath=null; projectToken=null; savedRevision=-1; importedPsdPath=null; externalConflict=false; ResetCanvasView(); NewProjectRecord();
             ResetSetsBaseline(false);
         }
-        void OnLostFocus() { FinishStroke(false); CancelShapeDrag(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); preview?.CancelNavigation(); SaveRecovery(); }
-        void BeforeReload() { FinishStroke(false); CancelShapeDrag(); EndLightingDrag(true); preview?.CancelNavigation(); SaveRecovery(); }
-        void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ FinishStroke(false); CancelShapeDrag(); SaveRecovery(); } }
+        void OnLostFocus() { menuAltPending = false; ClearPolygonFillHover(); pickHoverPointer = new Vector2(-100, -100); FinishStroke(false); CancelShapeDrag(); CancelGradientDrafts(); EndLightingDrag(true); CancelToolDrag(); ReleaseCanvasViewInput(); ReleaseStencilInput(); preview?.CancelNavigation(); SaveRecovery(); }
+        void BeforeReload() { PaintMenuSession.CloseFor(this); CancelSmartSave(); FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); CancelGradientDrafts(); EndLightingDrag(true); preview?.CancelNavigation(); preview?.CancelPreparation(); CaptureMaterialInspector(); DisposeMaterialInspector(); SaveRecoveryBeforeLifecycleChange(); }
+        void PlayModeChanged(PlayModeStateChange state) { if(state==PlayModeStateChange.ExitingEditMode){ PaintMenuSession.CloseFor(this); CancelSmartSave(); FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); CancelGradientDrafts(); SaveRecoveryBeforeLifecycleChange(); } }
         void OnDisable()
         {
+            CancelSmartSave();
+            PaintMenuSession.CloseFor(this);
+            CaptureMaterialInspector(); DisposeMaterialInspector();
             DisposePenInput();
-            FinishStroke(false); CancelShapeDrag(); preview?.CancelNavigation(); SaveRecovery();
+            FinishStroke(false); CancelToolDrag(); CancelShapeDrag(); CancelGradientDrafts(); preview?.CancelNavigation(); SaveRecoveryBeforeLifecycleChange(); recoveryWriter=null; lastRecoveryRequest=null;
             EditorApplication.update-=Tick; PainterSettings.Changed-=SettingsChanged; EditorApplication.projectChanged-=OnUnityProjectChanged; UnhookResources(); DisposeAssetThumbnails(); L.LanguageChanged-=Repaint; PainterToolIcons.Changed-=Repaint; AssemblyReloadEvents.beforeAssemblyReload-=BeforeReload; EditorApplication.playModeStateChanged-=PlayModeChanged;
-            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeThumbnails(); DisposeColorPanel(); DisposeTextureSetTextures(); DisposeMaterialChannelTextures(); DisposeModelShowTextures(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
+            DisposeNormalOutput(); DisposeLighting(); DisposeMeshMaps(); DisposeDecalOverlay(); DisposeStencilOverlay(); DisposeThumbnails(); DisposeColorPanel(); DisposeTextureSetTextures(); DisposeMaterialChannelTextures(); DisposeModelShowTextures(); DisposeCanvasShowTextures(); compositor?.Dispose(); preview?.Dispose(); compositor=null; preview=null;
             if(selectionOverlay!=null){DestroyImmediate(selectionOverlay);selectionOverlay=null;overlayFor=null;}
         }
         void Tick()
         {
+            PollRecovery();
             if(document==null) return;
+            TickSmartSave();
+            if(EditorApplication.timeSinceStartup-lastRecoveryStorageCheck>60) CheckRecoveryStorage();
+            TickModelPreparation();
             TickAssetsPanel(); // アセットのパネルが出たら、リソースの出どころを確かめる（TexturePaintWindow.AssetsPanel.cs）
             if(stroke==null && EditorApplication.timeSinceStartup-lastRecovery>PainterSettings.RecoveryIntervalSeconds && !RecoveryIsCurrent()) SaveRecovery();
             if(!String.IsNullOrEmpty(projectPath) && EditorApplication.timeSinceStartup-lastExternalCheck>3) CheckExternalChange();
@@ -169,7 +176,7 @@ namespace Yozolab.YoluPainter.Editor
             // 描いていないあいだは GPU の写しを手放す（Update が来ないと合成器は古い写しを捨てられない）
             if(compositor!=null && compositor.ResidentBytes>0 && EditorApplication.timeSinceStartup-lastComposite>GpuCacheIdleSeconds) compositor.ReleaseResidentCaches();
             RebuildCompositorIfPending(); // 「表示の合成」の設定が変わったのをストロークの終わりまで待っていたら
-            WatchSourceMaterials(); ReconcileMaterialEdits(); RepaintPreviewIfWanted();
+            CaptureMaterialInspector(); WatchSourceMaterials(); ReconcileMaterialEdits(); RepaintPreviewIfWanted();
         }
         long thumbnailRepaintAsked=-1;
         internal const double GpuCacheIdleSeconds=120;
@@ -179,12 +186,13 @@ namespace Yozolab.YoluPainter.Editor
             if(String.IsNullOrEmpty(projectPath)) return;
             lastExternalCheck=EditorApplication.timeSinceStartup;
             externalConflict=YlpStore.HasExternalChange(projectPath,projectToken);
-            if(externalConflict) message="The saved file changed outside this window. Normal save is blocked; use Save As or explicitly reopen after reviewing local edits.";
+            if(externalConflict) message=L.Tr("The saved file changed outside this window; Save is blocked (Save As still works).");
         }
         void OnGUI()
         {
             if(document==null) return;
-            var e=Event.current; var pointerAtStart=e.mousePosition; // 途中のクリップや 3D の描画の後でも同じ位置を使う
+            NoteNewAnchorIssues(); // キーの Undo・ドラッグの並べ替えなど TryAction を通らない編集の後も（文書が変わったときだけ見る）
+            var e=Event.current; if (HandleMenuInput(e)) return; var pointerAtStart=e.mousePosition; // 途中のクリップや 3D の描画の後でも同じ位置を使う
             // 診断がオフなら bool の判定だけ。オンのときはイベントが Use/座標変換される前に読み、最後に計器を重ねる。
             if(penInputEnabled)
             {
@@ -198,6 +206,7 @@ namespace Yozolab.YoluPainter.Editor
             if(e.type==EventType.MouseMove) Repaint(); // マウスの乗った部品の見た目
             // スライダーのドラッグ中の変更は 1 つの Undo にまとめる。離したところで区切る。
             if(e.rawType==EventType.MouseUp) document.EndCoalescing();
+            SyncStencil(); // ステンシルの画像がまだプロジェクトにあるか（Tools/TexturePaintWindow.Stencil.cs）
             HandleModelPicker(e); HandleEnvironmentPicker(e); // 環境のテクスチャを選ぶ窓（Model/TexturePaintWindow.Display3D.cs）
             HandleKeys(e);
             if(e.type==EventType.KeyDown&&HandleToolKeys(e))return false;
@@ -206,17 +215,20 @@ namespace Yozolab.YoluPainter.Editor
             // Repaint が来るので、その間の変更はまとめて 1 回で合成する。
             if(e.type==EventType.Repaint) CountRepaint(); // 描き直しの回数（RedrawRate.cs）
             if(e.type==EventType.Repaint && DisplayNeedsCompositing) RefreshDisplayForFrame(); // 時間で区切る。残りは次の描画へ（Compositing.cs）
+            ApplyVisibility();
             LayoutShell();
             SyncPolygonFillHover(); // ポインタの下の範囲の強調を、ツール・モデル・範囲の種類に合わせる（Tools/TexturePaintWindow.PolygonFill.cs）
             PaintGui.Fill(WindowRect,PaintTheme.WindowBg);
             if(canvasRect.width>0) DrawCanvas();
             if(surfaceRect.width>0 && e.type==EventType.Repaint)
             {
-                PaintGui.Fill(surfaceRect,PaintTheme.CanvasBg); SyncSymmetryPlane(); SyncShapeOverlay(); SyncEnvironment(); preview.Render(surfaceRect); NoteDisplayProblems(); DrawPathMarkers(); DrawShapeGizmo(pointerAtStart);
+                PaintGui.Fill(surfaceRect,PaintTheme.CanvasBg); SyncSymmetryPlane(); SyncShapeOverlay(); SyncEnvironment(); preview.Render(surfaceRect); DrawStencilOverlay3D(); NoteDisplayProblems(); DrawRadialSymmetryAxis(); DrawPathMarkers(); DrawShapeGizmo(pointerAtStart);
                 // 3D の描画（PreviewRenderUtility）の後はイベントのマウスの位置が (0,0) になっているので、外枠のマウスの乗った見た目のために戻す
                 if(Event.current!=null) Event.current.mousePosition=pointerAtStart;
             }
+            DrawHiddenModelNotice();
             DrawShell();
+            DrawModelPreparation();
             if(surfaceRect.width>0){DrawSurfaceBrushCursor(pointerAtStart);DrawMirroredBrushCursor(pointerAtStart);} // 3D の描画の後に GUI の状態を戻してから重ねる
             return true;
         }
@@ -226,10 +238,12 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>schedule の時間の中で合成する（Repaint から。null なら全部）。</summary>
         void RefreshPreviewTextures(CompositeSchedule schedule)
         {
+            BeginPreviewDisplayFrame(schedule);
             TryAction(()=> { compositor.Update(document,channel,schedule); UpdateNormalOutput(); ShowTextureSets(); });
             TryAction(UpdatePreviewLighting);
             TryAction(ShowMaterialChannels);
             TryAction(ShowModelShowTextures); // 1 つのチャンネル・メッシュマップだけの見せ方（Model/TexturePaintWindow.ModelShow.cs）
+            TryAction(UpdateCanvasShowTexture); // 2Dは描き込み先と3Dから独立した表示
             lastComposite=EditorApplication.timeSinceStartup; CompositeCount++;
             renderedRevision=document.Revision; repaintPixels=false;
         }
@@ -239,7 +253,8 @@ namespace Yozolab.YoluPainter.Editor
 
         void TryAction(Action action)
         {
-            try{action();}catch(Exception ex){if(stroke!=null)FinishStroke(false);message=ex is LayerOpException refused?RefusalText(refused):ex.Message;Debug.LogWarning("Texture Painter: "+ex.Message);}
+            try{action();}catch(Exception ex){if(stroke!=null)FinishStroke(false);message=ex is LayerOpException refused?RefusalText(refused):L.Tr(ex.Message);Debug.LogWarning("Texture Painter: "+ex.Message);}
+            NoteNewAnchorIssues(); // 並べ替え・削除などで Anchor の参照が使えなくなったら、知らせに理由を添える（Layers/TexturePaintWindow.Anchors.cs）
         }
     }
 }

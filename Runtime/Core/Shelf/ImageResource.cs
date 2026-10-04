@@ -5,9 +5,9 @@ using System.Security.Cryptography;
 
 namespace Yozolab.YoluPainter.Core.Shelf
 {
-    /// <summary>What a resource is. Only images today; brushes, materials and smart materials join here (each new kind is a new
-    /// .ylp format, so an older YoluPainter refuses the file instead of dropping what it does not know).</summary>
-    public enum ResourceKind { Image = 0 }
+    /// <summary>What a resource is: images (.ylp format 4) and smart materials and smart masks (format 5). Brushes and materials join here
+    /// (each new kind is a new .ylp format, so an older YoluPainter refuses the file instead of dropping what it does not know).</summary>
+    public enum ResourceKind { Image = 0, SmartMaterial = 1, SmartMask = 2, Brush = 3, Material = 4 }
 
     /// <summary>Where a resource's copy came from.</summary>
     public enum ResourceOriginKind
@@ -134,7 +134,7 @@ namespace Yozolab.YoluPainter.Core.Shelf
         public byte[] Resampled(int width, int height, CanvasResampling? resampling = null)
             => ImageResampling.Resample(pixels, Width, Height, width, height, resampling ?? ImageResampling.Automatic(Width, Height, width, height));
         /// <summary>The PNG of this content (made once, then kept).</summary>
-        public byte[] EncodePng() => png ?? (png = RgbaPng.Encode(pixels, Width, Height));
+        public byte[] EncodePng() { lock (pixels) return png ?? (png = RgbaPng.Encode(pixels, Width, Height)); }
 
         /// <summary>Read-only access for code in this assembly (stages that sample the image).</summary>
         internal byte[] Pixels => pixels;
@@ -157,6 +157,8 @@ namespace Yozolab.YoluPainter.Core.Shelf
         public static readonly ResourceOrigin None = new ResourceOrigin(ResourceOriginKind.None, null, null, null, -1, null, 0, false);
         public ResourceOriginKind Kind { get; }
         public string AssetGuid { get; }
+        /// <summary>Unity のファイルの中のオブジェクト ID。0 は旧形式の主アセット参照。</summary>
+        public long LocalFileId { get; }
         public string Path { get; }
         public string SourceStamp { get; }
         public long SourceLength { get; }
@@ -166,15 +168,15 @@ namespace Yozolab.YoluPainter.Core.Shelf
         /// textures give the values they show, not the original file's).</summary>
         public bool ReadThroughGpu { get; }
 
-        ResourceOrigin(ResourceOriginKind kind, string guid, string path, string stamp, long length, string key, int version, bool gpu)
-        { Kind = kind; AssetGuid = guid; Path = path; SourceStamp = stamp; SourceLength = length; BuiltInKey = key; BuiltInVersion = version; ReadThroughGpu = gpu; }
+        ResourceOrigin(ResourceOriginKind kind, string guid, string path, string stamp, long length, string key, int version, bool gpu, long localFileId = 0)
+        { LocalFileId = localFileId; Kind = kind; AssetGuid = guid; Path = path; SourceStamp = stamp; SourceLength = length; BuiltInKey = key; BuiltInVersion = version; ReadThroughGpu = gpu; }
 
-        public static ResourceOrigin UnityAsset(string guid, string path, string stamp, bool readThroughGpu)
+        public static ResourceOrigin UnityAsset(string guid, string path, string stamp, bool readThroughGpu, long localFileId = 0)
         {
             if (!IsAssetGuid(guid)) throw new ArgumentException("A Unity asset GUID is 32 lower-case hex digits.", nameof(guid));
             CheckText(path, nameof(path), MaxPathLength, required: true);
             CheckText(stamp, nameof(stamp), MaxStampLength, required: false);
-            return new ResourceOrigin(ResourceOriginKind.UnityAsset, guid, path, stamp ?? "", -1, null, 0, readThroughGpu);
+            return new ResourceOrigin(ResourceOriginKind.UnityAsset, guid, path, stamp ?? "", -1, null, 0, readThroughGpu, localFileId);
         }
         public static ResourceOrigin File(string path, string sha256, long length)
         {
@@ -185,8 +187,8 @@ namespace Yozolab.YoluPainter.Core.Shelf
         }
         public static ResourceOrigin Library(string fileName, string sha256, long length)
         {
-            CheckText(fileName, nameof(fileName), 255, required: true);
-            if (fileName.IndexOfAny(new[] { '/', '\\' }) >= 0 || fileName == "." || fileName == "..") throw new ArgumentException("A library entry is a file name, not a path.", nameof(fileName));
+            CheckText(fileName, nameof(fileName), MaxPathLength, required: true);
+            if (!IsLibraryPath(fileName)) throw new ArgumentException("A library entry is a safe relative path inside its folder.", nameof(fileName));
             if (!ImageContent.IsHash(sha256)) throw new ArgumentException("A file stamp is a SHA-256 (64 lower-case hex digits).", nameof(sha256));
             if (length < 0) throw new ArgumentOutOfRangeException(nameof(length));
             return new ResourceOrigin(ResourceOriginKind.Library, null, fileName, sha256, length, null, 0, false);
@@ -203,12 +205,16 @@ namespace Yozolab.YoluPainter.Core.Shelf
         {
             switch (Kind)
             {
-                case ResourceOriginKind.UnityAsset: return UnityAsset(AssetGuid, Path, stamp, ReadThroughGpu);
+                case ResourceOriginKind.UnityAsset: return UnityAsset(AssetGuid, Path, stamp, ReadThroughGpu, LocalFileId);
                 case ResourceOriginKind.File: return File(Path, stamp, length);
                 case ResourceOriginKind.Library: return Library(Path, stamp, length);
                 default: return this;
             }
         }
+
+        public static bool IsLibraryPath(string path) => !string.IsNullOrEmpty(path) && path.Length <= MaxPathLength
+            && !path.StartsWith("/", StringComparison.Ordinal) && !path.Contains("\\") && !path.Contains(":")
+            && path.Split('/').All(p => p.Length > 0 && p != "." && p != ".." && !p.Any(c => c < 32 || c == 127));
 
         public static bool IsAssetGuid(string text) => text != null && text.Length == 32 && text.All(c => c >= '0' && c <= '9' || c >= 'a' && c <= 'f');
 

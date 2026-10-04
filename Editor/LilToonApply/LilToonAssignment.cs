@@ -91,7 +91,7 @@ namespace Yozolab.YoluPainter.Editor.LilToonApply
             if (string.IsNullOrEmpty(path)) return Refuse("The material is not an asset, so a change could not be saved.");
             if (!path.EndsWith(".mat", StringComparison.OrdinalIgnoreCase))
                 return Refuse("The material is part of '" + path + "' (an imported model), which Unity re-creates on import. Extract the materials first (the model's Materials tab), then assign to the extracted material.");
-            if (document.HasActiveStroke) return Refuse("Finish the stroke first.");
+            if (document.HasActiveStroke) return Refuse("A stroke is in progress.");
             var report = LilToonAdapter.Inspect(material, options);
             plan.Report = report;
             if (!report.IsApplicable) return Refuse(report.Reasons.Count > 0 ? report.Reasons.ToArray() : new[] { "lilToon is not applicable to this material." });
@@ -183,12 +183,12 @@ namespace Yozolab.YoluPainter.Editor.LilToonApply
         {
             if (plan == null) throw new ArgumentNullException(nameof(plan));
             if (!plan.CanApply) throw new InvalidOperationException(string.Join(" ", plan.Refusals.Count > 0 ? plan.Refusals : new[] { "Nothing to assign." }));
-            if (document.HasActiveStroke) throw new InvalidOperationException("Finish the stroke first.");
+            if (document.HasActiveStroke) throw new InvalidOperationException("A stroke is in progress.");
             var material = plan.Material;
             // 確認の間に変わっていないこと（シェーダーの差し替えなど）を確かめ直す
             var check = LilToonAdapter.Inspect(material, options);
             if (!check.IsApplicable || check.ShaderName != plan.Report.ShaderName || check.Version != plan.Report.Version)
-                throw new InvalidOperationException("The material changed since the plan was made; nothing was changed. Plan again.");
+                throw new InvalidOperationException("The material changed since the plan was made; nothing was changed.");
             if (plan.CreatesFolder) CreateFolder(plan.Folder);
             foreach (var item in plan.Items)
             {

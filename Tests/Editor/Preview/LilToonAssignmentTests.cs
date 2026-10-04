@@ -153,7 +153,7 @@ namespace Yozolab.YoluPainter.Tests
             var layer = d.Layers[0];
             using (var s = d.BeginStroke(layer.Id, PaintChannel.Color, new BrushSettings()))
             {
-                Assert.That(LilToonAssignment.Plan(d, lil, folder, "X").Refusals, Has.Some.Contains("Finish the stroke"));
+                Assert.That(LilToonAssignment.Plan(d, lil, folder, "X").Refusals, Has.Some.Contains("A stroke is in progress"));
                 s.Cancel();
             }
             var refused = LilToonAssignment.Plan(d, standard, folder, "X");

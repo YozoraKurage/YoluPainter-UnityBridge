@@ -12,6 +12,27 @@ namespace Yozolab.YoluPainter.Editor
     {
         int wandTolerance = 32; bool wandContiguous = true, wandSampleAll;
         Color gradientTo = new Color(0, 0, 0, 0); GradientShape gradientShape;
+        [SerializeField] bool gradientBetweenMaterials;
+        [SerializeField] BrushState gradientEndMaterial = new BrushState();
+        internal bool GradientBetweenMaterials { get => gradientBetweenMaterials; set => gradientBetweenMaterials = value; }
+        internal IReadOnlyList<ChannelPaint> GradientEndChannels()
+            => StrokeChannels().Select(m => new ChannelPaint(m.Channel, MaterialValue(gradientEndMaterial, m.Channel))).ToArray();
+        internal void CaptureGradientEndMaterial()
+        {
+            CopyMaterial(brush, gradientEndMaterial); gradientEndMaterial.color = brush.color;
+        }
+        void GradientMaterialSection(UiRows rows)
+        {
+            if (!brush.material || EditingMask) return;
+            gradientBetweenMaterials = PaintGui.FitToggle(Mark("gradient.between-materials", rows.Row()), L.Tr("Between two materials"), gradientBetweenMaterials,
+                L.Tr("Interpolate each channel from the brush material to the end material. Off: fade to transparent."));
+            if (!gradientBetweenMaterials) return;
+            PaintGui.GroupLabel(rows.Row(18), L.Tr("End material"));
+            if (PaintGui.FitButton(Mark("gradient.capture-end", rows.Row(24)), L.Tr("Use current material as end"))) CaptureGradientEndMaterial();
+            foreach (var c in Channels) if (MaterialIncludes(c)) MaterialValueRow(rows, c, gradientEndMaterial, "gradient.end.");
+            float alpha = PaintGui.FitSlider(Mark("gradient.end-alpha", rows.SliderRow()), L.Tr("End alpha"), gradientEndMaterial.color.a, 0, 1, "0.00", "");
+            var color = gradientEndMaterial.color; color.a = alpha; gradientEndMaterial.color = color;
+        }
         // ドラッグで形を決めるツール（グラデーション・矩形/楕円/投げ縄選択）の途中の状態。キャンバスの画素座標（左下原点）
         bool toolDragging; Vector2 toolStart, toolCurrent; readonly List<Vector2> lassoPoints = new List<Vector2>();
         internal int WandTolerance { get => wandTolerance; set => wandTolerance = Mathf.Clamp(value, 0, 255); }
@@ -46,7 +67,7 @@ namespace Yozolab.YoluPainter.Editor
                 }
             }
         }
-        void CancelToolDrag(){toolDragging=false;lassoPoints.Clear();moveBounds=null;}
+        void CancelToolDrag(){toolDragging=false;lassoPoints.Clear();moveBounds=null;if(pathDrag>=0){pathDrag=-1;GUIUtility.hotControl=0;}}
         /// <summary>ブラシ以外のツールのキャンバス入力。2D キャンバスだけで働く。</summary>
         bool HandleToolInput(Event e)
         {
@@ -100,7 +121,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             if(p.x<0||p.y<0||p.x>=document.Width||p.y>=document.Height)return;
             var layer=document.GetLayer(selectedLayer);
-            if(!EditingMask&&layer.Kind!=LayerKind.Raster)throw new InvalidOperationException("Fill paints pixels: select a paint layer, or edit the layer's mask.");
+            if(!EditingMask&&layer.Kind!=LayerKind.Raster)throw new InvalidOperationException(L.Tr("Only a paint layer or a mask can be filled."));
             var b=GetBrush();
             if(!EditingMask)document.EnsurePixelsEditable(selectedLayer,b.Erase); // ロックで断るなら、チャンネルを有効にする前に
             if(!EditingMask&&!brush.material&&!layer.IsChannelEnabled(channel))document.SetChannelEnabled(selectedLayer,channel,true);
@@ -118,7 +139,7 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     if(click)return;
                     var layer=document.GetLayer(selectedLayer);
-                    if(!EditingMask&&layer.Kind!=LayerKind.Raster)throw new InvalidOperationException("A gradient paints pixels: select a paint layer.");
+                    if(!EditingMask&&layer.Kind!=LayerKind.Raster)throw new InvalidOperationException(L.Tr("Only a paint layer or a mask takes a gradient."));
                     var c=GetBrush(); var to=(Color32)gradientTo;
                     var g=new GradientSettings{Shape=gradientShape,X0=a.x,Y0=a.y,X1=b.x,Y1=b.y,From=c.Color,To=new Rgba32(to.r,to.g,to.b,to.a),Opacity=brush.opacity};
                     if(EditingMask)
@@ -126,7 +147,11 @@ namespace Yozolab.YoluPainter.Editor
                         g.From=new Rgba32(0,0,0); g.To=Rgba32.Transparent;
                         document.GradientMask(selectedLayer,g,reveal:c.Erase);
                     }
-                    else if(brush.material)document.GradientMaterial(selectedLayer,StrokeChannels(),g,erase:c.Erase);
+                    else if(brush.material)
+                    {
+                        if (gradientBetweenMaterials) document.GradientMaterial(selectedLayer, StrokeChannels(), GradientEndChannels(), g, erase:c.Erase);
+                        else document.GradientMaterial(selectedLayer,StrokeChannels(),g,erase:c.Erase);
+                    }
                     else
                     {
                         document.EnsurePixelsEditable(selectedLayer);
@@ -145,7 +170,7 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     if(moveMode==MoveMode.Move){var d=MoveDelta(); if(d!=Vector2Int.zero)MoveBy(d.x,d.y); break;}
                     var t=DragTransform(); if(t.IsIdentity)break;
-                    if(Math.Abs(t.Determinant)<1e-6)throw new InvalidOperationException("That would scale to nothing; drag the handle less far.");
+                    if(Math.Abs(t.Determinant)<1e-6)throw new InvalidOperationException(L.Tr("That would scale to nothing."));
                     bool changed=TransformTargets(t,moveResampling);
                     message=!changed?"Nothing changed.":moveMode==MoveMode.Rotate?"Rotated "+DragAngle().ToString("0.#",System.Globalization.CultureInfo.InvariantCulture)+"°.":"Scaled.";
                     repaintPixels=true;break;

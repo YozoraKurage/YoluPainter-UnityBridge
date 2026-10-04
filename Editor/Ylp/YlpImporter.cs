@@ -25,7 +25,7 @@ namespace Yozolab.YoluPainter.Editor
     /// <item>読めないファイルは理由をインポートのエラーに出し、<see cref="YlpImportInfo.error"/> に残す（アセットは消えない）。
     /// .ylp そのものには一切書かない。ダブルクリックで YoluPainter で開く。</item>
     /// </list></summary>
-    [ScriptedImporter(4, "ylp")]
+    [ScriptedImporter(5, "ylp")] // 5: テクスチャセットの一覧のマテリアル（形式 6）
     internal sealed class YlpImporter : ScriptedImporter
     {
         /// <summary>主オブジェクトの識別子。</summary>
@@ -64,21 +64,28 @@ namespace Yozolab.YoluPainter.Editor
         {
             // 形式を先に確かめる（新しすぎる形式は、中身の並びが違うかもしれないので読まずに断る）。合成の画像の置き場は形式で決まる
             // （形式 1・2 は根の composite/、形式 3 からはセットごとの sets/<ID>/composite/）。
-            var head = YlpArchive.Read(data, entry => entry == YlpFormat.InfoName || entry == YlpFormat.ProjectName || entry == YlpFormat.ViewName);
+            var head = YlpArchive.Read(data, entry => entry == YlpFormat.InfoName || entry == YlpFormat.ProjectName || entry == YlpFormat.ViewName || entry == ResourceIndex.EntryName);
             var format = head.TryGetValue(YlpFormat.InfoName, out var record) ? YlpFormat.ReadInfo(record) : new YlpFormatInfo(1, null, null);
             YlpFormat.CheckReadable(format);
             info.format = format.Format; info.savedBy = format.SavedBy?.ToString() ?? ""; info.createdBy = format.CreatedBy?.ToString() ?? "";
+            var resources = head.TryGetValue(ResourceIndex.EntryName, out var resourceIndex) ? ResourceIndex.Read(resourceIndex) : new YlpResourceEntry[0];
+            info.resourceCount = resources.Count;
+            info.brushCount = resources.Count(r => r.Kind == Core.Shelf.ResourceKind.Brush);
+            info.materialCount = resources.Count(r => r.Kind == Core.Shelf.ResourceKind.Material);
+            info.imageCount = resources.Count(r => r.Kind == Core.Shelf.ResourceKind.Image);
+            info.smartMaterialCount = resources.Count(r => r.Kind == Core.Shelf.ResourceKind.SmartMaterial);
+            info.smartMaskCount = resources.Count(r => r.Kind == Core.Shelf.ResourceKind.SmartMask);
             var sets = new List<YlpImportInfo.TextureSetSummary>();
             if (format.Format >= 3)
             {
                 if (!head.TryGetValue(YlpFormat.ProjectName, out var projectBytes)) throw new InvalidDataException("The file has no " + YlpFormat.ProjectName + " (its list of texture sets).");
-                var project = YlpFormat.ReadProject(projectBytes);
+                var project = YlpFormat.ReadProjectOfAnyFormat(projectBytes); // 形式 3〜5 の materialSlot も読む（移行はしない）
                 var composites = YlpArchive.Read(data, entry => YlpFormat.TrySplitSetEntry(entry, out _, out var leaf) && YlpContent.TryParseComposite(leaf, out _));
                 foreach (var set in project.Sets)
                 {
                     string folder = YlpFormat.SetFolder(set.Id);
                     var mine = composites.Where(c => c.Key.StartsWith(folder, StringComparison.Ordinal)).ToDictionary(c => c.Key.Substring(folder.Length), c => c.Value, StringComparer.Ordinal);
-                    sets.Add(DescribeSet(data, mine, YlpFormat.SetEntry(set.Id, YlpArchive.NativeName), set.Name, set.MaterialSlot, set.Id == project.CurrentSet, project.Sets.Count > 1, warnings));
+                    sets.Add(DescribeSet(data, mine, YlpFormat.SetEntry(set.Id, YlpArchive.NativeName), set.Name, MaterialText(set.Material), set.Id == project.CurrentSet, project.Sets.Count > 1, warnings));
                 }
             }
             else
@@ -90,17 +97,20 @@ namespace Yozolab.YoluPainter.Editor
                     catch (InvalidDataException ex) { warnings.Add("The material slot in view.json could not be read (" + ex.Message + "); slot 0 is shown."); }
                 }
                 var composites = YlpArchive.Read(data, entry => YlpContent.TryParseComposite(entry, out _));
-                sets.Add(DescribeSet(data, composites, YlpArchive.NativeName, YlpFormat.MigratedSetName, slot, true, false, warnings));
+                sets.Add(DescribeSet(data, composites, YlpArchive.NativeName, YlpFormat.MigratedSetName, MaterialText(YlpMaterialRef.PendingSlot(slot)), true, false, warnings));
             }
             info.textureSets = sets.ToArray();
             var current = sets.First(s => s.current);
             info.width = current.width; info.height = current.height; info.channels = current.channels; info.fromNativeDocument = current.fromNativeDocument; info.error = "";
         }
 
+        /// <summary>セットが描くマテリアルの見せ方（名前、Unassigned、まだ結び付けていないスロットの番号）。</summary>
+        internal static string MaterialText(YlpMaterialRef m) => m.Unassigned ? "Unassigned" : m.IsPendingSlot ? "slot " + m.Slot : m.Name;
+
         /// <summary>1 つのテクスチャセット（composites はセットの下の名前）。</summary>
-        static YlpImportInfo.TextureSetSummary DescribeSet(byte[] data, Dictionary<string, byte[]> composites, string nativeEntry, string name, int slot, bool current, bool named, List<string> warnings)
+        static YlpImportInfo.TextureSetSummary DescribeSet(byte[] data, Dictionary<string, byte[]> composites, string nativeEntry, string name, string material, bool current, bool named, List<string> warnings)
         {
-            var summary = new YlpImportInfo.TextureSetSummary { name = name, materialSlot = slot, current = current };
+            var summary = new YlpImportInfo.TextureSetSummary { name = name, material = material, current = current };
             if (composites.Count > 0)
             {
                 try { DescribeComposites(composites, summary); return summary; }

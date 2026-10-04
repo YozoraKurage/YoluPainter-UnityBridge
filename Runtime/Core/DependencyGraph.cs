@@ -112,7 +112,7 @@ namespace Yozolab.YoluPainter.Core
         {
             if (!nodes.ContainsKey(id)) throw new KeyNotFoundException("Node not found.");
             foreach (var edge in connections) if (edge.SourceId == id)
-                throw new InvalidOperationException("Node has consumers. Reconnect, bake explicitly, or cancel deletion.");
+                throw new InvalidOperationException("Node has consumers.");
             connections.RemoveAll(edge => edge.TargetId == id); nodes[id].Owner = null; nodes.Remove(id);
         }
         public bool TryMoveNode(Guid id, int layerOrder, int effectOrder, out string reason)

@@ -151,7 +151,7 @@ namespace Yozolab.YoluPainter.Tests
             BeginLine(300, 300);
             Key(window, KeyCode.J, Ctrl);
             Assert.That(d.Layers.Count, Is.EqualTo(count), "no duplicate during a stroke");
-            Assert.That(window.StatusMessage, Does.Contain("Finish the stroke first"));
+            Assert.That(window.StatusMessage, Does.Contain("A stroke is in progress"));
             Assert.That(window.IsStroking, Is.True, "the stroke goes on");
             Mouse(window, EventType.MouseUp, At(window, 360, 300));
             Key(window, KeyCode.J, Ctrl);
@@ -165,7 +165,7 @@ namespace Yozolab.YoluPainter.Tests
             Key(window, KeyCode.C, Ctrl);
             Assert.That(PainterClipboard.Content, Is.Not.Null, window.StatusMessage);
 
-            var hair = window.AddTextureSet(1);
+            var hair = window.AddTextureSet(-1); // モデルが無い: マテリアルに結び付けないセット
             Assert.That(window.Document, Is.SameAs(hair.Document));
             Key(window, KeyCode.V, Ctrl);
             var pasted = hair.Document.GetLayer(window.SelectedLayer);
@@ -188,31 +188,31 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void TheMenusOfferTheLayerOperationsWithTheirKeys()
         {
             var d = window.Document; var layer = d.Layers.Last();
-            var edit = new GenericMenu(); Invoke(window, "EditMenu", edit);
+            var edit = new PaintMenu(); Invoke(window, "EditMenu", edit);
             var texts = LayerMenuTexts(edit);
             Assert.That(texts, Does.Contain("Cut    Ctrl+X")); Assert.That(texts, Does.Contain("Copy    Ctrl+C"));
             Assert.That(texts, Does.Contain("Copy Merged    Ctrl+Shift+C"));
             Assert.That(texts, Does.Contain("Paste    Ctrl+V (disabled)").Or.Contain("Paste    Ctrl+V"));
-            var layers = new GenericMenu(); Invoke(window, "LayerMenu", layers);
+            var layers = new PaintMenu(); Invoke(window, "LayerMenu", layers);
             texts = LayerMenuTexts(layers);
             Assert.That(texts, Does.Contain("Duplicate Layer    Ctrl+J"));
             Assert.That(texts, Does.Contain("Merge Down    Ctrl+E (disabled)"), "the bottom layer has nothing below");
             Assert.That(texts, Does.Contain("Merge Visible    Ctrl+Shift+E"));
             var group = d.GroupLayers(new[] { layer.Id }, "g"); window.SelectedLayer = group.Id;
-            layers = new GenericMenu(); Invoke(window, "LayerMenu", layers);
+            layers = new PaintMenu(); Invoke(window, "LayerMenu", layers);
             Assert.That(LayerMenuTexts(layers), Does.Contain("Merge Group    Ctrl+E"));
             // 項目を選ぶと同じ操作になる
             Run(layers, "Duplicate Layer    Ctrl+J");
             Assert.That(d.GetLayer(window.SelectedLayer).Name, Is.EqualTo("g copy"));
         }
 
-        static IEnumerable LayerMenuItems(GenericMenu menu)
+        static IEnumerable LayerMenuItems(PaintMenu menu)
         {
-            var field = typeof(GenericMenu).GetField("m_MenuItems", BindingFlags.NonPublic | BindingFlags.Instance) ?? typeof(GenericMenu).GetField("menuItems", BindingFlags.NonPublic | BindingFlags.Instance);
-            if (field == null) Assert.Inconclusive("GenericMenu.menuItems is not there in this Unity version.");
+            var field = typeof(PaintMenu).GetField("m_MenuItems", BindingFlags.NonPublic | BindingFlags.Instance) ?? typeof(PaintMenu).GetField("menuItems", BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field == null) Assert.Inconclusive("PaintMenu.menuItems is not there in this Unity version.");
             return (IEnumerable)field.GetValue(menu);
         }
-        static List<string> LayerMenuTexts(GenericMenu menu)
+        static List<string> LayerMenuTexts(PaintMenu menu)
         {
             var texts = new List<string>();
             foreach (var item in LayerMenuItems(menu))
@@ -224,13 +224,13 @@ namespace Yozolab.YoluPainter.Tests
             }
             return texts;
         }
-        static void Run(GenericMenu menu, string text)
+        static void Run(PaintMenu menu, string text)
         {
             foreach (var item in LayerMenuItems(menu))
             {
                 var t = item.GetType();
                 if (((GUIContent)t.GetField("content").GetValue(item)).text != text) continue;
-                ((GenericMenu.MenuFunction)t.GetField("func").GetValue(item))(); return;
+                ((PaintMenu.MenuFunction)t.GetField("func").GetValue(item))(); return;
             }
             Assert.Fail("No menu item " + text);
         }

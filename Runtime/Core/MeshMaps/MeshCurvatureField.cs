@@ -99,7 +99,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             BoundaryEdges = boundary; NonManifoldEdges = nonManifold; InconsistentEdges = inconsistent;
             long need = segmentTotal * (7 * 8 + 4 + 8 + 8);
             if (segmentTotal > int.MaxValue / 8 || need > remainingBytes)
-                throw new MeshBakeRefusedException("Curvature needs about " + (need >> 20) + " MiB for " + segmentTotal + " edge segments, over the remaining bake budget. Use a larger curvature radius or raise the memory budget.");
+                throw new MeshBakeRefusedException("Curvature needs about " + (need >> 20) + " MiB for " + segmentTotal + " edge segments, over the remaining bake budget.");
             TriangleComponent = new int[count];
             for (int i = 0; i < count; i++) TriangleComponent[i] = Find(parent, i);
             int segmentCount = (int)segmentTotal;

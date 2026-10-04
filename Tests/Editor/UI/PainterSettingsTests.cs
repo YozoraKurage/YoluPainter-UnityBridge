@@ -45,6 +45,20 @@ namespace Yozolab.YoluPainter.Tests
         }
 
         static string P(params string[] parts) => Path.Combine(parts);
+        [Test] public void RecoveryRetentionAndWarningArePersonalAndRoundTrip()
+        {
+            Assert.That(PainterSettings.RecoveryGenerationsToKeep, Is.EqualTo(3)); Assert.That(PainterSettings.RecoveryWarningBytes, Is.EqualTo(2048L << 20));
+            PainterSettings.UpdatePersonal(p => { p.recoveryGenerationsToKeep = 2; p.recoveryWarningMiB = 64; });
+            PainterSettings.Reload();
+            Assert.That(PainterSettings.RecoveryGenerationsToKeep, Is.EqualTo(2)); Assert.That(PainterSettings.RecoveryWarningBytes, Is.EqualTo(64L << 20));
+            Assert.That(File.Exists(PainterSettings.SharedPath), Is.False);
+            var invalid = PainterSettings.PersonalSettings; invalid.recoveryGenerationsToKeep = 1;
+            Assert.That(() => PainterSettings.Save(null, invalid), Throws.ArgumentException);
+            invalid = PainterSettings.PersonalSettings; invalid.recoveryWarningMiB = 0; Assert.That(() => PainterSettings.Save(null, invalid), Throws.ArgumentException);
+            Assert.That(PainterSettings.RecoveryGenerationsToKeep, Is.EqualTo(2));
+            File.WriteAllText(PainterSettings.PersonalPath, "{\"schema\":1,\"recoveryIntervalSeconds\":20}"); PainterSettings.Reload();
+            Assert.That(PainterSettings.RecoveryGenerationsToKeep, Is.EqualTo(3)); Assert.That(PainterSettings.RecoveryWarningBytes, Is.EqualTo(2048L << 20));
+        }
         static ImportedBrush Brush(string name) => new ImportedBrush(name, "test", new BrushSettings { Tip = new BrushTip(name, 2, 2, new byte[] { 255, 0, 0, 255 }) });
 
         [Test] public void WithoutFilesTheDefaultsApplyAndNothingIsWritten()

@@ -36,6 +36,7 @@ readonly PID_FILE="$DAEMON_DIR/daemon.pid"
 readonly RECEIVER_SRC="$SCRIPT_DIR/daemon/YoluPainterTestDaemon.cs"
 readonly RECEIVER_DST="$UNITY_PROJECT/Assets/YoluPainterTestDaemon/Editor/YoluPainterTestDaemon.cs"
 readonly DAEMON_LOG="$UNITY_LOG_DIR/daemon.log"
+source "$SCRIPT_DIR/daemon-lock.sh"
 
 MODE="${YOLUPAINTER_DAEMON_MODE:-gui}"   # gui | batch | batch-gl
 
@@ -75,23 +76,25 @@ install_receiver() {
 }
 
 launch() {
-  # 依頼のロック（client.lock）を常駐 Unity に引き継がせない（daemon-lock.sh）
-  source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/daemon-lock.sh"
-  close_inherited_daemon_lock
-  if [[ "$MODE" == batch ]]; then
-    nohup "$UNITY_EDITOR" -batchmode -nographics \
-      -projectPath "$UNITY_PROJECT" -logFile "$DAEMON_LOG" \
-      >/dev/null 2>&1 &
-  elif [[ "$MODE" == batch-gl ]]; then
-    # ラッパーが xvfb と -batchmode を被せる。-nographics を付けないので GL デバイスが付く。
-    nohup "$UNITY_EDITOR" -projectPath "$UNITY_PROJECT" -logFile "$DAEMON_LOG" \
-      >/dev/null 2>&1 &
-  else
-    # unity-editor ラッパーは必ず -batchmode を足すので、本体を直接 xvfb に載せる。
-    nohup xvfb-run -a -s "-screen 0 ${YOLUPAINTER_XVFB_SCREEN:-1920x1080x24}" \
-      "$UNITY_BIN" -projectPath "$UNITY_PROJECT" -logFile "$DAEMON_LOG" \
-      >/dev/null 2>&1 &
-  fi
+  # 準備を待つ親はロックを保ち、常駐する子だけで fd と継承の印を外す。
+  (
+    close_inherited_daemon_lock
+    unset YOLUPAINTER_LOCK_HELD YOLUPAINTER_DAEMON_SWITCHING
+    if [[ "$MODE" == batch ]]; then
+      exec nohup "$UNITY_EDITOR" -batchmode -nographics \
+        -projectPath "$UNITY_PROJECT" -logFile "$DAEMON_LOG" \
+        >/dev/null 2>&1
+    elif [[ "$MODE" == batch-gl ]]; then
+      # ラッパーが xvfb と -batchmode を被せる。-nographics を付けないので GL デバイスが付く。
+      exec nohup "$UNITY_EDITOR" -projectPath "$UNITY_PROJECT" -logFile "$DAEMON_LOG" \
+        >/dev/null 2>&1
+    else
+      # unity-editor ラッパーは必ず -batchmode を足すので、本体を直接 xvfb に載せる。
+      exec nohup xvfb-run -a -s "-screen 0 ${YOLUPAINTER_XVFB_SCREEN:-1920x1080x24}" \
+        "$UNITY_BIN" -projectPath "$UNITY_PROJECT" -logFile "$DAEMON_LOG" \
+        >/dev/null 2>&1
+    fi
+  ) &
   local wrapper=$! pid=""
   for _ in $(seq 1 30); do
     sleep 1
@@ -253,6 +256,11 @@ status() {
 }
 
 cmd="${1:-status}"; shift || true
+case "$cmd" in
+  start|stop|restart)
+    acquire_daemon_client_lock
+    export YOLUPAINTER_LOCK_HELD=1 ;;
+esac
 case "$cmd" in
   start)   parse_mode "$@"; start ;;
   stop)    stop ;;

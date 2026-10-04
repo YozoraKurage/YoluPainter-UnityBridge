@@ -371,8 +371,7 @@ namespace Yozolab.YoluPainter.Tests
             lines.Add(Measure("16 single tiles, 10 layers", () => Doc(10), d => { for (int i = 0; i < 16; i++) CpuCompositor.CompositeRegion(d, PaintChannel.Color, (8 + i % 4) * 128, (10 + i / 4) * 128, 128, 128); }));
             lines.Add(Measure("fill", () => { var d = Doc(0); d.AddLayer("f"); d.ClearHistory(); return d; }, d => d.Fill(d.Layers[0].Id, PaintChannel.Color, new Rgba32(10, 200, 30, 255), .7)));
             lines.Add(Measure("rotate 15°", () => Doc(1), d => d.Transform(d.Layers[0].Id, Affine2D.FromParts(2048, 2048, 0, 0, 15, 1, 1))));
-            UnityEngine.Debug.Log("CPU timings:\n" + string.Join("\n", lines));
-            TestContext.WriteLine(string.Join("\n", lines));
+            TestContext.WriteLine("CPU timings:\n" + string.Join("\n", lines));
         }
     }
 }

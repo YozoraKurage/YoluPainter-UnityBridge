@@ -8,13 +8,10 @@ msgstr ""
 # ── プロジェクト設定の画面 ──
 
 msgid "A texture set's size must be one of {0}."
-msgstr "テクスチャセットの大きさは {0} のどれかにしてください。"
+msgstr "テクスチャセットの大きさは {0} のどれかです。"
 
 msgid "Resized texture sets are resampled when you apply; their undo history is cleared."
 msgstr "大きさを変えたテクスチャセットは、適用すると再標本化し、そのセットの履歴は消えます。"
-
-msgid "Choose a texture set's size in its row above."
-msgstr "テクスチャセットの大きさは、上の並びの各行で選びます。"
 
 msgid "Automatic"
 msgstr "自動"
@@ -49,8 +46,8 @@ msgstr "{0} を {1} × {2} に再標本化しています…"
 msgid "{0} is now {1} × {2}."
 msgstr "{0} は {1} × {2} になりました。"
 
-msgid "The path on the layer {0} was resampled, not redrawn: its model is not loaded. Redraw it in the Path section when it is."
-msgstr "レイヤー {0} のパスは描き直さず、画素を再標本化しました（そのモデルを読み込んでいません）。読み込んだら、パスの欄で描き直してください。"
+msgid "The path on the layer {0} was resampled, not redrawn: its model is not loaded."
+msgstr "レイヤー {0} のパスは描き直さず、画素を再標本化しました（そのモデルを読み込んでいません）。"
 
 msgid "The path on the layer {0} was resampled, not redrawn: {1}"
 msgstr "レイヤー {0} のパスは描き直さず、画素を再標本化しました: {1}"

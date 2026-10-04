@@ -271,7 +271,7 @@ namespace Yozolab.YoluPainter.Tests
             s.ApplyKindKey(MeshMapKind.Id, "source=SomethingNewer;algorithm=3", 4); Assert.That(s.IdSource, Is.EqualTo(MeshIdSource.MeshPart));
             Assert.That(s.KindKey(MeshMapKind.Id), Is.EqualTo("source=MeshPart;algorithm=2"));
             // 型: 知らない元は断る
-            var bad = new MeshBakeSettings { IdSource = (MeshIdSource)5 };
+            var bad = new MeshBakeSettings { IdSource = (MeshIdSource)int.MaxValue };
             Assert.That(() => bad.Validate(), Throws.InstanceOf<ArgumentOutOfRangeException>());
         }
 

@@ -10,11 +10,10 @@ namespace Yozolab.YoluPainter.Editor
         void StrokeAssistSection(UiRows rows)
         {
             if (!ToolSection(rows, "brush-stroke", L.Tr("Stabilizer & Taper"), "ink_stroke")) return;
-            brush.stabilizer = PaintGui.FitSlider(rows.Row(), L.Tr("Stabilizer"), brush.stabilizer, 0, 100, "0", " px",
+            brush.stabilizer = PaintGui.FitSlider(rows.SliderRow(), L.Tr("Stabilizer"), brush.stabilizer, 0, 100, "0", " px",
                 L.Tr("The brush trails the pointer by this string length, smoothing shaky lines (Krita's / Lazy Nezumi's pulled string). The line is finished to the pointer when you lift. 2D canvas only."));
-            var c = UiRows.Split(rows.Row(), 2, 6);
-            brush.taperIn = PaintGui.FitSlider(c[0], L.Tr("Taper in"), brush.taperIn, 0, 500, "0", " px", L.Tr("The brush grows from nothing over this much stroke length."));
-            brush.taperOut = PaintGui.FitSlider(c[1], L.Tr("Taper out"), brush.taperOut, 0, 500, "0", " px", L.Tr("The brush shrinks to nothing over the last this much stroke length. That part appears when the stroke ends."));
+            brush.taperIn = PaintGui.FitSlider(rows.SliderRow(), L.Tr("Taper in"), brush.taperIn, 0, 500, "0", " px", L.Tr("The brush grows from nothing over this much stroke length."));
+            brush.taperOut = PaintGui.FitSlider(rows.SliderRow(), L.Tr("Taper out"), brush.taperOut, 0, 500, "0", " px", L.Tr("The brush shrinks to nothing over the last this much stroke length. That part appears when the stroke ends."));
             rows.Space(4);
         }
 
@@ -26,31 +25,36 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>3D ビューのストロークで 1 回の入力（1 区間）に置けるダブの数の上限。超えたらストロークを取り消す。</summary>
         internal const int SurfaceDabsPerEvent = 128;
 
+        // 表示の準備の案内が出入りしても、増えた部品が筆の制御番号を取り、ドラッグを飲み込まないための手がかり。
+        const int StrokeDragHint = 0x59505354;
+
         /// <summary>ブラシのストローク（2D キャンバスと 3D ビュー）: 押して始め、ドラッグで足し、離して確定する。</summary>
         void HandleBrushInput(Event e)
         {
-            if(!IsBrushTool&&e.type==EventType.MouseDown&&surfaceRect.Contains(e.mousePosition)&&e.button==0&&!e.alt){message=tool+" works on the 2D canvas. Use the brush, the polygon fill, a selection tool or the bucket on the 3D view.";e.Use();return;}
+            if(!IsBrushTool&&e.type==EventType.MouseDown&&surfaceRect.Contains(e.mousePosition)&&e.button==0&&!e.alt){message=L.Tr("{0} works on the 2D canvas.",tool);e.Use();return;}
             if(e.type==EventType.MouseDown && e.button==0 && !e.alt && (canvasRect.Contains(e.mousePosition)||surfaceRect.Contains(e.mousePosition)))
             {
                 surfaceStroke=surfaceRect.Contains(e.mousePosition);
                 if (!PrepareBrushEffectStroke(e.mousePosition, surfaceStroke)) { e.Use(); Repaint(); return; }
-                if(surfaceStroke && !preview.CanPaint){message="This preview snapshot is not safe to paint. See its load diagnostics.";return;}
+                if(surfaceStroke && !preview.CanPaint){message=L.Tr("This preview snapshot is not safe to paint.");return;}
                 // ほかのテクスチャセットの面では描き始めない（その面をダブルクリックするか、テクスチャセットのパネルで切り替える）
-                if(surfaceStroke && preview.TryPick(surfaceRect,e.mousePosition,out var startHit) && startHit.MaterialSlot!=materialSlot){OtherSlotPressed(startHit.MaterialSlot);e.Use();Repaint();return;}
+                if(surfaceStroke && preview.TryPick(surfaceRect,e.mousePosition,out var startHit) && !PaintsSlot(startHit.MaterialSlot)){OtherSlotPressed(startHit.MaterialSlot);e.Use();Repaint();return;}
                 TryAction(()=>
                 {
                     RememberColor();
-                    if(EditingMask) stroke=document.BeginMaskStroke(selectedLayer,GetBrush());
+                    // ステンシル（使うなら）はストロークの始めの置き場で（Tools/TexturePaintWindow.Stencil.cs）
+                    if(EditingMask) stroke=document.BeginMaskStroke(selectedLayer,StrokeBrush(surfaceStroke));
                     else
                     {
-                        if(document.GetLayer(selectedLayer).IsGroup) throw new InvalidOperationException("A group has no pixels. Select a layer inside it to paint, or paint the group's mask.");
+                        if(document.GetLayer(selectedLayer).IsGroup) throw new InvalidOperationException(L.Tr("A group has no pixels."));
                         // 今のチャンネル 1 つ、またはマテリアルの組（Tools/TexturePaintWindow.MaterialBrush.cs）。ロックで断るときは何も変えず、層で無効の
                         // チャンネルはストロークの中で有効にする（ストロークと同じ 1 回の Undo。取消で戻る）
-                        stroke=document.BeginMaterialStroke(selectedLayer,StrokeChannels(),GetBrush());
+                        stroke=document.BeginMaterialStroke(selectedLayer,StrokeChannels(),StrokeBrush(surfaceStroke));
                     }
-                    effectSurfaceIsland=-1;
+                    strokeCanvasSymmetry=surfaceStroke ? null : CanvasSymmetryNow();
+                    BeginBrushEffectStroke();
                     previousPointer=e.mousePosition; previousPressure=Pressure(e); surfaceHasBefore=surfaceHasHeld=false;
-                    PaintAt(e.mousePosition,previousPressure); GUIUtility.hotControl=GUIUtility.GetControlID(FocusType.Passive);
+                    PaintAt(e.mousePosition,previousPressure); GUIUtility.hotControl=GUIUtility.GetControlID(StrokeDragHint,FocusType.Passive);
                 });
                 e.Use();Repaint();
             }
@@ -108,7 +112,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             float total=lengths[pieces];
             int steps=Mathf.Max(1,Mathf.CeilToInt(total/spacing));
-            if(steps>SurfaceDabsPerEvent)throw new InvalidOperationException("Surface input exceeded per-event budget; stroke canceled without partial edits. Reduce brush size or move more slowly.");
+            if(steps>SurfaceDabsPerEvent)throw new InvalidOperationException("Surface input exceeded per-event budget; stroke canceled without partial edits.");
             float startPressure=previousPressure;
             for(int i=1,j=1;i<=steps;i++)
             {
@@ -125,14 +129,14 @@ namespace Yozolab.YoluPainter.Editor
             if(surfaceStroke)
             {
                 if(brush.pressureSize && pressure<=0)return;
-                if(!surfaceRect.Contains(pointer)||!preview.TryPick(surfaceRect,pointer,out var hit)||hit.MaterialSlot!=materialSlot)return;
+                if(!surfaceRect.Contains(pointer)||!preview.TryPick(surfaceRect,pointer,out var hit)||!PaintsSlot(hit.MaterialSlot))return;
                 float radius=Mathf.Max(.000001f,preview.Bounds.size.magnitude)*brush.radius/document.Width*(brush.pressureSize?Mathf.Max(.001f,pressure):1);
                 // ストロークの間はカメラもモデルも動かないので、テクセルの見え方を覚えて、重なる次のダブで撃ち直さない。シンメトリーなら
                 // 映した側のダブも合わせた 1 つのダブ（Model/TexturePaintWindow.Symmetry.cs）
                 var dab=BuildStrokeSurfaceDab(hit,radius);
                 if(dab.WasClipped)throw new InvalidOperationException(dab.Diagnostic);
                 if(!String.IsNullOrEmpty(dab.Diagnostic))message=dab.Diagnostic;
-                if(CurrentBrushEffect == BrushEffect.Paint) foreach(var pixel in dab.Pixels)stroke.ApplyPixel(pixel.X,pixel.Y,pixel.Coverage,pressure);
+                if(CurrentBrushEffect == BrushEffect.Paint) PaintSurfacePixels(dab,hit,pressure); // ステンシルがあればテクセルの点を画面へ写して読む
                 else ApplySurfaceEffect(dab,hit,pressure);
             }
             else
@@ -149,10 +153,10 @@ namespace Yozolab.YoluPainter.Editor
             try
             {
                 if(commit&&surfaceStroke)FinishSurfaceCurve(); // 2D の最後の区間は Commit が描く
-                if(commit) { bool changed=stroke.Commit(); if(changed && tool==PaintTool.Clone) { cloneOffset=cloneStrokeOffset; cloneOffsetValid=true; } } else stroke.Cancel();
+                if(commit) { bool changed=stroke.Commit(); if(changed && tool==PaintTool.Clone) CommitCloneAlignment(); } else stroke.Cancel();
             }
             catch(Exception ex){message=ex.Message;stroke.Cancel();}
-            finally{stroke.Dispose();stroke=null;GUIUtility.hotControl=0;repaintPixels=true;surfaceHasHeld=surfaceHasBefore=false;surfaceVisibility=null;EndPolygonFillDrag();}
+            finally{stroke.Dispose();stroke=null;GUIUtility.hotControl=0;repaintPixels=true;surfaceHasHeld=surfaceHasBefore=false;surfaceVisibility=null;strokeMirror=null;strokeRadial=null;strokeCanvasSymmetry=null;EndBrushEffectStroke();EndPolygonFillDrag();}
         }
         /// <summary>今の 3D のストロークのあいだ覚えておく、テクセルの見え方（ストロークが終われば捨てる）。</summary>
         Preview.SurfaceVisibilityCache surfaceVisibility;

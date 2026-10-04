@@ -82,7 +82,7 @@ namespace Yozolab.YoluPainter.Tests
                 d.AddLayerMask(fill.Id); w.SelectedLayer = fill.Id;
                 var gen = w.AddGenerator(FilterTarget.Mask, GeneratorType.IdColor); d.ClearHistory();
                 w.SelectedFilter = gen.Id;
-                w.SetSectionOpen("layer", false); w.SetSectionOpen("mask", false); w.SetSectionOpen("filters", true);
+                w.SetSectionOpen("effect", true);
                 Window("generator-empty", new string[0], new[] { "generator.id.pick", "generator.id.tolerance", "generator.blend" });
                 d.SetFilterSettings(fill.Id, gen.Id, gen.Settings.WithGenerator(gen.Settings.Generator.WithIdColors(FirstColours(w, 3)).WithIdTolerance(12))); d.ClearHistory();
                 Assert.That(d.GetGeneratorStatus(fill.Id, gen.Id).Active, Is.True, d.GetGeneratorStatus(fill.Id, gen.Id).Reason);
@@ -98,7 +98,7 @@ namespace Yozolab.YoluPainter.Tests
                     PaintGui.ShortenedTexts = 0; float used = 0;
                     OffscreenGui.RenderToPng(300, 900, () => used = w.DrawFilterSectionOnly(new Rect(0, 0, 300, 900)), Path.Combine(Folder, name + ".png"), PaintTheme.PanelBg);
                     Assert.That(PaintGui.ShortenedTexts, Is.Zero, name + ": cut text");
-                    Assert.That(used, Is.GreaterThan(200).And.LessThan(900), name + ": the section fits the picture");
+                    Assert.That(used, Is.GreaterThan(120).And.LessThan(900), name + ": the section fits the picture");
                 }
 
                 // ベイクの窓の ID の頁: 元ごと

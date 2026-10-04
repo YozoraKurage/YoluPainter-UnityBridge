@@ -51,7 +51,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         NoSurface,
         /// <summary>映した点のいちばん近い面が、今のテクスチャセットとは別のスロット。</summary>
         OtherSlot,
-        /// <summary>映した側の面はあるが、カメラから見える画素が無い（今の 3D のダブは見えるテクセルにだけ塗る）。</summary>
+        /// <summary>可視性を無視しない設定で、映した側の画素がカメラから見えない。</summary>
         Hidden,
     }
 
@@ -72,8 +72,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
     /// <summary>
     /// 3D ビューのシンメトリー（Substance Painter の Symmetry のミラーと同じ考え方）: ダブの中心（面の上の点）を対称の面で映し、その点に
     /// いちばん近い、向きの合う面の上の点（<see cref="SurfaceGeometry.TryFindClosestPoint"/>）に、同じ半径・硬さでもう 1 つダブを作る。
-    /// 映した側も元の側と同じ決まり（スロット・連結・表向き・カメラからの見え方・UV の継ぎ目、同じ予算）で作るので、カメラから見えない
-    /// 所には塗らない。2 つは画素ごとに大きいほうの覆いで 1 つにする（対称の面の近くで重なっても二重に塗らない。1 つのダブの中で
+    /// 映した側もスロット・連結・UV の継ぎ目と同じ予算を守る。ignoreVisibility が有効ならカメラから見えない対称先にも塗り、
+    /// 元の側はいつも可視性を確かめる。2 つは画素ごとに大きいほうの覆いで 1 つにする（対称の面の近くで重なっても二重に塗らない。1 つのダブの中で
     /// 三角形が重なったときと同じ）。
     /// </summary>
     public static class SurfaceSymmetry
@@ -88,7 +88,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
 
         /// <summary>元のダブと、映した側のダブを作って合わせる。元の側が断られた・作れなかったら、映した側は作らない。</summary>
         public static SymmetricSurfaceDab Build(SurfaceGeometry geometry, SurfaceHit hit, MirrorPlane plane, float radiusWorld, int width, int height,
-            Vector3 cameraPosition, float hardness = 0.8f, SurfaceBrushBudget budget = null, SurfaceVisibilityCache cache = null)
+            Vector3 cameraPosition, float hardness = 0.8f, SurfaceBrushBudget budget = null, SurfaceVisibilityCache cache = null, bool ignoreVisibility = false)
         {
             if (geometry == null) throw new ArgumentNullException(nameof(geometry));
             budget = budget ?? new SurfaceBrushBudget();
@@ -108,9 +108,9 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 dab.Outcome = MirrorOutcome.NoSurface; return dab;
             }
             dab.MirrorHit = mirrorHit; dab.HasMirrorHit = true;
-            if (mirrorHit.MaterialSlot != hit.MaterialSlot || mirrorHit.RendererIndex != hit.RendererIndex) { dab.Outcome = MirrorOutcome.OtherSlot; return dab; }
+            if (mirrorHit.Material != hit.Material) { dab.Outcome = MirrorOutcome.OtherSlot; return dab; } // 同じマテリアル（テクスチャセット）なら別のメッシュでも描く
 
-            var mirror = geometry.BuildSurfaceDabs(mirrorHit, radiusWorld, width, height, cameraPosition, hardness, budget, cache);
+            var mirror = geometry.BuildSurfaceDabs(mirrorHit, radiusWorld, width, height, cameraPosition, hardness, budget, cache, ignoreVisibility);
             dab.Mirror = mirror;
             if (mirror.WasClipped) { dab.Result = new SurfaceDabResult().Reject("Mirrored side: " + mirror.Diagnostic); return dab; }
             dab.Outcome = mirror.Pixels.Count == 0 && original.Pixels.Count > 0 ? MirrorOutcome.Hidden : MirrorOutcome.Painted;
@@ -124,7 +124,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
             var result = new SurfaceDabResult
             {
                 CandidatePixels = a.CandidatePixels + b.CandidatePixels, VisibilityRays = a.VisibilityRays + b.VisibilityRays,
-                RayTriangleTests = a.RayTriangleTests + b.RayTriangleTests,
+                RayTriangleTests = a.RayTriangleTests + b.RayTriangleTests, VisitedTriangles = a.VisitedTriangles + b.VisitedTriangles, RayNodeVisits = a.RayNodeVisits + b.RayNodeVisits,
                 Diagnostic = !string.IsNullOrEmpty(a.Diagnostic) ? a.Diagnostic : b.Diagnostic
             };
             var pa = a.Pixels; var pb = b.Pixels; int i = 0, j = 0;
@@ -134,7 +134,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 long ka = i < pa.Count ? (long)pa[i].Y * width + pa[i].X : long.MaxValue, kb = j < pb.Count ? (long)pb[j].Y * width + pb[j].X : long.MaxValue;
                 if (ka < kb) result.Pixels.Add(pa[i++]);
                 else if (kb < ka) result.Pixels.Add(pb[j++]);
-                else { var p = pa[i++]; float c = Mathf.Max(p.Coverage, pb[j++].Coverage); result.Pixels.Add(new SurfacePixel(p.X, p.Y, c)); }
+                else { var p = pa[i++]; var q = pb[j++]; result.Pixels.Add(p.Coverage >= q.Coverage ? p : q); }
             }
             return result;
         }

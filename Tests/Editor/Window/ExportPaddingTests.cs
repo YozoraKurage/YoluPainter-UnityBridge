@@ -54,7 +54,7 @@ namespace Yozolab.YoluPainter.Tests
                 var set = w.CurrentTextureSet; var d = set.Document;
                 var notes = new List<string>(); var unchanged = new byte[d.Width * d.Height * 4];
                 Assert.That(w.PadForExport(set, unchanged, notes), Is.SameAs(unchanged), "no model: no padding");
-                Assert.That(notes.Single(), Does.Contain("load the model"));
+                Assert.That(notes.Single(), Does.Contain("no model in the 3D view"));
 
                 w.Preview.LoadDemoMesh();
                 var coverage = w.ExportCoverage(set);

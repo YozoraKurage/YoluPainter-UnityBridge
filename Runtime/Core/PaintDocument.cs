@@ -14,6 +14,8 @@ namespace Yozolab.YoluPainter.Core
         public bool Inverted { get; internal set; }
         public double Density { get; internal set; }
         internal RasterMask(SparseTileSurface surface) { Surface = surface; Enabled = true; Density = 1; }
+        /// <summary>The anchor point on this mask (<see cref="AnchorPlacement.Mask"/>), or null. It goes with the mask (removing the mask removes it).</summary>
+        public AnchorPoint Anchor { get; internal set; }
         /// <summary>Multiplier applied to the layer's source alpha for a stored hide amount (0..255).</summary>
         public double Factor(byte hide)
         {
@@ -63,6 +65,8 @@ namespace Yozolab.YoluPainter.Core
         public RasterMask Mask { get; internal set; }
         /// <summary>The editable path (on the model or on the canvas) the layer's pixels are drawn from (one channel), or null for ordinary pixels.</summary>
         public Paths.EditablePath Path { get; internal set; }
+        /// <summary>The anchor point on this layer (<see cref="AnchorPlacement.Layer"/>: the stack's result through this layer), or null.</summary>
+        public AnchorPoint Anchor { get; internal set; }
         public IReadOnlyList<PaintChannel> EnabledChannels
         {
             get { var values = new List<PaintChannel>(enabled); values.Sort(); return values.AsReadOnly(); }
@@ -82,9 +86,9 @@ namespace Yozolab.YoluPainter.Core
         public SparseTileSurface GetChannel(PaintChannel channel)
         {
             ValidateChannel(channel);
-            if (Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers have no pixel surface. Change the fill value, or paint on the layer's mask.");
-            if (Kind == LayerKind.Adjustment) throw new InvalidOperationException("Adjustment layers have no pixel surface. Change the adjustment, or paint on the layer's mask.");
-            if (Kind == LayerKind.Group) throw new InvalidOperationException("Groups have no pixel surface. Paint on a layer inside the group, or on the group's mask.");
+            if (Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers have no pixel surface.");
+            if (Kind == LayerKind.Adjustment) throw new InvalidOperationException("Adjustment layers have no pixel surface.");
+            if (Kind == LayerKind.Group) throw new InvalidOperationException("Groups have no pixel surface.");
             SparseTileSurface surface;
             if (!channels.TryGetValue(channel, out surface))
             {
@@ -154,7 +158,7 @@ namespace Yozolab.YoluPainter.Core
             if (Kind == LayerKind.Fill)
             {
                 if (x < 0 || y < 0 || x >= document.Width || y >= document.Height) throw new ArgumentOutOfRangeException("pixel");
-                if (fillImages.ContainsKey(channel)) return document.FillSampler(this, channel).Pixel(x, y); // 投影した画像（フィルターの前）
+                if (IsProjectedFill(channel)) return document.FillSampler(this, channel).Pixel(x, y); // 投影した画像・デカール（フィルターの前）
                 return fillValues.TryGetValue(channel, out var value) ? value : Rgba32.Transparent;
             }
             return channels.TryGetValue(channel, out var surface) ? surface.GetPixel(x, y) : Rgba32.Transparent;
@@ -177,11 +181,11 @@ namespace Yozolab.YoluPainter.Core
             if (coord.X < 0 || coord.Y < 0 || (long)coord.X * tile >= document.Width || (long)coord.Y * tile >= document.Height) throw new ArgumentOutOfRangeException(nameof(coord));
             Array.Clear(destination, 0, length);
             int w = Math.Min(tile, document.Width - coord.X * tile), h = Math.Min(tile, document.Height - coord.Y * tile);
-            if (fillImages.ContainsKey(channel))
+            if (IsProjectedFill(channel))
             {
-                // 投影した画像（フィルターの前の、層そのものの画素）。評価してキャッシュには入れない
+                // 投影した画像・デカール（フィルターの前の、層そのものの画素）。評価してキャッシュには入れない
                 var sampler = document.FillSampler(this, channel);
-                if (!sampler.MayCover) return false;
+                if (!sampler.MayCoverTiles(coord.X, coord.Y, coord.X + 1, coord.Y + 1)) return false;
                 sampler.FillRows(coord.X * tile, coord.Y * tile, w, 0, h, destination, tile);
                 return true;
             }
@@ -224,7 +228,12 @@ namespace Yozolab.YoluPainter.Core
         public int Width { get; private set; }
         public int Height { get; private set; }
         public int TileSize { get; private set; }
-        public long Revision { get; private set; }
+        long revision;
+        /// <summary>Changes on every edit (history entries, undo, redo).</summary>
+        public long Revision { get { return revision; } private set { revision = value; editSerial++; } }
+        /// <summary>Counts every assignment of <see cref="Revision"/> and the loaders' direct changes; never goes back (the anchors look at
+        /// the document again when it changes, PaintDocument.Anchors.cs).</summary>
+        long editSerial;
         public IReadOnlyList<PaintLayer> Layers { get; private set; }
         public int UndoCount { get { return undo.Count; } }
         public int RedoCount { get { return redo.Count; } }
@@ -318,14 +327,15 @@ namespace Yozolab.YoluPainter.Core
             EnsureNoStroke(); PaintLayer.ValidateChannel(channel); var layer = GetLayer(id);
             if (layer.Kind != LayerKind.Fill) throw new InvalidOperationException("Only fill layers have fill values.");
             Rgba32? old = layer.FillValues.TryGetValue(channel, out var current) ? current : (Rgba32?)null;
+            layer.FillGradients.TryGetValue(channel, out var gradient);
             Guid? image = layer.FillImages.TryGetValue(channel, out var imageId) ? imageId : (Guid?)null;
             bool wasEnabled = layer.IsChannelEnabled(channel);
             if (Nullable.Equals(old, value) && (value == null || wasEnabled)) return;
             RefuseLockedPixels(layer, erase: false); // 塗りつぶしの値は層の中身
             if ((old?.A ?? 0) != (value?.A ?? 0) || image.HasValue && value == null) RefuseLockedTransparency(layer);
             Execute(LayerScoped(layer, channel,
-                () => { layer.SetFillValueInternal(channel, value); if (value.HasValue) layer.Enable(channel, true); else layer.SetFillImageInternal(channel, null); FillChanged(layer); },
-                () => { layer.SetFillValueInternal(channel, old); layer.SetFillImageInternal(channel, image); layer.Enable(channel, wasEnabled); FillChanged(layer); }, 64), coalesce ? (object)("fill", id, channel) : null);
+                () => { layer.SetFillValueInternal(channel, value); if (value.HasValue) layer.Enable(channel, true); else { layer.SetFillImageInternal(channel, null); layer.SetFillGradientInternal(channel, null); } FillChanged(layer); },
+                () => { layer.SetFillValueInternal(channel, old); layer.SetFillImageInternal(channel, image); layer.SetFillGradientInternal(channel, gradient); layer.Enable(channel, wasEnabled); FillChanged(layer); }, 64), coalesce ? (object)("fill", id, channel) : null);
         }
         /// <summary>Adds an adjustment layer on top that changes the composite below it in the given channels (all channels
         /// the adjustment applies to when null). Hue/saturation can only target Color and Emission.</summary>
@@ -350,7 +360,7 @@ namespace Yozolab.YoluPainter.Core
             var layer = GetLayer(id);
             if (layer.Kind != LayerKind.Adjustment) throw new InvalidOperationException("Only adjustment layers have adjustment settings.");
             foreach (var channel in layer.EnabledChannels)
-                if (!settings.AppliesTo(channel)) throw new InvalidOperationException(settings.Type + " cannot be applied to the enabled " + channel + " channel. Disable it first.");
+                if (!settings.AppliesTo(channel)) throw new InvalidOperationException(settings.Type + " cannot be applied to the enabled " + channel + " channel.");
             var old = layer.Adjustment; if (old.Equals(settings)) return;
             RefuseLockedAttributes(layer);
             Execute(LayerScoped(layer, null, () => layer.Adjustment = settings, () => layer.Adjustment = old, 128), coalesce ? (object)("adjustment", id) : null);
@@ -424,7 +434,7 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>Puts sibling layers into a new group placed where the topmost of them was. They keep their order.</summary>
         public PaintLayer GroupLayers(IReadOnlyCollection<Guid> ids, string name = null, Guid? groupId = null)
         {
-            EnsureNoStroke(); if (ids == null || ids.Count == 0) throw new ArgumentException("Choose at least one layer.", nameof(ids));
+            EnsureNoStroke(); if (ids == null || ids.Count == 0) throw new ArgumentException("No layer is chosen.", nameof(ids));
             var members = new List<PaintLayer>(); foreach (var id in ids) { var l = GetLayer(id); if (!members.Contains(l)) members.Add(l); }
             Guid parentId = members[0].ParentId;
             foreach (var m in members) if (m.ParentId != parentId) throw new InvalidOperationException("Only layers in the same group can be grouped together.");
@@ -543,7 +553,7 @@ namespace Yozolab.YoluPainter.Core
             }
         }
         /// <summary>For loaders: sets a layer's group without history. Call ValidateStructure afterwards.</summary>
-        internal void SetParentForLoad(PaintLayer layer, Guid parentId) { layer.ParentId = parentId; }
+        internal void SetParentForLoad(PaintLayer layer, Guid parentId) { layer.ParentId = parentId; editSerial++; }
         public void SetLayerName(Guid id, string name)
         {
             EnsureNoStroke(); if (name == null) throw new ArgumentNullException(nameof(name)); var layer = GetLayer(id);
@@ -595,6 +605,9 @@ namespace Yozolab.YoluPainter.Core
             RefuseLockedAttributes(layer);
             if (enabled && layer.Kind == LayerKind.Adjustment && !layer.Adjustment.AppliesTo(channel))
                 throw new InvalidOperationException(layer.Adjustment.Type + " cannot be applied to the " + channel + " channel.");
+            if (!enabled && layer.Path != null && layer.Path.Material == null)
+                foreach (var m in layer.Path.Paints) if (m.Channel == channel)
+                    throw new InvalidOperationException("A channel drawn by a path cannot be disabled until the path is rasterized.");
             // 有効にして初めて面ができたときは、取り消しで面も外す（空の面が残ると保存のバイト列が変わる）。やり直しでは同じ面を付け直す
             // （作り直すと、その面に描いた後の履歴が、外れた面へ画素を戻してしまう）
             bool hadSurface = layer.TryGetChannel(channel, out _);
@@ -666,11 +679,11 @@ namespace Yozolab.YoluPainter.Core
         {
             EnsureNoStroke(); RefuseInBatch("A stroke"); if (settings == null) throw new ArgumentNullException(nameof(settings)); settings.Validate();
             var layer = GetLayer(layerId);
-            if (layer.Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers are generated from their values and cannot be painted. Paint on the layer's mask, or add a paint layer.");
+            if (layer.Kind == LayerKind.Fill) throw new InvalidOperationException("Fill layers are generated from their values and cannot be painted.");
             RefuseLockedPixels(layer, settings.Erase);
             RefusePathLayer(layer);
             var surface = layer.GetChannel(channel);
-            if (!layer.IsChannelEnabled(channel)) throw new InvalidOperationException("Enable the target channel before painting.");
+            if (!layer.IsChannelEnabled(channel)) throw new InvalidOperationException("The target channel is not enabled.");
             activeStroke = new BrushStroke(this, surface, settings.ForChannel(channel), KeepsAlpha(layer)); return activeStroke;
         }
         public byte[] Composite(PaintChannel channel) { return CpuCompositor.Composite(this, channel); }
@@ -691,7 +704,7 @@ namespace Yozolab.YoluPainter.Core
         internal void EnsureNoStroke()
         {
             if (notifyingHistory) throw new InvalidOperationException("Do not mutate document state inside a history notification.");
-            if (activeStroke != null) throw new InvalidOperationException("Finish or cancel the active stroke first.");
+            if (activeStroke != null) throw new InvalidOperationException("A stroke is in progress.");
         }
         internal void BeforeExternalMutation() { EnsureNoStroke(); }
         internal void AfterExternalMutation() { ClearHistory(); Revision++; }
@@ -708,12 +721,18 @@ namespace Yozolab.YoluPainter.Core
             PaintLayer.ValidateChannel(channel);
             if (changed == null) throw new ArgumentNullException(nameof(changed));
             if (since < 0 || since > changeSerial) return false;
-            PollGeneratorInputs(); // 焼き直したマップなどで Generator の層が変われば、ここで「変わった」に入る
+            PollGeneratorInputs(); // 焼き直したマップなどで Generator の層が変われば、ここで「変わった」に入る（Anchor の見直しも）
+            if (HasAnchorReaders) { AddAnchorClosure(channel, since, changed); return true; } // Anchor を読む層: 読む元の変化も（PaintDocument.Anchors.cs）
+            AddRawChanges(channel, since, changed);
+            return true;
+        }
+        /// <summary>The tiles of the channel whose own pixels or layers changed after since, and the halos of filtered layers.</summary>
+        void AddRawChanges(PaintChannel channel, long since, ICollection<TileCoord> changed)
+        {
             Dictionary<TileCoord, long> serials;
             if (tileSerials.TryGetValue(channel, out serials))
                 foreach (var entry in serials) if (entry.Value > since) changed.Add(entry.Key);
             AddFilterInfluence(channel, since, changed);
-            return true;
         }
         internal void MarkTileChanged(PaintChannel channel, TileCoord coord)
         {
@@ -723,7 +742,7 @@ namespace Yozolab.YoluPainter.Core
         }
         /// <summary>A mask tile can change the composite of every channel the layer has.</summary>
         internal void MarkMaskTileChanged(PaintLayer layer, TileCoord coord)
-        { foreach (var channel in layer.CoveredChannels) MarkTileChanged(channel, coord); RecordMaskHalo(layer, coord); }
+        { foreach (var channel in layer.CoveredChannels) MarkTileChanged(channel, coord); RecordMaskHalo(layer, coord); RecordMaskAnchorTile(layer, coord); }
         /// <summary>Marks every tile the layer holds (in one channel, or all when channel is null) as changed.</summary>
         private void MarkLayerChanged(PaintLayer layer, PaintChannel? channel)
         {
@@ -773,7 +792,7 @@ namespace Yozolab.YoluPainter.Core
         internal void EnsureStrokeBudget(long projectedBytes)
         {
             if (projectedBytes > activeStrokeBudgetBytes)
-                throw new InvalidOperationException("Active stroke rollback budget exceeded. Stroke cancelled safely; use shorter strokes or raise ActiveStrokeBudgetBytes.");
+                throw new InvalidOperationException("Active stroke rollback budget exceeded. Stroke cancelled safely.");
         }
         internal void FinishStroke(BrushStroke stroke, IHistoryCommand command)
         {

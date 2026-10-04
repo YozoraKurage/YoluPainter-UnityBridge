@@ -6,8 +6,8 @@ using UnityEngine;
 namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>
-    /// ドックのパネル（またはタブのまとまり）を出した別のウィンドウ。Unity の普通のウィンドウなので、別のモニターに置いたり、Unity の
-    /// レイアウトにドッキングしたりできる。中身は持ち主の <see cref="TexturePaintWindow"/> がドックと同じ描き方で描き、文書・選択・Undo は
+    /// ドックのパネル（またはタブのまとまり）を出した別のウィンドウ。既定は Unity の窓より手前のユーティリティ窓。普通の窓へ
+    /// 切り替えると Unity のレイアウトにドッキングできる。中身は持ち主の <see cref="TexturePaintWindow"/> がドックと同じ描き方で描き、文書・選択・Undo は
     /// 持ち主のもの。
     /// <list type="bullet">
     /// <item>描き手が閉じると、パネルは持ち主の列（出す前の位置）に戻る。持ち主の窓を閉じるとこのウィンドウも閉じる（配置には別のウィンドウの
@@ -22,6 +22,7 @@ namespace Yozolab.YoluPainter.Editor
         public const float MinHeight = 120;
         [SerializeField] TexturePaintWindow owner;
         [SerializeField] string ownerKey, groupId;
+        [SerializeField] bool dockableWindow;
         [SerializeField] List<string> shownPanels = new List<string>();
         /// <summary>true なら閉じても配置を変えない（持ち主が閉じた・配置の側で閉じた）。</summary>
         bool leaveLayout;
@@ -41,6 +42,7 @@ namespace Yozolab.YoluPainter.Editor
         internal TexturePaintWindow Owner => owner;
         internal string OwnerKey => ownerKey;
         internal string GroupId => groupId;
+        internal bool DockableWindow => dockableWindow;
         internal IReadOnlyList<string> ShownPanels => shownPanels;
         /// <summary>GUI の原点のスクリーン座標（直前の Repaint の。テストでドラッグの位置を決めるのに使う）。</summary>
         internal Vector2 ScreenOriginForTests => screenOrigin;
@@ -59,12 +61,14 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>持ち主へ回したキーを持ち主が使った（<see cref="TexturePaintWindow.ForwardPanelWindowKey"/> から）。</summary>
         internal void NoteTookKey(Event e) { tookKey = e.keyCode; tookModifiers = e.modifiers; }
 
-        /// <summary>まとまり g を映す別のウィンドウを開く（Unity の普通のウィンドウとして浮かせる）。</summary>
+        /// <summary>まとまり g を映す別のウィンドウを、保存した窓モードで開く。</summary>
         internal static PainterPanelWindow Open(TexturePaintWindow owner, DockGroup g, Rect at)
         {
             var w = CreateInstance<PainterPanelWindow>();
             w.Attach(owner, g);
-            w.Show();
+            w.dockableWindow = g.dockableWindow;
+            w.position = at;
+            if (w.dockableWindow) w.Show(); else w.ShowUtility();
             w.position = at;
             return w;
         }
@@ -98,7 +102,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void OnDisable()
         {
-            open.Remove(this); L.LanguageChanged -= Repaint;
+            PaintMenuSession.CloseFor(this); open.Remove(this); L.LanguageChanged -= Repaint;
             if (owner != null && !leaveLayout && !Quitting) owner.RememberPanelWindowRect(this);
         }
 
@@ -142,7 +146,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void OnGUI()
         {
-            var e = Event.current; var type = e.type;
+            var e = Event.current; if (PaintMenuSession.HandleOwnerEvent(this, e)) return; var type = e.type;
             if (type == EventType.KeyDown) { editingText = GUIUtility.keyboardControl != 0; tookKey = KeyCode.None; }
             if (owner == null)
             {
@@ -185,7 +189,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             else
             {
-                PaintGui.Notice(rows, L.Tr("Several YoluPainter windows are open. Choose the one this panel belongs to."), "info", PaintTheme.TextDim);
+                PaintGui.Notice(rows, L.Tr("Several YoluPainter windows are open."), "info", PaintTheme.TextDim);
                 var painters = Painters();
                 for (int i = 0; i < painters.Count; i++)
                 {

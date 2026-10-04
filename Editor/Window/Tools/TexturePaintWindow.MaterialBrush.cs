@@ -63,17 +63,18 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>マテリアルのチャンネルの値（straight RGBA8、1 チャンネルで描画色をその値にして塗ったときと同じバイト）。アルファは描画色のアルファ。</summary>
-        internal Rgba32 MaterialValue(PaintChannel c)
+        internal Rgba32 MaterialValue(PaintChannel c) => MaterialValue(brush, c);
+        static Rgba32 MaterialValue(BrushState b, PaintChannel c)
         {
-            float a = brush.color.a;
+            float a = b.color.a;
             switch (c)
             {
-                case PaintChannel.Color: return ToBrushBytes(brush.color);
-                case PaintChannel.Emission: return ToBrushBytes(new Color(brush.materialEmission.r, brush.materialEmission.g, brush.materialEmission.b, a));
-                case PaintChannel.Roughness: return ToBrushBytes(Grey(brush.materialRoughness, a));
-                case PaintChannel.Metallic: return ToBrushBytes(Grey(brush.materialMetallic, a));
-                case PaintChannel.Height: return ToBrushBytes(Grey(brush.materialHeight, a));
-                default: return ToBrushBytes(NormalColor(brush.materialNormalX, brush.materialNormalY, a));
+                case PaintChannel.Color: return ToBrushBytes(b.color);
+                case PaintChannel.Emission: return ToBrushBytes(new Color(b.materialEmission.r, b.materialEmission.g, b.materialEmission.b, a));
+                case PaintChannel.Roughness: return ToBrushBytes(Grey(b.materialRoughness, a));
+                case PaintChannel.Metallic: return ToBrushBytes(Grey(b.materialMetallic, a));
+                case PaintChannel.Height: return ToBrushBytes(Grey(b.materialHeight, a));
+                default: return ToBrushBytes(NormalColor(b.materialNormalX, b.materialNormalY, a));
             }
         }
         static Color Grey(float v, float a) => new Color(v, v, v, a);
@@ -87,19 +88,21 @@ namespace Yozolab.YoluPainter.Editor
             return new Color(x * .5f + .5f, y * .5f + .5f, z * .5f + .5f, a);
         }
 
-        internal void SetMaterialScalar(PaintChannel c, float value)
+        internal void SetMaterialScalar(PaintChannel c, float value, BrushState b = null)
         {
+            if (b == null) b = brush;
             value = Mathf.Clamp01(value);
-            if (c == PaintChannel.Roughness) brush.materialRoughness = value;
-            else if (c == PaintChannel.Metallic) brush.materialMetallic = value;
-            else if (c == PaintChannel.Height) brush.materialHeight = value;
+            if (c == PaintChannel.Roughness) b.materialRoughness = value;
+            else if (c == PaintChannel.Metallic) b.materialMetallic = value;
+            else if (c == PaintChannel.Height) b.materialHeight = value;
             else throw new ArgumentException(c + " is not a scalar channel.", nameof(c));
         }
-        float MaterialScalar(PaintChannel c) => c == PaintChannel.Roughness ? brush.materialRoughness : c == PaintChannel.Metallic ? brush.materialMetallic : brush.materialHeight;
-        internal void SetMaterialNormal(float x, float y)
+        float MaterialScalar(PaintChannel c, BrushState b) => c == PaintChannel.Roughness ? b.materialRoughness : c == PaintChannel.Metallic ? b.materialMetallic : b.materialHeight;
+        internal void SetMaterialNormal(float x, float y, BrushState b = null)
         {
+            if (b == null) b = brush;
             float l2 = x * x + y * y; if (l2 > 1) { float l = Mathf.Sqrt(l2); x /= l; y /= l; }
-            brush.materialNormalX = x; brush.materialNormalY = y;
+            b.materialNormalX = x; b.materialNormalY = y;
         }
 
         /// <summary>スポイトの色をマテリアルの今のチャンネルの値にする（Color は描画色）。</summary>
@@ -158,15 +161,17 @@ namespace Yozolab.YoluPainter.Editor
                 }
             }
             if (CurrentBrushEffect == BrushEffect.Paint) { foreach (var c in Channels) if (MaterialIncludes(c)) MaterialValueRow(rows, c); }
-            else PaintGui.Paragraph(rows, L.Tr("Pixel effects use each checked channel's existing pixels; the material values and color dynamics do not change the result."), PaintTheme.TextDim);
-            if (EditingMask) NoteRow(rows, L.Tr("While you edit a mask, strokes paint the mask only."), NoteKind.Info);
+            if (EditingMask) NoteRow(rows, L.Tr("Painting the layer mask"), NoteKind.Info);
             rows.Space(4);
         }
 
         /// <summary>組のチャンネルの値の行（Color は描画色の見本、Emission は色の見本、データのチャンネルは 0〜1、Normal は傾き）。</summary>
-        void MaterialValueRow(UiRows rows, PaintChannel c)
+        void MaterialValueRow(UiRows rows, PaintChannel c, BrushState b = null, string prefix = "material.value.")
         {
-            var row = Mark("material.value." + c, rows.Row());
+            if (b == null) b = brush;
+            // 色の見本と法線の見出しは 1 行、値のスライダーは 2 行（Substance と同じ）
+            bool color = c == PaintChannel.Color || c == PaintChannel.Emission;
+            var row = Mark(prefix + c, color || c == PaintChannel.Normal ? rows.Row() : rows.SliderRow());
             string name = L.Tr(c.ToString());
             switch (c)
             {
@@ -176,26 +181,26 @@ namespace Yozolab.YoluPainter.Editor
                     PaintGui.Text(new Rect(row.x, row.y, LabelColumn, row.height), PaintGui.Fit(name, LabelColumn - 6, PaintTheme.Label), PaintTheme.Label, GUI.enabled ? PaintTheme.Text : PaintTheme.TextDisabled);
                     var swatch = new Rect(row.x + LabelColumn, row.y + 1, row.width - LabelColumn, row.height - 2);
                     if (c == PaintChannel.Color)
-                        PaintGui.ColorSwatch(swatch, brush.color, v => { brush.color = v; Repaint(); }, true, L.Tr("The foreground color (also in the Color panel)"), GUI.enabled && stroke == null);
+                        PaintGui.ColorSwatch(swatch, b.color, v => { b.color = v; Repaint(); }, true, ReferenceEquals(b, brush) ? L.Tr("The foreground color (also in the Color panel)") : L.Tr("The end material color"), GUI.enabled && stroke == null);
                     else
-                        PaintGui.ColorSwatch(swatch, new Color(brush.materialEmission.r, brush.materialEmission.g, brush.materialEmission.b, 1), v => { brush.materialEmission = new Color(v.r, v.g, v.b, 1); Repaint(); }, false, L.Tr("The emission color the stroke paints"), GUI.enabled && stroke == null);
+                        PaintGui.ColorSwatch(swatch, new Color(b.materialEmission.r, b.materialEmission.g, b.materialEmission.b, 1), v => { b.materialEmission = new Color(v.r, v.g, v.b, 1); Repaint(); }, false, L.Tr("The emission color the stroke paints"), GUI.enabled && stroke == null);
                     break;
                 }
                 case PaintChannel.Normal:
                 {
-                    var cols = PaintGui.LabeledColumns(new Rect(row.x, row.y, row.width - 28, row.height), name, 56, 2);
-                    double x = brush.materialNormalX, y = brush.materialNormalY;
-                    double nx = PaintGui.KeepSlider(cols[0], L.TrIn("normal brush", "Tilt X"), x, -1, 1, "0.00", "", L.Tr("The Normal value as a direction: +1 leans right"));
-                    double ny = PaintGui.KeepSlider(cols[1], L.TrIn("normal brush", "Tilt Y"), y, -1, 1, "0.00", "", L.Tr("+1 leans up (OpenGL / Unity)"));
-                    if (nx != x || ny != y) SetMaterialNormal((float)nx, (float)ny);
-                    if (PaintGui.IconButton(new Rect(row.xMax - 24, row.y, 24, row.height), "restart_alt", L.Tr("Flat brush value (128, 128, 255): paints a flat normal"), false, GUI.enabled && stroke == null, 16)) SetMaterialNormal(0, 0);
+                    PaintGui.Text(new Rect(row.x, row.y, row.width - 28, row.height), PaintGui.Fit(name, row.width - 34, PaintTheme.Label), PaintTheme.Label, GUI.enabled ? PaintTheme.Text : PaintTheme.TextDisabled);
+                    double x = b.materialNormalX, y = b.materialNormalY;
+                    double nx = PaintGui.KeepSlider(rows.SliderRow(), L.TrIn("normal brush", "Tilt X"), x, -1, 1, "0.00", "", L.Tr("The Normal value as a direction: +1 leans right"));
+                    double ny = PaintGui.KeepSlider(rows.SliderRow(), L.TrIn("normal brush", "Tilt Y"), y, -1, 1, "0.00", "", L.Tr("+1 leans up (OpenGL / Unity)"));
+                    if (nx != x || ny != y) SetMaterialNormal((float)nx, (float)ny, b);
+                    if (PaintGui.IconButton(new Rect(row.xMax - 24, row.y, 24, row.height), "restart_alt", L.Tr("Flat brush value (128, 128, 255): paints a flat normal"), false, GUI.enabled && stroke == null, 16)) SetMaterialNormal(0, 0, b);
                     break;
                 }
                 default:
                 {
-                    float v = MaterialScalar(c);
+                    float v = MaterialScalar(c, b);
                     float next = PaintGui.FitSlider(row, name, v, 0, 1, "0.00", "", L.Tr("The {0} value the stroke paints", name));
-                    if (next != v) SetMaterialScalar(c, next);
+                    if (next != v) SetMaterialScalar(c, next, b);
                     break;
                 }
             }

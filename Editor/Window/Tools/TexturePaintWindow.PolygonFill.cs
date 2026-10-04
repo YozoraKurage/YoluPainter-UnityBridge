@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
@@ -30,7 +31,7 @@ namespace Yozolab.YoluPainter.Editor
 
         /// <summary>強調の色: 塗るは橙、消すは桃色（UV のワイヤーフレームの水色と見分けられる色）。</summary>
         static readonly Color PaintHighlight = new Color(1f, .62f, .16f, 1f), EraseHighlight = new Color(1f, .36f, .62f, 1f);
-        Color HighlightColor => polyFillErase ? EraseHighlight : PaintHighlight;
+        Color HighlightColor => tool == PaintTool.PolygonFill && polyFillErase ? EraseHighlight : PaintHighlight;
 
         // ───────── 範囲の索引（ジオメトリごと） ─────────
 
@@ -44,18 +45,19 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>ポインタの下の、今のテクスチャセットの三角形（無ければ −1）。3D ビューはその面の三角形、2D キャンバスはその点の UV を含む
-        /// スロットの三角形（重なった UV では番号の小さいもの）。</summary>
+        /// スロットの三角形（重なった UV では選んだ候補、未選択なら番号の小さいもの）。</summary>
         int PolygonFillTriangleAt(Vector2 pointer, bool onSurface)
         {
             if (preview == null || !preview.CanPaint) return -1;
             if (onSurface)
             {
                 if (!surfaceRect.Contains(pointer) || !preview.TryPick(surfaceRect, pointer, out var hit)) return -1;
-                return hit.MaterialSlot == materialSlot ? hit.TriangleIndex : -1;
+                return PaintsSlot(hit.MaterialSlot) ? hit.TriangleIndex : -1;
             }
             if (!canvasRect.Contains(pointer)) return -1;
+            overlapPointer = pointer;
             var p = CanvasPoint(pointer);
-            return RegionIndex()?.TriangleAtUv(materialSlot, new Vector2(p.x / document.Width, p.y / document.Height)) ?? -1;
+            return PolygonFillUvCandidate(new Vector2(p.x / document.Width, p.y / document.Height));
         }
 
         /// <summary>範囲の三角形の UV を、キャンバスの画素座標の三角形に（UV (0, 0) がキャンバスの左下。SurfaceRegions.Selection と同じ）。</summary>
@@ -73,6 +75,8 @@ namespace Yozolab.YoluPainter.Editor
         bool HandlePolygonFillInput(Event e)
         {
             if (polyFill == null && tool != PaintTool.PolygonFill) return false;
+            if (e.type == EventType.MouseDown && e.button == 1 && !e.alt && polyFill == null && canvasRect.Contains(e.mousePosition))
+            { UpdatePolygonFillHover(e.mousePosition); if (overlapCandidates.Count > 1) { OpenPolygonOverlapMenu(new Rect(e.mousePosition, Vector2.zero)); e.Use(); return true; } }
             if (e.type == EventType.MouseMove) { UpdatePolygonFillHover(e.mousePosition); return false; }
             if (e.type == EventType.MouseLeaveWindow) { ClearPolygonFillHover(); Repaint(); return false; }
             if (polyFill == null)
@@ -98,20 +102,21 @@ namespace Yozolab.YoluPainter.Editor
 
         void BeginPolygonFill(Vector2 pointer, bool onSurface)
         {
-            if (preview == null || !preview.HasModel) { message = L.Tr("Load a model (or the demo cube) to fill its polygons on the 3D view or its UVs on the 2D canvas."); return; }
-            if (!preview.CanPaint) { message = "This preview snapshot is not safe to paint. See its load diagnostics."; return; }
-            if (onSurface && preview.TryPick(surfaceRect, pointer, out var hit) && hit.MaterialSlot != materialSlot) { OtherSlotPressed(hit.MaterialSlot); return; }
+            if (preview == null || !preview.HasModel) { message = L.Tr("No model"); return; }
+            if (!preview.CanPaint) { message = L.Tr("This preview snapshot is not safe to paint."); return; }
+            if (onSurface && preview.TryPick(surfaceRect, pointer, out var hit) && !PaintsSlot(hit.MaterialSlot)) { OtherSlotPressed(hit.MaterialSlot); return; }
             var layer = document.GetLayer(selectedLayer);
             TriangleFill fill;
             if (EditingMask) fill = document.BeginMaskTriangleFill(selectedLayer, brush.opacity, reveal: MaskFillReveals(layer));
             else
             {
-                if (layer.IsGroup) throw new InvalidOperationException("A group has no pixels. Select a layer inside it to fill, or fill the group's mask.");
-                if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException("Fill paints pixels: select a paint layer, or edit the layer's mask.");
+                if (layer.IsGroup) throw new InvalidOperationException(L.Tr("A group has no pixels."));
+                if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException(L.Tr("Only a paint layer or a mask can be filled."));
                 document.EnsurePixelsEditable(selectedLayer, polyFillErase); // ロックで断るなら、チャンネルを有効にする前に（何も残さない）
                 if (!layer.IsChannelEnabled(channel)) document.SetChannelEnabled(selectedLayer, channel, true);
                 if (!polyFillErase) RememberColor();
-                fill = document.BeginTriangleFill(selectedLayer, channel, BrushColor32(), brush.opacity, polyFillErase);
+                fill = brush.material ? document.BeginMaterialTriangleFill(selectedLayer, StrokeChannels(), brush.opacity, polyFillErase)
+                    : document.BeginTriangleFill(selectedLayer, channel, BrushColor32(), brush.opacity, polyFillErase);
             }
             polyFill = fill; stroke = fill.Stroke; surfaceStroke = false; polyFillOnSurface = onSurface; polyFillRegions.Clear(); polyFillLast = pointer;
             GUIUtility.hotControl = GUIUtility.GetControlID(FocusType.Passive);
@@ -140,7 +145,8 @@ namespace Yozolab.YoluPainter.Editor
             if (triangle < 0) return;
             var index = RegionIndex(); long key = index.Key(triangle, surfacePick);
             if (!polyFillRegions.Add(key)) return; // 足した範囲はもう塗ってある
-            polyFill.Add(CanvasTriangles(index.Region(triangle, surfacePick)));
+            var region = index.Region(triangle, surfacePick);
+            polyFill.Add(CanvasTriangles(polyFillOnSurface ? VisibleSurfaceRegion(region).ToList() : region));
             repaintPixels = true;
         }
 
@@ -171,8 +177,11 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>ポインタの下の範囲を求め直す（三角形が変わったときだけ範囲を引き、範囲の鍵が変わったときだけ見せる物を変える）。</summary>
         internal void UpdatePolygonFillHover(Vector2 pointer)
         {
-            if (tool != PaintTool.PolygonFill) { ClearPolygonFillHover(); return; }
+            if (UsesIdHover) { pickHoverPointer = pointer; UpdateIdPickHover(pointer); return; }
+            if (!UsesRegionHover) { ClearPolygonFillHover(); return; }
+            pickHoverPointer = pointer;
             bool onSurface = polyFill != null ? polyFillOnSurface : surfaceRect.Contains(pointer);
+            if (tool != PaintTool.PolygonFill && !onSurface) { ClearPolygonFillHover(); return; }
             int triangle = PolygonFillTriangleAt(pointer, onSurface);
             SetPolygonFillHover(triangle, onSurface);
         }
@@ -180,19 +189,21 @@ namespace Yozolab.YoluPainter.Editor
         void SetPolygonFillHover(int triangle, bool onSurface)
         {
             var geometry = preview != null && preview.HasModel ? preview.Geometry : null;
-            if (triangle == hoverTriangle && onSurface == hoverOnSurface && surfacePick == hoverKind && ReferenceEquals(geometry, hoverGeometry) && materialSlot == hoverSlot) return;
-            hoverTriangle = triangle; hoverOnSurface = onSurface; hoverKind = surfacePick; hoverGeometry = geometry; hoverSlot = materialSlot;
+            if (idHoverRgb.HasValue || !ReferenceEquals(geometry, hoverGeometry) || CurrentMaterialGroup != hoverSlot) { hoverKey = -1; idHoverRgb = null; }
+            if (triangle == hoverTriangle && onSurface == hoverOnSurface && surfacePick == hoverKind && ReferenceEquals(geometry, hoverGeometry) && CurrentMaterialGroup == hoverSlot) return;
+            hoverTriangle = triangle; hoverOnSurface = onSurface; hoverKind = surfacePick; hoverGeometry = geometry; hoverSlot = CurrentMaterialGroup;
             if (triangle < 0 || geometry == null) { hoverKey = -1; hoverOutline = null; preview?.HideRegion(); return; }
             var index = RegionIndex(); long key = index.Key(triangle, surfacePick);
             if (key == hoverKey) return;
             hoverKey = key; PolygonFillHoverLookups++;
-            preview.ShowRegion(key, index.Region(triangle, surfacePick), HighlightColor * new Color(1, 1, 1, .34f));
+            preview.ShowRegion(key, index.Region(triangle, surfacePick), HighlightColor * new Color(1, 1, 1, .24f));
             hoverOutline = index.UvOutline(triangle, surfacePick); hoverOutlineGui = null;
         }
 
         void ClearPolygonFillHover()
         {
-            if (hoverTriangle < 0 && hoverKey < 0) return;
+            if (hoverTriangle < 0 && hoverKey < 0 && !idHoverRgb.HasValue) return;
+            idHoverRgb = null;
             hoverTriangle = -1; hoverKey = -1; hoverOutline = null; hoverOutlineGui = null; hoverGeometry = null; preview?.HideRegion();
         }
 
@@ -200,12 +211,9 @@ namespace Yozolab.YoluPainter.Editor
         void SyncPolygonFillHover()
         {
             if (Event.current == null || Event.current.type != EventType.Repaint) return;
-            if (tool != PaintTool.PolygonFill) { ClearPolygonFillHover(); return; }
-            if (hoverTriangle < 0) return;
-            var geometry = preview != null && preview.HasModel ? preview.Geometry : null;
-            if (!ReferenceEquals(geometry, hoverGeometry) || hoverSlot != materialSlot) { ClearPolygonFillHover(); return; }
-            if (hoverKind != surfacePick) { int t = hoverTriangle; hoverTriangle = -1; hoverKey = -1; SetPolygonFillHover(t, hoverOnSurface); }
-            else preview.ShowRegion(hoverKey, RegionIndex().Region(hoverTriangle, surfacePick), HighlightColor * new Color(1, 1, 1, .34f)); // 色（塗る/消す）の切り替え
+            UpdatePolygonFillHover(pickHoverPointer);
+            if (UsesIdHover || hoverTriangle < 0) return;
+            preview.ShowRegion(hoverKey, RegionIndex().Region(hoverTriangle, surfacePick), HighlightColor * new Color(1, 1, 1, .24f));
         }
 
         /// <summary>2D キャンバスのクリップの中で、強調している範囲の UV の輪郭を描く（Repaint のときだけ。UV のワイヤーフレームと同じく
@@ -236,14 +244,12 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>範囲の選び方のメニュー（オプションバーと「3D Pick」の欄で共有）。</summary>
         void OpenSurfacePickMenu(Rect at)
         {
-            var menu = new GenericMenu();
+            var menu = new PaintMenu();
             foreach (SurfaceRegionKind kind in Enum.GetValues(typeof(SurfaceRegionKind))) { var k = kind; menu.AddItem(new GUIContent(SurfacePickName(k)), k == surfacePick, () => { surfacePick = k; Repaint(); }); }
             menu.DropDown(at);
         }
 
         string PolygonFillPaintLabel => EditingMask ? L.Tr("White (show)") : L.TrIn("polygon fill", "Paint");
         string PolygonFillEraseLabel => EditingMask ? L.Tr("Black (hide)") : L.TrIn("polygon fill", "Erase");
-        string PolygonFillHint => EditingMask ? L.Tr("Mask: white shows, black hides (X swaps). Click or drag; one undo when you let go.")
-            : L.Tr("Click or drag over the model or its UVs; one undo when you let go.");
     }
 }

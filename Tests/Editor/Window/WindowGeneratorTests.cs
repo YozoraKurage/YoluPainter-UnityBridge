@@ -36,7 +36,7 @@ namespace Yozolab.YoluPainter.Tests
             var plain = d.Composite(PaintChannel.Color);
             var gen = window.AddGenerator(FilterTarget.Mask, GeneratorType.EdgeWear);
             Assert.That(gen, Is.Not.Null, window.StatusMessage);
-            Assert.That(window.StatusMessage, Does.Contain("no effect until its mesh maps are baked"));
+            Assert.That(window.StatusMessage, Does.Contain("No effect"));
             var status = d.GetGeneratorStatus(fill.Id, gen.Id);
             Assert.That(status.Active, Is.False); Assert.That(status.Reason, Does.Contain("Curvature has not been baked"));
             AssertShows(window, plain, "no maps: the mask passes through, nothing turns black");
@@ -74,7 +74,7 @@ namespace Yozolab.YoluPainter.Tests
             var gen = window.AddGenerator(FilterTarget.Mask, GeneratorType.EdgeWear);
             BakeCurvature(window); window.PollGeneratorInputs();
             Assert.That(first.Document.GetGeneratorStatus(fill.Id, gen.Id).Active, Is.True);
-            var second = window.AddTextureSet(1);
+            var second = window.AddTextureSet(-1); // デモのキューブのマテリアルは 1 つ: モデルに無いセット
             Assert.That(window.CurrentTextureSet, Is.SameAs(second));
             Assert.That(second.Document.GeneratorInputs, Is.Not.Null.And.Not.SameAs(first.Document.GeneratorInputs), "each set has its own maps");
             var other = WornFill();
@@ -114,7 +114,8 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.AddGenerator(FilterTarget.Content, GeneratorType.EdgeWear), Is.Null);
             Assert.That(window.StatusMessage, Does.Contain("unit vectors"));
             Assert.That(window.GeneratorChoices(fill.Id, FilterTarget.Content).All(c => c.refusal != null), Is.True, "every choice says why");
-            Assert.That(window.GeneratorChoices(fill.Id, FilterTarget.Mask).All(c => c.refusal == null), Is.True, "a mask takes every generator");
+            Assert.That(window.GeneratorChoices(fill.Id, FilterTarget.Mask).Where(c => c.type != GeneratorType.Anchor).All(c => c.refusal == null), Is.True, "a mask takes every generator");
+            Assert.That(window.GeneratorChoices(fill.Id, FilterTarget.Mask).Single(c => c.type == GeneratorType.Anchor).refusal, Does.Contain("no anchor below"), "the anchor generator needs an anchor below");
             Assert.That(d.UndoCount, Is.EqualTo(now));
             // 描いているあいだは変えない。Esc で何も残らない
             window.Channel = PaintChannel.Color; window.SelectedLayer = paint.Id; window.EditMask = false;

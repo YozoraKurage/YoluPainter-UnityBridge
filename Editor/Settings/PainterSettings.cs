@@ -40,6 +40,10 @@ namespace Yozolab.YoluPainter.Editor
             public bool showBundledBrushes = true;
             /// <summary>未保存の作業の復旧 checkpoint を書く間隔。</summary>
             public int recoveryIntervalSeconds = 15;
+            /// <summary>保存の確定後に残す復旧の世代。current と previous を含め、最低 2。</summary>
+            public int recoveryGenerationsToKeep = 3;
+            /// <summary>Library/YoluPainter の合計の通知目安（MiB）。超えても自動では削除しない。</summary>
+            public int recoveryWarningMiB = 2048;
             /// <summary>ドキュメントのメモリ予算（MiB）: Undo 履歴、レイヤーの画素の合計、1 回の操作（ストローク・塗りつぶし・変形）の
             /// 巻き戻し用。-1 は自動（このマシンのメモリから決める。<see cref="AutomaticBudgetMiB"/>）。</summary>
             public int undoBudgetMiB = Automatic, sourceBudgetMiB = Automatic, strokeBudgetMiB = Automatic;
@@ -81,6 +85,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>パスの比較（Windows と macOS の既定は大文字小文字を区別しないので、区切りが \ の環境では区別しない）。</summary>
         public static StringComparison PathComparison => Path.DirectorySeparatorChar == '\\' ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         public const int MinRecoverySeconds = 5, MaxRecoverySeconds = 600;
+        public const int MaxRecoveryGenerations = 1000, MaxRecoveryWarningMiB = 1048576;
         public const int MaxUndoMiB = 16384, MinSourceMiB = 16, MaxSourceMiB = 32768, MinStrokeMiB = 8, MaxStrokeMiB = 8192, MaxMinUndoSteps = 100;
         /// <summary>予算の値で「自動」を表す。</summary>
         public const int Automatic = -1;
@@ -167,6 +172,8 @@ namespace Yozolab.YoluPainter.Editor
         public static int DefaultResolution { get { Load(); return shared.defaultResolution; } }
         public static int ExportPadding { get { Load(); return shared.exportPadding; } }
         public static int RecoveryIntervalSeconds { get { Load(); return personal.recoveryIntervalSeconds; } }
+        public static int RecoveryGenerationsToKeep { get { Load(); return personal.recoveryGenerationsToKeep; } }
+        public static long RecoveryWarningBytes { get { Load(); return personal.recoveryWarningMiB * 1024L * 1024; } }
         public static long UndoBudgetBytes { get { Load(); return Bytes(personal.undoBudgetMiB, Budget.Undo); } }
         public static long SourceBudgetBytes { get { Load(); return Bytes(personal.sourceBudgetMiB, Budget.Source); } }
         public static long StrokeBudgetBytes { get { Load(); return Bytes(personal.strokeBudgetMiB, Budget.Stroke); } }
@@ -255,6 +262,8 @@ namespace Yozolab.YoluPainter.Editor
                 if (fix) value = fallback;
             }
             Range(ref p.recoveryIntervalSeconds, MinRecoverySeconds, MaxRecoverySeconds, defaultsPersonal.recoveryIntervalSeconds, "Recovery interval (s)");
+            Range(ref p.recoveryGenerationsToKeep, 2, MaxRecoveryGenerations, defaultsPersonal.recoveryGenerationsToKeep, "Recovery generations to keep");
+            Range(ref p.recoveryWarningMiB, 1, MaxRecoveryWarningMiB, defaultsPersonal.recoveryWarningMiB, "Recovery warning (MiB)");
             void Budget(ref int value, int min, int max, string what) { if (value != Automatic) Range(ref value, min, max, Automatic, what + " (-1 = automatic)"); }
             Budget(ref p.undoBudgetMiB, 0, MaxUndoMiB, "Undo budget (MiB)");
             Budget(ref p.sourceBudgetMiB, MinSourceMiB, MaxSourceMiB, "Layer pixel budget (MiB)");

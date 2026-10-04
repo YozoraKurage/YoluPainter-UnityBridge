@@ -39,7 +39,7 @@ namespace Yozolab.YoluPainter.Tests
                 var gen = w.AddGenerator(FilterTarget.Mask, GeneratorType.ShapeGradient);
                 Assert.That(gen, Is.Not.Null, w.StatusMessage);
                 w.SelectedFilter = gen.Id; w.View = TexturePaintWindow.ViewMode.Split;
-                w.SetSectionOpen("layer", false); w.SetSectionOpen("mask", false); w.SetSectionOpen("filters", true);
+                w.SetSectionOpen("effect", true);
                 w.Preview.ViewFrom(35, 25);
                 var start = gen.Settings.Generator.Volume;
                 int drawn = 0;

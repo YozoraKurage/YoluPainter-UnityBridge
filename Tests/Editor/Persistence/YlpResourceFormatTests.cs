@@ -83,7 +83,7 @@ namespace Yozolab.YoluPainter.Tests
             {
                 { "empty", "" }, { "not an object", "[]" }, { "no list", "{}" }, { "an item that is not an object", "{ \"resources\": [ 1 ] }" },
                 { "no id", Good("\"id\": \"" + id + "\", ", "") }, { "upper-case id", Good(id, id.ToUpperInvariant()) }, { "empty id", Good(id, Guid.Empty.ToString("D")) },
-                { "an unknown kind", Good("\"image\"", "\"brush\"") }, { "no name", Good("\"name\": \"X\", ", "") }, { "a blank name", Good("\"X\"", "\"  \"") },
+                { "an unknown kind", Good("\"image\"", "\"futureKind\"") }, { "no name", Good("\"name\": \"X\", ", "") }, { "a blank name", Good("\"X\"", "\"  \"") },
                 { "a short hash", Good(hash, "abc") }, { "an upper-case hash", Good(hash, hash.ToUpperInvariant()) },
                 { "width 0", Good("\"width\": 2", "\"width\": 0") }, { "height 8193", Good("\"height\": 3", "\"height\": 8193") }, { "a text width", Good("\"width\": 2", "\"width\": \"2\"") },
                 { "an unknown colour space", Good("\"width\": 2", "\"colorSpace\": \"aces\", \"width\": 2") },
@@ -92,13 +92,13 @@ namespace Yozolab.YoluPainter.Tests
                 { "a unity asset without a guid", Good("{ \"type\": \"builtIn\", \"key\": \"grid\", \"version\": 1 }", "{ \"type\": \"unityAsset\", \"path\": \"Assets/x.png\" }") },
                 { "a unity guid with hyphens", Good("{ \"type\": \"builtIn\", \"key\": \"grid\", \"version\": 1 }", "{ \"type\": \"unityAsset\", \"guid\": \"" + id + "\", \"path\": \"Assets/x.png\" }") },
                 { "a file without a hash", Good("{ \"type\": \"builtIn\", \"key\": \"grid\", \"version\": 1 }", "{ \"type\": \"file\", \"path\": \"/x.png\", \"length\": 1 }") },
-                { "a library path", Good("{ \"type\": \"builtIn\", \"key\": \"grid\", \"version\": 1 }", "{ \"type\": \"library\", \"file\": \"sub/x.png\", \"sha256\": \"" + hash + "\", \"length\": 1 }") },
+                { "a library path", Good("{ \"type\": \"builtIn\", \"key\": \"grid\", \"version\": 1 }", "{ \"type\": \"library\", \"file\": \"../x.png\", \"sha256\": \"" + hash + "\", \"length\": 1 }") },
                 { "a negative length", Good("{ \"type\": \"builtIn\", \"key\": \"grid\", \"version\": 1 }", "{ \"type\": \"file\", \"path\": \"/x.png\", \"sha256\": \"" + hash + "\", \"length\": -1 }") },
                 { "the same id twice", "{ \"resources\": [ " + string.Join(",", Enumerable.Repeat("{ \"id\": \"" + id + "\", \"kind\": \"image\", \"name\": \"X\", \"content\": \"" + hash + "\", \"width\": 2, \"height\": 3 }", 2)) + " ] }" },
                 { "too many", "{ \"resources\": [ " + string.Join(",", Enumerable.Range(0, ProjectResources.MaxResources + 1).Select(i => "{ \"id\": \"" + new Guid(i + 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1).ToString("D") + "\", \"kind\": \"image\", \"name\": \"X\", \"content\": \"" + hash + "\", \"width\": 2, \"height\": 3 }")) + " ] }" },
             };
             foreach (var b in bad) Assert.That(() => ResourceIndex.Read(Json(b.Value)), Throws.TypeOf<InvalidDataException>(), b.Key);
-            Assert.That(() => ResourceIndex.Read(Json(Good("\"image\"", "\"brush\""))), Throws.TypeOf<InvalidDataException>().With.Message.Contains("does not know"), "a later kind is refused, not dropped");
+            Assert.That(() => ResourceIndex.Read(Json(Good("\"image\"", "\"futureKind\""))), Throws.TypeOf<InvalidDataException>().With.Message.Contains("does not know"), "a later kind is refused, not dropped");
         }
 
         // ───────── 形式 4 のファイル ─────────
@@ -120,7 +120,7 @@ namespace Yozolab.YoluPainter.Tests
             resources.Restore(R3, "Mask again", ImageContent.FromPixels(b.CopyPixels(), 7, 2), Origins()[4], ResourceColorSpace.Unspecified);
             var files = new Dictionary<string, byte[]>(StringComparer.Ordinal)
             {
-                { YlpFormat.ProjectName, YlpFormat.WriteProject(new YlpProjectInfo(new[] { new YlpTextureSetInfo(A, "Body", 0) }, A)) },
+                { YlpFormat.ProjectName, YlpFormat.WriteProject(new YlpProjectInfo(new[] { new YlpTextureSetInfo(A, "Body", YlpMaterialRef.PendingSlot(0)) }, A)) },
                 { YlpFormat.SetEntry(A, YlpArchive.NativeName), Document(A) },
             };
             ResourceIndex.AddTo(files, resources);
@@ -146,7 +146,7 @@ namespace Yozolab.YoluPainter.Tests
             var bytes = YlpArchive.Write(files);
             Assert.That(ManifestHeader(bytes), Is.EqualTo("YOLUPAINTER-YLP-3"));
             var opened = YlpFormat.Open(YlpArchive.Read(bytes));
-            Assert.That(opened.Info.Format, Is.EqualTo(4)); Assert.That(opened.Upgraded, Is.False); Assert.That(opened.UnknownEntries, Is.Empty);
+            Assert.That(opened.Info.Format, Is.EqualTo(YlpFormat.Current)); Assert.That(opened.Upgraded, Is.False); Assert.That(opened.UnknownEntries, Is.Empty);
             Assert.That(opened.Resources.Select(r => (r.Id, r.Name)), Is.EqualTo(new[] { (R1, "Scratches"), (R2, "Mask"), (R3, "Mask again") }), "the order is kept");
             var loaded = ResourceIndex.Load(opened.Files, opened.Resources);
             Assert.That(loaded.Images.Select(r => (r.Id, r.Name, r.ContentHash, r.ColorSpace, r.Origin.Kind)), Is.EqualTo(resources.Images.Select(r => (r.Id, r.Name, r.ContentHash, r.ColorSpace, r.Origin.Kind))));
@@ -242,9 +242,9 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(opened.Info.Format, Is.EqualTo(3)); Assert.That(opened.Upgraded, Is.True);
             Assert.That(opened.Info.SavedBy.App, Is.EqualTo("YoluPainter")); Assert.That(opened.Info.CreatedBy, Is.Not.Null);
             Assert.That(opened.UnknownEntries, Is.Empty); Assert.That(opened.Notes, Is.Empty); Assert.That(opened.Resources, Is.Empty);
-            Assert.That(opened.Files.Keys, Is.EquivalentTo(snapshot.Keys.Where(k => k != YlpFormat.InfoName)), "the step 3 → 4 moves nothing");
-            foreach (var entry in opened.Files) Assert.That(entry.Value, Is.EqualTo(snapshot[entry.Key]), entry.Key);
-            Assert.That(opened.Project.Sets.Select(s => (s.Name, s.MaterialSlot)), Is.EqualTo(new[] { ("Body", 0), ("Hair Front", 1) }));
+            Assert.That(opened.Files.Keys, Is.EquivalentTo(snapshot.Keys.Where(k => k != YlpFormat.InfoName)), "the steps 3 → 7 move nothing");
+            foreach (var entry in opened.Files) if (entry.Key != YlpFormat.ProjectName) Assert.That(entry.Value, Is.EqualTo(snapshot[entry.Key]), entry.Key + " (project.json changes in 6 → 7)");
+            Assert.That(opened.Project.Sets.Select(s => (s.Name, s.Material)), Is.EqualTo(new[] { ("Body", YlpMaterialRef.PendingSlot(0)), ("Hair Front", YlpMaterialRef.PendingSlot(1)) }));
             Assert.That(opened.Project.CurrentSet, Is.EqualTo(opened.Project.Sets[0].Id));
             foreach (var set in opened.Project.Sets)
             {
@@ -256,7 +256,7 @@ namespace Yozolab.YoluPainter.Tests
                 Assert.That(SelectionBinary.Write(SelectionBinary.Read(files[SelectionBinary.EntryName], document)), Is.EqualTo(files[SelectionBinary.EntryName]), set.Name + " selection");
                 var maps = files.Where(f => f.Key.StartsWith(MeshMapBinary.EntryPrefix, StringComparison.Ordinal)).Select(f => MeshMapBinary.Read(f.Value)).ToList();
                 Assert.That(maps.Select(m => m.Kind), Is.EquivalentTo(new[] { MeshMapKind.WorldNormal, MeshMapKind.Position }), set.Name + " mesh maps");
-                Assert.That(maps.Select(m => m.Provenance.TargetSlot), Is.All.EqualTo(set.MaterialSlot));
+                Assert.That(maps.Select(m => m.Provenance.TargetSlot), Is.All.EqualTo(set.Material.Slot));
                 bool generator = document.Layers.Any(l => l.Filters.Any(f => f.Settings.Type == FilterType.Generator) || l.Mask != null && l.Mask.Filters.Any(f => f.Settings.Type == FilterType.Generator));
                 Assert.That(generator, Is.EqualTo(set.Name == "Hair Front"), "the second set holds a Generator stage (native version 11)");
                 // Generator の段はメッシュマップを入力にしないと元を通すので、その段が変える Color はここでは比べない

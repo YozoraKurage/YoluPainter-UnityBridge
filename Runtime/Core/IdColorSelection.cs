@@ -71,7 +71,7 @@ namespace Yozolab.YoluPainter.Core
         {
             Require(document); IdMapColors.RequireIdMap(idMap); IdMapColors.RequireColors(colors, tolerance);
             if (idMap.Width != document.Width || idMap.Height != document.Height)
-                throw new ArgumentException("The ID map is " + idMap.Width + "×" + idMap.Height + ", the document " + document.Width + "×" + document.Height + ". Bake it again for this texture set.", nameof(idMap));
+                throw new ArgumentException("The ID map is " + idMap.Width + "×" + idMap.Height + ", the document " + document.Width + "×" + document.Height + ".", nameof(idMap));
             if (colors.Count == 0) return None(document);
             var wanted = new int[colors.Count]; for (int i = 0; i < wanted.Length; i++) wanted[i] = colors[i];
             var data = idMap.Data; var coverage = idMap.Coverage; int w = document.Width;

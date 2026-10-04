@@ -13,8 +13,10 @@
 """
 import filecmp
 import os
+import re
 import shutil
 import sys
+import tempfile
 
 EXCLUDED_TOP = {".git", "temp~", ".devcontainer", ".github", ".worktrees", ".claude", ".agent"}  # .worktrees・.claude はエージェントの worktree の置き場、.agent は進捗メモ
 
@@ -52,10 +54,18 @@ def main(argv):
                 if s.st_size == d.st_size and (filecmp.cmp(src, dst, shallow=False) if checksum else int(s.st_mtime) == int(d.st_mtime)):
                     same += 1
                     continue
-            tmp = dst + ".sync-tmp"
-            shutil.copyfile(src, tmp)
-            shutil.copystat(src, tmp)
-            os.replace(tmp, dst)  # 途中の状態を Unity に見せない
+            # 台のロックが主対策。一時名も PID と乱数で分け、単独で呼ばれた同期どうしの衝突を避ける。
+            fd, tmp = tempfile.mkstemp(prefix=".sync-tmp-%d-" % os.getpid(), suffix="~", dir=target_dir)
+            os.close(fd)
+            try:
+                shutil.copyfile(src, tmp)
+                shutil.copystat(src, tmp)
+                os.replace(tmp, dst)  # 途中の状態を Unity に見せない
+            finally:
+                try:
+                    os.remove(tmp)
+                except FileNotFoundError:
+                    pass
             copied += 1
     # 写しにだけあるものを消す（深い所から）
     for root, dirs, files in os.walk(dest, topdown=False):
@@ -63,6 +73,9 @@ def main(argv):
         if rel != "." and rel.split(os.sep)[0] in EXCLUDED_TOP:
             continue
         for name in files:
+            # ロックを通らない同期への保険。ほかの同期の作業中の一時ファイルを消さない。
+            if re.fullmatch(r"[.]sync-tmp-[0-9]+-[a-z0-9_]{8}~", name):
+                continue
             path = os.path.normpath(os.path.join(root, name))
             if path not in wanted:
                 os.remove(path)

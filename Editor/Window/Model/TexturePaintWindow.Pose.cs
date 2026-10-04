@@ -25,16 +25,16 @@ namespace Yozolab.YoluPainter.Editor
                 foreach (var shape in shapes.Take(MaxBlendShapeRows))
                 {
                     float w = preview.GetBlendShapeWeight(shape);
-                    double next = PaintGui.KeepSlider(Spot("pose.shape." + shape.Label, rows.Row()), shape.Label, w, 0, 100, "0.#", "", null, labelIsData: true);
+                    double next = PaintGui.KeepSlider(Spot("pose.shape." + shape.Label, rows.SliderRow()), shape.Label, w, 0, 100, "0.#", "", null, labelIsData: true);
                     if (next != w) { preview.SetBlendShapeWeight(shape, (float)next); posePending = true; }
                 }
-                if (shapes.Count > MaxBlendShapeRows) PaintGui.Text(rows.Row(18), L.Tr("… {0} more; narrow the filter.", shapes.Count - MaxBlendShapeRows), PaintTheme.LabelDim);
+                if (shapes.Count > MaxBlendShapeRows) PaintGui.Text(rows.Row(18), L.Tr("… {0} more.", shapes.Count - MaxBlendShapeRows), PaintTheme.LabelDim);
                 PaintGui.GroupLabel(rows.Row(16), L.Tr("Animation Clip"));
                 var clip = poseClip;
-                if (PaintGui.ObjectBox(rows.Row(), ref clip, PoseClipPickerId, false, L.Tr("None (drop a clip here)"), "animation",
+                if (PaintGui.ObjectBox(rows.Row(), ref clip, PoseClipPickerId, false, L.Tr("None"), "animation",
                         L.Tr("An animation clip to pose the bones with: Generic clips follow bone paths, Humanoid clips use the model's Avatar"), L.Tr("Stop using the clip")))
                     poseClip = clip;
-                poseTime = (float)PaintGui.KeepSlider(rows.Row(), L.TrIn("pose", "Time"), poseTime, 0, poseClip != null ? Mathf.Max(0, poseClip.length) : 0, "0.00", " s", L.Tr("The moment of the clip to pose with (seconds)"), poseClip != null);
+                poseTime = (float)PaintGui.KeepSlider(rows.SliderRow(), L.TrIn("pose", "Time"), poseTime, 0, poseClip != null ? Mathf.Max(0, poseClip.length) : 0, "0.00", " s", L.Tr("The moment of the clip to pose with (seconds)"), poseClip != null);
                 var c = UiRows.Split(rows.Row(), 2, 6);
                 if (PaintGui.FitButton(c[0], L.Tr("Pose from Clip"), false, GUI.enabled && poseClip != null, L.Tr("Pose the preview with the clip at this time")))
                     TryAction(() => { preview.SamplePose(poseClip, poseTime); posePending = true; });
@@ -53,9 +53,9 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>今のポーズと BlendShape で形を焼き直す（新しいスナップショットの世代）。ストロークの最中は断る。</summary>
         internal void ApplyPoseNow()
         {
-            if (stroke != null) { message = L.Tr("Finish the stroke before changing the pose."); return; }
+            if (stroke != null) { message = L.Tr("A stroke is in progress."); return; }
             posePending = false;
-            if (preview.ApplyPose()) { message = L.Tr("Pose applied to the preview (the model itself is unchanged). Painting follows the posed surface; the texture stays in UV space."); Repaint(); }
+            if (preview.ApplyPose()) { message = L.Tr("Pose applied to the preview."); Repaint(); }
         }
     }
 }

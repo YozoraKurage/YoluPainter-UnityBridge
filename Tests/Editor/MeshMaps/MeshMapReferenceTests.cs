@@ -281,15 +281,20 @@ namespace Yozolab.YoluPainter.Tests
                 var restored = new MeshBakeSettings(); restored.ApplyKindKey(map.Kind, back.Provenance.SettingsKey, back.Provenance.Padding); restored.ApplySourceKey(back.Provenance.Source);
                 Assert.That(restored.KindKey(map.Kind), Is.EqualTo(back.Provenance.SettingsKey)); Assert.That(restored.SourceKey(high.Hash), Is.EqualTo(back.Provenance.Source));
             }
-            // 版 1: アンチエイリアスの欄が無い（読むと 1）
+            // 版 2: スロットの並びが無い（読むとスロット 1 つ）。版 1: さらにアンチエイリアスの欄が無い（読むと 1）
             var old = MeshBaker.Bake(low, new MeshBakeSettings { Width = 16, Height = 16, Maps = new[] { MeshMapKind.Position } }).Maps[0];
-            var v2 = MeshMapBinary.Write(old);
-            const int antialiasingAt = 8 + 4 + 4 + 4 + (4 + 64) + (4 + 64) + 4 + 4 + 4 + 4 + 4;
-            Assert.That(BitConverter.ToInt32(v2, antialiasingAt), Is.EqualTo(1));
+            var v3 = MeshMapBinary.Write(old);
+            const int antialiasingAt = 8 + 4 + 4 + 4 + (4 + 64) + (4 + 64) + 4 + 4 + 4 + 4 + 4, slotsAt = antialiasingAt + 4 + 4;
+            Assert.That(BitConverter.ToInt32(v3, antialiasingAt), Is.EqualTo(1));
+            Assert.That((BitConverter.ToInt32(v3, slotsAt), BitConverter.ToInt32(v3, slotsAt + 4)), Is.EqualTo((1, 0)), "one slot: slot 0");
+            var v2 = v3.Take(slotsAt).Concat(v3.Skip(slotsAt + 8)).ToArray(); BitConverter.GetBytes(2).CopyTo(v2, 8);
+            var readV2 = MeshMapBinary.Read(v2);
+            Assert.That(readV2.Provenance.TargetSlots, Is.EqualTo(new[] { 0 })); Assert.That(readV2.Provenance.ConditionKey, Is.EqualTo(old.Provenance.ConditionKey), "a one-slot map keeps its key");
+            Assert.That(MeshMapBinary.Write(readV2), Is.EqualTo(v3), "written again as version 3");
             var v1 = v2.Take(antialiasingAt).Concat(v2.Skip(antialiasingAt + 4)).ToArray(); BitConverter.GetBytes(1).CopyTo(v1, 8);
             var read = MeshMapBinary.Read(v1);
             Assert.That(read.Provenance.Antialiasing, Is.EqualTo(1)); Assert.That(read.RawValue(8, 8, 0), Is.EqualTo(old.RawValue(8, 8, 0)));
-            var bad = (byte[])v2.Clone(); BitConverter.GetBytes(9).CopyTo(bad, antialiasingAt);
+            var bad = (byte[])v3.Clone(); BitConverter.GetBytes(9).CopyTo(bad, antialiasingAt);
             Assert.That(() => MeshMapBinary.Read(bad), Throws.TypeOf<InvalidDataException>().With.Message.Contains("antialiasing"));
         }
 

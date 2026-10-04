@@ -7,8 +7,8 @@ using Yozolab.YoluPainter.Core;
 
 namespace Yozolab.YoluPainter.Editor
 {
-    /// <summary>レイヤーのパネル: 合成モードと不透明度、ロック、行（サムネイル・マスク・名前の変更・右クリック・Ctrl/Shift での複数選択）、
-    /// ドラッグでの並べ替え、下のツールバー、レイヤーの操作（メニューと共有）。</summary>
+    /// <summary>レイヤーのパネル: 合成モードと不透明度、ロック、行（サムネイル・マスク・名前の変更・右クリック・Ctrl/Shift での複数選択）と
+    /// その下の効果の段の行（Panels/TexturePaintWindow.EffectRows.cs）、ドラッグでの並べ替え、下のツールバー、レイヤーの操作（メニューと共有）。</summary>
     public sealed partial class TexturePaintWindow
     {
         const float LayerRowHeight = 30, LayerToolbarHeight = 30;
@@ -65,17 +65,23 @@ namespace Yozolab.YoluPainter.Editor
             float listTop = LayerListOffsetFor(r.width);
             var list = PanelSpot("list", new Rect(r.x, r.y + listTop, r.width, r.height - listTop - LayerToolbarHeight));
             PaintGui.Fill(list, PaintTheme.ControlBg);
-            float content = document.Layers.Count * LayerRowHeight;
-            var view = new Rect(0, 0, list.width - (content > list.height ? 10 : 0), content);
+            var listRows = LayerListRows(); // 層の行と、その下の効果の段の行（Panels/TexturePaintWindow.EffectRows.cs）
+            float content = LayerListHeight(listRows);
+            var view = new Rect(0, 0, PaintGui.ScrollContentWidth(list, content), content);
             layerScroll.y = Mathf.Clamp(layerScroll.y, 0, Mathf.Max(0, content - list.height));
+            bool overList = list.Contains(Event.current.mousePosition);
+            PanelSpot("scrollbar", PaintGui.ScrollTrack(list));
+            if (PaintGui.Scrollbar(list, ref layerScroll, content, 12)) Repaint();
             PaintGui.BeginScroll(list, layerScroll);
-            int row = 0;
-            for (int i = document.Layers.Count - 1; i >= 0; i--, row++) DrawLayerRow(new Rect(0, row * LayerRowHeight, view.width, LayerRowHeight), document.Layers[i], i);
+            foreach (var row in listRows)
+            {
+                var at = new Rect(0, row.Y, view.width, row.Height);
+                if (row.IsEffect) DrawEffectRow(at, row); else if (row.IsAnchor) DrawAnchorListRow(at, row); else DrawLayerRow(at, row.Layer, row.Index);
+            }
             HandleLayerDrag(view.width);
+            HandleSmartDrop(view.width, overList); // アセットのパネルからのスマートマテリアル・スマートマスク（Project/TexturePaintWindow.SmartMaterials.cs）
             PaintGui.EndScroll();
-            if (Event.current.type == EventType.ScrollWheel && list.Contains(Event.current.mousePosition))
-            { layerScroll.y = Mathf.Clamp(layerScroll.y + Event.current.delta.y * 12, 0, Mathf.Max(0, content - list.height)); Event.current.Use(); Repaint(); }
-            if (content > list.height) PaintGui.Rounded(new Rect(list.xMax - 6, list.y + list.height * layerScroll.y / content, 4, list.height * list.height / content), PaintTheme.ControlActive, 2);
+            LayerBlankContext(list, content, layerScroll.y, view.width);
             // 下: 操作
             var bar = new Rect(r.x, list.yMax, r.width, LayerToolbarHeight);
             PaintGui.Fill(bar, PaintTheme.PanelHeader);
@@ -84,7 +90,7 @@ namespace Yozolab.YoluPainter.Editor
             if (PaintGui.IconButton(B(), "format_color_fill", L.Tr("New Fill Layer"), false, true, 17)) TryAction(AddFillLayerHere);
             if (PaintGui.IconButton(B(), "tune", L.Tr("New Adjustment Layer"), false, true, 17))
             {
-                var menu = new GenericMenu();
+                var menu = new PaintMenu();
                 foreach (var (label, make) in AdjustmentMenu) { var mk = make; var lb = label; menu.AddItem(new GUIContent(L.Tr(lb)), false, () => TryAction(() => selectedLayer = document.AddAdjustmentLayer(L.Tr(lb), mk(), above: AboveSelected()).Id)); }
                 menu.ShowAsContext();
             }
@@ -92,7 +98,7 @@ namespace Yozolab.YoluPainter.Editor
             bool hasMask = active?.Mask != null;
             if (PaintGui.IconButton(B(), "vignette", hasMask ? L.Tr("Edit Layer Mask") : L.Tr("Add Layer Mask"), hasMask && editMask, active != null, 17))
                 TryAction(() => { if (!hasMask) { document.AddLayerMask(selectedLayer); editMask = true; } else editMask = !editMask; });
-            if (PaintGui.IconButton(B(), "auto_awesome", L.Tr("Add Filter"), false, active != null, 17)) { var menu = new GenericMenu(); FilterMenuItems(menu); menu.ShowAsContext(); }
+            if (PaintGui.IconButton(B(), "auto_awesome", L.Tr("Add Filter"), false, active != null, 17)) { var menu = new PaintMenu(); FilterMenuItems(menu); menu.ShowAsContext(); }
             x = bar.xMax - 4 - 27 * 3;
             if (PaintGui.IconButton(B(), "expand_less", L.Tr("Move Layer Up"), false, active != null, 18)) TryAction(() => MoveSelectedLayer(+1));
             if (PaintGui.IconButton(B(), "expand_more", L.Tr("Move Layer Down"), false, active != null, 18)) TryAction(() => MoveSelectedLayer(-1));
@@ -123,19 +129,22 @@ namespace Yozolab.YoluPainter.Editor
                 PaintGui.Icon(thumb, layer.IsGroup ? "folder" : layer.Kind == LayerKind.Fill ? "format_color_fill" : "tune", PaintTheme.TextDim, 15);
             }
             if (layer.Path != null) PaintGui.Icon(new Rect(thumb.xMax - 11, thumb.yMax - 11, 12, 12), "conversion_path", Color.white, 11); // パスで描かれた層の印
+            if (layer.Anchor != null) AnchorBadge(new Rect(thumb.x - 2, thumb.y - 2, 12, 12), layer.Anchor); // Anchor の印
             x = thumb.xMax + 6;
             if (layer.Mask != null)
             {
-                var maskBox = new Rect(x, r.y + 4, r.height - 8, r.height - 8);
+                var maskBox = PanelSpot("mask." + layer.Id, new Rect(x, r.y + 4, r.height - 8, r.height - 8));
                 bool editing = selected && editMask;
                 DrawThumbnail(maskBox, MaskThumbnail(layer));
+                if (layer.Mask.Anchor != null) AnchorBadge(new Rect(maskBox.x - 2, maskBox.y - 2, 12, 12), layer.Mask.Anchor);
                 if (editing) PaintGui.Outline(new Rect(maskBox.x - 2, maskBox.y - 2, maskBox.width + 4, maskBox.height + 4), PaintTheme.Accent, 2, 2);
-                PaintGui.Tooltip(maskBox, L.Tr("Layer mask (click to paint on it)"));
-                if (e.type == EventType.MouseDown && e.button == 0 && maskBox.Contains(e.mousePosition) && GUI.enabled) { selectedLayer = layer.Id; editMask = !editing; e.Use(); }
+                PaintGui.Tooltip(maskBox, L.Tr("Layer mask (click to paint on it)") + "\n" + L.Tr("Right-click for the mask's settings."));
+                if (e.type == EventType.MouseDown && e.button == 0 && maskBox.Contains(e.mousePosition) && GUI.enabled) { SelectSingleLayer(layer.Id); selectedFilter = Guid.Empty; editMask = !editing; e.Use(); }
+                if (e.type == EventType.ContextClick && maskBox.Contains(e.mousePosition) && GUI.enabled) { var menu = new PaintMenu(); MaskMenu(menu, layer); menu.ShowAsContext(); e.Use(); }
                 x = maskBox.xMax + 6;
             }
             // 右端の印（効果・チャンネル無し、その左にロック）
-            bool mark = layer.Filters.Count > 0 || layer.Mask != null && layer.Mask.Filters.Count > 0 || !layer.IsGroup && layer.Kind == LayerKind.Raster && !layer.IsChannelEnabled(channel);
+            bool mark = !layer.IsGroup && layer.Kind == LayerKind.Raster && !layer.IsChannelEnabled(channel); // 効果は層の下の行に出る
             bool locked = DrawRowLock(new Rect(r.xMax - (mark ? 44 : 24), r.y, 20, r.height), layer);
             // 名前（ダブルクリックで変える）
             var nameRect = new Rect(x, r.y + 4, r.xMax - x - 26 - (locked ? 20 : 0), r.height - 8);
@@ -147,8 +156,7 @@ namespace Yozolab.YoluPainter.Editor
             }
             else PaintGui.Text(nameRect, layer.Name, PaintTheme.Label, layer.Visible ? (inSelection ? Color.white : PaintTheme.Text) : PaintTheme.TextDim);
             // 右端の印
-            if (layer.Filters.Count > 0 || layer.Mask != null && layer.Mask.Filters.Count > 0) PaintGui.Icon(new Rect(r.xMax - 24, r.y, 20, r.height), "auto_awesome", PaintTheme.TextDim, 13);
-            else if (!layer.IsGroup && layer.Kind == LayerKind.Raster && !layer.IsChannelEnabled(channel)) { PaintGui.Icon(new Rect(r.xMax - 24, r.y, 20, r.height), "link_off", PaintTheme.TextDisabled, 13); PaintGui.Tooltip(new Rect(r.xMax - 24, r.y, 20, r.height), L.Tr("This layer has no pixels in the selected channel yet")); }
+            if (!layer.IsGroup && layer.Kind == LayerKind.Raster && !layer.IsChannelEnabled(channel)) { PaintGui.Icon(new Rect(r.xMax - 24, r.y, 20, r.height), "link_off", PaintTheme.TextDisabled, 13); PaintGui.Tooltip(new Rect(r.xMax - 24, r.y, 20, r.height), L.Tr("This layer has no pixels in the selected channel yet")); }
             // 選ぶ（Ctrl/Cmd で足し引き、Shift で範囲）・ダブルクリックで名前
             if (e.type == EventType.MouseDown && e.button == 0 && hover && GUI.enabled && renamingLayer != layer.Id)
             {
@@ -159,6 +167,7 @@ namespace Yozolab.YoluPainter.Editor
                     e.Use(); Repaint(); return;
                 }
                 bool twice = lastLayerClicked == layer.Id && EditorApplication.timeSinceStartup - lastLayerClick < .4;
+                selectedFilter = Guid.Empty; // 層の行を押したら、プロパティの欄はその層（かツール）に戻る
                 // 複数選択の中の行を押したら、ドラッグで全部を動かせるように選択を残し、ドラッグにならなければ離したところでその 1 つにする
                 if (inSelection && MultiSelectionValid) { if (!selected) SelectLayers(SelectedLayers, layer.Id); layerCollapsePending = layer.Id; }
                 else SelectSingleLayer(layer.Id);
@@ -171,23 +180,26 @@ namespace Yozolab.YoluPainter.Editor
             if (e.type == EventType.ContextClick && hover && GUI.enabled)
             {
                 if (!inSelection) SelectSingleLayer(layer.Id); else if (!selected) SelectLayers(SelectedLayers, layer.Id);
-                var menu = new GenericMenu(); LayerMenu(menu); menu.ShowAsContext(); e.Use();
+                var menu = new PaintMenu(); LayerMenu(menu); menu.ShowAsContext(); e.Use();
             }
         }
 
         // ───────── ドラッグでの並べ替え ─────────
         Guid layerDragCandidate; Vector2 layerDragStart; bool layerDragging;
 
-        /// <summary>ドラッグで落とす先: 行と行の間（gap 番目の行のすぐ上。gap が行の数なら一番下）か、グループの行の中ほど（その中の一番上）。</summary>
+        /// <summary>ドラッグで落とす先: 層の行と行の間（gap 番目の層の行のすぐ上。gap が層の数なら一番下）か、グループの行の中ほど（その中の一番上）。
+        /// 効果の段の行の上は、その層の下（効果の段のまとまりの後）。</summary>
+        internal (int gap, PaintLayer into) LayerDropTargetForTests(float y) => LayerDropTarget(y);
         (int gap, PaintLayer into) LayerDropTarget(float y)
         {
-            int n = document.Layers.Count, rowIndex = Mathf.FloorToInt(y / LayerRowHeight);
-            float within = y / LayerRowHeight - rowIndex;
-            if (rowIndex >= 0 && rowIndex < n)
-            {
-                var layer = document.Layers[n - 1 - rowIndex];
-                if (layer.IsGroup && within > .3f && within < .7f) return (-1, layer);
-            }
+            var rows = LayerListRows(); int n = document.Layers.Count;
+            if (y < 0 || n == 0) return (0, null);
+            var hit = LayerListRowAt(rows, y);
+            if (hit == null) return (n, null);
+            var row = hit.Value; int rowIndex = n - 1 - row.Index; // 層の行の上からの番号
+            if (row.IsChild) return (rowIndex + 1, null);
+            float within = (y - row.Y) / row.Height;
+            if (row.Layer.IsGroup && within > .3f && within < .7f) return (-1, row.Layer);
             return (Mathf.Clamp(within < .5f ? rowIndex : rowIndex + 1, 0, n), null);
         }
 
@@ -215,12 +227,8 @@ namespace Yozolab.YoluPainter.Editor
             if (layerDragging && e.type == EventType.Repaint)
             {
                 var target = LayerDropTarget(e.mousePosition.y);
-                if (target.into != null)
-                {
-                    int rowOf = document.Layers.Count - 1 - document.Layers.ToList().IndexOf(target.into);
-                    PaintGui.Outline(new Rect(1, rowOf * LayerRowHeight + 1, width - 2, LayerRowHeight - 2), PaintTheme.Accent, 2, 3);
-                }
-                else PaintGui.Fill(new Rect(4, target.gap * LayerRowHeight - 1, width - 8, 2), PaintTheme.Accent);
+                if (target.into != null) PaintGui.Outline(new Rect(1, LayerRowY(target.into) + 1, width - 2, LayerRowHeight - 2), PaintTheme.Accent, 2, 3);
+                else PaintGui.Fill(new Rect(4, LayerGapY(target.gap) - 1, width - 8, 2), PaintTheme.Accent);
             }
         }
 

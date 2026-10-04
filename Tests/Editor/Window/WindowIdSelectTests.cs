@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
@@ -158,7 +159,10 @@ namespace Yozolab.YoluPainter.Tests
             // ツールを持ち替えると抜ける
             ClickLayerControl("generator.id.pick"); Assert.That(window.IdColorPicking, Is.True);
             Key(window, KeyCode.M); Assert.That(window.IdColorPicking, Is.False);
-            // 欄のボタンをもう一度押すと抜ける
+            Assert.That(window.SelectedFilter, Is.EqualTo(Guid.Empty), "choosing a tool shows that tool's settings (the generator's row is no longer selected)");
+            // 欄のボタンをもう一度押すと抜ける（レイヤーの重なりの Generator の行で選び直す）
+            var row = LayerPanelPoint("effect." + gen.Id, .6f); SendHost(EventType.MouseDown, row); SendHost(EventType.MouseUp, row); Repaint(window);
+            Assert.That(window.SelectedFilter, Is.EqualTo(gen.Id));
             ClickLayerControl("generator.id.pick"); ClickLayerControl("generator.id.pick"); Assert.That(window.IdColorPicking, Is.False);
         }
 

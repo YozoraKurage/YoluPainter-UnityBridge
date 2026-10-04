@@ -19,9 +19,6 @@ msgstr "ぼかしの半径"
 msgid "Smudge strength"
 msgstr "引きずる量"
 
-msgid "Alpha-weighted box blur of the current layer or mask. Transparent pixels keep their RGB. Opacity, flow and pressure set the strength."
-msgstr "今のレイヤーかマスクを、アルファで重みを付けてぼかします。透明な画素の RGB は保ちます。不透明度・流量・筆圧で強さを変えます。"
-
 msgid "Each dab pulls pixels from the previous dab. In 3D this follows UV motion within one island; crossing a seam starts a new pickup. Mirror symmetry is unavailable."
 msgstr "描点ごとに前の描点の画素を拾って引きずります。3D では同じ UV アイランド内で働き、継ぎ目では拾い直します。鏡映の対称は使えません。"
 
@@ -40,9 +37,6 @@ msgstr "Alt＋クリックで今のレイヤーかマスクの写し元を決め
 msgid "Clone source ready"
 msgstr "写し元を設定済み"
 
-msgid "Set the source with Alt-click"
-msgstr "Alt＋クリックで写し元を設定"
-
 msgid "Clone Stamp uses the 2D canvas. A UV offset cannot identify the source across 3D seams."
 msgstr "コピースタンプは 2D キャンバスで使ってください。3D の継ぎ目をまたぐ写し元を UV の相対位置だけでは決められません。"
 
@@ -54,6 +48,3 @@ msgstr "まず 2D キャンバスを Alt＋クリックし、今のレイヤー�
 
 msgid "Clone source set. Paint to copy the current layer; Alt-click sets a new source."
 msgstr "写し元を設定しました。描くと今のレイヤーから写し、Alt＋クリックで写し元を変えられます。"
-
-msgid "Pixel effects use each checked channel's existing pixels; the material values and color dynamics do not change the result."
-msgstr "画素の効果は、チェックした各チャンネルの今の画素を使います。マテリアルの値と色の変化は結果に影響しません。"

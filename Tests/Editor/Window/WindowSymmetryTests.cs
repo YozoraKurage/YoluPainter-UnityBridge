@@ -13,7 +13,7 @@ namespace Yozolab.YoluPainter.Tests
     /// <summary>3D ビューのシンメトリーを本物のウィンドウで（GUI モード、SendEvent）: 左右対称の箱を正面（カメラは対称の面の上）から見て
     /// 片側をクリックすると反対側の対応するテクセルにも同じ濃さが入り、1 回の Undo で両側が戻る。対称の面の近くでは重なりを二重に
     /// 塗らない。見出しの切り替えで切ると片側だけ。映した側が見えない・別のスロット・予算超えなら塗らず（予算はストロークごと取り消す）、
-    /// Esc で両側とも残らない。設定はウィンドウの状態で、ブラシの設定には入らない。</summary>
+    /// Esc で両側とも残らない。設定はブラシの状態として保存する。</summary>
     public sealed partial class WindowTests
     {
         GameObject symmetricSource; Mesh symmetricMesh; Material[] symmetricMaterials;
@@ -148,7 +148,8 @@ namespace Yozolab.YoluPainter.Tests
             Click(at); Repaint(window);
         }
 
-        [Test] public void ThePropertiesSectionSetsTheAxisCenterAndPlane()
+        /// <summary>オプションバーの対称の小さな窓（前はプロパティの欄のブラシの中）で、軸・中心・面を決める。</summary>
+        [Test] public void TheSymmetryPopupSetsTheAxisCenterAndPlane()
         {
             LoadSymmetricBox();
             window.SetToolSectionsOpen(true);
@@ -249,17 +250,17 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(window.Document.UndoCount, Is.EqualTo(1));
         }
 
-        [Test] public void SymmetryIsWindowStateAndNotPartOfTheBrush()
+        [Test] public void SymmetryIsPartOfTheBrushWithoutChangingTheNativeVersion()
         {
-            string brushBefore = JsonUtility.ToJson(window.Brush);
+            string before = JsonUtility.ToJson(window.Brush);
             window.Symmetry = true; window.SymmetryAxis = SymmetryAxis.Z; window.SymmetryOffset = .125f; window.SymmetryPlaneShown = false;
-            Assert.That(JsonUtility.ToJson(window.Brush), Is.EqualTo(brushBefore), "brush presets do not carry symmetry");
-            var serialized = new SerializedObject(window);
-            Assert.That(serialized.FindProperty("symmetry").boolValue, Is.True);
-            Assert.That(serialized.FindProperty("symmetryAxis").enumValueIndex, Is.EqualTo((int)SymmetryAxis.Z));
-            Assert.That(serialized.FindProperty("symmetryOffset").floatValue, Is.EqualTo(.125f));
-            Assert.That(serialized.FindProperty("symmetryPlaneShown").boolValue, Is.False);
-            window.SymmetryOffset = float.NaN; Assert.That(window.SymmetryOffset, Is.Zero, "a broken value falls back to the origin");
+            Assert.That(JsonUtility.ToJson(window.Brush), Is.Not.EqualTo(before));
+            var state = new SerializedObject(window).FindProperty("brush");
+            Assert.That(state.FindPropertyRelative("symmetry3D").boolValue, Is.True);
+            Assert.That(state.FindPropertyRelative("symmetryAxis").enumValueIndex, Is.EqualTo((int)SymmetryAxis.Z));
+            Assert.That(state.FindPropertyRelative("symmetryOffset").floatValue, Is.EqualTo(.125f));
+            Assert.That(state.FindPropertyRelative("symmetryAxesShown").boolValue, Is.False);
+            window.SymmetryOffset = float.NaN; Assert.That(window.SymmetryOffset, Is.Zero);
             window.SymmetryOffset = 1e9f; Assert.That(window.SymmetryOffset, Is.EqualTo(TexturePaintWindow.MaxSymmetryOffset));
         }
     }

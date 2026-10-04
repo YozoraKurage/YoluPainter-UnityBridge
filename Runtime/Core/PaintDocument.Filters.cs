@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 
@@ -209,7 +210,7 @@ namespace Yozolab.YoluPainter.Core
             long need = 0;
             foreach (var layer in layers)
             {
-                foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel))) { var chain = layer.ActiveChain(c); if (chain.Length > 0) need = Math.Max(need, BlockWorkingBytes(chain, blockPixels)); }
+                foreach (PaintChannel c in Enum.GetValues(typeof(PaintChannel))) { var chain = layer.ActiveChain(c); if (chain.Length > 0 || layer.HasFillGradient(c)) need = Math.Max(need, BlockWorkingBytes(chain, blockPixels)); }
                 if (layer.Mask != null) { var chain = layer.Mask.ActiveChain(); if (chain.Length > 0) need = Math.Max(need, BlockWorkingBytes(chain, blockPixels)); }
             }
             return need;
@@ -217,7 +218,7 @@ namespace Yozolab.YoluPainter.Core
         long BlockWorkingBytes(FilterEffect[] chain, int blockPixels)
         {
             int side = Math.Max(1, blockPixels / TileSize) * TileSize;
-            return FilterEngine.WorkingBytes(chain, chain.Length, Math.Min(side, Width), Math.Min(side, Height), Width, Height);
+            return FilterEngine.WorkingBytes(chain, chain.Length, Math.Min(side, Width), Math.Min(side, Height), Width, Height, TileSize);
         }
 
         // ───────────── editing ─────────────
@@ -260,11 +261,11 @@ namespace Yozolab.YoluPainter.Core
                         string why = settings.RefusalFor(c); if (why != null) throw new InvalidOperationException(why);
                         targets.Add(c);
                     }
-                if (targets.Count == 0) throw new ArgumentException("Choose at least one channel for the filter.", nameof(channels));
+                if (targets.Count == 0) throw new ArgumentException("No channel is chosen for the filter.", nameof(channels));
             }
             else
             {
-                if (layer.Mask == null) throw new InvalidOperationException("The layer has no mask. Add a mask before adding mask filters.");
+                if (layer.Mask == null) throw new InvalidOperationException("The layer has no mask for mask filters.");
                 if (channels != null) foreach (var _ in channels) throw new ArgumentException("Mask filters apply to the mask, which all channels share; they have no channels.", nameof(channels));
                 string why = settings.RefusalForMask(); if (why != null) throw new InvalidOperationException(why);
             }
@@ -328,7 +329,7 @@ namespace Yozolab.YoluPainter.Core
             if (target == FilterTarget.Mask) throw new InvalidOperationException("Mask filters have no channels.");
             var list = new List<PaintChannel>();
             foreach (var c in channels) { string why = effect.Settings.RefusalFor(c); if (why != null) throw new InvalidOperationException(why); if (!list.Contains(c)) list.Add(c); }
-            if (list.Count == 0) throw new ArgumentException("Choose at least one channel for the filter.", nameof(channels));
+            if (list.Count == 0) throw new ArgumentException("No channel is chosen for the filter.", nameof(channels));
             list.Sort(); bool same = list.Count == effect.Channels.Count;
             for (int i = 0; same && i < list.Count; i++) same = list[i] == effect.Channels[i];
             if (same) return;
@@ -374,15 +375,15 @@ namespace Yozolab.YoluPainter.Core
             foreach (var chain in probe)
             {
                 int halo = FilterEngine.Halo(chain, chain.Length);
-                if (halo > MaxFilterStackHalo) throw new InvalidOperationException("The filters would reach " + halo + " pixels in total, more than " + MaxFilterStackHalo + ". Use smaller radii.");
+                if (halo > MaxFilterStackHalo) throw new InvalidOperationException("The filters would reach " + halo + " pixels in total, more than " + MaxFilterStackHalo + ".");
                 long need = BlockWorkingBytes(chain, filterBlockPixels);
-                if (need > filterWorkingBudget) throw new InvalidOperationException("These filters need about " + (need >> 20) + " MiB of working memory per block, more than the filter budget (" + (filterWorkingBudget >> 20) + " MiB). Nothing was changed; use smaller radii or raise FilterWorkingBudgetBytes.");
+                if (need > filterWorkingBudget) throw new InvalidOperationException("These filters need about " + (need >> 20) + " MiB of working memory per block, more than the filter budget (" + (filterWorkingBudget >> 20) + " MiB). Nothing was changed.");
             }
             var mask = layer.Mask; var before = StackOf(layer, target).ToArray();
             Execute(new DelegateCommand(
                 () => { MarkLayerChanged(layer, null); SetStack(layer, target, mask, after); MarkLayerChanged(layer, null); MarkClippedLayersChanged(); },
                 () => { MarkLayerChanged(layer, null); SetStack(layer, target, mask, before); MarkLayerChanged(layer, null); MarkClippedLayersChanged(); },
-                64 + 96L * (before.Length + after.Length)), coalesceKey);
+                64 + 96L * (before.Length + after.Length) + before.Sum(e => e.Settings.Generator?.Ramp?.ByteSize ?? 0) + after.Sum(e => e.Settings.Generator?.Ramp?.ByteSize ?? 0)), coalesceKey);
         }
         void SetStack(PaintLayer layer, FilterTarget target, RasterMask mask, FilterEffect[] stack)
         {
@@ -421,7 +422,7 @@ namespace Yozolab.YoluPainter.Core
             EnsureNoStroke(); var layer = GetLayer(layerId); var mask = layer.Mask;
             bool content = layer.FilterList.Count > 0, masked = mask != null && mask.FilterList.Count > 0;
             if (!content && !masked) return false;
-            if (content && layer.Kind != LayerKind.Raster) throw new InvalidOperationException("A " + layer.Kind.ToString().ToLowerInvariant() + " layer has no pixels to bake its filters into. Remove the filters, or put the content on a paint layer.");
+            if (content && layer.Kind != LayerKind.Raster) throw new InvalidOperationException("A " + layer.Kind.ToString().ToLowerInvariant() + " layer has no pixels to bake its filters into.");
             if (content) RefusePathLayer(layer);
             if (content) RefuseLockedPixels(layer, erase: false); else RefuseLockedAttributes(layer);
             bool keepAlpha = content && KeepsAlpha(layer);

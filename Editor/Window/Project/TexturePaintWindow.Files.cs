@@ -14,40 +14,20 @@ namespace Yozolab.YoluPainter.Editor
     /// 全部のテクスチャセットを同じ並び（.ylp の形式 3: project.json と sets/&lt;ID&gt;/）で書き、同じ <see cref="YlpFormat.Open"/> で読む。</summary>
     public sealed partial class TexturePaintWindow
     {
-        /// <summary>view.json: モデル（GUID）と選んだチャンネル。形式 2 までの materialSlot は project.json に移った（読まない・書かない）。</summary>
-        [Serializable] sealed class ViewState { public string modelAssetGuid; public int selectedChannel; }
+        /// <summary>view.json: モデル（GUID）・選んだチャンネル・任意の可視性。形式 2 までの materialSlot は project.json に移った（読まない・書かない）。</summary>
+        [Serializable] sealed class ViewState { public string modelAssetGuid; public int selectedChannel; public VisibilityState visibility; }
         /// <summary>開いた .ylp の中身の形式（新しく作った・取り込んだものは今の形式）と、最初に作ったアプリ（形式 1 のファイルは分からないので null）。</summary>
         int openedFormat=YlpFormat.Current; YlpWriterInfo projectCreatedBy;
         internal int OpenedFormat=>openedFormat;
         /// <summary>新しく作った・取り込んだ文書: 今の形式で、作ったのはこのアプリ。</summary>
         void NewProjectRecord(){openedFormat=YlpFormat.Current;projectCreatedBy=YlpContent.Writer;}
-        bool ConfirmDiscard() => ProjectUnchanged() || Dialogs.Confirm("Keep current work?","Current work has unsaved changes. A native recovery checkpoint will be kept before opening another document.","Continue","Cancel") && SaveRecovery();
+        bool ConfirmDiscard() => ProjectUnchanged() || Dialogs.Confirm("Keep current work?","Current work has unsaved changes. A native recovery checkpoint will be kept before opening another document.","Continue","Cancel") && SaveRecoveryAndWait();
         /// <summary>復旧 checkpoint が全部のセットとセットの並びの今の中身と同じか。</summary>
         bool RecoveryIsCurrent()
         {
             if(currentSet==null)return true;
             SyncCurrentSet();
-            return setsRevision==recoveredSetsRevision&&textureSets.All(s=>s.Document.Revision==s.RecoveredRevision);
-        }
-        bool SaveRecovery()
-        {
-            if(document==null||currentSet==null||stroke!=null||RecoveryIsCurrent())return true;
-            try
-            {
-                var files=new Dictionary<string,byte[]>(StringComparer.Ordinal);
-                foreach(var set in textureSets)
-                {
-                    files.Add(YlpFormat.SetEntry(set.Id,YlpArchive.NativeName),DocumentBinary.Write(set.Document));
-                    if(set.Document.Selection!=null)files.Add(YlpFormat.SetEntry(set.Id,SelectionBinary.EntryName),SelectionBinary.Write(set.Document.Selection));
-                }
-                files.Add(YlpFormat.ProjectName,YlpFormat.WriteProject(ProjectInfo()));
-                ResourceIndex.AddTo(files,resources); // プロジェクトのリソース（形式 4。TexturePaintWindow.Resources.cs）
-                YlpFormat.Stamp(files,YlpContent.Writer,projectCreatedBy);
-                var snapshot=GenerationStore.Commit(recoveryRoot,files,recoveryToken); recoveryToken=snapshot.Token;
-                foreach(var set in textureSets)set.RecoveredRevision=set.Document.Revision;
-                recoveredSetsRevision=setsRevision;lastRecovery=EditorApplication.timeSinceStartup;return true;
-            }
-            catch(Exception ex){message="Recovery checkpoint failed: "+ex.Message;return false;}
+            return setsRevision==recoveredSetsRevision&&textureSets.All(s=>s.Document.Revision==s.RecoveredRevision)&&recoveredProjectState==RecoveryState();
         }
         /// <summary>保存した選択範囲をセットの文書に戻す（履歴も版も増やさない）。読めなければ選択なしで開き、そのことを知らせる（文書は開ける）。</summary>
         void RestoreSavedSelection(TextureSet set,IReadOnlyDictionary<string,byte[]> files,List<string> notes)
@@ -69,7 +49,7 @@ namespace Yozolab.YoluPainter.Editor
                 PaintDocument document;
                 try{document=DocumentBinary.Read(files[YlpArchive.NativeName]);}
                 catch(InvalidDataException ex){throw new InvalidDataException("Texture set \""+info.Name+"\": "+ex.Message,ex);}
-                sets.Add(new TextureSet(info.Id,info.Name,info.MaterialSlot,document)
+                sets.Add(new TextureSet(info.Id,info.Name,info.Material,document)
                 {
                     SelectedLayer=document.Layers.Count>0?document.Layers[document.Layers.Count-1].Id:Guid.Empty,
                     ImportedOriginal=files.TryGetValue(YlpContent.ImportedOriginalName,out var original)?original:null,
@@ -110,7 +90,7 @@ namespace Yozolab.YoluPainter.Editor
                     if(set.Document.Selection!=null)files.Add(YlpFormat.SetEntry(set.Id,SelectionBinary.EntryName),SelectionBinary.Write(set.Document.Selection));
                 }
                 files.Add(YlpFormat.ProjectName,YlpFormat.WriteProject(ProjectInfo()));
-                var state=new ViewState{modelAssetGuid=model==null?"":AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(model)),selectedChannel=(int)channel};
+                var state=new ViewState{modelAssetGuid=model==null?"":AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(model)),selectedChannel=(int)channel,visibility=CaptureVisibility()};
                 files.Add(YlpContent.ViewName,System.Text.Encoding.UTF8.GetBytes(JsonUtility.ToJson(state,true)));
                 files.Add(YlpContent.BrushName,System.Text.Encoding.UTF8.GetBytes(JsonUtility.ToJson(brush,true)));
                 var thumbnail=ProjectThumbnail(); if(thumbnail!=null)files.Add(YlpContent.ThumbnailName,thumbnail);
@@ -180,19 +160,31 @@ namespace Yozolab.YoluPainter.Editor
                 if(files.TryGetValue(YlpContent.BrushName,out var preset))
                 {
                     // 状態のエントリ: 読めなければ今のブラシのまま開いて知らせる（正本は読めているので開くのを止めない）
-                    try{brush=ReadBrushState(System.Text.Encoding.UTF8.GetString(preset));var missing=MissingTipNote();if(missing!=null)notes.Add(missing);}
+                    try{brush=ReadBrushState(System.Text.Encoding.UTF8.GetString(preset));var migration=BrushAlphaMigrationNote();if(migration!=null)notes.Add(migration);}
                     catch(Exception ex) when(ex is InvalidDataException||ex is ArgumentException){notes.Add("The saved brush settings could not be read ("+ex.Message+"); the brush keeps its current settings.");}
                 }
                 if(files.TryGetValue(YlpContent.ViewName,out var view))
                 {
-                    var state=JsonUtility.FromJson<ViewState>(System.Text.Encoding.UTF8.GetString(view));channel=(PaintChannel)state.selectedChannel;
+                    try
+                    {
+                    if (view.Length > 262144) throw new InvalidDataException("View state exceeds its budget.");
+                    var state=JsonUtility.FromJson<ViewState>(new System.Text.UTF8Encoding(false, true).GetString(view));
+                    if (state == null || !Enum.IsDefined(typeof(PaintChannel), state.selectedChannel)) throw new InvalidDataException("Invalid view state.");
+                    channel=(PaintChannel)state.selectedChannel;
                     var loaded=AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(state.modelAssetGuid));
-                    if(loaded!=null){model=loaded;preview.Load(model);if(sets.Count==1)materialSlot=Mathf.Clamp(materialSlot,0,Mathf.Max(0,preview.MaterialSlotCount-1));}
+                    if(loaded!=null){model=loaded;preview.Load(model);}
                     else if(!String.IsNullOrEmpty(state.modelAssetGuid))notes.Add("Model asset is unavailable; assign it explicitly.");
+                    RestoreVisibility(state.visibility);
+                    }
+                    catch(Exception ex) when(ex is ArgumentException || ex is InvalidDataException || ex is System.Text.DecoderFallbackException)
+                    { ResetVisibility(); notes.Add(L.Tr("The saved view state could not be restored; all meshes are shown.") + " " + ex.Message); }
                 }
                 SyncCurrentSet();
+                // セットの鍵を読んだモデルのマテリアルに結び付ける（形式 5 までのスロットの番号は、そのスロットのマテリアルに読み替える。
+                // 2 つが同じマテリアルに落ちれば、片方をモデルに無いまま残して知らせる）
+                ResolveSetMaterials(notes);
                 // 形式 2 までのファイルの 1 つのセットは、移行で仮の名前になっている: モデルのマテリアルの名前（無ければ訳した既定の名前）にする
-                if(opened.Info.Format<3)foreach(var set in sets)set.Name=DefaultSetName(set.MaterialSlot,set);
+                if(opened.Info.Format<3)foreach(var set in sets)set.Name=set.MaterialGroup>=0?DefaultSetName(preview.MaterialGroups[set.MaterialGroup],set):UniqueSetName(NumberedSetName(1),set);
                 meshMapsLoadedInto.Clear();
                 foreach(var set in sets)
                 {
@@ -202,6 +194,7 @@ namespace Yozolab.YoluPainter.Editor
                     set.SavedRevision=set.Document.Revision;
                 }
                 var resourceNote=AdoptResources(loadedResources); if(resourceNote!=null)notes.Add(resourceNote);
+                var missingBrush=MissingTipNote(); if(missingBrush!=null)notes.Add(missingBrush);
                 var missingImages=MissingFillImageNote(); if(missingImages!=null)notes.Add(missingImages); // 無い画像を読む層は値のまま（参照は残す）
                 ResetSetsBaseline(true);
                 var sourceNote=AskAboutChangedResources(); if(sourceNote!=null)notes.Add(sourceNote); // 出どころが変わっていれば尋ねる（更新すると未保存になる）
@@ -219,13 +212,15 @@ namespace Yozolab.YoluPainter.Editor
                 if(result.Mode!=PsdCompatibilityMode.EditableRaster){Dialogs.Inform("PSD protected: "+result.Mode,String.Join("\n",result.Diagnostics.Select(d=>d.ToString()))+"\nOriginal file was not modified. Unsupported features cannot be edited here.");return;}
                 var next=PsdBridge.Import(result);if(!ConfirmDiscard())return;
                 if(next.Layers.Count==0)next.AddLayer(L.Tr("Layer")+" 1");
-                // PSD は 1 つのテクスチャセットのプロジェクトになる（スロットは今のセットのまま）
-                int slot=currentSet!=null?materialSlot:0;
-                var set=new TextureSet(next.Id,BaseSetName(slot),slot,next){SelectedLayer=next.Layers.Last().Id,ImportedOriginal=result.CopyOriginalBytes()};
+                // PSD は 1 つのテクスチャセットのプロジェクトになる（マテリアルは今のセットのまま）
+                var like=currentSet;
+                var key=like!=null?like.Material:YlpMaterialRef.PendingSlot(0);
+                string setName=like!=null&&like.MaterialGroup>=0?BaseSetName(preview.MaterialGroups[like.MaterialGroup]):NumberedSetName(1);
+                var set=new TextureSet(next.Id,setName,key,next){SelectedLayer=next.Layers.Last().Id,ImportedOriginal=result.CopyOriginalBytes()};
                 FinishStroke(false);CancelToolDrag();
                 ReplaceProject(new[]{set},set);BindDocument();
                 ForgetProjectFile();importedPsdPath=Path.GetFullPath(path);channel=PaintChannel.Color;
-                message="Imported "+Path.GetFileName(path)+". Save keeps it as a .ylp (with the original PSD inside); Export PSD writes a PSD. The PSD itself is never rewritten.";
+                message=L.Tr("Imported {0}; the PSD itself is never rewritten.",Path.GetFileName(path));
                 // 編集できる取り込みでも、書き出す PSD に含まれない情報や合成結果の差などの注意があれば一覧で見せる（黙って捨てない）
                 var notes=result.Diagnostics.Select(d=>d.ToString()).ToList();
                 if(notes.Count>0)Dialogs.Inform("PSD imported with notes",String.Join("\n",notes.Take(40))+(notes.Count>40?"\n… and "+(notes.Count-40)+" more.":"")+"\n\nThe original PSD bytes are kept inside the .ylp when you save.");
@@ -264,7 +259,7 @@ namespace Yozolab.YoluPainter.Editor
             var planned=textureSets.SelectMany(set=>YlpContent.UsedChannels(set.Document).Select(c=>(set,channel:c,name:ExportImageName(stem,set,c)))).ToList();
             if(planned.Count==0){message="Nothing to export: no layer uses any channel.";return;}
             var clash=planned.GroupBy(t=>t.name,StringComparer.OrdinalIgnoreCase).FirstOrDefault(g=>g.Count()>1);
-            if(clash!=null){message=L.Tr("Nothing was exported: texture sets {0} would write the same file {1}. Rename one in File ▸ Project Configuration.",String.Join(", ",clash.Select(t=>t.set.Name).Distinct()),clash.Key);return;}
+            if(clash!=null){message=L.Tr("Nothing was exported: texture sets {0} would write the same file {1}.",String.Join(", ",clash.Select(t=>t.set.Name).Distinct()),clash.Key);return;}
             if(!ConfirmInactiveGenerators(planned.Select(t=>t.set).Distinct().Select(set=>(set.Name,set.Document))))return;
             string folder=Dialogs.OpenFolder("Export images into folder",projectPath!=null?Path.GetDirectoryName(projectPath):Application.dataPath);if(String.IsNullOrEmpty(folder))return;
             var targets=planned.Select(t=>(t.set,t.channel,path:Path.Combine(folder,t.name))).ToList();

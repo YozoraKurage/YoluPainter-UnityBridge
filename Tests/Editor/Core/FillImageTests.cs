@@ -304,8 +304,8 @@ namespace Yozolab.YoluPainter.Tests
             int projection = block + 8 + 16;
             void Refused(string why, Action<byte[]> tamper) { var b = (byte[])bytes.Clone(); tamper(b); Assert.That(() => DocumentBinary.Read(b), Throws.TypeOf<InvalidDataException>(), why); }
             Refused("unknown algorithm version", b => BitConverter.GetBytes(2).CopyTo(b, projection));
-            Refused("unknown mode", b => BitConverter.GetBytes(5).CopyTo(b, projection + 4));
-            Refused("unknown wrap", b => BitConverter.GetBytes(2).CopyTo(b, projection + 8));
+            Refused("unknown mode", b => BitConverter.GetBytes(6).CopyTo(b, projection + 4)); // 5 はデカール（版 17）
+            Refused("unknown wrap", b => BitConverter.GetBytes(3).CopyTo(b, projection + 8)); // 2 は画像の外を透明に（版 17）
             Refused("tiles 0", b => BitConverter.GetBytes(0.0).CopyTo(b, projection + 12));
             Refused("NaN rotation", b => BitConverter.GetBytes(double.NaN).CopyTo(b, projection + 12 + 4 * 8));
             Refused("placement size 0", b => BitConverter.GetBytes(0.0).CopyTo(b, projection + 12 + 12 * 8));

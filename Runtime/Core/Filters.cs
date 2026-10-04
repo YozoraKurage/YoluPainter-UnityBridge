@@ -141,6 +141,8 @@ namespace Yozolab.YoluPainter.Core
         }
         /// <summary>True for a generator stage (it reads the texture set's mesh maps).</summary>
         public bool IsGenerator { get { return Type == FilterType.Generator; } }
+        /// <summary>True for an anchor generator (it reads an anchor point below its layer, <see cref="GeneratorType.Anchor"/>).</summary>
+        public bool ReadsAnchor { get { return Type == FilterType.Generator && Generator.Type == GeneratorType.Anchor; } }
         /// <summary>How far (in pixels) an input pixel can influence output pixels (0 for point and global filters).</summary>
         public int HaloPixels { get { return Type == FilterType.GaussianBlur || Type == FilterType.Sharpen ? Radius : 0; } }
         /// <summary>True when output alpha can be non-zero where the input alpha is zero (within the halo). Only the blur spreads
@@ -275,13 +277,15 @@ namespace Yozolab.YoluPainter.Core
     public readonly struct FilterStamp : IEquatable<FilterStamp>
     {
         /// <summary>Maps: the document's generator-input revision when the stack has a generator (its output also depends on the
-        /// texture set's mesh maps), 0 otherwise.</summary>
-        public readonly long Filters, Input, Maps;
-        public FilterStamp(long filters, long input) : this(filters, input, 0) { }
-        public FilterStamp(long filters, long input, long maps) { Filters = filters; Input = input; Maps = maps; }
-        public bool Equals(FilterStamp other) { return Filters == other.Filters && Input == other.Input && Maps == other.Maps; }
+        /// texture set's mesh maps), 0 otherwise. Anchors: when the stack has anchor generators, the sum of the versions of what they read
+        /// over the tiles concerned (each version only ever grows, so the sum changes whenever any of them does), 0 otherwise.</summary>
+        public readonly long Filters, Input, Maps, Anchors;
+        public FilterStamp(long filters, long input) : this(filters, input, 0, 0) { }
+        public FilterStamp(long filters, long input, long maps) : this(filters, input, maps, 0) { }
+        public FilterStamp(long filters, long input, long maps, long anchors) { Filters = filters; Input = input; Maps = maps; Anchors = anchors; }
+        public bool Equals(FilterStamp other) { return Filters == other.Filters && Input == other.Input && Maps == other.Maps && Anchors == other.Anchors; }
         public override bool Equals(object obj) { return obj is FilterStamp && Equals((FilterStamp)obj); }
-        public override int GetHashCode() { unchecked { return (Filters.GetHashCode() * 397 ^ Input.GetHashCode()) * 31 ^ Maps.GetHashCode(); } }
-        public override string ToString() { return Maps == 0 ? Filters + ":" + Input : Filters + ":" + Input + ":m" + Maps; }
+        public override int GetHashCode() { unchecked { return ((Filters.GetHashCode() * 397 ^ Input.GetHashCode()) * 31 ^ Maps.GetHashCode()) * 17 ^ Anchors.GetHashCode(); } }
+        public override string ToString() { return (Maps == 0 ? Filters + ":" + Input : Filters + ":" + Input + ":m" + Maps) + (Anchors == 0 ? "" : ":a" + Anchors); }
     }
 }

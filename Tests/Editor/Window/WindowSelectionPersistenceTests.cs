@@ -55,10 +55,10 @@ namespace Yozolab.YoluPainter.Tests
         {
             PaintDot(window, 777, 333);
             var d = window.Document; d.SetSelection(SelectionMask.Rectangle(d, 10, 20, 300, 200));
-            Invoke(window, "OnLostFocus");
+            Invoke(window, "OnLostFocus"); window.FlushRecovery();
             var recovery = GenerationStore.Load(window.RecoveryRoot);
             Assert.That(SetFiles(recovery.Files)[SelectionBinary.EntryName], Is.EqualTo(SelectionBinary.Write(d.Selection)));
-            d.ClearSelection(); Invoke(window, "OnLostFocus");
+            d.ClearSelection(); Invoke(window, "OnLostFocus"); window.FlushRecovery();
             Assert.That(SetFiles(GenerationStore.Load(window.RecoveryRoot).Files).ContainsKey(SelectionBinary.EntryName), Is.False);
         }
     }

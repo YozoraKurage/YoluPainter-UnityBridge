@@ -215,10 +215,13 @@ namespace Yozolab.YoluPainter.Tests
             window.OpenProject();
             Assert.That(window.Document, Is.SameAs(unsaved), "declining keeps the current work open");
             fake.ConfirmAnswer = true;
+            string discardedRecovery=window.RecoveryRoot;
             window.OpenProject();
             Assert.That(window.Document, Is.Not.SameAs(unsaved));
-            var recovery = GenerationStore.Load(window.RecoveryRoot);
+            var recovery = GenerationStore.Load(discardedRecovery);
             Assert.That(SetFiles(recovery.Files)["document.utpaint"], Is.EqualTo(DocumentBinary.Write(unsaved)), "the discarded work is kept as a recovery checkpoint");
+            Assert.That(window.RecoveryRoot, Is.Not.EqualTo(discardedRecovery), "the opened project cannot overwrite the discarded work's checkpoint");
+            Directory.Delete(discardedRecovery,true);
         }
 
         [Test] public void ImportingAnEditablePsdKeepsItsOriginalBytesForSaving()
@@ -301,7 +304,7 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void FocusLossWritesARecoveryCheckpoint()
         {
             PaintDot(window, 777, 333);
-            Invoke(window, "OnLostFocus");
+            Invoke(window, "OnLostFocus"); window.FlushRecovery();
             var recovery = GenerationStore.Load(window.RecoveryRoot);
             Assert.That(SetFiles(recovery.Files)["document.utpaint"], Is.EqualTo(DocumentBinary.Write(window.Document)));
         }

@@ -144,14 +144,21 @@ namespace Yozolab.YoluPainter.Editor.Preview
         }
     }
 
-    /// <summary>プレビューの複製だけに入れたプロパティの値 1 つ（元のマテリアルとどの値か、それが決めるキーワード）。</summary>
+    public enum MaterialEditKind { Property, Keyword, RenderQueue, Instancing, DoubleSidedGI, GlobalIllumination, OverrideTag, ShaderPass }
+
+    /// <summary>複製だけに入れた値。Property = 0 は以前のウィンドウの記録も読める。</summary>
     [Serializable]
     public sealed class MaterialPropertyEdit
     {
         public Material material;
         public string property;
         public ShaderPropertyType type;
-        /// <summary>Float・Range・Int は x、Color は rgba、Vector は xyzw。</summary>
+        public MaterialEditKind kind;
+        public Texture texture;
+        public string text;
+        public int integer;
+        public bool hasInteger;
+        /// <summary>Float・Range・Int は x、Color は rgba、Vector は xyzw。Texture は scale.xy・offset.xy。</summary>
         public Vector4 value;
         /// <summary>切り替えが決めるキーワード（無ければ空）と、それを有効にするか。</summary>
         public string keyword;
@@ -168,7 +175,9 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 case ShaderPropertyType.Color: { var c = m.GetColor(property); return new Vector4(c.r, c.g, c.b, c.a); }
                 case ShaderPropertyType.Vector: return m.GetVector(property);
                 case ShaderPropertyType.Int: return new Vector4(m.GetInteger(property), 0, 0, 0);
-                case ShaderPropertyType.Texture: return Vector4.zero; // テクスチャは値として扱わない（欄では名前だけ）
+                case ShaderPropertyType.Texture:
+                    var scale = m.GetTextureScale(property); var offset = m.GetTextureOffset(property);
+                    return new Vector4(scale.x, scale.y, offset.x, offset.y);
                 default: return new Vector4(m.GetFloat(property), 0, 0, 0);
             }
         }
@@ -176,16 +185,74 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// <summary>この値（とキーワード）を target に入れる。</summary>
         public void WriteTo(Material target)
         {
-            if (target == null || !target.HasProperty(property)) return;
+            if (target == null) return;
+            switch (kind)
+            {
+                case MaterialEditKind.Keyword: if (keywordEnabled) target.EnableKeyword(keyword); else target.DisableKeyword(keyword); return;
+                case MaterialEditKind.RenderQueue: target.renderQueue = (int)value.x; return;
+                case MaterialEditKind.Instancing: target.enableInstancing = value.x != 0; return;
+                case MaterialEditKind.DoubleSidedGI: target.doubleSidedGI = value.x != 0; return;
+                case MaterialEditKind.GlobalIllumination: target.globalIlluminationFlags = (MaterialGlobalIlluminationFlags)(int)value.x; return;
+                case MaterialEditKind.OverrideTag: target.SetOverrideTag(keyword, text ?? ""); return;
+                case MaterialEditKind.ShaderPass: target.SetShaderPassEnabled(text, value.x != 0); return;
+            }
+            int index = target.shader != null ? target.shader.FindPropertyIndex(property) : -1;
+            if (index < 0 || target.shader.GetPropertyType(index) != type) return;
+            if (type == ShaderPropertyType.Texture && texture != null && target.shader.GetPropertyTextureDimension(index) != TextureDimension.Any && texture.dimension != target.shader.GetPropertyTextureDimension(index)) return;
             switch (type)
             {
                 case ShaderPropertyType.Color: target.SetColor(property, Color); break;
                 case ShaderPropertyType.Vector: target.SetVector(property, value); break;
-                case ShaderPropertyType.Int: target.SetInteger(property, Mathf.RoundToInt(value.x)); break;
-                case ShaderPropertyType.Texture: break;
+                case ShaderPropertyType.Int: target.SetInteger(property, hasInteger ? integer : Mathf.RoundToInt(value.x)); break;
+                case ShaderPropertyType.Texture:
+                    target.SetTexture(property, texture);
+                    target.SetTextureScale(property, new Vector2(value.x, value.y));
+                    target.SetTextureOffset(property, new Vector2(value.z, value.w)); break;
                 default: target.SetFloat(property, value.x); break;
             }
             if (!string.IsNullOrEmpty(keyword)) { if (keywordEnabled) target.EnableKeyword(keyword); else target.DisableKeyword(keyword); }
+        }
+
+        public MaterialPropertyEdit ReadCurrent(Material m)
+        {
+            var e = new MaterialPropertyEdit { material = m, property = property, type = type, kind = kind, keyword = keyword, text = text };
+            switch (kind)
+            {
+                case MaterialEditKind.Keyword: e.keywordEnabled = m.IsKeywordEnabled(keyword); break;
+                case MaterialEditKind.RenderQueue:
+                    using (var serialized = new UnityEditor.SerializedObject(m)) e.value.x = serialized.FindProperty("m_CustomRenderQueue").intValue;
+                    break;
+                case MaterialEditKind.Instancing: e.value.x = m.enableInstancing ? 1 : 0; break;
+                case MaterialEditKind.DoubleSidedGI: e.value.x = m.doubleSidedGI ? 1 : 0; break;
+                case MaterialEditKind.GlobalIllumination: e.value.x = (int)m.globalIlluminationFlags; break;
+                case MaterialEditKind.OverrideTag: e.text = m.GetTag(keyword, false, ""); break;
+                case MaterialEditKind.ShaderPass: e.value.x = m.GetShaderPassEnabled(text) ? 1 : 0; break;
+                default:
+                    e.value = Read(m, property, type);
+                    if (type == ShaderPropertyType.Int) { e.integer = m.GetInteger(property); e.hasInteger = true; }
+                    if (type == ShaderPropertyType.Texture) e.texture = m.GetTexture(property);
+                    if (!string.IsNullOrEmpty(keyword)) e.keywordEnabled = m.IsKeywordEnabled(keyword);
+                    break;
+            }
+            return e;
+        }
+
+        internal bool SameValue(MaterialPropertyEdit other) => other != null && kind == other.kind && type == other.type && value.Equals(other.value)
+            && texture == other.texture && text == other.text && keyword == other.keyword && keywordEnabled == other.keywordEnabled
+            && hasInteger == other.hasInteger && (!hasInteger || integer == other.integer);
+        internal MaterialPropertyEdit Snapshot() => (MaterialPropertyEdit)MemberwiseClone();
+
+        public string DescribeValue()
+        {
+            if (kind == MaterialEditKind.Property && type == ShaderPropertyType.Int && hasInteger) return integer.ToString(CultureInfo.InvariantCulture);
+            if (kind == MaterialEditKind.Keyword) return L.Tr(keywordEnabled ? "on" : "off");
+            if (kind == MaterialEditKind.OverrideTag) return text ?? "";
+            if (kind == MaterialEditKind.RenderQueue) return value.x.ToString("0", CultureInfo.InvariantCulture);
+            if (kind == MaterialEditKind.Instancing || kind == MaterialEditKind.DoubleSidedGI || kind == MaterialEditKind.ShaderPass) return L.Tr(value.x != 0 ? "on" : "off");
+            if (kind == MaterialEditKind.GlobalIllumination) return ((MaterialGlobalIlluminationFlags)(int)value.x).ToString();
+            if (kind == MaterialEditKind.Property && type == ShaderPropertyType.Texture)
+                return (texture != null ? texture.name : L.Tr("None")) + " · " + Format(value, ShaderPropertyType.Vector);
+            return Format(value, type);
         }
 
         /// <summary>表に出す値（元と比べる一覧に使う）。</summary>
@@ -237,6 +304,45 @@ namespace Yozolab.YoluPainter.Editor.Preview
             version++;
         }
 
+        /// <summary>シェーダーインスペクターの複製と元の差。塗ったテクスチャを入れる前の複製だけを渡す。</summary>
+        public bool Capture(Material source, Material copy)
+        {
+            if (source == null || copy == null || source.shader != copy.shader) throw new ArgumentException("The inspector copy must use the source shader.");
+            var next = new List<MaterialPropertyEdit>();
+            void Add(MaterialPropertyEdit key)
+            {
+                var original = key.ReadCurrent(source); var changed = key.ReadCurrent(copy);
+                changed.material = source;
+                if (!changed.SameValue(original)) next.Add(changed);
+            }
+            foreach (var p in MaterialPropertyInfo.Describe(source.shader).GroupBy(p => p.Name).Select(g => g.First()))
+                Add(new MaterialPropertyEdit { property = p.Name, type = p.Type });
+            foreach (var k in source.shaderKeywords.Union(copy.shaderKeywords).OrderBy(k => k, StringComparer.Ordinal))
+                Add(new MaterialPropertyEdit { property = "$keyword:" + k, kind = MaterialEditKind.Keyword, keyword = k });
+            foreach (var k in new[] { MaterialEditKind.RenderQueue, MaterialEditKind.Instancing, MaterialEditKind.DoubleSidedGI, MaterialEditKind.GlobalIllumination })
+                Add(new MaterialPropertyEdit { property = "$" + k, kind = k });
+            foreach (var tag in TagNames(source).Union(TagNames(copy)).OrderBy(t => t, StringComparer.Ordinal))
+                Add(new MaterialPropertyEdit { property = "$tag:" + tag, kind = MaterialEditKind.OverrideTag, keyword = tag });
+            foreach (string pass in Enumerable.Range(0, source.passCount).Select(source.GetPassName).Where(p => !string.IsNullOrEmpty(p)).Distinct(StringComparer.Ordinal))
+            {
+                Add(new MaterialPropertyEdit { property = "$pass:" + pass, kind = MaterialEditKind.ShaderPass, text = pass });
+            }
+            var old = For(source).ToList();
+            if (old.Count == next.Count && old.All(e => next.Any(n => n.property == e.property && n.SameValue(e)))) return false;
+            edits.RemoveAll(e => e != null && e.material == source); edits.AddRange(next); version++;
+            return true;
+        }
+
+        static IEnumerable<string> TagNames(Material material)
+        {
+            using (var serialized = new UnityEditor.SerializedObject(material))
+            {
+                var map = serialized.FindProperty("stringTagMap");
+                if (map == null) yield break;
+                for (int i = 0; i < map.arraySize; i++) yield return map.GetArrayElementAtIndex(i).FindPropertyRelative("first").stringValue;
+            }
+        }
+
         /// <summary>1 つを元の値に戻す（印を外す）。戻したら true。</summary>
         public bool Revert(Material material, string property)
         {
@@ -254,7 +360,15 @@ namespace Yozolab.YoluPainter.Editor.Preview
         }
 
         /// <summary>そのマテリアルの変更を target（プレビューの複製）に入れる。</summary>
-        public void ApplyTo(Material source, Material target) { foreach (var e in For(source)) e.WriteTo(target); }
+        public void ApplyTo(Material source, Material target, ISet<string> paintedProperties = null)
+        {
+            foreach (var e in For(source))
+            {
+                if (e.kind == MaterialEditKind.Property && e.type == ShaderPropertyType.Texture && paintedProperties?.Contains(e.property) == true)
+                { target.SetTextureScale(e.property, new Vector2(e.value.x, e.value.y)); target.SetTextureOffset(e.property, new Vector2(e.value.z, e.value.w)); }
+                else e.WriteTo(target);
+            }
+        }
 
         /// <summary>消えたマテリアル（削除・再読み込み）の変更を捨てる。</summary>
         void Prune() { if (edits.RemoveAll(e => e == null || e.material == null) > 0) version++; }

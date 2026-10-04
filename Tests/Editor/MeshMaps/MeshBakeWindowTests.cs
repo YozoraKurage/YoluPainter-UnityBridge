@@ -153,7 +153,7 @@ namespace Yozolab.YoluPainter.Tests
             s.CurvatureRadius = .06;
             Assert.That(owner.MeshMaps.Check(MeshMapKind.Curvature, owner.CurrentMeshMapExpectation()).State, Is.EqualTo(MeshMapState.Stale));
             bake.Page = (int)MeshMapKind.Curvature; Assert.That(bake.Page, Is.EqualTo((int)MeshMapKind.Curvature));
-            Assert.That(owner.MeshBakeTargets().Single().Slot, Is.Zero, "one texture set: the open document's material slot");
+            Assert.That(owner.MeshBakeTargets().Single().Slots, Is.EqualTo(new[] { 0 }), "one texture set: the slots of the open document's material");
         }
 
         // ───────── 窓から焼く ─────────
@@ -219,9 +219,9 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void TheWindowRefusesForTheSameReasonsAsBakeMeshMaps()
         {
             // モデルが無い
-            Assert.That(owner.MeshBakeRefusal(), Does.Contain("Load a model"));
-            Assert.That(owner.StartMeshBake(), Does.Contain("Load a model")); Assert.That(owner.IsBakingMeshMaps, Is.False);
-            Assert.That(owner.BakeMeshMaps(), Is.Null); Assert.That(owner.StatusMessage, Does.Contain("Load a model"));
+            Assert.That(owner.MeshBakeRefusal(), Does.Contain("No model"));
+            Assert.That(owner.StartMeshBake(), Does.Contain("No model")); Assert.That(owner.IsBakingMeshMaps, Is.False);
+            Assert.That(owner.BakeMeshMaps(), Is.Null); Assert.That(owner.StatusMessage, Does.Contain("No model"));
             owner.Preview.LoadDemoMesh();
             Assert.That(owner.MeshBakeRefusal(), Is.Null);
             // ポーズの変更中（スライダーを離すまでスナップショットは古い）
@@ -231,7 +231,7 @@ namespace Yozolab.YoluPainter.Tests
             pending.SetValue(owner, false);
             // 焼くマップが無い（保存したマップから戻した設定などで）
             owner.MeshBakeSettings.Maps = new MeshMapKind[0];
-            Assert.That(owner.StartMeshBake(), Does.Contain("at least one map"));
+            Assert.That(owner.StartMeshBake(), Does.Contain("No map is checked"));
             owner.MeshBakeSettings.Maps = new[] { MeshMapKind.AmbientOcclusion }; owner.MeshBakeSettings.AoSamples = 512; owner.MeshBakeUseGpu = false;
             // ベイク中はもう 1 つ始めない（窓からも、呼んだ所で待つベイクからも）
             Assert.That(owner.StartMeshBake(), Is.Null);
@@ -252,13 +252,13 @@ namespace Yozolab.YoluPainter.Tests
             UseSmallDocument(128);
             owner.Preview.LoadDemoMesh();
             owner.MeshBakeSettings.Maps = new[] { MeshMapKind.WorldNormal, MeshMapKind.AmbientOcclusion }; owner.MeshBakeSettings.AoSamples = 8;
-            var slot = typeof(TexturePaintWindow).GetField("materialSlot", BindingFlags.NonPublic | BindingFlags.Instance);
-            // マテリアルスロット（焼いた結果は始めたときのスロットのもの）
+            var set = owner.CurrentTextureSet;
+            // マテリアルのスロット（焼いた結果は始めたときのスロットのもの）
             Assert.That(owner.StartMeshBake(), Is.Null);
-            slot.SetValue(owner, 1);
+            set.Bind(0, new[] { 1 });
             PumpUntilDone();
             Assert.That(owner.MeshMaps.Count, Is.Zero); Assert.That(owner.MeshBakeOutcome, Does.Contain("material slot"));
-            slot.SetValue(owner, 0);
+            set.Bind(0, new[] { 0 });
             // モデルのスナップショット（読み込み直し・ポーズ）
             Assert.That(owner.StartMeshBake(), Is.Null);
             owner.Preview.LoadDemoMesh();

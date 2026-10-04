@@ -26,7 +26,7 @@ namespace Yozolab.YoluPainter.Editor
         internal sealed class SetGeneratorInputs : IGeneratorInputs, IGeneratorModelFrame
         {
             readonly TexturePaintWindow window; readonly TextureSet set;
-            long revision, mapsRevision = long.MinValue; int slot = int.MinValue;
+            long revision, mapsRevision = long.MinValue; string slots;
             object input, highPoly; string settings; PaintDocument doc; Vector3 rootPosition; Quaternion rootRotation; bool hasRoot;
             /// <summary>窓が最後に見た文書と、その文書の <see cref="PaintDocument.GeneratorInputsRevision"/>（合成器が先に問い合わせて
             /// 変化を受け取っていても、窓の写しを作り直し損ねないように、窓は文書の版で比べる）。</summary>
@@ -42,14 +42,15 @@ namespace Yozolab.YoluPainter.Editor
                     var nowInput = window.CurrentMeshBakeInput(); var nowHigh = window.highPolyModel != null ? window.CurrentHighPolyInput() : null;
                     string nowSettings = JsonUtility.ToJson(window.meshBakeSettings);
                     bool current = set == window.currentSet;
-                    int nowSlot = current ? window.materialSlot : set.MaterialSlot;
+                    string nowSlots = string.Join(",", set.Slots); // セットが受け持つスロット（モデル・マテリアルで変わる）
                     var nowDoc = current && window.document != null ? window.document : set.Document;
+                    nowSettings += ";idColours=" + (nowDoc?.IdColors.Key ?? "");
                     bool nowHasRoot = window.preview != null && window.preview.HasModel;
                     var nowRootPosition = nowHasRoot ? window.preview.ModelRootPosition : Vector3.zero; var nowRootRotation = nowHasRoot ? window.preview.ModelRootRotation : Quaternion.identity;
-                    if (set.MeshMaps.Revision != mapsRevision || !ReferenceEquals(nowInput, input) || !ReferenceEquals(nowHigh, highPoly) || nowSettings != settings || nowSlot != slot || !ReferenceEquals(nowDoc, doc)
+                    if (set.MeshMaps.Revision != mapsRevision || !ReferenceEquals(nowInput, input) || !ReferenceEquals(nowHigh, highPoly) || nowSettings != settings || nowSlots != slots || !ReferenceEquals(nowDoc, doc)
                         || nowHasRoot != hasRoot || nowRootPosition != rootPosition || nowRootRotation != rootRotation)
                     {
-                        mapsRevision = set.MeshMaps.Revision; input = nowInput; highPoly = nowHigh; settings = nowSettings; slot = nowSlot; doc = nowDoc;
+                        mapsRevision = set.MeshMaps.Revision; input = nowInput; highPoly = nowHigh; settings = nowSettings; slots = nowSlots; doc = nowDoc;
                         hasRoot = nowHasRoot; rootPosition = nowRootPosition; rootRotation = nowRootRotation;
                         revision++;
                     }
@@ -121,7 +122,7 @@ namespace Yozolab.YoluPainter.Editor
                 if (ReferenceEquals(inputs.SeenDocument, d) && inputs.SeenRevision == revision) continue;
                 bool first = !ReferenceEquals(inputs.SeenDocument, d);
                 inputs.SeenDocument = d; inputs.SeenRevision = revision;
-                if (first && !d.HasGenerators && !d.HasFillImages) continue; // 初めて見た文書で、Generator も塗りつぶしの画像も無い
+                if (first && !d.HasGenerators && !d.HasFillImages && !d.HasFillGradients) continue; // 初めて見た文書で、Generator も塗りつぶしの画像も無い
                 changed = true;
                 set.DisplayKey = null; set.LightingKey = null; set.ThumbnailRevision = long.MinValue;
                 foreach (var c in set.MaterialChannels.Values) c.Revision = long.MinValue;
@@ -134,17 +135,19 @@ namespace Yozolab.YoluPainter.Editor
 
         // ───────── 足す ─────────
 
-        static readonly GeneratorType[] GeneratorMenu = { GeneratorType.EdgeWear, GeneratorType.Dirt, GeneratorType.PositionGradient, GeneratorType.ShapeGradient, GeneratorType.Thickness, GeneratorType.Direction, GeneratorType.IdColor };
+        static readonly GeneratorType[] GeneratorMenu = { GeneratorType.EdgeWear, GeneratorType.Dirt, GeneratorType.PositionGradient, GeneratorType.ShapeGradient, GeneratorType.Thickness, GeneratorType.Direction, GeneratorType.IdColor, GeneratorType.Anchor };
 
         /// <summary>選んだ層のスタックに Generator を足す（画素なら今のチャンネルだけ）。足せたら知らせに、読むマップが無ければその理由も添える。</summary>
         internal FilterEffect AddGenerator(FilterTarget target, GeneratorType type)
         {
-            var added = AddFilter(target, FilterSettings.FromGenerator(NewGeneratorSettings(type)));
+            var settings = NewGeneratorSettings(type);
+            if (type == GeneratorType.Anchor) settings = settings.WithAnchor(NearestAnchorBelow(selectedLayer), settings.AnchorChannel, settings.AnchorRead); // すぐ下の Anchor を読む（TexturePaintWindow.Anchors.cs）
+            var added = AddFilter(target, FilterSettings.FromGenerator(settings));
             if (added == null) return null;
             ConnectGeneratorInputs();
             if (type == GeneratorType.ShapeGradient) ShapeEditFilter = added.Id; // 足したらすぐ 3D ビューで形を動かせるように
-            var status = document.GetGeneratorStatus(added.Settings.Generator);
-            if (!status.Active) message += " " + L.Tr("It has no effect until its mesh maps are baked: {0}", status.Reason);
+            var status = StageStatus(added);
+            if (!status.Active) message += " " + L.Tr("No effect: {0}", status.Reason);
             return added;
         }
 
@@ -155,7 +158,11 @@ namespace Yozolab.YoluPainter.Editor
             foreach (var type in GeneratorMenu)
             {
                 string why;
-                try { why = document.FilterRefusal(layerId, target, FilterSettings.FromGenerator(GeneratorSettings.Default(type)), channel); }
+                try
+                {
+                    why = document.FilterRefusal(layerId, target, FilterSettings.FromGenerator(GeneratorSettings.Default(type)), channel);
+                    if (why == null && type == GeneratorType.Anchor && document.AnchorsReadableFrom(layerId).Count == 0) why = L.Tr("no anchor below this layer");
+                }
                 catch (KeyNotFoundException) { why = L.Tr("no layer"); }
                 choices.Add((GeneratorName(type), type, why));
             }
@@ -163,7 +170,7 @@ namespace Yozolab.YoluPainter.Editor
         }
         void ShowGeneratorMenu(Rect at, Guid layerId, FilterTarget target)
         {
-            var menu = new GenericMenu();
+            var menu = new PaintMenu();
             foreach (var (label, type, why) in GeneratorChoices(layerId, target))
             {
                 if (why == null) menu.AddItem(new GUIContent(label), false, () => { AddGenerator(target, type); Repaint(); });
@@ -184,6 +191,7 @@ namespace Yozolab.YoluPainter.Editor
                 case GeneratorType.ShapeGradient: return L.Tr("Shape gradient");
                 case GeneratorType.Thickness: return L.TrIn("generator", "Thickness");
                 case GeneratorType.IdColor: return L.Tr("ID color");
+                case GeneratorType.Anchor: return L.TrIn("generator", "Anchor");
                 default: return L.TrIn("generator", "Direction");
             }
         }
@@ -215,6 +223,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             var g = e.Settings.Generator;
             string text = "  " + GeneratorBlendName(g.Blend);
+            if (g.Type == GeneratorType.Anchor) return text + AnchorSummary(e); // 読む Anchor の名前（TexturePaintWindow.Anchors.cs）
             if (e.IsActive && !document.GetGeneratorStatus(g).Active) text += "  · " + L.Tr("no maps");
             return text;
         }
@@ -224,7 +233,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             var p = map.Provenance;
             string source = p.Source == MeshBaker.Source ? L.Tr("baked from the model") : L.Tr("baked from a high poly");
-            return MeshMapLabel(p.Kind) + " · " + p.Width + " × " + p.Height + " · " + L.Tr("slot {0}", p.TargetSlot) + " · " + source + (string.IsNullOrEmpty(p.SettingsKey) ? "" : " · " + p.SettingsKey.Replace(";", "; "))
+            return MeshMapLabel(p.Kind) + " · " + p.Width + " × " + p.Height + " · " + L.Tr("slot {0}", SlotList(p)) + " · " + source + (string.IsNullOrEmpty(p.SettingsKey) ? "" : " · " + p.SettingsKey.Replace(";", "; "))
                 + "\n" + L.Tr("Bake {0}", p.ConditionKey.Substring(0, 12) + "…");
         }
 
@@ -235,8 +244,10 @@ namespace Yozolab.YoluPainter.Editor
         void DrawGeneratorParameters(UiRows rows, FilterEffect e, float indent)
         {
             var g = e.Settings.Generator; GeneratorSettings next = g;
-            var status = document.GetGeneratorStatus(g);
-            PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.Tr("Reads"), L.Tr("The texture set's baked mesh maps this generator reads. They come from the model; painting (Height too) does not change them."));
+            var status = StageStatus(e); // Anchor の Generator は参照も見る
+            if (g.Type == GeneratorType.Anchor) AnchorRows(rows, e, indent); // 読む Anchor・チャンネル・読み方（TexturePaintWindow.Anchors.cs）
+            if (status.Maps.Count > 0 || g.Type != GeneratorType.Anchor)
+                PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.Tr("Reads"), L.Tr("The texture set's baked mesh maps this generator reads. They come from the model; painting (Height too) does not change them."));
             foreach (var use in status.Maps)
             {
                 var row = Indent(rows.Row(20, 2), indent);
@@ -252,15 +263,17 @@ namespace Yozolab.YoluPainter.Editor
             }
             if (!status.Active)
             {
-                NoteRow(rows, L.Tr("No effect now: the input passes through unchanged. {0}", status.Reason), NoteKind.Warning, indent);
-                if (meshBakeJob == null && PaintGui.Button(Spot("generator.bake", Indent(rows.Row(24), indent)), L.Tr("Bake Mesh Maps…"), false, GUI.enabled && stroke == null,
-                        L.Tr("Open the bake window: check the maps, set them up and bake them from the loaded model"), "local_fire_department"))
+                NoteRow(rows, L.Tr("No effect: {0}", status.Reason), NoteKind.Warning, indent);
+                if (meshBakeJob == null && status.Maps.Any(m => !m.Usable) && PaintGui.Button(Spot("generator.bake", Indent(rows.Row(24), indent)), L.Tr("Bake Mesh Maps…"), false, GUI.enabled && stroke == null,
+                        L.Tr("Open the bake window"), "local_fire_department"))
                     TryAction(() => OpenMeshBakeWindow());
             }
             bool pinned = g.Pins.Count > 0;
-            bool pin = PaintGui.FitToggle(Spot("generator.pin", Indent(rows.Row(), indent)), L.Tr("Only this bake"), pinned,
-                L.Tr("On: keep reading exactly the bake shown above. A rebake under other conditions is then not used (the generator has no effect until you turn this on again). Off: follow the latest bake."),
-                pinned || status.Maps.All(m => m.Usable));
+            bool pin = pinned;
+            if (status.Maps.Count > 0) // マップを読まない Generator（崩しを UV に置いた Anchor）にはピンが無い
+                pin = PaintGui.FitToggle(Spot("generator.pin", Indent(rows.Row(), indent)), L.Tr("Only this bake"), pinned,
+                    L.Tr("On: keep reading this bake. Off: follow the latest bake."),
+                    pinned || status.Maps.All(m => m.Usable));
             try
             {
                 if (pin != pinned)
@@ -274,9 +287,8 @@ namespace Yozolab.YoluPainter.Editor
                     case GeneratorType.EdgeWear:
                     case GeneratorType.Dirt:
                         if (g.Type == GeneratorType.Dirt)
-                            next = next.WithBalance(PaintGui.KeepSlider(Spot("generator.balance", Indent(rows.Row(), indent)), L.Tr("AO ↔ Cavities"), next.Balance, 0, 1, "0", "%",
+                            next = next.WithBalance(PaintGui.KeepSlider(Spot("generator.balance", Indent(rows.SliderRow(), indent)), L.Tr("AO ↔ Cavities"), next.Balance, 0, 1, "0", "%",
                                 L.Tr("0 %: ambient occlusion only. 100 %: cavities (concave curvature) only."), true, 100));
-                        NoteRow(rows, L.Tr("Curvature comes from the model's bake; painted Height does not change it."), NoteKind.Plain, indent);
                         break;
                     case GeneratorType.PositionGradient:
                         ChoiceDropdown(Spot("generator.axis", Indent(rows.Row(), indent)), L.Tr("Axis"), next.Axis, new[] { 0, 1, 2 }, AxisName,
@@ -284,7 +296,8 @@ namespace Yozolab.YoluPainter.Editor
                             L.Tr("0 at the bounding box's minimum, 1 at its maximum along this world axis"));
                         break;
                     case GeneratorType.ShapeGradient:
-                        next = ShapeGradientRows(rows, e, next, indent); // 形・置き場・シーンから写す（TexturePaintWindow.ShapeGradient.cs）
+                        next = ShapeGradientRows(rows, e, next, indent);
+                        next = GradientRampRows(rows, e.Id.ToString(), next, picked => ApplyFilterSettings(e.Id, e.Settings.WithGenerator(picked)), () => document.FindFilter(selectedLayer, e.Id, out _)?.Settings.Generator, IsScalarChannel(channel) || document.FindFilter(selectedLayer, e.Id, out var rampTarget) != null && rampTarget == FilterTarget.Mask, indent); // 形・置き場・シーンから写す（TexturePaintWindow.ShapeGradient.cs）
                         break;
                     case GeneratorType.IdColor:
                         next = IdColorRows(rows, e, next, indent); // 色の一覧・スポイト・許容の幅（Tools/TexturePaintWindow.IdSelect.cs）
@@ -305,22 +318,21 @@ namespace Yozolab.YoluPainter.Editor
                 // レベル: 低と高は入れ違わない（0.001 以上離す）。ID の色は 0 か 1 なので、範囲とやわらかさは出さない（反転は出す）
                 if (g.Type != GeneratorType.IdColor)
                 {
-                    var c = PaintGui.LabeledColumns(Indent(rows.Row(), indent), L.TrIn("generator", "Range"), PropertyLabelWidth, 2);
-                    double low = PaintGui.KeepSlider(Spot("generator.low", c[0]), L.TrIn("generator", "Low"), next.Low, 0, 1, "0.###", "", L.Tr("Base values at or below this give 0"));
-                    double high = PaintGui.KeepSlider(Spot("generator.high", c[1]), L.TrIn("generator", "High"), next.High, 0, 1, "0.###", "", L.Tr("Base values at or above this give 1"));
+                    PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.TrIn("generator", "Range"));
+                    double low = PaintGui.KeepSlider(Spot("generator.low", Indent(rows.SliderRow(), indent)), L.TrIn("generator", "Low"), next.Low, 0, 1, "0.###", "", L.Tr("Base values at or below this give 0"));
+                    double high = PaintGui.KeepSlider(Spot("generator.high", Indent(rows.SliderRow(), indent)), L.TrIn("generator", "High"), next.High, 0, 1, "0.###", "", L.Tr("Base values at or above this give 1"));
                     if (low != next.Low) low = Math.Max(0, Math.Min(low, next.High - GeneratorSettings.MinLevelRange));
                     if (high != next.High) high = Math.Min(1, Math.Max(high, low + GeneratorSettings.MinLevelRange));
-                    double softness = PaintGui.KeepSlider(Spot("generator.softness", Indent(rows.Row(), indent)), L.TrIn("generator", "Softness"), next.Softness, 0, 1, "0", "%",
+                    double softness = PaintGui.KeepSlider(Spot("generator.softness", Indent(rows.SliderRow(), indent)), L.TrIn("generator", "Softness"), next.Softness, 0, 1, "0", "%",
                         L.Tr("0 %: a straight ramp from low to high. 100 %: a smooth S curve."), true, 100);
                     next = next.WithLevels(low, high, softness);
                 }
                 next = next.WithInvert(PaintGui.FitToggle(Spot("generator.invert", Indent(rows.Row(), indent)), L.TrIn("generator", "Invert"), next.Invert, L.Tr("Swap 0 and 1 after the range")));
                 // 崩し
-                PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.Tr("Breakup"), L.Tr("Seeded noise that wears the result away in patches, so edges and dirt do not look uniform (100 %: gone where the noise is strongest). The same seed always gives the same result."));
-                var b = UiRows.Split(Indent(rows.Row(), indent), 2, 6);
-                double amount = PaintGui.KeepSlider(Spot("generator.noise", b[0]), L.TrIn("filter", "Amount"), next.NoiseAmount, 0, 1, "0", "%", null, true, 100);
-                int seed = PaintGui.KeepIntField(Spot("generator.seed", b[1]), L.TrIn("filter", "Seed"), next.NoiseSeed, int.MinValue, int.MaxValue, L.Tr("The same seed gives the same noise. Drag to change, click to type."));
-                double scale = PaintGui.KeepSlider(Spot("generator.scale", Indent(rows.Row(), indent)), L.TrIn("generator", "Size"), next.NoiseScale, .005, .5, "0.###", "", L.Tr("The size of the largest features, as a fraction of the model's bounding-box diagonal (or of the UV square)"), amount > 0);
+                PaintGui.GroupLabel(Indent(rows.Row(16), indent), L.Tr("Breakup"), L.Tr("Seeded noise that wears the result away in patches"));
+                double amount = PaintGui.KeepSlider(Spot("generator.noise", Indent(rows.SliderRow(), indent)), L.TrIn("filter", "Amount"), next.NoiseAmount, 0, 1, "0", "%", null, true, 100);
+                int seed = PaintGui.KeepIntField(Spot("generator.seed", Indent(rows.Row(), indent)), L.TrIn("filter", "Seed"), next.NoiseSeed, int.MinValue, int.MaxValue, L.Tr("The same seed gives the same noise."));
+                double scale = PaintGui.KeepSlider(Spot("generator.scale", Indent(rows.SliderRow(), indent)), L.TrIn("generator", "Size"), next.NoiseScale, .005, .5, "0.###", "", L.Tr("The size of the largest features, as a fraction of the model's bounding-box diagonal (or of the UV square)"), amount > 0);
                 next = next.WithNoise(amount, scale, seed, next.NoiseSpace);
                 ChoiceDropdown(Spot("generator.space", Indent(rows.Row(), indent)), L.TrIn("generator", "Placed"), next.NoiseSpace, (GeneratorNoiseSpace[])Enum.GetValues(typeof(GeneratorNoiseSpace)), NoiseSpaceName,
                     s => { if (s != g.NoiseSpace) ApplyFilterSettings(e.Id, e.Settings.WithGenerator(g.WithNoise(g.NoiseAmount, g.NoiseScale, g.NoiseSeed, s))); },
@@ -335,14 +347,15 @@ namespace Yozolab.YoluPainter.Editor
 
         /// <summary>プロパティの欄の区画（"layer"・"mask"・"filters" など）を開く・閉じる（オフスクリーンで描く試験が、見たい区画を上に出すため）。</summary>
         internal void SetSectionOpen(string key, bool open) => sectionOpen[key] = open;
-        /// <summary>選んだ層のフィルターの区画の中身だけを area に描く（欄と同じ部品と幅。オフスクリーンで見た目を確かめる試験用）。使った高さ。</summary>
+        /// <summary>選んだ効果の段の欄の中身だけを area に描く（欄と同じ部品と幅。オフスクリーンで見た目を確かめる試験用）。使った高さ。</summary>
         internal float DrawFilterSectionOnly(Rect area)
         {
-            var active = document.Layers.FirstOrDefault(l => l.Id == selectedLayer);
+            var (e, target) = SelectedEffect();
             PaintGui.Fill(area, PaintTheme.PanelBg);
-            if (active == null) return 0;
+            if (e == null) return 0;
+            BeginSpots("properties");
             var rows = new UiRows(area, 6);
-            DrawFilters(rows, active);
+            DrawFilterParameters(rows, e, target);
             return rows.Used;
         }
 
@@ -361,14 +374,14 @@ namespace Yozolab.YoluPainter.Editor
             if (list == null) return ConfirmInactiveFillImages(documents); // 塗りつぶしの画像も（TexturePaintWindow.FillImages.cs）
             if (Dialogs.Confirm(L.Tr("Generators without mesh maps"), L.Tr("These generators have no usable mesh maps, so the exported images would not have their effect (the layers pass through unchanged):\n{0}\n\nBake the mesh maps first, or export anyway?", list), L.Tr("Export Anyway"), L.Tr("Cancel")))
                 return ConfirmInactiveFillImages(documents);
-            message = L.Tr("Nothing was exported: some generators have no usable mesh maps. Bake them (Properties ▸ Filters ▸ the generator) first.");
+            message = L.Tr("Nothing was exported: some generators have no usable mesh maps.");
             return false;
         }
         /// <summary>保存の知らせに添える文（.ylp には Generator がそのまま残る。合成の画像だけが効きなし）。無ければ空。</summary>
         string InactiveGeneratorSaveNote()
         {
             int count = textureSets.Sum(s => (s == currentSet ? document : s.Document).InactiveGenerators().Count);
-            return (count == 0 ? "" : " " + L.Tr("{0} generator(s) have no usable mesh maps; they are kept in the file, and the preview images inside it are without their effect.", count)) + InactiveFillImageSaveNote();
+            return (count == 0 ? "" : " " + L.Tr("{0} generator(s) have no usable mesh maps.", count)) + InactiveFillImageSaveNote();
         }
     }
 }

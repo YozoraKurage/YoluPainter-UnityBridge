@@ -33,6 +33,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>持ち主の窓を閉じたら別のウィンドウも閉じる（配置には別のウィンドウのまま覚え、次に開いたときにまた出す）。</summary>
         void OnDestroy()
         {
+            CleanupRecoveryOnClose();
             WarnUnappliedMaterialEdits(); DisposeMadeMaterials(); // シェーダーから作ったプレビューのマテリアル（Model/TexturePaintWindow.PreviewMaterial.cs）
             if (PainterPanelWindow.Quitting) return;
             foreach (var w in PanelWindows.ToList()) w.CloseWithOwner();
@@ -89,6 +90,16 @@ namespace Yozolab.YoluPainter.Editor
         internal void PanelWindowClosed(PainterPanelWindow w)
         {
             if (Layout.HasGroup(w.GroupId) && Layout.Dock(w.GroupId)) { SaveDockLayout(); Repaint(); }
+        }
+
+        /// <summary>窓の種類は開き直して切り替える。文書とタブのまとまり、位置・大きさ・戻り先を保つ。</summary>
+        internal void SetPanelWindowMode(string groupId, bool dockable)
+        {
+            if (!Layout.HasGroup(groupId) || !Layout.Group(groupId).Floating) return;
+            var group = Layout.Group(groupId); if (group.dockableWindow == dockable) return;
+            var window = PanelWindows.FirstOrDefault(w => w.GroupId == groupId);
+            if (window != null) { group.window = window.position; window.CloseLeavingLayout(); }
+            group.dockableWindow = dockable; PanelLayoutChanged();
         }
 
         /// <summary>別のウィンドウの位置を配置に覚える（閉じる・リロードの前）。</summary>

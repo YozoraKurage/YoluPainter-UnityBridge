@@ -4,9 +4,6 @@ msgstr ""
 "Language: ja\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 
-msgid "The Normal channel paints a direction. Choose it in Properties ▸ Normal."
-msgstr "ノーマルのチャンネルは向きを描きます。プロパティ ▸ ノーマル で選んでください。"
-
 msgid "The value the brush paints (0–255)"
 msgstr "ブラシが描く値（0〜255）"
 
@@ -15,9 +12,6 @@ msgstr "16 進の色（#RRGGBB）"
 
 msgid "Alpha of the brush color"
 msgstr "ブラシの色の不透明度"
-
-msgid "Colors you paint with appear here."
-msgstr "描いた色がここに並びます。"
 
 msgid "Hue wheel"
 msgstr "色相の円"

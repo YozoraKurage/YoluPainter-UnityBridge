@@ -44,6 +44,11 @@ namespace Yozolab.YoluPainter.Editor
                 {
                     Event.current = new Event { type = type, mousePosition = mouse ?? new Vector2(-1000, -1000) };
                     beginContainer.Invoke(null, new[] { state });
+                    // 通常の EditorWindow が用意するエディタのスキンとスタイルを、オフスクリーンの入口でも用意する。
+                    var skinMode = guiUtility.GetField("s_SkinMode", Internal);
+                    skinMode?.SetValue(null, 1);
+                    GUI.skin = UnityEditor.EditorGUIUtility.GetBuiltinSkin(UnityEditor.EditorSkin.Inspector);
+                    typeof(UnityEditor.EditorStyles).GetMethod("UpdateSkinCache", Internal, null, Type.EmptyTypes, null)?.Invoke(null, null);
                     pushParent.Invoke(null, new object[] { Matrix4x4.identity, Matrix4x4.identity, new Rect(0, 0, width, height) });
                     Event.current = new Event { type = type, mousePosition = mouse ?? new Vector2(-1000, -1000) }; // BeginContainer がイベントを差し替えるので後で入れる
                     GL.PushMatrix(); GL.LoadPixelMatrix(0, width, height, 0);

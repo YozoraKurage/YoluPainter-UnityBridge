@@ -74,7 +74,8 @@ namespace Yozolab.YoluPainter.Tests
         {
             var d = window.Document; var layer = d.Layers[d.Layers.Count - 1];
             window.Tool = TexturePaintWindow.PaintTool.Gradient; window.GradientTo = new Color(0, 0, 1, 1);
-            Drag(0, 500, 1000, 500);
+            // 画素 0 は表示の左の端。既定の配置の左の列（アセット・カラー）の幅のつまみが表示へ 2 px 出ているので、少し内側から引く
+            Drag(20, 500, 1000, 500);
             Assert.That(window.StatusMessage, Does.Contain("Gradient"));
             Assert.That(d.CompositePixel(PaintChannel.Color, 1020, 10).B, Is.GreaterThan(240), "the end colour past the end");
             Assert.That(d.UndoCount, Is.GreaterThan(0));

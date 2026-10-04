@@ -231,6 +231,8 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That((image.Width, image.Height), Is.EqualTo((32, 32)), "the imported size");
             Assert.That(window.StatusMessage, Does.Contain("imported at 32 × 32").And.Contain("64 × 64"));
             var normal = MakeTexture("Bumps", Pattern(16, 16, 8), 16, 16, i => { i.isReadable = true; i.textureType = TextureImporterType.NormalMap; });
+            if (!UnityTextureReader.GpuReadbackWorks(out _))
+            { Assert.That(() => window.ImportUnityTexture(normal), Throws.TypeOf<ResourceRefusedException>().With.Message.Contains("cannot be decoded")); return; }
             window.ImportUnityTexture(normal);
             Assert.That(window.StatusMessage, Does.Contain("normal map"));
             Assert.That(window.ImageResources.Images.Last().ColorSpace, Is.EqualTo(ResourceColorSpace.Linear), "normal maps are data");
@@ -256,13 +258,14 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(UnityTextureReader.Refusal(material), Does.Contain("not a 2D texture"));
             // 別のアセットの中のテクスチャ（GUID だけでは指せない）
             var inner = new Texture2D(4, 4) { name = "Inner" }; AssetDatabase.AddObjectToAsset(inner, material); AssetDatabase.SaveAssets();
-            Assert.That(() => window.ImportUnityTexture(inner), Throws.TypeOf<ResourceRefusedException>().With.Message.Contains("inside another asset"));
+            var embedded = window.ImportUnityTexture(inner);
+            Assert.That(embedded.Origin.LocalFileId, Is.EqualTo(UnityResourceObject.LocalId(inner)));
             // 予算: 読む前に断る（何も変えない）
             var big = MakeTexture("Big", Pattern(64, 64, 9), 64, 64, i => i.isReadable = true);
             window.ImageResources.BudgetBytes = 1000;
             long revision = window.ImageResources.Revision;
             Assert.That(() => window.ImportUnityTexture(big), Throws.TypeOf<ResourceRefusedException>().With.Property("Refusal").EqualTo(ResourceRefusal.OverBudget).And.Message.Contains("budget"));
-            Assert.That((window.ImageResources.Count, window.ImageResources.Revision), Is.EqualTo((0, revision)));
+            Assert.That((window.ImageResources.Count, window.ImageResources.Revision), Is.EqualTo((1, revision)));
         }
 
         // ───────── 出どころが変わったとき ─────────
@@ -341,7 +344,7 @@ namespace Yozolab.YoluPainter.Tests
             dialogs.File = Temp(".ylp"); window.SaveProject(true);
             Assert.That(window.IsSaved, Is.True, window.StatusMessage);
             var saved = YlpFormat.Open(YlpStore.Load(dialogs.File).Files);
-            Assert.That(saved.Info.Format, Is.EqualTo(4)); Assert.That(saved.Resources.Count, Is.EqualTo(3));
+            Assert.That(saved.Info.Format, Is.EqualTo(YlpFormat.Current)); Assert.That(saved.Resources.Count, Is.EqualTo(3));
             Assert.That(saved.Files.Keys.Count(k => k.StartsWith(ResourceIndex.Folder, StringComparison.Ordinal)), Is.EqualTo(3));
 
             var other = NewWindow(); other.OpenProjectAt(dialogs.File);
@@ -355,9 +358,9 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(other.ImageResources.Count, Is.Zero);
 
             // 復旧の checkpoint（フォーカスを失ったとき）から別の窓が戻す（ドメインのリロードと同じ道）
-            window.GetType().GetMethod("OnLostFocus", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(window, null);
+            window.GetType().GetMethod("OnLostFocus", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(window, null); window.FlushRecovery();
             window.ImportBuiltInImage("value-noise");
-            window.GetType().GetMethod("OnLostFocus", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(window, null);
+            window.GetType().GetMethod("OnLostFocus", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(window, null); window.FlushRecovery();
             var restored = NewWindow(); var flags = BindingFlags.NonPublic | BindingFlags.Instance;
             restored.GetType().GetMethod("OnDisable", flags).Invoke(restored, null);
             string own = restored.RecoveryRoot; if (Directory.Exists(own)) Directory.Delete(own, true);

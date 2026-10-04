@@ -179,7 +179,7 @@ namespace Yozolab.YoluPainter.Tests
             ClickToolControl("material.toggle");
             ClickToolControl("material.chip." + PaintChannel.Color);
             Assert.That(window.MaterialIncludes(PaintChannel.Color), Is.True, "the only channel cannot be left out");
-            Assert.That(window.StatusMessage, Does.Contain("at least one channel"));
+            Assert.That(window.StatusMessage, Does.Contain("A material paints at least one channel."));
             ClickToolControl("material.toggle");
             Assert.That(window.MaterialMode, Is.False);
         }
@@ -240,9 +240,11 @@ namespace Yozolab.YoluPainter.Tests
             window.Channel = PaintChannel.Color; Repaint(window);
             SendHost(EventType.MouseDown, LayerPanelPoint("opacity", .9f)); SendHost(EventType.MouseUp, LayerPanelPoint("opacity", .9f)); Repaint(window);
             Assert.That(layer.Opacity, Is.GreaterThan(.85)); Assert.That(layer.OpacityIn(PaintChannel.Roughness), Is.LessThan(.6), "Roughness keeps its own");
-            // プロパティの一覧の × で層の値に戻す
-            OpenLayerPanels();
-            ClickLayerControl("layer.channelBlend.clear." + PaintChannel.Roughness);
+            // 上の切り替えで層の値に戻す（ペイントの層を選ぶとプロパティの欄はブラシなので、一覧の × は塗りつぶし・調整・グループの層の欄と、
+            // レイヤーの右クリックの「チャンネルごとの合成」にある）
+            window.Channel = PaintChannel.Roughness; Repaint(window);
+            toggle = LayerPanelPoint("channelBlend");
+            SendHost(EventType.MouseDown, toggle); SendHost(EventType.MouseUp, toggle); Repaint(window);
             Assert.That(layer.HasChannelBlends, Is.False);
             Key(window, KeyCode.Z, EventModifiers.Control);
             Assert.That(layer.ChannelBlends.ContainsKey(PaintChannel.Roughness), Is.True);

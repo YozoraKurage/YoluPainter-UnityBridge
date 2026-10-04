@@ -32,17 +32,8 @@ msgstr "使える ID マップがまだありません"
 msgid "ID Map"
 msgstr "ID マップ"
 
-msgid "Colours from: {0}. Click a part on the 2D canvas or the 3D view to select every pixel of its colour."
-msgstr "色分けの元: {0}。2D キャンバスか 3D ビューで部品をクリックすると、その色の画素をすべて選択します。"
-
 msgid "unknown"
 msgstr "不明"
-
-msgid "There is no usable ID map for this texture set: {0} Bake one (Properties ▸ Mesh Maps ▸ Bake…, check ID)."
-msgstr "このテクスチャセットに使える ID マップがありません: {0} ベイクしてください（プロパティ ▸ メッシュマップ ▸ ベイク…で ID にチェック）。"
-
-msgid "Load a model (or the demo cube) to pick on the 3D view."
-msgstr "3D ビューで選ぶには、モデル（かデモのキューブ）を読み込んでください。"
 
 msgid "Nothing of the model under the pointer."
 msgstr "ポインタの下にモデルがありません。"
@@ -73,9 +64,6 @@ msgstr "ID の色"
 msgid "Texels of the ID map with one of these colours (within the tolerance) get 1, the rest 0."
 msgstr "ID マップで、これらの色のどれか（許容の幅の中）のテクセルが 1、ほかは 0 になります。"
 
-msgid "No colours yet: turn on Pick from ID Map and click parts on the 2D canvas or the 3D view."
-msgstr "色がまだありません: 「ID マップから取る」を押して、2D キャンバスか 3D ビューで部品をクリックしてください。"
-
 msgid "Take this colour out"
 msgstr "この色を外す"
 
@@ -91,17 +79,11 @@ msgstr "押してから 2D キャンバスか 3D ビューで部品をクリッ�
 msgid "How far (largest 8-bit channel difference) a texel's ID colour may be from a listed one. Baked ID colours of up to 4080 parts differ by 17 or more."
 msgstr "テクセルの ID の色が、一覧の色からどこまで離れていてよいか（8 bit のチャンネルの差の最大）。焼いた ID の色は、部品が 4080 個までなら互いに 17 以上離れています。"
 
-msgid "Click parts on the 2D canvas or the 3D view to add their ID colours (Ctrl+click takes one out). Esc stops."
-msgstr "2D キャンバスか 3D ビューで部品をクリックすると、その ID の色を足します（Ctrl+クリックで外す）。Esc でやめます。"
-
 msgid "Stopped picking ID colours."
 msgstr "ID の色を取るのをやめました。"
 
 msgid "Stopped picking ID colours: the generator is no longer selected."
 msgstr "ID の色を取るのをやめました: その Generator が選ばれていません。"
-
-msgid "This generator reads another ID bake (Only this bake). Its colours may not match this map: turn Only this bake off first, then pick again."
-msgstr "この Generator は別の ID マップのベイクを読んでいます（このベイクだけを読む）。色がこのマップと合わないかもしれません。先に「このベイクだけを読む」を切ってから取り直してください。"
 
 msgid "{0} is not in the list."
 msgstr "{0} は一覧にありません。"
@@ -124,8 +106,8 @@ msgctxt "mesh map"
 msgid "Material slot (submesh)"
 msgstr "マテリアルスロット（サブメッシュ）"
 
-msgid "A flat colour for each part (material slot, mesh, connected mesh part or UV island) or each triangle's vertex colour. Select by these colours with Shift+W or the ID colour generator."
-msgstr "部品（マテリアルスロット・メッシュ・つながったメッシュの塊・UV アイランド）ごとの塗りつぶした色か、三角形ごとの頂点カラー。Shift+W か Generator「ID の色」で、この色で選べます。"
+msgid "A flat colour for each part (material slot, mesh, connected mesh part or UV island) or each triangle's vertex colour."
+msgstr "部品（マテリアルスロット・メッシュ・つながったメッシュの塊・UV アイランド）ごとの塗りつぶした色か、三角形ごとの頂点カラー。"
 
 msgid "Each connected piece of the mesh (triangles sharing edges in 3D, across UV seams) gets its own colour, split the same way as the polygon fill's Mesh Part."
 msgstr "メッシュのつながった塊（3D で辺を共有する三角形。UV の継ぎ目もまたぐ）ごとに色を付けます。ポリゴン塗りつぶしの「メッシュの塊」と同じ分け方です。"
@@ -141,6 +123,3 @@ msgstr "三角形ごとに、角の多くが持つ頂点カラーにします（
 
 msgid "Each material slot (a renderer's submesh) gets its own colour; with a high poly, each of its slots."
 msgstr "マテリアルスロット（レンダラーのサブメッシュ）ごとに色を付けます。高ポリがあれば、高ポリのスロットごとです。"
-
-msgid "Without a high poly, every texel of one texture set has the same slot and mesh, so this ID map is one colour. Use mesh parts, UV islands or vertex colours, or choose a high poly."
-msgstr "高ポリが無いと、1 つのテクスチャセットのテクセルはどれも同じスロット・メッシュなので、この ID マップは 1 色になります。メッシュの塊・UV アイランド・頂点カラーを使うか、高ポリを選んでください。"

@@ -35,18 +35,6 @@ msgstr "{0} 枚のレイヤーを非表示にしました。"
 msgid "Showed {0} layers."
 msgstr "{0} 枚のレイヤーを表示しました。"
 
-msgid "At least one layer must remain. Keep one layer out of the selection."
-msgstr "レイヤーは少なくとも 1 枚残します。どれか 1 枚を選択から外してください。"
-
-msgid "Only layers in the same group can be grouped together. Move them into one group first."
-msgstr "同じグループの中のレイヤーどうししかグループにできません。先に同じグループへ移してください。"
-
-msgid "Only layers in the same group can be merged together. Move them into one group first."
-msgstr "同じグループの中のレイヤーどうししか結合できません。先に同じグループへ移してください。"
-
-msgid "Select a group to ungroup it."
-msgstr "解除するグループを選んでください。"
-
 # ── ロック ──
 
 # レイヤーのパネルの見出しの 2 行目の「ロック:」
@@ -120,20 +108,5 @@ msgstr "「{0}」"
 msgid "The group “{0}”"
 msgstr "グループ「{0}」"
 
-msgid "{0} has its transparent pixels locked: this would change their transparency. Unlock transparent pixels to erase, cut, draw a path or move a selected part."
-msgstr "{0} は透明ピクセルがロックされています。この操作では画素の透明度が変わります。消す・カット・パス・選択範囲の中の移動には、透明ピクセルのロックを外してください。"
-
-msgid "{0} has its image pixels locked. Unlock it to change its pixels."
-msgstr "{0} は画像ピクセルがロックされています。画素を変えるにはロックを外してください。"
-
-msgid "{0} has its position locked. Unlock it to move or transform it."
-msgstr "{0} は位置がロックされています。移動・変形するにはロックを外してください。"
-
-msgid "{0} is locked. Unlock it to change it."
-msgstr "{0} はすべてロックされています。変えるにはロックを外してください。"
-
 msgid "Nothing was changed."
 msgstr "何も変えていません。"
-
-msgid "The transparent pixels are locked, so only the colours were baked: each pixel kept its transparency."
-msgstr "透明ピクセルがロックされているので、色だけを焼き込みました（各画素の透明度はそのまま）。"

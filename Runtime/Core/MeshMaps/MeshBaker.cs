@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
@@ -45,7 +46,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             if (input == null) throw new ArgumentNullException(nameof(input));
             if (settings == null) throw new ArgumentNullException(nameof(settings));
             return MeshMapProvenance.ComputeConditionKey(kind, EngineVersion, input.Hash, input.UvChannel, settings.Width, settings.Height, settings.TargetSlot,
-                settings.Padding, settings.Antialiasing, settings.KindKey(kind), Space, Pose, settings.SourceKey(reference?.Hash));
+                settings.Padding, settings.Antialiasing, settings.KindKey(kind), Space, Pose, settings.SourceKey(reference?.Hash), settings.Targets());
         }
 
         static int Threads(MeshBakeBudget budget) => budget != null && budget.MaxDegreeOfParallelism > 0 ? budget.MaxDegreeOfParallelism : Math.Max(1, Environment.ProcessorCount);
@@ -69,6 +70,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             if (settings.Includes(MeshMapKind.Id))
             {
                 bytes += IdTable.EstimateBytes(triangles, settings.IdSource);
+                if (settings.ManualIdColors.Colors.Count > 0) bytes += MeshRegions.EstimateBytes(triangles) + triangles * 12;
                 if (reference != null && settings.IdSource != MeshIdSource.UvIsland) bytes += IdTable.EstimateBytes(reference.TriangleCount, settings.IdSource);
             }
             if (reference != null)
@@ -115,7 +117,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
         {
             if (input == null) throw new ArgumentNullException(nameof(input));
             if (settings == null) throw new ArgumentNullException(nameof(settings));
-            settings = settings.Clone(); settings.Validate();
+            settings.Validate(); settings = settings.WithIdContext(input, reference, settings.ManualIdColors);
             budget = budget ?? new MeshBakeBudget();
             var report = new MeshBakeReport();
             var control = new Control { Token = cancellation, Clock = Stopwatch.StartNew(), MaxSeconds = budget.MaxSeconds };
@@ -124,10 +126,12 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
 
             // 焼き込む三角形（スロット・UV の面積）と、UV の範囲の確認。まだ大きなものは割り当てない
             var receivers = new List<int>();
+            var targets = settings.Targets(); // 昇順（null なら全部）
+            bool Targeted(int slot) => slot >= 0 && (targets == null || Array.BinarySearch(targets, slot) >= 0);
             for (int t = 0; t < triangles; t++)
             {
                 int slot = input.Slots[t];
-                if (slot < 0 || (settings.TargetSlot >= 0 && slot != settings.TargetSlot)) continue;
+                if (!Targeted(slot)) continue;
                 int k = t * 6;
                 double area = (uvs[k + 2] - uvs[k]) * (uvs[k + 5] - uvs[k + 1]) - (uvs[k + 4] - uvs[k]) * (uvs[k + 3] - uvs[k + 1]);
                 if (Math.Abs(area) * width * height < 1e-9) { report.ZeroUvAreaTriangles++; continue; }
@@ -138,13 +142,13 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                 receivers.Add(t);
             }
             if (receivers.Count == 0)
-                throw new MeshBakeRefusedException(settings.TargetSlot >= 0 ? "No triangle with UVs uses material slot " + settings.TargetSlot + "; nothing to bake." : "No triangle has UVs; nothing to bake.");
+                throw new MeshBakeRefusedException(targets != null ? "No triangle with UVs uses material slot " + string.Join(", ", targets) + "; nothing to bake." : "No triangle has UVs; nothing to bake.");
             long estimate = EstimateBytes(input, settings, budget, reference) + (rayTracer != null && NeedsRays(settings) ? DeferredBytes : 0);
             report.EstimatedBytes = estimate;
             if (estimate > budget.MaxBytes)
                 throw new MeshBakeRefusedException("Baking " + settings.Maps.Length + " map(s) at " + width + "×" + height + (settings.Antialiasing > 1 ? " with " + settings.Antialiasing + "×" + settings.Antialiasing + " antialiasing" : "")
                     + (reference != null ? " from a " + reference.TriangleCount + "-triangle high poly" : "") + " needs about " + (estimate >> 20) + " MiB, over the " + (budget.MaxBytes >> 20)
-                    + " MiB budget. Bake fewer maps at once or raise the memory budget (Project Settings > YoluPainter).");
+                    + " MiB budget.");
             report.ReceivingTriangles = receivers.Count;
             if (!Report(progress, control, 0, "Preparing")) return Stopped(control, report);
 
@@ -157,7 +161,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             {
                 var occluders = new List<int>();
                 for (int t = 0; t < triangles; t++)
-                    if (low.Valid[t] && (settings.Occluders == MeshOccluders.WholeModel || input.Slots[t] == settings.TargetSlot || settings.TargetSlot < 0)) occluders.Add(t);
+                    if (low.Valid[t] && (settings.Occluders == MeshOccluders.WholeModel || targets == null || Array.BinarySearch(targets, input.Slots[t]) >= 0)) occluders.Add(t);
                 low.Occluders = new MeshRayBvh(corners, occluders);
                 report.OccluderTriangles = occluders.Count;
             }
@@ -181,7 +185,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
                 report.ReferenceTriangles = all.Count;
             }
             var frames = new LowFrames(input, low, receivers, settings.Includes(MeshMapKind.TangentNormal));
-            var ids = settings.Includes(MeshMapKind.Id) ? new IdTable(input, reference, settings.IdSource, receivers) : null;
+            var ids = settings.Includes(MeshMapKind.Id) ? new IdTable(input, reference, settings.IdSource, receivers, settings.ManualIdColors) : null;
             var raster = new UvRaster(input, receivers, width, height, settings.Antialiasing, remaining);
             report.PrepareSeconds = control.Clock.Elapsed.TotalSeconds;
             if (!Report(progress, control, 0.05, "Baking")) return Stopped(control, report);
@@ -254,7 +258,9 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             if (ids != null)
             {
                 report.IdParts = ids.Parts;
-                if (settings.IdSource == MeshIdSource.VertexColor)
+                if (settings.ManualIdColors.Colors.Count > 0)
+                    report.Diagnostics.Add("Manual ID colours override the source on " + settings.ManualIdColors.Colors.Count + " mesh part(s). Equal colours select together; palette separation is not guaranteed for manual colours.");
+                else if (settings.IdSource == MeshIdSource.VertexColor)
                 {
                     if (!input.HasColors) report.Diagnostics.Add("The model has no vertex colours, so the ID map is white.");
                 }
@@ -268,7 +274,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             foreach (var kind in settings.Maps)
             {
                 var provenance = new MeshMapProvenance(kind, EngineVersion, input.Hash, input.TopologyHash, input.UvChannel, width, height, settings.TargetSlot, settings.Padding,
-                    settings.Antialiasing, settings.KindKey(kind), Space, Pose, source, job.BoundsMin, job.BoundsMax);
+                    settings.Antialiasing, settings.KindKey(kind), Space, Pose, source, job.BoundsMin, job.BoundsMax, targets);
                 maps.Add(new BakedMeshMap(provenance, job.Outputs[(int)kind], job.Coverage));
             }
             report.TotalSeconds = control.Clock.Elapsed.TotalSeconds;
@@ -311,12 +317,30 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             public readonly int[] Low, High;
             /// <summary>色を振った部品の数（低ポリと高ポリの和。頂点カラーでは 0）。</summary>
             public readonly int Parts;
+            public readonly int[] Manual;
 
             public static long EstimateBytes(long triangles, MeshIdSource source)
-                => triangles * (4 + 4) + (source == MeshIdSource.MeshPart || source == MeshIdSource.UvIsland ? MeshRegions.EstimateBytes(triangles) : 0);
+                => triangles * (source == MeshIdSource.MaterialAsset ? 160 : 8) + (source == MeshIdSource.MeshPart || source == MeshIdSource.UvIsland ? MeshRegions.EstimateBytes(triangles) : 0);
 
-            public IdTable(MeshBakeInput low, MeshBakeInput high, MeshIdSource source, List<int> receivers)
+            public IdTable(MeshBakeInput low, MeshBakeInput high, MeshIdSource source, List<int> receivers, IdColorAssignments manual)
             {
+                if (manual.Colors.Count > 0)
+                {
+                    var parts = new IdPartIndex(low); parts.Validate(manual); Manual = Enumerable.Repeat(-1, low.TriangleCount).ToArray();
+                    for (int t = 0; t < Manual.Length; t++) if (manual.Colors.TryGetValue(parts.Parts[t], out int color)) Manual[t] = color;
+                }
+                if (source == MeshIdSource.MaterialAsset)
+                {
+                    var keys = new SortedSet<string>(StringComparer.Ordinal);
+                    string Key(MeshBakeInput mesh, int t, bool reference) => !string.IsNullOrEmpty(mesh.MaterialKeys?[t]) ? "asset:" + mesh.MaterialKeys[t] : (reference ? "high:" : "low:") + mesh.Slots[t];
+                    for (int t = 0; t < low.TriangleCount; t++) if (low.Slots[t] >= 0) keys.Add(Key(low, t, false));
+                    if (high != null) for (int t = 0; t < high.TriangleCount; t++) keys.Add(Key(high, t, true));
+                    Parts = keys.Count; var assetColors = IdPalette.Colors(Parts); var byKey = new Dictionary<string, int>(StringComparer.Ordinal);
+                    foreach (string key in keys) byKey.Add(key, assetColors[byKey.Count]);
+                    Low = new int[low.TriangleCount]; foreach (int t in receivers) Low[t] = byKey[Key(low, t, false)];
+                    if (high != null) { High = new int[high.TriangleCount]; for (int t = 0; t < High.Length; t++) High[t] = byKey[Key(high, t, true)]; }
+                    return;
+                }
                 if (source == MeshIdSource.VertexColor) { Low = TriangleColors(low); High = high != null ? TriangleColors(high) : null; return; }
                 var lowKeys = Keys(low, source);
                 var lowRanks = Ranks(lowKeys, receivers);
@@ -893,6 +917,7 @@ namespace Yozolab.YoluPainter.Core.MeshMaps
             /// 低ポリの島（<see cref="IdTable"/>）。頂点カラーの無いメッシュは白。</summary>
             int IdColor(SurfaceData surface, int st, int t)
             {
+                if (ids.Manual != null && ids.Manual[t] >= 0) return ids.Manual[t];
                 if (settings.IdSource == MeshIdSource.UvIsland) return ids.Low[t];
                 var table = surface == low ? ids.Low : ids.High;
                 return table == null ? 0xFFFFFF : table[st];

@@ -56,8 +56,13 @@ namespace Yozolab.YoluPainter.Editor
         internal MeshBakeReport LastMeshBakeReport => lastMeshBakeReport;
         internal MeshMapView MeshMapOverlay { get => meshMapView; set { meshMapView = value; Repaint(); } }
         internal float MeshMapOverlayOpacity { get => meshMapOpacity; set => meshMapOpacity = Mathf.Clamp01(value); }
-        /// <summary>プロパティの欄のメッシュマップのセクションが開いているか（既定は閉。モデルを読み込んでから使う区画なので）。</summary>
-        internal bool ShowMeshMapPanel { get => SectionIsOpen("mesh-maps", false); set => sectionOpen["mesh-maps"] = value; }
+        /// <summary>テクスチャセットの設定のメッシュマップのセクションが見えているか（既定は閉。モデルを読み込んでから使う区画なので）。
+        /// true にするとセクションを開き、テクスチャセットの設定のタブを見せる。</summary>
+        internal bool ShowMeshMapPanel
+        {
+            get => SectionIsOpen("mesh-maps", false) && PanelShown("textureSetSettings");
+            set { sectionOpen["mesh-maps"] = value; if (value && !PanelShown("textureSetSettings")) Layout.SetActive("textureSetSettings"); }
+        }
         /// <summary><see cref="BakeMeshMaps"/>（呼んだ所で待つベイク）の進み具合（題、説明、0〜1）。true を返すと取消。既定は Unity の取消
         /// できる進捗バー（テストは差し替える）。ベイクの窓からのベイクは窓の中に進み具合を出すので、これを使わない。</summary>
         internal Func<string, string, float, bool> MeshBakeProgress = EditorUtility.DisplayCancelableProgressBar;
@@ -69,14 +74,14 @@ namespace Yozolab.YoluPainter.Editor
             var geometry = preview != null ? preview.Geometry : null;
             if (geometry == null || geometry.TriangleCount == 0) { meshBakeInputFor = null; meshBakeInput = null; return null; }
             if (ReferenceEquals(geometry, meshBakeInputFor)) return meshBakeInput;
-            meshBakeInput = BuildMeshBakeInput(geometry, preview.Attributes);
+            meshBakeInput = BuildMeshBakeInput(geometry, preview.Attributes, MaterialIdentityKeys(preview));
             meshBakeInputFor = geometry;
             return meshBakeInput;
         }
 
         /// <summary>スナップショットの三角形（位置・UV0・スロット・レンダラー）と属性（頂点法線・接線・頂点カラー・レンダラー名）を
         /// 焼き込みの入力にする。属性が無い（または並びが合わない）ときは、頂点法線を形から作り直し、接線・色・名前は無し。</summary>
-        internal static MeshBakeInput BuildMeshBakeInput(SurfaceGeometry geometry, SurfaceAttributes attributes = null)
+        internal static MeshBakeInput BuildMeshBakeInput(SurfaceGeometry geometry, SurfaceAttributes attributes = null, IReadOnlyList<string> materialKeys = null)
         {
             if (geometry == null) throw new ArgumentNullException(nameof(geometry));
             var triangles = geometry.Triangles; int n = triangles.Count;
@@ -91,10 +96,10 @@ namespace Yozolab.YoluPainter.Editor
                 slots[i] = Math.Max(-1, t.MaterialSlot); renderers[i] = Math.Max(0, t.RendererIndex);
             }
             if (attributes == null || attributes.TriangleCount != n)
-                return new MeshBakeInput(corners, MeshBakeInput.ReconstructNormals(corners, MeshMapNormalCrease), uvs, slots, 0, "reconstructed-crease-" + MeshMapNormalCrease, renderers: renderers);
+                return new MeshBakeInput(corners, MeshBakeInput.ReconstructNormals(corners, MeshMapNormalCrease), uvs, slots, 0, "reconstructed-crease-" + MeshMapNormalCrease, renderers: renderers, materialKeys: materialKeys);
             var names = attributes.RendererNames;
             if (names != null) foreach (int r in renderers) if (r >= names.Count) { names = null; break; }
-            return new MeshBakeInput(corners, attributes.Normals, uvs, slots, 0, "authored", attributes.Tangents, attributes.Colors, renderers, names);
+            return new MeshBakeInput(corners, attributes.Normals, uvs, slots, 0, "authored", attributes.Tangents, attributes.Colors, renderers, names, materialKeys);
         }
 
         /// <summary>高ポリの入力。選んでいない・読めない・形が無ければ null。低ポリのモデル（の原点）が替わったら読み直す。
@@ -116,25 +121,29 @@ namespace Yozolab.YoluPainter.Editor
             }
             var geometry = highPolyPreview.Geometry;
             if (geometry == null || geometry.TriangleCount == 0) return null;
-            if (!ReferenceEquals(geometry, highPolyInputFor)) { highPolyInput = BuildMeshBakeInput(geometry, highPolyPreview.Attributes); highPolyInputFor = geometry; }
+            if (!ReferenceEquals(geometry, highPolyInputFor)) { highPolyInput = BuildMeshBakeInput(geometry, highPolyPreview.Attributes, MaterialIdentityKeys(highPolyPreview)); highPolyInputFor = geometry; }
             return highPolyInput;
         }
         internal GameObject HighPolyModel { get => highPolyModel; set { highPolyModel = value; Repaint(); } }
         void DisposeHighPoly() { highPolyPreview?.Dispose(); highPolyPreview = null; highPolyLoaded = null; highPolyInput = null; highPolyInputFor = null; highPolyNote = null; }
 
         /// <summary>マップを使う側の今の条件（モデル・今のテクスチャセットのドキュメントの大きさ・スロット・欄の設定）。</summary>
-        internal MeshMapExpectation CurrentMeshMapExpectation() => MeshMapExpectationOf(document, materialSlot);
+        internal MeshMapExpectation CurrentMeshMapExpectation() => MeshMapExpectationOf(document, currentSet);
         /// <summary>テクスチャセットのマップの今の条件。</summary>
-        MeshMapExpectation MeshMapExpectationFor(TextureSet set) => set == currentSet ? CurrentMeshMapExpectation() : MeshMapExpectationOf(set.Document, set.MaterialSlot);
-        MeshMapExpectation MeshMapExpectationOf(Core.PaintDocument d, int slot)
+        MeshMapExpectation MeshMapExpectationFor(TextureSet set) => set == currentSet ? CurrentMeshMapExpectation() : MeshMapExpectationOf(set.Document, set);
+        /// <summary>セットのマテリアルを使う全部のスロット（モデルに無ければ −1 の 1 つ: どのマップとも合わない）。</summary>
+        MeshMapExpectation MeshMapExpectationOf(Core.PaintDocument d, TextureSet set)
         {
             var input = CurrentMeshBakeInput();
+            var slots = set != null && set.InModel ? set.Slots.ToArray() : null;
             return new MeshMapExpectation
             {
                 MeshHash = input?.Hash, TopologyHash = input?.TopologyHash, ReferenceHash = CurrentHighPolyInput()?.Hash, Width = d.Width, Height = d.Height,
-                TargetSlot = slot, UvChannel = 0, Settings = meshBakeSettings,
+                TargetSlot = slots != null ? slots[0] : -2, TargetSlots = slots, UvChannel = 0, Settings = meshBakeSettings.WithIdContext(input, CurrentHighPolyInput(), d.IdColors),
             };
         }
+        /// <summary>焼いたスロットの見せ方（"0" や "0, 2"）。</summary>
+        static string SlotList(MeshMapProvenance p) => p.TargetSlots.Count == 0 ? "—" : string.Join(", ", p.TargetSlots);
 
         /// <summary>高ポリを選ぶオブジェクトピッカーの印（ExecuteCommand で結果を見分ける）。</summary>
         const int HighPolyPickerId = 0x59500010;
@@ -160,9 +169,9 @@ namespace Yozolab.YoluPainter.Editor
             var expected = meshMaps.Count > 0 ? CurrentMeshMapExpectation() : null;
             if (meshBakeJob != null) DrawMeshBakeProgressRow(rows);
             else if (PaintGui.Button(Spot("meshmap.bake", rows.Row(28, 6)), L.Tr("Bake Mesh Maps…"), true, GUI.enabled && stroke == null,
-                    L.Tr("Open the bake window: check the maps, set them up and bake them from the loaded model"), "local_fire_department"))
+                    L.Tr("Open the bake window"), "local_fire_department"))
                 TryAction(() => OpenMeshBakeWindow());
-            if (preview == null || !preview.HasModel) NoteRow(rows, L.Tr("Load a model in Texture Set (or 3D ▸ Demo Cube) to bake."), NoteKind.Info);
+            if (preview == null || !preview.HasModel) NoteRow(rows, L.Tr("No model"), NoteKind.Info);
             if (meshMaps.Count > 0) DrawBakedMeshMaps(rows, expected);
             else if (preview != null && preview.HasModel) NoteRow(rows, L.Tr("No mesh maps are baked yet."), NoteKind.Plain);
             if (meshMapNote != null) NoteRow(rows, meshMapNote, NoteKind.Warning);
@@ -182,17 +191,17 @@ namespace Yozolab.YoluPainter.Editor
                 float right = PaintGui.TextWidth(state, PaintTheme.LabelDim) + 4;
                 PaintGui.Text(new Rect(row.x + 18, row.y, row.width - 18 - right, row.height), PaintGui.Fit(MeshMapLabel(map.Kind), row.width - 22 - right, PaintTheme.Label), PaintTheme.Label);
                 PaintGui.Text(new Rect(row.xMax - right, row.y, right, row.height), state, StateStyle, color);
-                PaintGui.Tooltip(row, L.Tr("{0} × {1} · slot {2}", map.Width, map.Height, map.Provenance.TargetSlot));
-                if (check.State == MeshMapState.Stale) NoteRow(rows, L.Tr("{0} is stale and is not used: {1} Bake again to update it.", MeshMapLabel(map.Kind), string.Join(" ", check.Reasons).Replace(";", "; ")), NoteKind.Warning, 18); // 由来の条件の文字列は ; で折り返せるようにする
+                PaintGui.Tooltip(row, L.Tr("{0} × {1} · slot {2}", map.Width, map.Height, SlotList(map.Provenance)));
+                if (check.State == MeshMapState.Stale) NoteRow(rows, L.Tr("{0} is stale and is not used: {1}", MeshMapLabel(map.Kind), string.Join(" ", check.Reasons).Replace(";", "; ")), NoteKind.Warning, 18); // 由来の条件の文字列は ; で折り返せるようにする
             }
-            if (expected.MeshHash == null) NoteRow(rows, L.Tr("No model is loaded, so the maps cannot be checked against it."), NoteKind.Info);
+            if (expected.MeshHash == null) NoteRow(rows, L.Tr("Not checked: no model is loaded."), NoteKind.Info);
             rows.Space(2);
             var views = new List<MeshMapView> { MeshMapView.None, MeshMapView.Coverage };
             views.AddRange(meshMaps.Maps.Select(m => (MeshMapView)m.Kind));
             var current = views.Contains(meshMapView) ? meshMapView : MeshMapView.None;
             ChoiceDropdown(rows.Row(), L.Tr("Show on canvas"), current, views.ToArray(), MeshMapViewName, v => { meshMapView = v; Repaint(); }, L.Tr("Read-only overlay; nothing is painted"));
             if (meshMapView != MeshMapView.None)
-                meshMapOpacity = (float)PaintGui.KeepSlider(rows.Row(), L.Tr("Overlay opacity"), meshMapOpacity, 0, 1, "0", "%", null, true, 100);
+                meshMapOpacity = (float)PaintGui.KeepSlider(rows.SliderRow(), L.Tr("Overlay opacity"), meshMapOpacity, 0, 1, "0", "%", null, true, 100);
             if (meshMapView == MeshMapView.Coverage)
             {
                 var row = rows.Row(18);
@@ -206,9 +215,9 @@ namespace Yozolab.YoluPainter.Editor
                     x += 13 + w + 12;
                 }
             }
-            if (!MeshMapsSaved) NoteRow(rows, L.Tr("These mesh maps are not in the saved file yet. Save keeps them in the .ylp (they are not part of Undo)."));
+            if (!MeshMapsSaved) NoteRow(rows, L.Tr("Not saved yet"));
             if (PaintGui.Button(rows.Row(), L.Tr("Clear Mesh Maps"), false, GUI.enabled && stroke == null, L.Tr("Remove the baked maps (derived data; the layers do not change)"), "delete"))
-            { meshMaps.Clear(); meshMapView = MeshMapView.None; message = L.Tr("Cleared the mesh maps (derived data; nothing in the layers changed)."); }
+            { meshMaps.Clear(); meshMapView = MeshMapView.None; message = L.Tr("Cleared the mesh maps."); }
         }
 
         static string MeshMapLabel(MeshMapKind kind)
@@ -248,6 +257,7 @@ namespace Yozolab.YoluPainter.Editor
         {
             switch (s)
             {
+                case MeshIdSource.MaterialAsset: return L.Tr("Material asset");
                 case MeshIdSource.Mesh: return L.Tr("Mesh");
                 case MeshIdSource.VertexColor: return L.Tr("Vertex color");
                 case MeshIdSource.UvIsland: return L.Tr("UV island");
@@ -310,7 +320,7 @@ namespace Yozolab.YoluPainter.Editor
             string problem = MeshMapSaveProblem(files.Values.Sum(b => b.LongLength), files.Count, entries.Values.Select(b => b.LongLength));
             if (problem != null)
             {
-                string note = "Mesh maps were left out of the last save: " + problem + " The document itself was saved; bake the maps again after opening it.";
+                string note = "Mesh maps were left out of the last save: " + problem + " The document itself was saved.";
                 foreach (var set in textureSets) { set.SavingMeshMapRevision = -1; if (set.MeshMaps.Count > 0) set.MeshMapNote = note; }
                 Debug.LogWarning("Texture Painter: " + note);
                 return;
@@ -347,7 +357,7 @@ namespace Yozolab.YoluPainter.Editor
                     loaded.Add(map);
                 }
                 catch (Exception ex) when (ex is InvalidDataException || ex is ArgumentException)
-                { notes.Add(who + "Mesh map " + kind + " could not be read (" + ex.Message + "); bake it again."); }
+                { notes.Add(who + "Mesh map " + kind + " could not be read (" + ex.Message + ")."); }
             }
             if (loaded.Count > 0)
             {

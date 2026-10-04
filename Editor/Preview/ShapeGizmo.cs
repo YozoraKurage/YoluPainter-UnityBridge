@@ -24,20 +24,22 @@ namespace Yozolab.YoluPainter.Editor.Preview
     public readonly struct ShapeGradientOverlay
     {
         public readonly Matrix4x4 WorldToShape; public readonly GeneratorShape Shape; public readonly Vector3 Half;
-        public readonly float Band, InverseWidth, Low, High, Softness; public readonly bool Invert; public readonly int Slot; public readonly Color Tint;
+        public readonly float Band, InverseWidth, Low, High, Softness; public readonly bool Invert; public readonly Color Tint;
+        /// <summary>重ねるマテリアルの組（<see cref="IsolatedModelPreview.MaterialGroups"/> の番号。テクスチャセット 1 つの全部のスロット）。</summary>
+        public readonly int Material;
 
-        ShapeGradientOverlay(Matrix4x4 worldToShape, GeneratorShape shape, Vector3 half, float band, float inverseWidth, float low, float high, float softness, bool invert, int slot, Color tint)
+        ShapeGradientOverlay(Matrix4x4 worldToShape, GeneratorShape shape, Vector3 half, float band, float inverseWidth, float low, float high, float softness, bool invert, int material, Color tint)
         {
-            WorldToShape = worldToShape; Shape = shape; Half = half; Band = band; InverseWidth = inverseWidth; Low = low; High = high; Softness = softness; Invert = invert; Slot = slot; Tint = tint;
+            WorldToShape = worldToShape; Shape = shape; Half = half; Band = band; InverseWidth = inverseWidth; Low = low; High = high; Softness = softness; Invert = invert; Material = material; Tint = tint;
         }
 
-        /// <summary>The overlay of a shape gradient's settings placed with the model root's pose.</summary>
-        public static ShapeGradientOverlay Of(GeneratorSettings g, Vector3 rootPosition, Quaternion rootRotation, int slot, Color tint)
+        /// <summary>The overlay of a shape gradient's settings placed with the model root's pose, on the faces of one material group.</summary>
+        public static ShapeGradientOverlay Of(GeneratorSettings g, Vector3 rootPosition, Quaternion rootRotation, int material, Color tint)
         {
             var v = g.Volume; var half = new Vector3((float)v.SizeX / 2, (float)v.SizeY / 2, (float)v.SizeZ / 2);
             float band = v.Shape == GeneratorShape.Sphere ? (float)v.Falloff * half.x : (float)v.Falloff * Mathf.Min(half.x, Mathf.Min(half.y, half.z));
             return new ShapeGradientOverlay(ShapeGizmo.WorldToShape(v, rootPosition, rootRotation), v.Shape, half, band, (float)(1 / v.SizeY),
-                (float)g.Low, (float)g.High, (float)g.Softness, g.Invert, slot, tint);
+                (float)g.Low, (float)g.High, (float)g.Softness, g.Invert, material, tint);
         }
 
         internal void Apply(Material material)
@@ -51,6 +53,15 @@ namespace Yozolab.YoluPainter.Editor.Preview
     }
 
     /// <summary>A part of the shape gizmo that can be dragged.</summary>
+    /// <summary>Incremental snapping from the drag start: move in root axes, full size in scene units, rotation in degrees.</summary>
+    public readonly struct ShapeSnap
+    {
+        public readonly Vector3 Move; public readonly float Size, Rotation;
+        public ShapeSnap(Vector3 move, float size, float rotation) { Move = move; Size = size; Rotation = rotation; }
+        public static readonly ShapeSnap Default = new ShapeSnap(Vector3.one, .1f, 15);
+        public static double Value(double value, double increment) => increment > 0 && !double.IsInfinity(increment) && !double.IsNaN(increment) ? Math.Round(value / increment, MidpointRounding.AwayFromZero) * increment : value;
+    }
+
     public enum ShapeHandle { None, MoveX, MoveY, MoveZ, MoveFree, RotateX, RotateY, RotateZ, SizeXPos, SizeXNeg, SizeYPos, SizeYNeg, SizeZPos, SizeZNeg }
 
     /// <summary>One polyline of the gizmo in GUI points, with its colour and width (drawn by the window with Handles.DrawAAPolyLine),
@@ -197,8 +208,9 @@ namespace Yozolab.YoluPainter.Editor.Preview
         /// size knobs move both faces (Shift). snap: rings turn in <see cref="SnapDegrees"/> steps (Ctrl). The result is not checked
         /// against the volume's limits beyond keeping sizes in range; a drag the view cannot resolve (an axis pointing at the
         /// camera) leaves the volume as it was.</summary>
-        public static ShapeVolume Drag(ShapeHandle handle, ShapeVolume start, Vector3 rootPosition, Quaternion rootRotation, IGizmoView view, Vector2 from, Vector2 to, bool symmetric = false, bool snap = false)
+        public static ShapeVolume Drag(ShapeHandle handle, ShapeVolume start, Vector3 rootPosition, Quaternion rootRotation, IGizmoView view, Vector2 from, Vector2 to, bool symmetric = false, bool snap = false, ShapeSnap? increments = null)
         {
+            var steps = increments ?? ShapeSnap.Default;
             var c0 = WorldCenter(start, rootPosition, rootRotation); var q0 = WorldRotation(start, rootRotation);
             switch (handle)
             {
@@ -206,6 +218,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
                 {
                     var a = rootRotation * Axis(handle - ShapeHandle.MoveX);
                     if (!AxisDelta(view, c0, a, from, to, out float delta)) return start;
+                    if (snap) delta = (float)ShapeSnap.Value(delta, steps.Move[handle - ShapeHandle.MoveX]);
                     return WithWorldCenter(start, c0 + a * delta, rootPosition, rootRotation);
                 }
                 case ShapeHandle.MoveFree:
@@ -213,13 +226,15 @@ namespace Yozolab.YoluPainter.Editor.Preview
                     if (!view.Ray(from, out var r0) || !view.Ray(to, out var r1)) return start;
                     var plane = new Plane(-r0.direction, c0);
                     if (!plane.Raycast(r0, out float t0) || !plane.Raycast(r1, out float t1)) return start;
-                    return WithWorldCenter(start, c0 + (r1.GetPoint(t1) - r0.GetPoint(t0)), rootPosition, rootRotation);
+                    var delta = r1.GetPoint(t1) - r0.GetPoint(t0);
+                    if (snap) { var local = Quaternion.Inverse(rootRotation) * delta; for (int k = 0; k < 3; k++) local[k] = (float)ShapeSnap.Value(local[k], steps.Move[k]); delta = rootRotation * local; }
+                    return WithWorldCenter(start, c0 + delta, rootPosition, rootRotation);
                 }
                 case ShapeHandle.RotateX: case ShapeHandle.RotateY: case ShapeHandle.RotateZ:
                 {
                     var a = rootRotation * Axis(handle - ShapeHandle.RotateX);
                     float angle = RingAngle(view, c0, a, RingPoints * WorldPerPoint(view, c0), from, to);
-                    if (snap) angle = Mathf.Round(angle / SnapDegrees) * SnapDegrees;
+                    if (snap) angle = (float)ShapeSnap.Value(angle, steps.Rotation);
                     if (angle == 0) return start;
                     var local = Quaternion.Inverse(rootRotation) * (Quaternion.AngleAxis(angle, a) * q0);
                     var e = local.eulerAngles;
@@ -236,13 +251,15 @@ namespace Yozolab.YoluPainter.Editor.Preview
                     {
                         case GeneratorShape.Sphere:
                         {
-                            double d = Clamp(start.SizeX + 2 * outward);
+                            double change = snap ? ShapeSnap.Value(2 * outward, steps.Size) : 2 * outward;
+                            double d = Clamp(start.SizeX + change);
                             return start.WithSize(d, start.SizeY, start.SizeZ);
                         }
                         default:
                         {
                             double[] size = { start.SizeX, start.SizeY, start.SizeZ };
-                            double next = Clamp(size[axis] + (symmetric ? 2 * outward : outward)), grown = next - size[axis];
+                            double change = symmetric ? 2 * outward : outward; if (snap) change = ShapeSnap.Value(change, steps.Size);
+                            double next = Clamp(size[axis] + change), grown = next - size[axis];
                             size[axis] = next;
                             var sized = start.WithSize(size[0], size[1], size[2]);
                             if (symmetric) return sized;

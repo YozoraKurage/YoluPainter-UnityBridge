@@ -48,7 +48,7 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>選びを変えられないとき（ストロークの最中）の理由。変えられれば null。</summary>
-        string MaterialChoiceRefusal() => stroke != null ? L.Tr("Finish the stroke first.") : null;
+        string MaterialChoiceRefusal() => stroke != null ? L.Tr("A stroke is in progress.") : null;
 
         /// <summary>セットを元のマテリアルで見せる（手で決めた流し込み先は残す）。</summary>
         internal bool UseOriginalMaterial(TextureSet set = null)
@@ -68,20 +68,20 @@ namespace Yozolab.YoluPainter.Editor
             set = SetOrCurrent(set);
             string refused = MaterialChoiceRefusal() ?? PreviewMaterialRefusal(material);
             if (refused != null) { message = refused; return false; }
-            if (preview != null && preview.HasModel && material == preview.SourceMaterial(set.MaterialSlot)) return UseOriginalMaterial(set);
+            if (preview != null && preview.HasModel && material == preview.SourceMaterial(set.FirstSlot)) return UseOriginalMaterial(set);
             AssetDatabase.TryGetGUIDAndLocalFileIdentifier(material, out string guid, out long fileId);
             var choice = EnsureChoice(set);
             choice.source = PreviewMaterialSource.Material; choice.materialGuid = guid; choice.materialFileId = fileId; choice.shaderName = "";
             resolvedChoices[SetKey(set)] = material;
             DropMadeMaterial(set);
-            MaterialChoiceChanged(L.Tr("3D view: {0} is shown with the material {1} (a preview copy; the material is not changed).", set.Name, material.name));
+            MaterialChoiceChanged(L.Tr("3D view: {0} shows the material {1}.", set.Name, material.name));
             return true;
         }
 
         /// <summary>プロジェクトのマテリアルに使えない理由（使えれば null）。</summary>
         internal static string PreviewMaterialRefusal(Object candidate)
         {
-            if (candidate == null) return L.Tr("Choose a material.");
+            if (candidate == null) return L.Tr("No material.");
             if (!(candidate is Material material)) return L.Tr("{0} is a {1}, not a material.", candidate.name, candidate.GetType().Name);
             if (!EditorUtility.IsPersistent(material) || !AssetDatabase.TryGetGUIDAndLocalFileIdentifier(material, out string guid, out long _) || string.IsNullOrEmpty(guid))
                 return L.Tr("{0} is not a material asset in the project (only an asset can be found again later).", material.name);
@@ -97,14 +97,14 @@ namespace Yozolab.YoluPainter.Editor
             var choice = EnsureChoice(set);
             choice.source = PreviewMaterialSource.Shader; choice.shaderName = shader.name; choice.materialGuid = ""; choice.materialFileId = 0;
             MadeMaterialFor(set, shader);
-            MaterialChoiceChanged(L.Tr("3D view: {0} is shown with a new material of the shader {1} (made for the preview only).", set.Name, shader.name));
+            MaterialChoiceChanged(L.Tr("3D view: {0} shows a new material of the shader {1}.", set.Name, shader.name));
             return true;
         }
 
         /// <summary>シェーダーに使えない理由（使えれば null）: 無い・壊れている・この GPU で使えない・隠しのもの。</summary>
         internal static string PreviewShaderRefusal(Shader shader)
         {
-            if (shader == null) return L.Tr("Choose a shader.");
+            if (shader == null) return L.Tr("No shader.");
             if (shader.name.StartsWith("Hidden/", StringComparison.Ordinal)) return L.Tr("{0} is a hidden shader, not one for materials.", shader.name);
             return PreviewMaterialBindings.ShaderProblem(shader);
         }
@@ -157,7 +157,7 @@ namespace Yozolab.YoluPainter.Editor
         internal Material ViewMaterialOf(TextureSet set)
         {
             if (preview == null || !preview.HasModel || set == null) return null;
-            return ResolveChoice(set, MaterialChoice(set), out _) ?? preview.SourceMaterial(set.MaterialSlot);
+            return ResolveChoice(set, MaterialChoice(set), out _) ?? preview.SourceMaterial(set.FirstSlot);
         }
 
         /// <summary>選びのマテリアル（元のマテリアルを使うなら null）。消えていれば null と理由。</summary>
@@ -235,7 +235,7 @@ namespace Yozolab.YoluPainter.Editor
             var notes = new List<string>();
             foreach (var set in textureSets)
             {
-                if (set.MaterialSlot >= preview.MaterialSlotCount) continue;
+                if (!set.InModel) continue;
                 var choice = MaterialChoice(set);
                 var material = ResolveChoice(set, choice, out string gone);
                 if (gone != null)
@@ -244,7 +244,7 @@ namespace Yozolab.YoluPainter.Editor
                     choice.source = PreviewMaterialSource.Original; choice.materialGuid = ""; choice.materialFileId = 0; choice.shaderName = "";
                     DropMadeMaterial(set);
                 }
-                preview.SetMaterialChoice(set.MaterialSlot, material, choice?.routes);
+                foreach (int slot in set.Slots) preview.SetMaterialChoice(slot, material, choice?.routes); // マテリアルを使う全部のスロット
             }
             if (madeMaterials != null)
                 foreach (var m in madeMaterials.Where(m => m != null && !textureSets.Any(s => SetKey(s) == m.set)).ToList())
@@ -263,7 +263,7 @@ namespace Yozolab.YoluPainter.Editor
                 case PreviewMaterialSource.Shader: return L.Tr("Shader: {0}", choice.shaderName);
                 default:
                 {
-                    var own = preview != null && preview.HasModel ? preview.SourceMaterial(set.MaterialSlot) : null;
+                    var own = preview != null && preview.HasModel ? preview.SourceMaterial(set.FirstSlot) : null;
                     return own != null ? L.Tr("Own material ({0})", own.name) : L.Tr("Own material (none)");
                 }
             }
@@ -323,7 +323,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void ShowPreviewMaterialMenu(Rect at)
         {
-            var m = new GenericMenu();
+            var m = new PaintMenu();
             var choice = MaterialChoice(); var source = choice?.source ?? PreviewMaterialSource.Original;
             Item(m, "Own Material", () => UseOriginalMaterial(), true, source == PreviewMaterialSource.Original);
             Item(m, "Project Material…", () => { previewMaterialPickerPending = true; Repaint(); RepaintPanelWindowsSoon(); }, true, source == PreviewMaterialSource.Material);
@@ -391,7 +391,7 @@ namespace Yozolab.YoluPainter.Editor
 
         void ShowRouteMenu(PaintChannel channel, Material shown, PreviewMaterialBinding binding, Rect at)
         {
-            var m = new GenericMenu();
+            var m = new PaintMenu();
             var route = MaterialChoice()?.Route(channel);
             var c = channel;
             m.AddItem(new GUIContent(L.Tr("Automatic")), route == null, () => { TryAction(() => SetChannelRoute(c, null)); Repaint(); });

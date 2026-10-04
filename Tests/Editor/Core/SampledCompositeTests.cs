@@ -53,7 +53,7 @@ namespace Yozolab.YoluPainter.Tests
                     var expected = Sample(d.Composite(ch), d.Width, d.Height, step);
                     var whole = new byte[sw * sh * 4];
                     CpuCompositor.CompositeSampledRegions(d, ch, step, new[] { new CpuCompositor.CompositeJob(0, 0, sw, sh, whole) });
-                    CpuCompositingTests.AssertSameBytes(expected, whole, at + ": the whole grid");
+                    PixelAssert.SameBytes(expected, whole, at + ": the whole grid");
                     // a region, from a sampled backdrop below entry k, capturing on the way
                     var plan = CpuCompositor.Plan(d, ch); int k = rnd.Next(plan.Count + 1);
                     int x = rnd.Next(sw), y = rnd.Next(sh), w = 1 + rnd.Next(sw - x), h = 1 + rnd.Next(sh - y);
@@ -69,8 +69,8 @@ namespace Yozolab.YoluPainter.Tests
                         Buffer.BlockCopy(expected, ((y + row) * sw + x) * 4, expectedRegion, row * w * 4, w * 4);
                         Buffer.BlockCopy(below, ((y + row) * sw + x) * 4, expectedBelow, row * w * 4, w * 4);
                     }
-                    CpuCompositingTests.AssertSameBytes(expectedRegion, region, at + $": region ({x}, {y}, {w}×{h}) from a sampled backdrop below {k}");
-                    CpuCompositingTests.AssertSameBytes(expectedBelow, capture, at + ": the capture is the sample of the composite below k");
+                    PixelAssert.SameBytes(expectedRegion, region, at + $": region ({x}, {y}, {w}×{h}) from a sampled backdrop below {k}");
+                    PixelAssert.SameBytes(expectedBelow, capture, at + ": the capture is the sample of the composite below k");
                 }
             }
         }
@@ -89,7 +89,7 @@ namespace Yozolab.YoluPainter.Tests
             CpuCompositor.CompositeSampledRegions(d, PaintChannel.Color, 4, new[] { new CpuCompositor.CompositeJob(0, 0, 16, 12, ok) });
             Assert.That(new[] { ok[0], ok[1], ok[2], ok[3] }, Is.EqualTo(new byte[] { 0, 0, 0, 0 }), "(3, 4) is not a sample at step 4 (samples at 2, 6, …)");
             CpuCompositor.CompositeSampledRegions(d, PaintChannel.Color, 1, new[] { new CpuCompositor.CompositeJob(0, 0, 16, 12, ok) });
-            CpuCompositingTests.AssertSameBytes(CpuCompositor.CompositeRegion(d, PaintChannel.Color, 0, 0, 16, 12), ok, "step 1 is CompositeRegions");
+            PixelAssert.SameBytes(CpuCompositor.CompositeRegion(d, PaintChannel.Color, 0, 0, 16, 12), ok, "step 1 is CompositeRegions");
         }
     }
 }

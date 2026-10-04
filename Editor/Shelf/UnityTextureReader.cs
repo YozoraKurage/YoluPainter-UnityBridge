@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
+using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using Yozolab.YoluPainter.Core.Shelf;
@@ -50,8 +51,6 @@ namespace Yozolab.YoluPainter.Editor
             if (string.IsNullOrEmpty(path) || !(path.StartsWith("Assets/", StringComparison.Ordinal) || path.StartsWith("Packages/", StringComparison.Ordinal)))
                 return "\"" + asset.name + "\" is not an asset in Assets or Packages.";
             if (!(asset is Texture2D texture)) return "\"" + asset.name + "\" is a " + asset.GetType().Name + ", not a 2D texture.";
-            // 別のアセットの中のテクスチャ（モデルに埋め込まれたもの・.asset の中のもの）は GUID だけでは指せないので取り込まない
-            if (!AssetDatabase.IsMainAsset(texture)) return "\"" + asset.name + "\" is inside another asset (" + path + "); only a texture asset of its own can be imported. Export it as an image first.";
             if (texture.width > ImageContent.MaxSide || texture.height > ImageContent.MaxSide) { kind = ResourceRefusal.TooLarge; return "\"" + asset.name + "\" is " + texture.width + " × " + texture.height + "; images are at most " + ImageContent.MaxSide + " on a side."; }
             if (IsHdr(texture.format)) return "\"" + asset.name + "\" is an HDR texture (" + texture.format + "); reading it as 8-bit colour would clip its values.";
             return null;
@@ -82,7 +81,18 @@ namespace Yozolab.YoluPainter.Editor
             result.ColorSpace = importer != null ? (importer.sRGBTexture ? ResourceColorSpace.Srgb : ResourceColorSpace.Linear) : srgbSampling ? ResourceColorSpace.Srgb : ResourceColorSpace.Linear;
             int w = texture.width, h = texture.height;
             Color32[] pixels;
-            if (texture.isReadable) pixels = texture.GetPixels32(0);
+            bool normal = importer != null && importer.textureType == TextureImporterType.NormalMap;
+            if (normal)
+            {
+                var shader = Shader.Find("Hidden/YoluPainter/NormalResourceReadback");
+                if (!GpuReadbackWorks(out string why) || shader == null || !shader.isSupported || UnityEditor.ShaderUtil.ShaderHasError(shader))
+                    throw new ResourceRefusedException(ResourceRefusal.Unsupported, L.Tr("The normal map cannot be decoded through the GPU here: {0}", why));
+                var decode = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+                try { pixels = ReadThroughGpu(texture, false, decode); }
+                finally { UnityEngine.Object.DestroyImmediate(decode); }
+                result.ThroughGpu = true; result.ColorSpace = ResourceColorSpace.Linear;
+            }
+            else if (texture.isReadable) pixels = texture.GetPixels32(0);
             else
             {
                 if (!GpuReadbackWorks(out string why)) throw new ResourceRefusedException(ResourceRefusal.Unsupported, "\"" + texture.name + "\" is not readable on the CPU (Read/Write is off in its import settings) and it cannot be read through the GPU here: " + why + " Its import settings were not changed.");
@@ -92,7 +102,7 @@ namespace Yozolab.YoluPainter.Editor
             if (GraphicsFormatUtility.IsCompressedFormat(texture.graphicsFormat)) result.Notes.Add("\"" + texture.name + "\" is compressed (" + texture.format + "); the copy holds the values it shows, not the source file's.");
             if (importer != null)
             {
-                if (importer.textureType == TextureImporterType.NormalMap) result.Notes.Add("\"" + texture.name + "\" is imported as a normal map; the copy holds the values as Unity stores them for the GPU.");
+                if (importer.textureType == TextureImporterType.NormalMap) result.Notes.Add(L.Tr("{0} is imported as a normal map; the copy is decoded to unit XYZ normals (RGB, OpenGL orientation, opaque).", texture.name));
                 importer.GetSourceTextureWidthAndHeight(out int sw, out int sh);
                 if (sw > 0 && sh > 0 && (sw != w || sh != h)) result.Notes.Add("\"" + texture.name + "\" is imported at " + w + " × " + h + " (its source is " + sw + " × " + sh + "); the copy is the imported size.");
             }
@@ -102,20 +112,33 @@ namespace Yozolab.YoluPainter.Editor
             return result;
         }
 
-        /// <summary>Draws mip 0 into a temporary render texture of the same size and reads it back (see the class summary).</summary>
-        static Color32[] ReadThroughGpu(Texture texture, bool srgbSampling)
+        internal const int ReadbackBandBytes = 1024 * 1024;
+        /// <summary>RGBA8 の同期転送と CPU の読み戻し台を、1 回あたりこのバイト数以内の行の束にする。</summary>
+        internal static int ReadbackBandHeight(int width, int height) => Math.Min(height, Math.Max(1, ReadbackBandBytes / checked(width * 4)));
+
+        /// <summary>Draws mip 0 into a temporary render texture of the same size and reads it back in bounded row bands (see the class summary).</summary>
+        static Color32[] ReadThroughGpu(Texture texture, bool srgbSampling, Material decode = null)
         {
             int w = texture.width, h = texture.height;
             var descriptor = new RenderTextureDescriptor(w, h, RenderTextureFormat.ARGB32, 0) { sRGB = srgbSampling, useMipMap = false, autoGenerateMips = false, msaaSamples = 1 };
             var previous = RenderTexture.active;
             var rt = RenderTexture.GetTemporary(descriptor);
-            var read = new Texture2D(w, h, TextureFormat.RGBA32, false, true);
+            Texture2D read = null;
             try
             {
-                Graphics.Blit(texture, rt);
+                int band = ReadbackBandHeight(w, h);
+                read = new Texture2D(w, band, TextureFormat.RGBA32, false, true);
+                if (decode == null) Graphics.Blit(texture, rt); else Graphics.Blit(texture, rt, decode);
                 RenderTexture.active = rt;
-                read.ReadPixels(new Rect(0, 0, w, h), 0, 0, false);
-                return read.GetPixels32(0);
+                var pixels = new Color32[checked(w * h)];
+                for (int y = 0; y < h; y += band)
+                {
+                    int rows = Math.Min(band, h - y);
+                    read.ReadPixels(new Rect(0, y, w, rows), 0, 0, false);
+                    // Texture2D の CPU データを借り、その場で写す。配列を Dispose したり、次の ReadPixels まで保持しない。
+                    NativeArray<Color32>.Copy(read.GetRawTextureData<Color32>(), 0, pixels, y * w, rows * w);
+                }
+                return pixels;
             }
             finally
             {

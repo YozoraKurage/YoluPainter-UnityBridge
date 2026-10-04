@@ -22,11 +22,14 @@ namespace Yozolab.YoluPainter.Editor
             if(turned){GL.PushMatrix();GL.modelview=GL.modelview*view.ImageMatrix();}
             try
             {
-                if(DisplayTexture!=null) EditorGUI.DrawTextureTransparent(image,DisplayTexture,ScaleMode.StretchToFill);
-                DrawMeshMapOverlay(image);
+                if(CanvasDisplayTexture!=null) EditorGUI.DrawTextureTransparent(image,CanvasDisplayTexture,ScaleMode.StretchToFill);
+                if(canvasShow==ModelShowKind.Material) DrawMeshMapOverlay(image);
+                DrawDecalOverlay(image); // 選んだデカールの届く範囲（Layers/TexturePaintWindow.Decals.cs）
                 if(document.Selection!=null){EnsureSelectionOverlay(); GUI.DrawTexture(image,selectionOverlay,ScaleMode.StretchToFill,true);}
             }
             finally{if(turned)GL.PopMatrix();}
+            DrawCanvasSymmetryAxes(view);
+            DrawStencilOverlay(new Rect(0,0,canvasRect.width,canvasRect.height)); // 画面に貼り付いたステンシル（Tools/TexturePaintWindow.Stencil.cs）
             DrawUvWireframe(view); // 今のテクスチャセットの UV（Canvas/TexturePaintWindow.UvWireframe.cs）
             DrawPolygonFillOutline(view); // ポリゴン塗りつぶしのポインタの下の範囲の輪郭（Tools/TexturePaintWindow.PolygonFill.cs）
             if(toolDragging&&Event.current.type==EventType.Repaint) DrawToolPreview(view);
@@ -41,6 +44,13 @@ namespace Yozolab.YoluPainter.Editor
         Vector2 CanvasPoint(Vector2 pointer)=>CanvasViewNow().ToCanvas(pointer);
         void HandleCanvasInput(Event e)
         {
+            if(e.type==EventType.MouseDown)
+            {
+                if(canvasRect.Contains(e.mousePosition)) showKeysInCanvas=true;
+                else if(surfaceRect.Contains(e.mousePosition)) showKeysInCanvas=false;
+            }
+            if(HandleStencilInput(e))return; // T ＋ ドラッグでステンシルを動かす（2D と 3D。Tools/TexturePaintWindow.Stencil.cs）
+            HandlePickHover(e);
             if((canvasRect.width>0||canvasRotating)&&HandleCanvasRotateInput(e))return; // R ＋ ドラッグ・Shift ＋ 中ボタンのドラッグで表示を回す
             if(HandleShapeGizmo(e))return; // 3D ビューの形のグラデーションのハンドル（Model/TexturePaintWindow.ShapeGizmo.cs）
             if(HandleResourceDrop(e))return; // アセットのパネル・Project ウィンドウから落とした画像をレイヤーとして置く

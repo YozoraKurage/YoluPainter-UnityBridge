@@ -136,8 +136,9 @@ namespace Yozolab.YoluPainter.Tests
             if (tool == "bucket")
             {
                 window.Tool = TexturePaintWindow.PaintTool.Fill;
-                expected.FillMask(l.Id, window.Brush.opacity);
                 var at = At(window, 200, 200); Mouse(window, EventType.MouseDown, at); Mouse(window, EventType.MouseUp, at);
+                // 描画色のアルファ（古い形）は使う時に一度だけ不透明度へ掛かるので、期待は塗った後の不透明度で作る
+                expected.FillMask(l.Id, window.Brush.opacity);
             }
             else
             {

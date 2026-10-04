@@ -13,9 +13,6 @@ msgstr "画素に Generator を足す（焼いたメッシュマップから値�
 msgid "Add a generator on the mask (where the layer shows, from the baked mesh maps)"
 msgstr "マスクに Generator を足す（レイヤーの見える所を、焼いたメッシュマップから作ります）"
 
-msgid "It has no effect until its mesh maps are baked: {0}"
-msgstr "メッシュマップを焼くまで効きません: {0}"
-
 msgid "Edge wear"
 msgstr "エッジの摩耗"
 
@@ -63,14 +60,8 @@ msgstr "高ポリから焼いた"
 msgid "Bake {0}"
 msgstr "ベイク {0}"
 
-msgid "No effect now: the input passes through unchanged. {0}"
-msgstr "今は効きません（入力をそのまま通します）。{0}"
-
 msgid "Only this bake"
 msgstr "このベイクだけを読む"
-
-msgid "On: keep reading exactly the bake shown above. A rebake under other conditions is then not used (the generator has no effect until you turn this on again). Off: follow the latest bake."
-msgstr "オン: 上に出ているベイクだけを読み続けます。別の条件で焼き直したマップは使いません（入れ直すまで Generator は効きません）。オフ: いちばん新しいベイクを読みます。"
 
 # ── 種類ごとの値 ──
 
@@ -79,9 +70,6 @@ msgstr "AO ↔ 隙間"
 
 msgid "0 %: ambient occlusion only. 100 %: cavities (concave curvature) only."
 msgstr "0 %: 環境遮蔽だけ。100 %: 隙間（曲率の凹）だけ。"
-
-msgid "Curvature comes from the model's bake; painted Height does not change it."
-msgstr "曲率はモデルから焼いたものです。描いた Height には追従しません。"
 
 msgid "0 at the bounding box's minimum, 1 at its maximum along this world axis"
 msgstr "このワールドの軸に沿って、境界箱のいちばん小さい所が 0、いちばん大きい所が 1"
@@ -136,9 +124,6 @@ msgstr "範囲の後で 0 と 1 を入れ替えます"
 
 msgid "Breakup"
 msgstr "崩し"
-
-msgid "Seeded noise that wears the result away in patches, so edges and dirt do not look uniform (100 %: gone where the noise is strongest). The same seed always gives the same result."
-msgstr "結果をまだらに削るノイズ（シード付き）で、エッジや汚れを一様に見せません（100 %: ノイズのいちばん強い所では消えます）。同じシードならいつも同じ結果です。"
 
 msgctxt "generator"
 msgid "Size"
@@ -206,9 +191,3 @@ msgstr "次の Generator には使えるメッシュマップが無いので、�
 
 msgid "Export Anyway"
 msgstr "このまま書き出す"
-
-msgid "Nothing was exported: some generators have no usable mesh maps. Bake them (Properties ▸ Filters ▸ the generator) first."
-msgstr "何も書き出していません: 使えるメッシュマップの無い Generator があります。先に焼いてください（プロパティ ▸ フィルター ▸ その Generator）。"
-
-msgid "{0} generator(s) have no usable mesh maps; they are kept in the file, and the preview images inside it are without their effect."
-msgstr "使えるメッシュマップの無い Generator が {0} 個あります。ファイルにはそのまま残り、中のプレビューの画像には効いていません。"

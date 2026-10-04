@@ -357,7 +357,7 @@ namespace Yozolab.YoluPainter.Tests
             Rejects(Damaged(b => BitConverter.GetBytes(49).CopyTo(b, heightAt)), "shorter");
             Rejects(Damaged(b => BitConverter.GetBytes(1).CopyTo(b, channelsAt)), "channel");
             var pp = maps[MeshMapKind.Position].Provenance;
-            int lengthAt = channelsAt + 4 + 4 + System.Text.Encoding.UTF8.GetByteCount(pp.SettingsKey) + 4 + pp.Space.Length + 4 + pp.Pose.Length + 4 + pp.Source.Length + 48;
+            int lengthAt = channelsAt + 4 + (4 + 4) /* 版 3: スロットの並び（数と 1 つ） */ + 4 + System.Text.Encoding.UTF8.GetByteCount(pp.SettingsKey) + 4 + pp.Space.Length + 4 + pp.Pose.Length + 4 + pp.Source.Length + 48;
             Assert.That(BitConverter.ToInt32(good, lengthAt), Is.EqualTo(good.Length - lengthAt - 4), "payload length field");
             Rejects(Damaged(b => BitConverter.GetBytes(int.MaxValue).CopyTo(b, lengthAt)), "truncated");
             Assert.That(MeshMapBinary.TryParseEntryName(MeshMapBinary.EntryName(MeshMapKind.AmbientOcclusion), out var kind) && kind == MeshMapKind.AmbientOcclusion, Is.True);
@@ -368,6 +368,64 @@ namespace Yozolab.YoluPainter.Tests
             byte[] archive = YlpArchive.Write(files);
             Assert.That(YlpArchive.Read(archive)[MeshMapBinary.EntryName(MeshMapKind.Position)], Is.EqualTo(good));
             Assert.That(YlpArchive.Read(archive, e => e == YlpArchive.NativeName).Keys, Is.EquivalentTo(new[] { YlpArchive.NativeName }));
+        }
+
+        /// <summary>
+        /// テクスチャセットはマテリアルごとなので、1 つのセットが複数のスロット（同じマテリアルを使う別のメッシュ・サブメッシュ）を焼く:
+        /// 並びのスロットの三角形だけが焼かれ、由来に並びが残り（.bin の版 3）、照合は並びで比べる。スロットが 1 つなら条件の鍵は前と同じ。
+        /// 並びの型（昇順・重ならない・最初が TargetSlot）と、.bin の並びの壊れは断る。
+        /// </summary>
+        [Test] public void OneTextureSetBakesEverySlotOfItsMaterial()
+        {
+            // スロット 0・1・2 の 3 枚の板（UV は横に 3 つ）
+            var input = new MeshBuilder()
+                .Quad(new Vector3(0, 0, 0), new Vector3(0, 0, 1), new Vector3(1, 0, 0), new Vector3(1, 0, 1), 0.02f, 0.02f, 0.31f, 0.98f, slot: 0)
+                .Quad(new Vector3(2, 0, 0), new Vector3(2, 0, 1), new Vector3(3, 0, 0), new Vector3(3, 0, 1), 0.35f, 0.02f, 0.64f, 0.98f, slot: 1)
+                .Quad(new Vector3(4, 0, 0), new Vector3(4, 0, 1), new Vector3(5, 0, 0), new Vector3(5, 0, 1), 0.68f, 0.02f, 0.97f, 0.98f, slot: 2).Build();
+            var two = new MeshBakeSettings { Width = 64, Height = 32, Padding = 0, TargetSlot = 0, TargetSlots = new[] { 0, 2 }, Maps = new[] { MeshMapKind.WorldNormal, MeshMapKind.Position } };
+            var result = MeshBaker.Bake(input, two);
+            Assert.That(result.Status, Is.EqualTo(MeshBakeStatus.Completed));
+            var map = result.Maps[0];
+            Assert.That(Baked(map, 8, 16) && Baked(map, 54, 16), Is.True, "the triangles of slots 0 and 2 are baked");
+            Assert.That(Baked(map, 32, 16), Is.False, "slot 1 is another material");
+            Assert.That(map.Provenance.TargetSlots, Is.EqualTo(new[] { 0, 2 })); Assert.That(map.Provenance.TargetSlot, Is.Zero);
+            var one = new MeshBakeSettings { Width = 64, Height = 32, Padding = 0, TargetSlot = 0, Maps = new[] { MeshMapKind.WorldNormal } };
+            var single = MeshBaker.Bake(input, one).Maps[0];
+            Assert.That(single.Provenance.TargetSlots, Is.EqualTo(new[] { 0 }));
+            Assert.That(map.Provenance.ConditionKey, Is.Not.EqualTo(single.Provenance.ConditionKey), "two slots are another condition");
+            Assert.That(MeshBaker.ConditionKey(input, one, MeshMapKind.WorldNormal), Is.EqualTo(single.Provenance.ConditionKey));
+            Assert.That(MeshBaker.ConditionKey(input, new MeshBakeSettings { Width = 64, Height = 32, Padding = 0, TargetSlot = 0, TargetSlots = new[] { 0 }, Maps = new[] { MeshMapKind.WorldNormal } }, MeshMapKind.WorldNormal),
+                Is.EqualTo(single.Provenance.ConditionKey), "a list of one slot is the same condition as the slot alone");
+            // 照合は並びで
+            MeshMapExpectation Expect(int[] slots) => new MeshMapExpectation { MeshHash = input.Hash, TopologyHash = input.TopologyHash, Width = 64, Height = 32, TargetSlot = slots[0], TargetSlots = slots, Settings = two };
+            Assert.That(map.Provenance.Check(Expect(new[] { 0, 2 })).State, Is.EqualTo(MeshMapState.Current));
+            var stale = map.Provenance.Check(Expect(new[] { 0 }));
+            Assert.That(stale.State, Is.EqualTo(MeshMapState.Stale)); Assert.That(string.Join(" ", stale.Reasons), Does.Contain("slots 0, 2").And.Contain("paints slots 0"));
+            Assert.That(map.Provenance.Check(Expect(new[] { 0, 1, 2 })).State, Is.EqualTo(MeshMapState.Stale), "another mesh now uses the material");
+            var outside = map.Provenance.Check(new MeshMapExpectation { MeshHash = input.Hash, TopologyHash = input.TopologyHash, Width = 64, Height = 32, TargetSlot = -2, Settings = two });
+            Assert.That(string.Join(" ", outside.Reasons), Does.Contain("not in the loaded model"), "a set whose material is not in the model matches no map");
+            // 保存（版 3）
+            var bytes = MeshMapBinary.Write(map); var back = MeshMapBinary.Read(bytes);
+            Assert.That(back.Provenance.TargetSlots, Is.EqualTo(new[] { 0, 2 })); Assert.That(back.Provenance.ConditionKey, Is.EqualTo(map.Provenance.ConditionKey));
+            Assert.That(MeshMapBinary.Write(back), Is.EqualTo(bytes));
+            int slotsAt = 8 + 4 + 4 + 4 + (4 + 64) + (4 + 64) + 4 + 4 + 4 + 4 + 4 + 4 + 4;
+            Assert.That(BitConverter.ToInt32(bytes, slotsAt), Is.EqualTo(2));
+            void Rejects(Action<byte[]> change, string contains)
+            {
+                var copy = (byte[])bytes.Clone(); change(copy);
+                Assert.That(() => MeshMapBinary.Read(copy), Throws.TypeOf<InvalidDataException>().With.Message.Contains(contains), contains);
+            }
+            Rejects(b => BitConverter.GetBytes(70000).CopyTo(b, slotsAt), "slot list");
+            Rejects(b => BitConverter.GetBytes(-1).CopyTo(b, slotsAt), "slot list");
+            Rejects(b => BitConverter.GetBytes(0).CopyTo(b, slotsAt + 8), "ascending");
+            Rejects(b => BitConverter.GetBytes(1).CopyTo(b, slotsAt + 4), "start with its slot");
+            // 設定の型
+            Assert.That(() => new MeshBakeSettings { TargetSlot = 0, TargetSlots = new[] { 2, 0 } }.Validate(), Throws.ArgumentException);
+            Assert.That(() => new MeshBakeSettings { TargetSlot = 0, TargetSlots = new[] { 0, 0 } }.Validate(), Throws.ArgumentException);
+            Assert.That(() => new MeshBakeSettings { TargetSlot = 1, TargetSlots = new[] { 0, 2 } }.Validate(), Throws.ArgumentException);
+            Assert.That(() => new MeshBakeSettings { TargetSlot = -1, TargetSlots = new[] { -1, 2 } }.Validate(), Throws.ArgumentException);
+            Assert.That(() => MeshBaker.Bake(input, new MeshBakeSettings { Width = 64, Height = 32, TargetSlot = 5, TargetSlots = new[] { 5, 6 } }), Throws.TypeOf<MeshBakeRefusedException>().With.Message.Contains("5, 6"));
+            Assert.That(two.Clone().TargetSlots, Is.EqualTo(two.TargetSlots).And.Not.SameAs(two.TargetSlots));
         }
 
         [Test] public void StaleMapsAreReportedWhenTheModelOrTheSettingsChange()

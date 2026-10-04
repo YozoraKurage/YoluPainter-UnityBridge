@@ -22,23 +22,14 @@ msgstr "画像を使えない所（メッシュマップが無い、画像が無
 msgid "Remove this channel's value and image (the fill then leaves the channel as it is)"
 msgstr "このチャンネルの値と画像を消す（塗りつぶしはこのチャンネルに何もしなくなる）"
 
-msgid "Drop an image from the Assets panel here, or click to choose one of this project's images."
-msgstr "アセットのパネルから画像をここへドラッグするか、押してこのプロジェクトの画像から選ぶ。"
-
 msgid "Click to choose one of this project's images; drop one from the Assets panel or the Project window."
 msgstr "押すとこのプロジェクトの画像から選べる。アセットのパネルや Project ウィンドウからドラッグしてもよい。"
-
-msgid "None (drop an image here)"
-msgstr "なし（画像をここへドラッグ）"
 
 msgid "Missing image"
 msgstr "画像が無い"
 
 msgid "None (use the value)"
 msgstr "なし（値を使う）"
-
-msgid "This project has no images yet (import them in the Assets panel)"
-msgstr "このプロジェクトにはまだ画像が無い（アセットのパネルで取り込む）"
 
 msgid "Stop using the image (the channel shows its value again)"
 msgstr "画像を外す（チャンネルは値に戻る）"
@@ -78,9 +69,6 @@ msgstr "画像を投影できないので、チャンネルは値のまま: {0}"
 
 msgid "{0} now reads {1} in {2}."
 msgstr "{0} の {2} に {1} を使うようにした。"
-
-msgid "{0} fill channel(s) read an image this project does not have; they show their fill value until you choose another image (the reference is kept): {1}"
-msgstr "{0} 個の塗りつぶしのチャンネルが、このプロジェクトに無い画像を読んでいる。別の画像を選ぶまで塗りつぶしの値を出す（参照は残している）: {1}"
 
 # ── 投影 ──
 
@@ -135,14 +123,11 @@ msgctxt "projection"
 msgid "Blend"
 msgstr "混ぜる幅"
 
-msgid "Choose an image for a channel (Layer ▸ Image) to project it; these settings apply to every image of this layer."
-msgstr "チャンネルに画像を選ぶ（レイヤー ▸ 画像）と投影される。この設定はこの層の全部の画像に効く。"
+msgid "UV: the image laid on the UV square. Tri-planar: three projections along the box's axes, mixed where the surface turns (no UV seams). Planar: through the box's front face. Spherical and cylindrical: around the box's centre. Decal: through the box's front face, only inside the box, cut out by the image's alpha."
+msgstr "UV: UV の正方形に画像を置く。トライプラナー: ボックスの 3 つの軸から投影し、面の向きが変わる所で混ぜる（UV の継ぎ目が出ない）。平面: ボックスの正面から突き抜けて投影。球・円柱: ボックスの中心のまわりに巻く。デカール: ボックスの正面から、ボックスの中だけに、画像のアルファで切り抜いて貼る。"
 
-msgid "UV: the image laid on the UV square. Tri-planar: three projections along the box's axes, mixed where the surface turns (no UV seams). Planar: through the box's front face. Spherical and cylindrical: around the box's centre."
-msgstr "UV: UV の正方形に画像を置く。トライプラナー: ボックスの 3 つの軸から投影し、面の向きが変わる所で混ぜる（UV の継ぎ目が出ない）。平面: ボックスの正面から突き抜けて投影。球・円柱: ボックスの中心のまわりに巻く。"
-
-msgid "Repeat the image, or continue its edge pixels."
-msgstr "画像を繰り返すか、端の画素を伸ばすか。"
+msgid "Repeat the image, continue its edge pixels, or leave it transparent outside the image."
+msgstr "画像を繰り返すか、端の画素を伸ばすか、画像の外を透明にするか。"
 
 msgid "How many times the image repeats across the projected square (U)"
 msgstr "投影した正方形の中で画像を繰り返す数（U）"
@@ -162,20 +147,8 @@ msgstr "投影した正方形の中心のまわりに、画像を反時計回り
 msgid "Where the surface turns between the box's axes: 0 %: a hard switch to the axis it faces most; 100 %: mixed in proportion to the normal."
 msgstr "面の向きがボックスの軸のあいだで変わる所: 0 % はいちばん向いている軸へはっきり切り替え、100 % は法線の向きの割合で混ぜる。"
 
-msgid "Show the projection's box in the 3D view with handles: drag the arrows to move it, the rings to turn it and the squares on its faces to size it (Shift: both faces)."
-msgstr "投影のボックスをハンドル付きで 3D ビューに出す: 矢印のドラッグで動かし、輪で回し、面の四角で大きさを変える（Shift で両側の面）。"
-
 msgid "Fit the box to the model (its bounds; a cube for tri-planar and spherical)"
 msgstr "ボックスをモデルに合わせる（外形。トライプラナーと球は立方体）"
-
-msgid "Show the 3D view (View ▸ 3D or 2D | 3D) to see and drag the box."
-msgstr "ボックスを見て動かすには 3D ビューを出す（表示 ▸ 3D か 2D | 3D）。"
-
-msgid "Load a model (or the demo cube) to see the box on it."
-msgstr "モデル（かデモのキューブ）を読み込むと、その上にボックスが見える。"
-
-msgid "Where the box's centre is, from the model root (scene units). Drag to change (Shift: ×10), click to type."
-msgstr "ボックスの中心の位置（モデルのルートから、シーンの単位）。ドラッグで変える（Shift で 10 倍）、押すと打ち込める。"
 
 msgid "Planar: the image spans the box's X and Y (seen from its −Z side); Z is not used."
 msgstr "平面: 画像はボックスの X と Y に広がる（−Z の側から見て）。Z は使わない。"
@@ -186,9 +159,6 @@ msgstr "円柱: 画像はボックスの Y 軸のまわりを 1 周し、Y の�
 msgid "Tri-planar: each face's image spans the box's two other sizes."
 msgstr "トライプラナー: それぞれの面の画像は、ボックスのほかの 2 つの軸の大きさに広がる。"
 
-msgid "Spherical: the image goes once around the box's centre (longitude) and from pole to pole; the size is not used."
-msgstr "球: 画像はボックスの中心のまわりを 1 周し（経度）、極から極まで広がる。大きさは使わない。"
-
 msgid "{0}: the image is not projected (the channel shows its value): {1}"
 msgstr "{0}: 画像を投影できない（チャンネルは値のまま）: {1}"
 
@@ -198,12 +168,12 @@ msgid "Fill images not projected"
 msgstr "投影できない塗りつぶしの画像"
 
 msgid ""
-"These fill channels cannot project their image now, so the exported images would show their fill value there instead:\n"
+"These fill channels cannot project their image now, so the exported images would show their fill value there instead (a decal: nothing):\n"
 "{0}\n"
 "\n"
 "Fix them first (bake the mesh maps, choose an image), or export anyway?"
 msgstr ""
-"次の塗りつぶしのチャンネルは今は画像を投影できないので、書き出す画像では代わりに塗りつぶしの値になる:\n"
+"次の塗りつぶしのチャンネルは今は画像を投影できないので、書き出す画像では代わりに塗りつぶしの値になる（デカールは何も出ない）:\n"
 "{0}\n"
 "\n"
 "先に直す（メッシュマップをベイクする、画像を選ぶ）か、このまま書き出すか。"

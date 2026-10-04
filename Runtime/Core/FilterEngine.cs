@@ -24,6 +24,11 @@ namespace Yozolab.YoluPainter.Core
     /// (<see cref="PaintDocument.GeneratorInputs"/>): the source carries that snapshot and its revision, which is part of the stamp,
     /// so new or lost maps never mix with tiles evaluated from the old ones. A generator whose maps are not usable passes its
     /// input through.</item>
+    /// <item>An anchor generator stage (<see cref="GeneratorType.Anchor"/>) reads an anchor point below its layer. Before the workers start, on
+    /// the calling thread, the anchor's tiles over every region the stage will read are made (a layer anchor's composite through its layer,
+    /// cached by the document; a mask anchor's filtered mask) and handed to the workers read-only. The stamp includes the version of those
+    /// tiles (<see cref="FilterStamp.Anchors"/>), so a change below the anchor never leaves a tile evaluated from the old values; the working
+    /// estimate includes the anchor tiles the evaluation holds.</item>
     /// </list>
     /// Single-threaded like the document. Stale blocks of a stack are evaluated together, one block per worker thread with
     /// reused working arrays (a single block runs its passes' rows or column strips in parallel instead); every output pixel is
@@ -49,12 +54,16 @@ namespace Yozolab.YoluPainter.Core
             public SparseTileSurface Surface; public bool IsFill; public Rgba32 Fill;
             /// <summary>A fill channel with an image: the bound projection (its pixels replace the fill value), or null.</summary>
             public FillImageSampler Sampler;
+            public BoundGenerator FillGradient; public GradientRamp FillRamp;
             public FilterEffect[] Chain; public long FilterRevision;
             /// <summary>Generator stacks: the mesh maps by kind as the document resolved them, and that resolution's revision (0
             /// without a generator).</summary>
             public IReadOnlyList<MeshMaps.BakedMeshMap> Maps; public long MapsRevision;
             /// <summary>Generator stacks: where the model root is in the maps' space (shape gradients), from the same resolution.</summary>
             public GeneratorModelFrame Frame;
+            /// <summary>Anchor generators: the resolved reference of each anchor stage by its index in <see cref="Chain"/> (null elsewhere), or
+            /// null when the chain has none.</summary>
+            public AnchorBinding[] Anchors;
             public bool Normal { get { return !Mask && Channel == PaintChannel.Normal; } }
             public int Key { get { return Mask ? MaskKey : (int)Channel; } }
         }
@@ -77,8 +86,9 @@ namespace Yozolab.YoluPainter.Core
         internal static Source ContentSource(PaintLayer layer, PaintChannel channel)
         {
             var chain = layer.ActiveChain(channel);
-            bool projected = layer.Kind == LayerKind.Fill && layer.HasFillImage(channel);
-            if (chain.Length == 0 && !projected) return null;
+            bool projected = layer.IsProjectedFill(channel);
+            bool gradient = layer.Kind == LayerKind.Fill && layer.HasFillGradient(channel);
+            if (chain.Length == 0 && !projected && !gradient) return null;
             var s = new Source { Layer = layer, Channel = channel, Chain = chain, FilterRevision = layer.FilterRevision };
             if (layer.Kind == LayerKind.Fill)
             {
@@ -87,6 +97,8 @@ namespace Yozolab.YoluPainter.Core
             }
             else { SparseTileSurface surface; layer.TryGetChannel(channel, out surface); s.Surface = surface; }
             AttachMaps(s, layer.Document);
+            if (gradient) { var g = layer.FillGradients[channel]; s.FillRamp = g.Ramp; s.FillGradient = BoundGenerator.Bind(g, s.Maps, s.Frame, layer.Document.Width, layer.Document.Height, out _); }
+            s.Anchors = layer.Document.AnchorBindingsOf(chain);
             return s;
         }
         internal static Source MaskSource(RasterMask mask)
@@ -94,11 +106,12 @@ namespace Yozolab.YoluPainter.Core
             var chain = mask.ActiveChain(); if (chain.Length == 0) return null;
             var s = new Source { Layer = mask.Owner, Mask = true, Surface = mask.Surface, Chain = chain, FilterRevision = mask.FilterRevision };
             AttachMaps(s, mask.Owner.Document);
+            s.Anchors = mask.Owner.Document.AnchorBindingsOf(chain);
             return s;
         }
         static void AttachMaps(Source s, PaintDocument document)
         {
-            bool reads = s.Sampler != null && s.Layer.ReadsMeshMapsForFill; // 型の上に投影する塗りつぶしの画像もマップを読む
+            bool reads = s.Layer.ReadsMeshMapsForFill; // 型の上に投影する塗りつぶしの画像もマップを読む
             foreach (var e in s.Chain) if (e.Settings.IsGenerator) reads = true;
             if (reads) s.Maps = document.GeneratorMapSnapshot(out s.MapsRevision, out s.Frame);
         }
@@ -118,25 +131,29 @@ namespace Yozolab.YoluPainter.Core
         }
 
         /// <summary>Working bytes of evaluating count stages over a rect of rectW × rectH (an upper bound: input and output bytes of
-        /// each stage, three 16-bit RGBA planes for a blur).</summary>
-        internal static long WorkingBytes(FilterEffect[] chain, int count, int rectW, int rectH, int width, int height)
+        /// each stage, three 16-bit RGBA planes for a blur), plus, with the tile size, the anchor tiles the anchor stages hold for the whole
+        /// evaluation (the tiles over the stage's region, which may reach a tile beyond it on each side).</summary>
+        internal static long WorkingBytes(FilterEffect[] chain, int count, int rectW, int rectH, int width, int height, int tileSize = 0)
         {
-            int after = Halo(chain, count); long peak = Area(after, rectW, rectH, width, height) * 4;
+            int after = Halo(chain, count); long peak = Area(after, rectW, rectH, width, height) * 4, anchors = 0;
             for (int k = 0; k < count; k++)
             {
-                long inA = Area(after, rectW, rectH, width, height); after -= chain[k].Settings.HaloPixels; long outA = Area(after, rectW, rectH, width, height);
+                long inA = Area(after, rectW, rectH, width, height);
+                // Anchor の段: 段の範囲（点の段なので入力の範囲）に掛かるタイルを評価のあいだ持つ（端で 1 枚ずつはみ出しうる）
+                if (tileSize > 0 && chain[k].Settings.ReadsAnchor) anchors += Area(after, rectW + 2 * tileSize, rectH + 2 * tileSize, width + 2 * tileSize, height + 2 * tileSize) * 4;
+                after -= chain[k].Settings.HaloPixels; long outA = Area(after, rectW, rectH, width, height);
                 var t = chain[k].Settings.Type;
                 long stage = t == FilterType.GaussianBlur || t == FilterType.Sharpen ? inA * 4 + 3 * inA * 8 + outA * 4 : inA * 4; // 16 bit の面 3 枚
                 peak = Math.Max(peak, stage);
             }
-            return peak;
+            return peak + anchors;
         }
         static long Area(int margin, int w, int h, int width, int height) { return (long)Math.Min(width, w + 2 * margin) * Math.Min(height, h + 2 * margin); }
         /// <summary>The working bytes of one block of this document for the chain.</summary>
         internal long BlockWorkingBytes(FilterEffect[] chain)
         {
             int side = BlockTiles * TileSize;
-            return WorkingBytes(chain, chain.Length, Math.Min(side, document.Width), Math.Min(side, document.Height), document.Width, document.Height);
+            return WorkingBytes(chain, chain.Length, Math.Min(side, document.Width), Math.Min(side, document.Height), document.Width, document.Height, TileSize);
         }
 
         /// <summary>True when the stack's output can have content in the tiles [tx0, tx1) × [ty0, ty1). Layer content: alpha only
@@ -150,7 +167,12 @@ namespace Yozolab.YoluPainter.Core
                 int m = Tiles(Halo(s.Chain, s.Chain.Length));
                 return AnyTile(s.Surface, tx0 - m, ty0 - m, tx1 + m, ty1 + m);
             }
-            if (s.IsFill) return s.Sampler != null ? s.Sampler.MayCover : s.Fill != Rgba32.Transparent;
+            if (s.IsFill)
+            {
+                if (s.Sampler == null) return s.FillRamp != null || s.Fill != Rgba32.Transparent;
+                int grow = Tiles(Expansion(s.Chain)); // デカールは箱の届くタイルだけ（ぼかしの広がりの分は広げて）
+                return s.Sampler.MayCoverTiles(tx0 - grow, ty0 - grow, tx1 + grow, ty1 + grow, externalValue: s.FillRamp != null);
+            }
             if (s.Surface == null) return false;
             int e = Tiles(Expansion(s.Chain));
             return AnyTile(s.Surface, tx0 - e, ty0 - e, tx1 + e, ty1 + e);
@@ -166,11 +188,22 @@ namespace Yozolab.YoluPainter.Core
         {
             long input;
             // 塗りつぶしの画像は層の塗りつぶしの版（負にして、値の詰め合わせと重ならないように）。一定の値はその値
-            if (s.IsFill) input = s.Sampler != null ? -1 - s.Layer.FillRevision : (long)((uint)s.Fill.R | (uint)s.Fill.G << 8 | (uint)s.Fill.B << 16 | (uint)s.Fill.A << 24);
+            if (s.IsFill) input = (s.Sampler != null || s.FillRamp != null) ? -1 - s.Layer.FillRevision : (long)((uint)s.Fill.R | (uint)s.Fill.G << 8 | (uint)s.Fill.B << 16 | (uint)s.Fill.A << 24);
             else if (s.Surface == null) input = 0;
             else if (IsGlobal(s.Chain, s.Chain.Length)) input = s.Surface.Revision;
             else { int m = Tiles(Halo(s.Chain, s.Chain.Length)); input = s.Surface.MaxTileRevision(tx0 - m, ty0 - m, tx1 + m, ty1 + m); }
-            return new FilterStamp(s.FilterRevision, input, s.MapsRevision);
+            return new FilterStamp(s.FilterRevision, input, s.MapsRevision, AnchorsStamp(s, tx0, ty0, tx1, ty1));
+        }
+        /// <summary>The anchor part of a stamp: per anchor stage, the version of what it reads over the tiles grown by the stack's halo (the
+        /// whole canvas for a global stack).</summary>
+        long AnchorsStamp(Source s, int tx0, int ty0, int tx1, int ty1)
+        {
+            if (s.Anchors == null) return 0;
+            if (IsGlobal(s.Chain, s.Chain.Length)) { tx0 = 0; ty0 = 0; tx1 = Tiles(document.Width); ty1 = Tiles(document.Height); }
+            else { int m = Tiles(Halo(s.Chain, s.Chain.Length)); tx0 -= m; ty0 -= m; tx1 += m; ty1 += m; }
+            long sum = 0;
+            foreach (var b in s.Anchors) if (b != null) unchecked { sum += document.AnchorStampPart(b, tx0, ty0, tx1, ty1); }
+            return sum;
         }
 
         // ───────────── tiles and pixels (cached) ─────────────
@@ -312,13 +345,14 @@ namespace Yozolab.YoluPainter.Core
         {
             for (int k = 0; k < count; k++) if (s.Chain[k].Settings.Locality == FilterLocality.Global) Statistics(s, k);
             var results = new byte[rects.Count][];
+            var anchors = PrepareAnchors(s, count, rects); // 作業者が読むだけの Anchor のタイルを、このスレッドで先に作る
             if (rects.Count == 1)
             {
                 var one = TakeScratch();
-                try { results[0] = EvaluateRect(s, count, rects[0], one); } finally { scratchPool.Add(one); }
+                try { results[0] = EvaluateRect(s, count, rects[0], one, anchors); } finally { scratchPool.Add(one); }
                 return results;
             }
-            long working = 1; foreach (var r in rects) working = Math.Max(working, WorkingBytes(s.Chain, count, r.W, r.H, document.Width, document.Height));
+            long working = 1; foreach (var r in rects) working = Math.Max(working, WorkingBytes(s.Chain, count, r.W, r.H, document.Width, document.Height, TileSize));
             int degree = (int)Math.Max(1, Math.Min(CoreParallelism.Degree, document.FilterWorkingBudgetBytes / working));
             // 作業者 degree 人が、次のブロックを順に取っていく（Parallel.For の分割に任せると同時に動く作業者が少なかった）
             int nextRect = -1; degree = Math.Min(degree, rects.Count);
@@ -326,7 +360,7 @@ namespace Yozolab.YoluPainter.Core
             {
                 sequentialPasses = true;
                 var scratch = TakeScratch();
-                try { for (int i; (i = System.Threading.Interlocked.Increment(ref nextRect)) < rects.Count;) results[i] = EvaluateRect(s, count, rects[i], scratch); }
+                try { for (int i; (i = System.Threading.Interlocked.Increment(ref nextRect)) < rects.Count;) results[i] = EvaluateRect(s, count, rects[i], scratch, anchors); }
                 finally { sequentialPasses = false; scratchPool.Add(scratch); }
             });
             return results;
@@ -386,13 +420,42 @@ namespace Yozolab.YoluPainter.Core
             public byte[] Bytes(int slot, int length) { var a = bytes[slot]; if (a == null || a.Length < length) bytes[slot] = a = new byte[length]; return a; }
         }
 
-        internal byte[] EvaluateRect(Source s, int count, Rect rect, Scratch scratch = null)
+        /// <summary>The anchor stages' pixels for the stages [0, count) over the rects (calling thread, before any worker): per stage index, the
+        /// tiles over the union of the regions the stage reads (each rect grown by the halos of the stage and the stages after it), or null.
+        /// A stage whose reference is not usable gets none (it passes its input through).</summary>
+        AnchorSample[] PrepareAnchors(Source s, int count, List<Rect> rects)
+        {
+            if (s.Anchors == null) return null;
+            AnchorSample[] samples = null;
+            for (int k = 0; k < count; k++)
+            {
+                var b = s.Anchors[k]; if (b == null || !b.Valid) continue;
+                int after = Halo(s.Chain, count) - Halo(s.Chain, k); // この段と後の段の halo の和
+                var coords = new HashSet<TileCoord>();
+                foreach (var r in rects)
+                {
+                    var g = Grow(r, after);
+                    for (int ty = g.Y0 / TileSize; ty < Tiles(g.Y1); ty++) for (int tx = g.X0 / TileSize; tx < Tiles(g.X1); tx++) coords.Add(new TileCoord(tx, ty));
+                }
+                (samples ?? (samples = new AnchorSample[count]))[k] = document.AnchorSampleFor(b, coords);
+            }
+            return samples;
+        }
+        /// <summary><see cref="EvaluateRect(Source, int, Rect, Scratch, AnchorSample[])"/> from the calling thread: prepares the anchor stages'
+        /// pixels first (the reference evaluations in one piece).</summary>
+        internal byte[] EvaluateRect(Source s, int count, Rect rect)
+        {
+            var anchors = PrepareAnchors(s, count, new List<Rect> { rect });
+            return EvaluateRect(s, count, rect, null, anchors);
+        }
+
+        internal byte[] EvaluateRect(Source s, int count, Rect rect, Scratch scratch, AnchorSample[] anchors)
         {
             if (scratch == null) scratch = new Scratch();
-            long working = WorkingBytes(s.Chain, count, rect.W, rect.H, document.Width, document.Height);
+            long working = WorkingBytes(s.Chain, count, rect.W, rect.H, document.Width, document.Height, TileSize);
             if (working > document.FilterWorkingBudgetBytes)
                 throw new InvalidOperationException("Evaluating these filters over " + rect.W + " × " + rect.H + " pixels needs about " + (working >> 20) + " MiB of working memory, more than the filter budget ("
-                    + (document.FilterWorkingBudgetBytes >> 20) + " MiB). Nothing was evaluated; use a smaller radius or raise PaintDocument.FilterWorkingBudgetBytes.");
+                    + (document.FilterWorkingBudgetBytes >> 20) + " MiB). Nothing was evaluated.");
             var after = new int[count + 1];
             for (int k = count - 1; k >= 0; k--) after[k] = after[k + 1] + s.Chain[k].Settings.HaloPixels;
             var cur = Grow(rect, after[0]);
@@ -400,7 +463,7 @@ namespace Yozolab.YoluPainter.Core
             for (int k = 0; k < count; k++)
             {
                 var next = Grow(rect, after[k + 1]);
-                var output = Apply(s, k, buf, cur, next, scratch, 1 - slot);
+                var output = Apply(s, k, buf, cur, next, scratch, 1 - slot, anchors == null ? null : anchors[k]);
                 if (output != buf) slot = 1 - slot;
                 buf = output;
                 cur = next;
@@ -416,6 +479,21 @@ namespace Yozolab.YoluPainter.Core
             int n = r.Area * 4; Array.Clear(buf, 0, n);
             if (s.IsFill)
             {
+                if (s.FillRamp != null)
+                {
+                    bool scalar = s.Channel != PaintChannel.Color && s.Channel != PaintChannel.Emission;
+                    ParallelRange(r.H, (row0, row1) =>
+                    {
+                        for (int y = row0; y < row1; y++) for (int x = 0; x < r.W; x++)
+                        {
+                            var value = s.Fill;
+                            if (s.FillGradient != null && s.FillGradient.TryValue(r.X0 + x, r.Y0 + y, out double t)) value = s.FillRamp.Evaluate(t, scalar);
+                            if (s.Sampler != null && s.Sampler.IsDecal) value = s.Sampler.ApplyDecalToValue(r.X0 + x, r.Y0 + y, value);
+                            int i = (y * r.W + x) * 4; buf[i] = value.R; buf[i + 1] = value.G; buf[i + 2] = value.B; buf[i + 3] = value.A;
+                        }
+                    });
+                    return buf;
+                }
                 if (s.Sampler != null)
                 {
                     // 投影した画像: 画素ごとに入力（マップ・画像）だけから決まるので、行の分け方によらず同じバイト
@@ -444,7 +522,7 @@ namespace Yozolab.YoluPainter.Core
             return buf;
         }
 
-        byte[] Apply(Source s, int k, byte[] buf, Rect cur, Rect next, Scratch scratch, int outSlot)
+        byte[] Apply(Source s, int k, byte[] buf, Rect cur, Rect next, Scratch scratch, int outSlot, AnchorSample anchor)
         {
             var effect = s.Chain[k]; var f = effect.Settings; double strength = effect.Strength;
             switch (f.Type)
@@ -463,7 +541,7 @@ namespace Yozolab.YoluPainter.Core
                     var lut = new byte[256]; for (int v = 0; v < 256; v++) lut[v] = (byte)(255 - v);
                     ApplyLut(buf, cur.Area, lut, strength); return buf;
                 }
-                case FilterType.Generator: Generate(s, buf, cur, f.Generator, strength); return buf;
+                case FilterType.Generator: Generate(s, buf, cur, f.Generator, strength, anchor); return buf;
                 default:
                 {
                     var st = Statistics(s, k);
@@ -479,7 +557,8 @@ namespace Yozolab.YoluPainter.Core
         Stats Statistics(Source s, int k)
         {
             var key = (s.Layer.Id, s.Key, k);
-            var stamp = new FilterStamp(s.FilterRevision, s.IsFill ? Stamp(s, 0, 0, 1, 1).Input : s.Surface == null ? 0 : s.Surface.Revision, s.MapsRevision);
+            var stamp = new FilterStamp(s.FilterRevision, s.IsFill ? Stamp(s, 0, 0, 1, 1).Input : s.Surface == null ? 0 : s.Surface.Revision, s.MapsRevision,
+                AnchorsStamp(s, 0, 0, Tiles(document.Width), Tiles(document.Height)));
             Stats st;
             if (stats.TryGetValue(key, out st) && st.Stamp.Equals(stamp)) return st;
             int min = 255, max = 0; bool any = false;
@@ -549,9 +628,9 @@ namespace Yozolab.YoluPainter.Core
         /// <summary>A generator stage in place (a point stage: the rect does not shrink). Masks: the grey hide amount is turned into
         /// visibility, combined and turned back. Layer pixels: each colour component; alpha is unchanged and fully transparent pixels
         /// keep their RGB. Pixels where a map has no data, and the whole stage when its maps are not usable, keep the input.</summary>
-        void Generate(Source s, byte[] buf, Rect r, GeneratorSettings g, double strength)
+        void Generate(Source s, byte[] buf, Rect r, GeneratorSettings g, double strength, AnchorSample anchor)
         {
-            var bound = BoundGenerator.Bind(g, s.Maps, s.Frame, document.Width, document.Height, out _);
+            var bound = BoundGenerator.Bind(g, s.Maps, s.Frame, document.Width, document.Height, anchor, out _);
             if (bound == null) return; // 入力のまま（理由は PaintDocument.GetGeneratorStatus が知らせる）
             bool mask = s.Mask; var blend = g.Blend; var unit = MathUtil.ByteUnit;
             ParallelRange(r.H, (y0, y1) =>
@@ -564,10 +643,19 @@ namespace Yozolab.YoluPainter.Core
                         if (!bound.TryValue(r.X0 + x, r.Y0 + y, out double v)) continue;
                         if (mask)
                         {
+                            if (g.Ramp != null) { var mapped = g.Ramp.Evaluate(v, true); v = unit[mapped.R] * unit[mapped.A]; }
                             byte hide = (byte)(255 - MathUtil.ToByte(BoundGenerator.Combine(blend, 1 - unit[buf[i]], v, strength)));
                             buf[i] = hide; buf[i + 1] = hide; buf[i + 2] = hide;
                         }
-                        else for (int c = 0; c < 3; c++) buf[i + c] = MathUtil.ToByte(BoundGenerator.Combine(blend, unit[buf[i + c]], v, strength));
+                        else if (g.Ramp == null) { for (int c = 0; c < 3; c++) buf[i + c] = MathUtil.ToByte(BoundGenerator.Combine(blend, unit[buf[i + c]], v, strength)); }
+                        else
+                        {
+                            var mapped = g.Ramp.Evaluate(v, s.Channel != PaintChannel.Color && s.Channel != PaintChannel.Emission);
+                            buf[i] = MathUtil.ToByte(BoundGenerator.Combine(blend, unit[buf[i]], unit[mapped.R], strength));
+                            buf[i + 1] = MathUtil.ToByte(BoundGenerator.Combine(blend, unit[buf[i + 1]], unit[mapped.G], strength));
+                            buf[i + 2] = MathUtil.ToByte(BoundGenerator.Combine(blend, unit[buf[i + 2]], unit[mapped.B], strength));
+                            buf[i + 3] = MathUtil.ToByte(unit[buf[i + 3]] * (1 - strength + strength * unit[mapped.A]));
+                        }
                     }
             });
         }

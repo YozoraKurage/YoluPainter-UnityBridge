@@ -1,0 +1,91 @@
+# Japanese translation for YoluPainter: the stencil (the Brush tool's Stencil section, its keys and notes).
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Stencil"
+msgstr "ステンシル"
+
+msgctxt "stencil"
+msgid "Image"
+msgstr "画像"
+
+msgctxt "stencil"
+msgid "Reads as"
+msgstr "読み方"
+
+msgctxt "stencil"
+msgid "Amount (mask)"
+msgstr "量（マスク）"
+
+msgctxt "stencil"
+msgid "Colour"
+msgstr "色"
+
+msgctxt "stencil"
+msgid "Automatic"
+msgstr "自動"
+
+msgctxt "stencil"
+msgid "Invert"
+msgstr "反転"
+
+msgctxt "stencil"
+msgid "No tiling"
+msgstr "繰り返さない"
+
+msgctxt "stencil"
+msgid "Horizontal"
+msgstr "横に繰り返す"
+
+msgctxt "stencil"
+msgid "Vertical"
+msgstr "縦に繰り返す"
+
+msgctxt "stencil"
+msgid "Both"
+msgstr "縦横に繰り返す"
+
+msgctxt "stencil"
+msgid "Size"
+msgstr "大きさ"
+
+msgid "Reset placement"
+msgstr "置き場を戻す"
+
+msgid "Rotation on the screen (clockwise)."
+msgstr "画面の上の回転（時計回り）。"
+
+msgid "The image's height as a share of the view's height."
+msgstr "画像の高さ（表示域の高さに対する割合）。"
+
+msgid "How strongly the stencil is shown over the views (display only)."
+msgstr "ステンシルを表示域にどれだけ濃く重ねるか（表示だけ）。"
+
+msgid "Back to the middle of the view, the first size and no rotation."
+msgstr "表示域の中央・初めの大きさ・回転なしに戻します。"
+
+msgid "Black lets the paint through and white holds it back (transparent still holds back)."
+msgstr "黒が塗りを通し、白が止めます（透明はやはり止めます）。"
+
+msgid "Repeat the image beyond its edges across the view. Without tiling nothing is painted outside the image."
+msgstr "画像を端の先へ、表示域いっぱいに繰り返します。繰り返さないときは、画像の外には塗りません。"
+
+msgid "Amount: the image's brightness is how much paint gets through (white paints, black and transparent hold back). Colour: the brush paints the image's colours, its alpha is the amount. Automatic: amount for a grey image, colour otherwise."
+msgstr "量: 画像の明るさが塗りを通す量です（白は塗り、黒と透明は止めます）。色: ブラシは画像の色で塗り、そのアルファが量です。自動: 灰色の画像なら量、そうでなければ色。"
+
+msgid "Stop using the stencil"
+msgstr "ステンシルを外す"
+
+msgid "None (no stencil)"
+msgstr "なし（ステンシルを使わない）"
+
+msgid "The stencil was removed."
+msgstr "ステンシルを外しました。"
+
+msgid "The stencil's image is no longer in this project; the stencil was removed."
+msgstr "ステンシルの画像がこのプロジェクトから無くなったので、ステンシルを外しました。"
+
+msgid "Stencil (Properties ▸ Stencil): hold T and drag on a view, left turns it (with Shift in 15° steps), middle or Ctrl+left moves it, right or Alt+left resizes it · hold N to paint without it"
+msgstr "ステンシル（プロパティ ▸ ステンシル）: T を押したまま表示域をドラッグ、左で回す（Shift で 15° 刻み）、中か Ctrl+左で動かす、右か Alt+左で大きさ · N を押しているあいだは使わずに塗る"

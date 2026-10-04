@@ -12,13 +12,14 @@ using Object = UnityEngine.Object;
 
 namespace Yozolab.YoluPainter.Tests
 {
-    /// <summary>描画ウィンドウのプロパティの欄（レイヤー・レイヤーマスク・フィルター・ノーマル・メッシュマップ・ポーズ）を、本物のマウスの入力
-    /// （SendEvent）で操作する: マスクに描く・濃度のドラッグが 1 回の Undo・反転・削除、フィルターの無効・選択・強さのドラッグ・並べ替え・削除、
-    /// Height → Normal と強さのドラッグ、平らな値、メッシュマップの「ベイク…」がベイクの窓を開くこと、BlendShape のスライダーを離した
-    /// ときに 1 回だけ焼き直すこと。欄は部品が見える所までスクロールして押す。どの欄も LegacySection（Unity の標準の部品）を通らない。</summary>
+    /// <summary>描画ウィンドウのプロパティの欄（選んだ物だけ: 塗りつぶし・調整・グループの層、マスクに描くときのマスクのタブ、選んだフィルター）と
+    /// テクスチャセットの設定（ノーマル・メッシュマップ・ポーズ）を、本物のマウスの入力（SendEvent）で操作する: マスクのサムネイルでマスクに描き、
+    /// マスクのタブで濃度のドラッグが 1 回の Undo・反転・削除、レイヤーの重なりの効果の行で選ぶ・無効・並べ替え・削除と欄の強さのドラッグ、
+    /// Height → Normal と強さのドラッグ、平らな値（ブラシの欄）、メッシュマップの「ベイク…」がベイクの窓を開くこと、BlendShape のスライダーを
+    /// 離したときに 1 回だけ焼き直すこと。欄は部品が見える所までスクロールして押す。どの欄も LegacySection（Unity の標準の部品）を通らない。</summary>
     public sealed partial class WindowTests
     {
-        static readonly string[] LayerPanelSections = { "layer", "mask", "filters", "normal", "mesh-maps", "pose" };
+        static readonly string[] LayerPanelSections = { "layer", "mask", "effect", "projection", "normal", "mesh-maps", "pose" };
 
         void OpenLayerPanels()
         {
@@ -26,17 +27,19 @@ namespace Yozolab.YoluPainter.Tests
             foreach (var key in LayerPanelSections) open[key] = true;
             Repaint(window);
         }
+        /// <summary>レイヤーと同じまとまりのタブの「テクスチャセットの設定」を見せる（既定の配置ではレイヤーが見えている）。</summary>
+        void ShowTextureSetSettings() { window.DockLayoutForTests.SetActive("textureSetSettings"); Repaint(window); }
 
         /// <summary>
-        /// プロパティの欄の部品 id を見える所までスクロールし、その中の点を SendEvent の座標（タブを含むホストの座標）で返す。fx は左から
-        /// 何割の所か。部品が覚える画面の座標は GUIClip を外してホストの画面の位置を足したものなので、ホストの画面の位置
+        /// プロパティの欄かテクスチャセットの設定の部品 id を見える所までスクロールし、その中の点を SendEvent の座標（タブを含むホストの座標）で
+        /// 返す。fx は左から何割の所か。部品が覚える画面の座標は GUIClip を外してホストの画面の位置を足したものなので、ホストの画面の位置
         /// （EditorWindow の m_Parent の screenPosition、内部）を引けば、SendEvent がそのまま受け取る座標になる（タブの高さの扱いを推測しない）。
         /// </summary>
         Vector2 LayerControlPoint(string id, float fx = .5f)
         {
             Repaint(window);
-            Assert.That(window.LayerControlPanelRects.TryGetValue(id, out var inPanel), Is.True, id + " was not drawn");
-            typeof(TexturePaintWindow).GetField("propertiesScroll", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(window, new Vector2(0, Mathf.Max(0, inPanel.y - 40)));
+            Assert.That(window.LayerControlPanelRects.ContainsKey(id), Is.True, id + " was not drawn");
+            window.ScrollToLayerControl(id);
             Repaint(window); Repaint(window);
             var screen = window.LayerControlScreenRects[id];
             var host = new Rect(screen.position - HostScreenPosition(window), screen.size);
@@ -68,19 +71,29 @@ namespace Yozolab.YoluPainter.Tests
             window.Channel = PaintChannel.Normal;
             OpenLayerPanels(); Repaint(window);
             var legacy = (Dictionary<string, float>)typeof(TexturePaintWindow).GetField("legacyHeights", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(window);
+            var drawn = new HashSet<string>(window.LayerControlScreenRects.Keys); // 選んだフィルター（足したところ）
+            window.SelectedFilter = Guid.Empty; window.EditMask = true; window.SetPropertyTab(PropertyContext.Brush, TexturePaintWindow.TabMask); Repaint(window);
+            drawn.UnionWith(window.LayerControlScreenRects.Keys); // マスクに描くときのマスクのタブ
+            window.EditMask = false;
+            window.SelectedLayer = d.AddFillLayer("Tint", new Dictionary<PaintChannel, Rgba32> { { PaintChannel.Color, new Rgba32(10, 20, 30) } }).Id; Repaint(window);
+            drawn.UnionWith(window.LayerControlScreenRects.Keys); // 塗りつぶしの層
+            ShowTextureSetSettings();
+            drawn.UnionWith(window.LayerControlScreenRects.Keys); // テクスチャセットの設定
             Assert.That(legacy.Keys.Intersect(LayerPanelSections), Is.Empty, "a layer or channel section went through LegacySection (Unity's standard controls)");
-            foreach (var id in new[] { "layer.channel", "mask.paint", "mask.density", "normal.derive", "meshmap.bake" })
-                Assert.That(window.LayerControlScreenRects.ContainsKey(id), Is.True, id + " was not drawn with the kit");
+            foreach (var id in new[] { "filter.strength", "layer.channel", "mask.paint", "mask.density", "normal.derive", "meshmap.bake" })
+                Assert.That(drawn.Contains(id), Is.True, id + " was not drawn with the kit");
         }
 
         [Test] public void TheMaskSectionPaintsOnTheMaskAndADensityDragIsOneUndoStep()
         {
             var d = window.Document; var layer = d.GetLayer(window.SelectedLayer);
-            OpenLayerPanels();
-            ClickLayerControl("mask.add");
-            Assert.That(layer.Mask, Is.Not.Null, window.StatusMessage); Assert.That(window.EditMask, Is.True, "a new mask is the one being painted");
-            ClickLayerControl("mask.paint");
-            Assert.That(window.EditMask, Is.False);
+            d.AddLayerMask(layer.Id); OpenLayerPanels();
+            // マスクのサムネイルを押すとマスクに描き、プロパティの欄はブラシとマスクのタブ（Substance と同じく、マスクを選んで描く）
+            var thumb = LayerPanelPoint("mask." + layer.Id); SendHost(EventType.MouseDown, thumb); SendHost(EventType.MouseUp, thumb); Repaint(window);
+            Assert.That(window.EditMask, Is.True, "the mask thumbnail selects the mask to paint on");
+            Assert.That(window.LastPropertyContext, Is.EqualTo(PropertyContext.Brush));
+            ClickToolControl("propertyTab." + TexturePaintWindow.TabMask); Repaint(window);
+            Assert.That(window.LastPropertyTab, Is.EqualTo(TexturePaintWindow.TabMask));
             int steps = d.UndoCount;
             DragLayerControl("mask.density", .95f, .5f);
             Assert.That(layer.Mask.Density, Is.EqualTo(.5).Within(.03)); Assert.That(d.UndoCount, Is.EqualTo(steps + 1), "one drag, one undo step");
@@ -90,36 +103,53 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(layer.Mask.Inverted, Is.False);
             Key(window, KeyCode.Z, EventModifiers.Control);
             Assert.That(layer.Mask.Density, Is.EqualTo(1), "undo restores the density before the drag");
+            ClickLayerControl("mask.paint");
+            Assert.That(window.EditMask, Is.False, "the toggle goes back to painting the layer");
+            Assert.That(window.LastPropertyTab, Is.Not.EqualTo(TexturePaintWindow.TabMask), "the mask tab is only there while the mask is painted");
+            thumb = LayerPanelPoint("mask." + layer.Id); SendHost(EventType.MouseDown, thumb); SendHost(EventType.MouseUp, thumb); Repaint(window);
+            Assert.That(window.LastPropertyTab, Is.EqualTo(TexturePaintWindow.TabMask), "the tab is remembered");
             ClickLayerControl("mask.delete");
-            Assert.That(layer.Mask, Is.Null);
+            Assert.That(layer.Mask, Is.Null); Assert.That(window.EditMask, Is.False);
             Key(window, KeyCode.Z, EventModifiers.Control);
             Assert.That(layer.Mask, Is.Not.Null);
         }
 
+        /// <summary>フィルターはレイヤーの重なりの子の行（Substance の効果の行）: 押して選ぶとプロパティの欄にその段、目で無効、選んだ行の
+        /// 上へ・下へ・消す、層の行を押すと欄は層（ツール）に戻る。どれも 1 回の Undo。</summary>
         [Test] public void FilterRowsTurnOffSelectReorderAndRemoveWithTheirButtons()
         {
             var d = window.Document; var layer = RedSquare();
             var blur = window.AddFilter(FilterTarget.Content, FilterSettings.GaussianBlur(4)); var invert = window.AddFilter(FilterTarget.Content, FilterSettings.Invert());
             window.SelectedFilter = Guid.Empty; OpenLayerPanels();
-            ClickLayerControl("filter." + blur.Id + ".eye");
+            Assert.That(window.LastPropertyContext, Is.EqualTo(PropertyContext.Brush));
+            void Press(string id, float fx = .5f) { var p = LayerPanelPoint(id, fx); SendHost(EventType.MouseDown, p); SendHost(EventType.MouseUp, p); Repaint(window); }
+            Press("effect." + blur.Id, .6f);
+            Assert.That(window.SelectedFilter, Is.EqualTo(blur.Id), "the row selects the filter");
+            Assert.That(window.LastPropertyContext, Is.EqualTo(PropertyContext.Effect), "and Properties shows it");
+            Press("effect." + blur.Id + ".eye");
             Assert.That(layer.Filters.Single(f => f.Id == blur.Id).Enabled, Is.False);
-            ClickLayerControl("filter." + blur.Id + ".name");
-            Assert.That(window.SelectedFilter, Is.EqualTo(blur.Id), "the name opens the settings");
             int steps = d.UndoCount;
             DragLayerControl("filter.strength", .95f, .5f);
             Assert.That(layer.Filters.Single(f => f.Id == blur.Id).Strength, Is.EqualTo(.5).Within(.03)); Assert.That(d.UndoCount, Is.EqualTo(steps + 1));
-            ClickLayerControl("filter." + invert.Id + ".down");
+            Press("effect." + invert.Id, .6f);
+            Press("effect." + invert.Id + ".down");
             Assert.That(layer.Filters.First().Id, Is.EqualTo(invert.Id), "down applies it earlier");
-            ClickLayerControl("filter." + blur.Id + ".remove");
+            Press("effect." + blur.Id, .6f);
+            Press("effect." + blur.Id + ".remove");
             Assert.That(layer.Filters.Select(f => f.Id), Is.EqualTo(new[] { invert.Id }));
+            Assert.That(window.SelectedFilter, Is.EqualTo(Guid.Empty)); Assert.That(window.LastPropertyContext, Is.EqualTo(PropertyContext.Brush));
             Key(window, KeyCode.Z, EventModifiers.Control);
             Assert.That(layer.Filters.Count, Is.EqualTo(2));
+            Press("effect." + invert.Id, .6f);
+            Press("row." + layer.Id, .7f);
+            Assert.That(window.SelectedFilter, Is.EqualTo(Guid.Empty), "the layer row goes back to the layer");
+            Assert.That(window.LastPropertyContext, Is.EqualTo(PropertyContext.Brush));
         }
 
         [Test] public void NormalAndMeshMapControlsWorkThroughTheirWidgets()
         {
             var d = window.Document;
-            window.Channel = PaintChannel.Normal; OpenLayerPanels();
+            window.Channel = PaintChannel.Normal; OpenLayerPanels(); ShowTextureSetSettings();
             int steps = d.UndoCount;
             ClickLayerControl("normal.derive");
             Assert.That(d.NormalSettings.DeriveFromHeight, Is.True); Assert.That(d.UndoCount, Is.EqualTo(steps + 1));
@@ -127,7 +157,7 @@ namespace Yozolab.YoluPainter.Tests
             DragLayerControl("normal.strength", .52f, .75f);
             Assert.That(d.NormalSettings.Strength, Is.GreaterThan(NormalSettings.Default.Strength)); Assert.That(d.UndoCount, Is.EqualTo(steps + 2), "the strength drag is one step");
             window.SetBrushNormal(1, 0);
-            ClickLayerControl("normal.flat");
+            ClickLayerControl("normal.flat"); // ブラシの値（プロパティのブラシのタブ。Normal のチャンネルのとき）
             Assert.That(window.GetBrush().Color, Is.EqualTo(new Rgba32(128, 128, 255)));
             // メッシュマップ: 欄の「ベイク…」はモデルが無くても押せて、ベイクの窓を開く（窓は焼けない理由を出す）。焼くマップのチェックと
             // 設定は窓の側（WindowMeshMapTests・MeshBakeWindowTests）
@@ -137,7 +167,7 @@ namespace Yozolab.YoluPainter.Tests
             try
             {
                 Assert.That(bake, Is.Not.Null, "Bake… opens the bake window");
-                Assert.That(window.MeshBakeRefusal(), Does.Contain("Load a model"));
+                Assert.That(window.MeshBakeRefusal(), Does.Contain("No model"));
                 Assert.That(window.MeshMaps.Count, Is.Zero); Assert.That(window.IsBakingMeshMaps, Is.False);
             }
             finally { if (bake != null) bake.Close(); }
@@ -154,7 +184,7 @@ namespace Yozolab.YoluPainter.Tests
             try
             {
                 Assert.That(window.Preview.Load(root).CanPaint, Is.True);
-                OpenLayerPanels();
+                OpenLayerPanels(); ShowTextureSetSettings();
                 var shape = window.Preview.BlendShapes[0]; string id = "pose.shape." + shape.Label;
                 int revision = window.Preview.SnapshotRevision;
                 var a = LayerControlPoint(id, .05f); var b = new Vector2(a.x + .8f * window.LayerControlScreenRects[id].width, a.y);

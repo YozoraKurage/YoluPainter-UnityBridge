@@ -113,7 +113,7 @@ namespace Yozolab.YoluPainter.Tests
             // フォーカスの喪失も同じ
             tip = OnArrow(ShapeHandle.MoveY);
             DragHandle(tip, tip + new Vector2(0, -30), release: false);
-            Invoke(window, "OnLostFocus");
+            Invoke(window, "OnLostFocus"); window.FlushRecovery();
             Assert.That(window.ShapeDragging, Is.False); Assert.That(fill.Projection.Placement, Is.EqualTo(start)); Assert.That(d.UndoCount, Is.EqualTo(steps));
             // 球の投影は球として見せる（面の四角は半径）
             window.SetProjectionMode(fill.Id, FillProjectionMode.Spherical); Repaint(window);

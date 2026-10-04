@@ -82,7 +82,7 @@ namespace Yozolab.YoluPainter.Tests
             var id = Guid.NewGuid();
             var files = new Dictionary<string, byte[]>
             {
-                { YlpFormat.ProjectName, YlpFormat.WriteProject(new YlpProjectInfo(new[] { new YlpTextureSetInfo(id, "Body", 0) }, id)) },
+                { YlpFormat.ProjectName, YlpFormat.WriteProject(new YlpProjectInfo(new[] { new YlpTextureSetInfo(id, "Body", YlpMaterialRef.PendingSlot(0)) }, id)) },
                 { YlpFormat.SetEntry(id, YlpArchive.NativeName), new byte[] { 1 } }, { "future/thing.bin", new byte[] { 2 } }, { YlpFormat.SetEntry(id, "composite/Glow.png"), new byte[] { 3 } },
                 { YlpArchive.NativeName, new byte[] { 4 } },
             };
@@ -156,7 +156,7 @@ namespace Yozolab.YoluPainter.Tests
         static Dictionary<string, byte[]> OneTextureSet(YlpOpened opened)
         {
             var set = opened.Project.Sets.Single();
-            Assert.That(set.MaterialSlot, Is.Zero); Assert.That(set.Name, Is.EqualTo(YlpFormat.MigratedSetName)); Assert.That(opened.Project.CurrentSet, Is.EqualTo(set.Id));
+            Assert.That(set.Material, Is.EqualTo(YlpMaterialRef.PendingSlot(0))); Assert.That(set.Name, Is.EqualTo(YlpFormat.MigratedSetName)); Assert.That(opened.Project.CurrentSet, Is.EqualTo(set.Id));
             Assert.That(opened.Files.Keys.Where(k => !k.StartsWith(YlpFormat.SetsFolder, StringComparison.Ordinal)), Is.EquivalentTo(new[] { YlpFormat.ProjectName, YlpFormat.ViewName, YlpFormat.BrushName, YlpFormat.ThumbnailName }));
             return opened.SetFiles(set.Id);
         }
@@ -168,7 +168,7 @@ namespace Yozolab.YoluPainter.Tests
             YlpFormat.Stamp(files, Saver, opened.Info.CreatedBy);
             var again = YlpFormat.Open(YlpArchive.Read(YlpArchive.Write(files)));
             Assert.That(again.Info.Format, Is.EqualTo(YlpFormat.Current)); Assert.That(again.Upgraded, Is.False); Assert.That(again.UnknownEntries, Is.Empty);
-            Assert.That(again.Project.Sets.Select(s => (s.Id, s.Name, s.MaterialSlot)), Is.EqualTo(opened.Project.Sets.Select(s => (s.Id, s.Name, s.MaterialSlot))));
+            Assert.That(again.Project.Sets.Select(s => (s.Id, s.Name, s.Material)), Is.EqualTo(opened.Project.Sets.Select(s => (s.Id, s.Name, s.Material))));
             foreach (var entry in opened.Files) Assert.That(again.Files[entry.Key], Is.EqualTo(entry.Value), entry.Key);
         }
 

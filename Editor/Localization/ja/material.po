@@ -25,9 +25,6 @@ msgstr "中立で見せているもの:"
 msgid "3D view: neutral shading (the painted channel on a neutral surface)."
 msgstr "3D ビュー: 中立の表示（描いているチャンネルを中立の面に見せる）。"
 
-msgid "3D view: material shading. Load a model to see its materials."
-msgstr "3D ビュー: マテリアルの表示。モデルを読み込むとそのマテリアルで見せます。"
-
 msgid "3D view: material shading."
 msgstr "3D ビュー: マテリアルの表示。"
 
@@ -104,9 +101,6 @@ msgstr "プレビューのチャンネルを詰め直すシェーダー（{0}）
 
 # ── 見せ方の注意 ──
 
-msgid "{0}: {1} is off on this material, so the painted {0} does not show. Turn it on in the Material panel to see it (only the preview changes)."
-msgstr "{0}: このマテリアルでは {1} が切れているので、描いた{0}は見えません。マテリアルの欄で入れると見えます（変わるのはプレビューだけ）。"
-
 msgid "{0}: the keyword {1} is off on this material, so the painted {0} does not show."
 msgstr "{0}: このマテリアルではキーワード {1} が切れているので、描いた{0}は見えません。"
 
@@ -123,9 +117,6 @@ msgstr "{0}: このマテリアルは {1} をタイリング・オフセット�
 
 msgid "This material slot has no source material (the demo cube or an unassigned slot). Load a model to see and adjust its material."
 msgstr "このマテリアルスロットには元のマテリアルがありません（デモのキューブか、割り当ての無いスロット）。モデルを読み込むと、そのマテリアルを見て調整できます。"
-
-msgid "Load a model to see and adjust its material."
-msgstr "モデルを読み込むと、そのマテリアルを見て調整できます。"
 
 msgid "Show the material in the Project window"
 msgstr "マテリアルをプロジェクトウィンドウで示す"
@@ -166,9 +157,6 @@ msgstr "全部元に戻す"
 msgid "Put every property of this material back to the material's own value (the preview only)"
 msgstr "このマテリアルのプロパティを全部マテリアルの値に戻す（プレビューだけ）"
 
-msgid "Reverted {0} change(s); the preview shows the material's own values again."
-msgstr "{0} 件の変更を元に戻しました。プレビューはマテリアルの値に戻っています。"
-
 msgid "Apply to Material…"
 msgstr "マテリアルに反映…"
 
@@ -201,9 +189,6 @@ msgstr "マテリアルに反映しますか？"
 msgid "Not applied; the material is unchanged."
 msgstr "反映しませんでした。マテリアルは変わっていません。"
 
-msgid "Applied {0} change(s) to {1}. Unity's Undo (Edit ▸ Undo) reverts the material."
-msgstr "{1} に {0} 件の変更を反映しました。Unity の元に戻す（Edit ▸ Undo）でマテリアルを戻せます。"
-
 msgid "keyword {0} {1}"
 msgstr "キーワード {0} を{1}"
 
@@ -228,8 +213,8 @@ msgstr "マテリアルのほかの値・テクスチャ・モデルは変えま
 msgid "This material slot has no source material."
 msgstr "このマテリアルスロットには元のマテリアルがありません。"
 
-msgid "The material is part of {0} (an imported model or a built-in asset), which Unity re-creates or does not save. Extract the material (the model's Materials tab) and use the extracted one."
-msgstr "このマテリアルは {0}（インポートしたモデルかビルトインのアセット）の一部で、Unity が作り直すか保存しません。マテリアルを取り出して（モデルの Materials タブ）、取り出したものを使ってください。"
+msgid "The material is part of {0} (an imported model or a built-in asset), which Unity re-creates or does not save."
+msgstr "このマテリアルは {0}（インポートしたモデルかビルトインのアセット）の一部で、Unity が作り直すか保存しません。"
 
 msgid "The material {0} is not open for editing (version control)."
 msgstr "マテリアル {0} は編集できる状態ではありません（バージョン管理）。"
@@ -240,13 +225,7 @@ msgstr "{0}: マテリアルのシェーダーに、同じ型のこのプロパ�
 msgid "Nothing to apply: no property of this material was changed in the Material panel."
 msgstr "反映するものがありません: マテリアルの欄でこのマテリアルのプロパティを変えていません。"
 
-msgid "The material changed since the list was made; nothing was applied. Try again."
-msgstr "一覧を作った後にマテリアルが変わったので、何も反映しませんでした。もう一度試してください。"
-
 # ── 未反映の変更の知らせ ──
-
-msgid "Discarded {0} preview-only material change(s) of materials that are not in this model (they were never applied)."
-msgstr "このモデルに無いマテリアルの、プレビューだけの変更 {0} 件を捨てました（反映はしていません）。"
 
 msgid "The Material panel still has {0} change(s) that are only in the preview (not applied to the material)."
 msgstr "マテリアルの欄に、プレビューだけの変更が {0} 件残っています（マテリアルには反映していません）。"

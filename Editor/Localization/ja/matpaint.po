@@ -25,9 +25,6 @@ msgstr "{0}: 塗らない（クリックで足す）"
 msgid "A material paints at least one channel."
 msgstr "マテリアルは少なくとも 1 つのチャンネルを塗ります。"
 
-msgid "While you edit a mask, strokes paint the mask only."
-msgstr "マスクの編集中は、ストロークはマスクだけを塗ります。"
-
 msgid "The foreground color (also in the Color panel)"
 msgstr "描画色（カラーのパネルと同じ）"
 
@@ -40,16 +37,10 @@ msgstr "ノーマルの値を向きで: +1 で右に傾く"
 msgid "The {0} value the stroke paints"
 msgstr "ストロークが塗る{0}の値"
 
-msgid "Showing {0}. The material brush paints the channels checked in Properties ▸ Brush ▸ Brush Material."
-msgstr "{0}を表示しています。マテリアルのブラシは、プロパティ ▸ ブラシ ▸ ブラシのマテリアル でチェックしたチャンネルを塗ります。"
-
 # ── プロパティ ▸ ノーマル（マテリアルで塗るとき） ──
 
 msgid "Material value (normal)"
 msgstr "マテリアルの値（ノーマル）"
-
-msgid "The material does not paint Normal now. Check it in Properties ▸ Brush ▸ Brush Material."
-msgstr "今のマテリアルはノーマルを塗りません。プロパティ ▸ ブラシ ▸ ブラシのマテリアル でチェックしてください。"
 
 # ── レイヤー: チャンネルごとの描画モードと不透明度 ──
 

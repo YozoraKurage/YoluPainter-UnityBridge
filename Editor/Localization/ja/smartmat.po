@@ -1,0 +1,190 @@
+# Japanese translation for YoluPainter: smart materials and smart masks (saving layers or a mask, the Assets panel's kinds, placing
+# them on the layer list, the canvas or a layer's mask) and the built-in ones.
+msgid ""
+msgstr ""
+"Language: ja\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# ── メニュー ──
+
+msgid "Save as Smart Material"
+msgstr "スマートマテリアルとして保存"
+
+msgid "Save Mask as Smart Mask"
+msgstr "マスクをスマートマスクとして保存"
+
+# ── アセットのパネル ──
+
+msgid "Smart Materials"
+msgstr "スマートマテリアル"
+
+msgid "Smart Masks"
+msgstr "スマートマスク"
+
+msgid "Smart mask"
+msgstr "スマートマスク"
+
+msgid "{0} layers"
+msgstr "{0} 層"
+
+msgid "Saved in this project"
+msgstr "このプロジェクトで保存"
+
+msgctxt "assets"
+msgid "Place"
+msgstr "置く"
+
+msgid "Apply to Mask"
+msgstr "マスクに置く"
+
+msgid "New layers above the selected layer, fitted to this texture set (one undo step)"
+msgstr "選んでいる層の上に、このテクスチャセットに合わせた新しい層として置く（1 回の取り消し）"
+
+msgid "Put it on the selected layer's mask, replacing the mask it has (one undo step)"
+msgstr "選んでいる層のマスクに置く（今のマスクと置き換える。1 回の取り消し）"
+
+msgid "Put into My Library (a .ylsmart file in your library folder)"
+msgstr "自分の置き場へ入れる（置き場のフォルダの .ylsmart ファイル）"
+
+msgid "Import into this project (it is then saved with the .ylp)"
+msgstr "このプロジェクトに取り込む（.ylp と一緒に保存される）"
+
+msgid "This file cannot be used: {0}"
+msgstr "このファイルは使えません: {0}"
+
+msgid "No smart material here matches the search."
+msgstr "検索に合うスマートマテリアルがここにはありません。"
+
+msgid "No smart mask here matches the search."
+msgstr "検索に合うスマートマスクがここにはありません。"
+
+msgid "Smart materials and smart masks are not Unity assets. Look in This Project, My Library or Built-in."
+msgstr "スマートマテリアルとスマートマスクは Unity のアセットではありません。このプロジェクト・自分の置き場・内蔵を見てください。"
+
+# ── 保存 ──
+
+msgid "{0} has no mask to save as a smart mask."
+msgstr "{0} にはスマートマスクとして保存するマスクがありません。"
+
+msgid "The layer has no mask to save as a smart mask."
+msgstr "この層にはスマートマスクとして保存するマスクがありません。"
+
+msgid "{0} mask"
+msgstr "{0} のマスク"
+
+msgid "Saving the smart material {0}…"
+msgstr "スマートマテリアル {0} を保存しています…"
+
+msgid "{0} was not saved: {1}"
+msgstr "{0} は保存しませんでした: {1}"
+
+msgid "It could not be put into My Library ({0})."
+msgstr "自分の置き場には入れられませんでした（{0}）。"
+
+msgid "Saved {0} as a smart material ({1} layers) in this project and in My Library ({2})."
+msgstr "{0} をスマートマテリアル（{1} 層）として、このプロジェクトと自分の置き場（{2}）に保存しました。"
+
+msgid "Saved {0} as a smart material ({1} layers) in this project."
+msgstr "{0} をスマートマテリアル（{1} 層）として、このプロジェクトに保存しました。"
+
+msgid "Saved {0} as a smart mask in this project and in My Library ({1})."
+msgstr "{0} をスマートマスクとして、このプロジェクトと自分の置き場（{1}）に保存しました。"
+
+msgid "Saved {0} as a smart mask in this project."
+msgstr "{0} をスマートマスクとして、このプロジェクトに保存しました。"
+
+# ── 置く ──
+
+msgid "Placed {0} as a group of {1} layers."
+msgstr "{0} を {1} 層のグループとして置きました。"
+
+msgid "Placed {0}."
+msgstr "{0} を置きました。"
+
+msgid "Put {0} on the mask of {1}, replacing its mask (Undo brings it back)."
+msgstr "{0} を {1} のマスクに置きました（前のマスクと置き換えました。取り消すと戻ります）。"
+
+msgid "Put {0} on {1} as its mask."
+msgstr "{0} を {1} のマスクとして置きました。"
+
+msgid "It was made at {0} × {1} and was resized to {2} × {3}."
+msgstr "{0} × {1} で作られたものを {2} × {3} にしました。"
+
+msgid "{0} generator(s) were pinned to this texture set's bake."
+msgstr "{0} 個の Generator をこのテクスチャセットのベイクに固定しました。"
+
+msgid "{0} is no longer in your library."
+msgstr "{0} はもう自分の置き場にありません。"
+
+msgid "{0} cannot be used: {1}"
+msgstr "{0} は使えません: {1}"
+
+msgid "A smart mask goes on a layer's mask, and a smart material is placed as layers."
+msgstr "スマートマスクは層のマスクに、スマートマテリアルは層として置きます。"
+
+msgid "It needs {0} MiB of layer pixels, more than the {1} MiB left under the layer pixel budget (Project Settings ▸ YoluPainter). Nothing was changed."
+msgstr "層の画素が {0} MiB 要り、レイヤーの画素の予算の残り {1} MiB を超えます（Project Settings ▸ YoluPainter）。何も変えていません。"
+
+msgid "The texture set would hold more than {0} layers. Nothing was placed."
+msgstr "テクスチャセットの層が {0} を超えてしまいます。何も置いていません。"
+
+msgid "A filter of it cannot run in this texture set: {0}"
+msgstr "このテクスチャセットでは動かせないフィルターがあります: {0}"
+
+msgid "It cannot be placed at this texture set's size: {0}"
+msgstr "このテクスチャセットの大きさには置けません: {0}"
+
+# ── 取り込む・消す ──
+
+msgid "{0} is already in this project as \"{1}\"; nothing was added."
+msgstr "{0} はこのプロジェクトに「{1}」として既にあります。何も足していません。"
+
+msgid "Imported {0} into this project."
+msgstr "{0} をこのプロジェクトに取り込みました。"
+
+msgid "Remove {0} from this project? Layers already placed from it stay as they are. Your library is not touched."
+msgstr "{0} をこのプロジェクトから消しますか？ すでに置いた層はそのまま残ります。自分の置き場は変えません。"
+
+# ── 内蔵（BuiltInSmartMaterials の名前と説明） ──
+
+msgid "Rusty metal"
+msgstr "錆びた金属"
+
+msgid "Bare steel with rust in the cavities and in patches towards the bottom, and shiny worn edges (reads AO, curvature and position)"
+msgstr "くぼみと下のほうに斑に錆があり、縁が擦れて光る鋼（AO・曲率・位置を読む）"
+
+msgid "Dirty paint"
+msgstr "汚れた塗装"
+
+msgid "Painted surface with grime in the cavities and towards the bottom, and dust on the faces that look up (reads AO, curvature, world normal and position)"
+msgstr "くぼみと下のほうに汚れ、上を向く面にほこりの付いた塗装（AO・曲率・ワールドの法線・位置を読む）"
+
+msgid "Chipped paint edges"
+msgstr "エッジの摩耗"
+
+msgid "Red paint chipped off the edges down to bare metal (reads curvature and position)"
+msgstr "赤い塗装の縁が剥げて地金が出たもの（曲率・位置を読む）"
+
+msgid "Edges"
+msgstr "エッジ"
+
+msgid "Shows the layer on convex edges, worn away in patches (curvature and position)"
+msgstr "出っ張った縁に層を見せ、ところどころ欠く（曲率・位置）"
+
+msgid "Cavities"
+msgstr "くぼみ"
+
+msgid "Shows the layer in cavities and occluded corners (AO, curvature and position)"
+msgstr "くぼみと奥まった角に層を見せる（AO・曲率・位置）"
+
+msgid "Facing up"
+msgstr "上向きの面"
+
+msgid "Shows the layer on faces that look up, like dust or snow (world normal and position)"
+msgstr "ほこりや雪のように、上を向く面に層を見せる（ワールドの法線・位置）"
+
+msgid "Bottom to top"
+msgstr "下から上へ"
+
+msgid "Fades the layer in from the bottom of the model to the top (position)"
+msgstr "モデルの下から上へ、層をだんだん見せる（位置）"

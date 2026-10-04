@@ -28,7 +28,7 @@ namespace Yozolab.YoluPainter.Editor.Preview
         public const string PackShaderName = "Hidden/YoluPainter/PreviewChannelPack";
         sealed class Slot
         {
-            public PreviewMaterialBinding Auto, Binding; public string RoutesKey;
+            public PreviewMaterialBinding Auto, Binding; public string RoutesKey, Locale;
             public Material Display;
             public int SyncedDirty = -1, SyncedEdits = -1; public Shader SyncedShader; public Material SyncedSource; public PreviewMaterialBinding SyncedBinding;
             public readonly Dictionary<string, RenderTexture> Packed = new Dictionary<string, RenderTexture>();
@@ -62,8 +62,8 @@ namespace Yozolab.YoluPainter.Editor.Preview
             if (slot < 0 || slot >= slots.Count) return null;
             var s = slots[slot]; var source = sourceOf(slot);
             bool resolved = false;
-            if (s.Auto == null || s.Auto.Source != source || source != null && (s.Auto.SourceDirtyCount != UnityEditor.EditorUtility.GetDirtyCount(source) || s.Auto.ShaderId != (source.shader != null ? source.shader.GetInstanceID() : 0)))
-            { s.Auto = PreviewMaterialBindings.Resolve(source); resolved = true; }
+            if (s.Auto == null || s.Locale != L.LocaleCode || s.Auto.Source != source || source != null && (s.Auto.SourceDirtyCount != UnityEditor.EditorUtility.GetDirtyCount(source) || s.Auto.ShaderId != (source.shader != null ? source.shader.GetInstanceID() : 0)))
+            { s.Auto = PreviewMaterialBindings.Resolve(source); s.Locale = L.LocaleCode; resolved = true; }
             var routes = routesOf?.Invoke(slot);
             string key = routes == null ? "" : string.Join("|", routes.Where(r => r != null).Select(r => r.Key));
             if (resolved || s.Binding == null || key != s.RoutesKey) { s.Binding = PreviewMaterialBindings.WithRoutes(s.Auto, routes); s.RoutesKey = key; }
@@ -89,18 +89,21 @@ namespace Yozolab.YoluPainter.Editor.Preview
             try
             {
                 Sync(s, b.Source, b);
+                var paintedProperties = new HashSet<string>();
                 foreach (var group in b.Channels.GroupBy(c => c.Property))
                 {
                     // まず元のテクスチャとキーワードに戻し（使わなくなったチャンネルが残らないように）、塗った中身があれば入れる
-                    s.Display.SetTexture(group.Key, b.Source.GetTexture(group.Key));
+                    var textureEdit = Edits?.Find(b.Source, group.Key);
+                    s.Display.SetTexture(group.Key, textureEdit != null && textureEdit.type == UnityEngine.Rendering.ShaderPropertyType.Texture ? textureEdit.texture : b.Source.GetTexture(group.Key));
                     foreach (var k in group.SelectMany(c => c.Keywords).Distinct()) SetKeyword(s.Display, k, b.Source.IsKeywordEnabled(k));
                     Texture bound = painted == null ? null : Pack(s, b, group.Key, group.ToList(), painted);
                     if (bound == null) continue;
                     s.Display.SetTexture(group.Key, bound);
+                    paintedProperties.Add(group.Key);
                     foreach (var k in group.Where(c => Has(painted, c)).SelectMany(c => c.Keywords).Distinct()) s.Display.EnableKeyword(k);
                 }
                 // マテリアルの欄で入れたキーワードは対応のキーワードより優先（複製を合わせ直したときに入っている）
-                Edits?.ApplyTo(b.Source, s.Display);
+                Edits?.ApplyTo(b.Source, s.Display, paintedProperties);
                 s.Reason = null;
             }
             catch (Exception ex) { s.Reason = L.Tr("The material view of this slot failed: {0}", ex.Message); ReleaseDisplay(s); }

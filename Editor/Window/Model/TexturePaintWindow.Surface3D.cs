@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using Yozolab.YoluPainter.Core;
@@ -42,10 +43,10 @@ namespace Yozolab.YoluPainter.Editor
             var mode=CombineOf(e); var pointer=e.mousePosition;
             TryAction(()=>
             {
-                if(!preview.HasModel){message="Load a model (or the demo cube) to pick on the 3D view.";return;}
-                if(!preview.TryPick(surfaceRect,pointer,out var hit)){message="Nothing of the model under the pointer.";return;}
-                if(hit.MaterialSlot!=materialSlot){OtherSlotPressed(hit.MaterialSlot);return;}
-                var region=SurfaceRegions.Selection(document,preview.Geometry,RegionIndex().Region(hit.TriangleIndex,surfacePick)); // 索引は SurfaceRegions.Region と同じ範囲（ジオメトリごとに 1 回作る）
+                if(!preview.HasModel){message=L.Tr("No model in the 3D view.");return;}
+                if(!preview.TryPick(surfaceRect,pointer,out var hit)){message=L.Tr("Nothing of the model under the pointer.");return;}
+                if(!PaintsSlot(hit.MaterialSlot)){OtherSlotPressed(hit.MaterialSlot);return;}
+                var region=SurfaceRegions.Selection(document,preview.Geometry,VisibleSurfaceRegion(RegionIndex().Region(hit.TriangleIndex,surfacePick)).ToList()); // 索引は SurfaceRegions.Region と同じ範囲（ジオメトリごとに 1 回作る）
                 if(selecting){ApplySelection(region,mode);message=document.Selection==null?"Nothing selected.":"Selected the "+surfacePick+" ("+mode+").";}
                 else FillRegion(region,surfacePick.ToString());
             });
@@ -56,7 +57,7 @@ namespace Yozolab.YoluPainter.Editor
         internal void FillRegion(SelectionMask region,string what)
         {
             var layer=document.GetLayer(selectedLayer);
-            if(!EditingMask&&layer.Kind!=LayerKind.Raster)throw new InvalidOperationException("Fill paints pixels: select a paint layer, or edit the layer's mask.");
+            if(!EditingMask&&layer.Kind!=LayerKind.Raster)throw new InvalidOperationException(L.Tr("Only a paint layer or a mask can be filled."));
             var b=GetBrush();
             if(!EditingMask)document.EnsurePixelsEditable(selectedLayer,b.Erase); // ロックで断るなら、チャンネルを有効にする前に
             if(!EditingMask&&!brush.material&&!layer.IsChannelEnabled(channel))document.SetChannelEnabled(selectedLayer,channel,true);

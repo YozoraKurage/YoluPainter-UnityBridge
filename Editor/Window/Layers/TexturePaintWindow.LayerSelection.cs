@@ -83,7 +83,7 @@ namespace Yozolab.YoluPainter.Editor
             {
                 var members = document.TopmostOf(ids);
                 int removed = document.Layers.Count(l => members.Any(m => m == l || IsInside(l, m)));
-                if (removed >= document.Layers.Count) { message = L.Tr("At least one layer must remain. Keep one layer out of the selection."); return; }
+                if (removed >= document.Layers.Count) { message = L.Tr("At least one layer must remain."); return; }
                 document.RemoveLayers(ids);
                 message = L.Tr("Deleted {0} layers.", members.Count);
             }
@@ -101,8 +101,8 @@ namespace Yozolab.YoluPainter.Editor
         internal void GroupSelectedLayers()
         {
             var members = document.TopmostOf(SelectedLayers);
-            if (members.Count == 0) { message = L.Tr("Select a layer first."); return; }
-            if (members.Any(m => m.ParentId != members[0].ParentId)) { message = L.Tr("Only layers in the same group can be grouped together. Move them into one group first."); return; }
+            if (members.Count == 0) { message = L.Tr("No layer is selected."); return; }
+            if (members.Any(m => m.ParentId != members[0].ParentId)) { message = L.Tr("Only layers in the same group can be grouped together."); return; }
             var group = document.GroupLayers(members.Select(m => m.Id).ToList(), L.Tr("Group") + " " + (document.Layers.Count(l => l.IsGroup) + 1));
             SelectSingleLayer(group.Id);
             if (members.Count > 1) message = L.Tr("Grouped {0} layers.", members.Count);
@@ -112,7 +112,7 @@ namespace Yozolab.YoluPainter.Editor
         internal void UngroupSelectedLayer()
         {
             var active = SelectedOrNull;
-            if (active == null || !active.IsGroup) { message = L.Tr("Select a group to ungroup it."); return; }
+            if (active == null || !active.IsGroup) { message = L.Tr("This is not a group."); return; }
             UngroupSelected();
         }
 
@@ -143,7 +143,7 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>選んでいる層の下のレイヤーでのクリッピングを切り替える（Ctrl+Alt+G）。</summary>
         internal void ToggleSelectedClipping()
         {
-            var active = SelectedOrNull; if (active == null) { message = L.Tr("Select a layer first."); return; }
+            var active = SelectedOrNull; if (active == null) { message = L.Tr("No layer is selected."); return; }
             document.SetLayerClipping(active.Id, !active.Clipping);
         }
 
@@ -237,7 +237,7 @@ namespace Yozolab.YoluPainter.Editor
         }
 
         /// <summary>レイヤーメニューのロックの項目（選んでいる層の全部に効く）。</summary>
-        void LockMenuItems(UnityEditor.GenericMenu m)
+        void LockMenuItems(PaintMenu m)
         {
             var ids = SelectedLayers; bool idle = stroke == null && !toolDragging;
             foreach (var (flag, _, _) in LockButtons)

@@ -117,9 +117,9 @@ namespace Yozolab.YoluPainter.Tests
                 CoreParallelism.MaxDegreeOfParallelism = c % 3 == 0 ? 1 : c % 3 == 1 ? 3 : 0;
                 foreach (var ch in new[] { PaintChannel.Color, PaintChannel.Normal, PaintChannel.Height })
                 {
-                    CpuCompositingTests.AssertSameBytes(FrozenCompositor.Region(d, ch, 0, 0, d.Width, d.Height), d.Composite(ch), "document " + c + " " + ch);
+                    PixelAssert.SameBytes(FrozenCompositor.Region(d, ch, 0, 0, d.Width, d.Height), d.Composite(ch), "document " + c + " " + ch);
                     int x = rnd.Next(d.Width), y = rnd.Next(d.Height), w = 1 + rnd.Next(d.Width - x), h = 1 + rnd.Next(d.Height - y);
-                    CpuCompositingTests.AssertSameBytes(FrozenCompositor.Region(d, ch, x, y, w, h), CpuCompositor.CompositeRegion(d, ch, x, y, w, h), "document " + c + " " + ch + " region");
+                    PixelAssert.SameBytes(FrozenCompositor.Region(d, ch, x, y, w, h), CpuCompositor.CompositeRegion(d, ch, x, y, w, h), "document " + c + " " + ch + " region");
                 }
                 var p = d.CompositePixel(PaintChannel.Color, d.Width / 2, d.Height / 3);
                 var e = FrozenCompositor.Region(d, PaintChannel.Color, d.Width / 2, d.Height / 3, 1, 1);
@@ -197,22 +197,22 @@ namespace Yozolab.YoluPainter.Tests
                         var pixels = new byte[w * h * 4 + 8]; rnd.NextBytes(pixels); // start 0: what is in it does not matter
                         var capture = new byte[w * h * 4];
                         CpuCompositor.CompositeRegions(d, ch, new[] { new CpuCompositor.CompositeJob(x, y, w, h, pixels, 0, k, capture) });
-                        CpuCompositingTests.AssertSameBytes(whole, Head(pixels, whole.Length), at + ": from transparent with a capture");
+                        PixelAssert.SameBytes(whole, Head(pixels, whole.Length), at + ": from transparent with a capture");
                         var hidden = new List<PaintLayer>();
                         for (int i = k; i < count; i++) { hidden.Add(plan[i].Base); d.SetLayerVisibility(plan[i].Base.Id, false); }
                         var lower = CpuCompositor.CompositeRegion(d, ch, x, y, w, h);
                         foreach (var l in hidden) d.SetLayerVisibility(l.Id, true);
-                        CpuCompositingTests.AssertSameBytes(lower, capture, at + ": the capture is the composite of the entries below k");
+                        PixelAssert.SameBytes(lower, capture, at + ": the capture is the composite of the entries below k");
                         var again = (byte[])capture.Clone();
                         CpuCompositor.CompositeRegions(d, ch, new[] { new CpuCompositor.CompositeJob(x, y, w, h, again, k) });
-                        CpuCompositingTests.AssertSameBytes(whole, again, at + ": from the capture in the pixels");
+                        PixelAssert.SameBytes(whole, again, at + ": from the capture in the pixels");
                         if (k == 0) continue; // from transparent there is no backdrop to read
                         // the backdrop in a bigger array, with a stride
                         int stride = w * 4 + 12, offset = 20; var backdrop = new byte[offset + h * stride];
                         for (int row = 0; row < h; row++) Buffer.BlockCopy(capture, row * w * 4, backdrop, offset + row * stride, w * 4);
                         var fromBackdrop = new byte[w * h * 4];
                         CpuCompositor.CompositeRegions(d, ch, new[] { new CpuCompositor.CompositeJob(x, y, w, h, fromBackdrop, k, backdrop, offset, stride) });
-                        CpuCompositingTests.AssertSameBytes(whole, fromBackdrop, at + ": from a backdrop array");
+                        PixelAssert.SameBytes(whole, fromBackdrop, at + ": from a backdrop array");
                     }
                     // several jobs at once
                     var jobs = new List<CpuCompositor.CompositeJob>(); var expected = new List<byte[]>();
@@ -224,7 +224,7 @@ namespace Yozolab.YoluPainter.Tests
                         jobs.Add(new CpuCompositor.CompositeJob(x, y, w, h, below, k)); expected.Add(CpuCompositor.CompositeRegion(d, ch, x, y, w, h));
                     }
                     CpuCompositor.CompositeRegions(d, ch, jobs);
-                    for (int j = 0; j < jobs.Count; j++) CpuCompositingTests.AssertSameBytes(expected[j], jobs[j].Pixels, $"document {c} {ch}: job {j} of several");
+                    for (int j = 0; j < jobs.Count; j++) PixelAssert.SameBytes(expected[j], jobs[j].Pixels, $"document {c} {ch}: job {j} of several");
                 }
             }
         }

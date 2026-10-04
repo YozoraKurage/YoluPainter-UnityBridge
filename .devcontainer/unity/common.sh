@@ -50,11 +50,25 @@ if [[ "${YOLUPAINTER_GPU:-1}" != 0 && -e /dev/dxg && -d /usr/lib/wsl/lib ]]; the
   # Dockerfile でビルドした新しい Mesa（d3d12 が OpenGL 4.6 を出す）があれば優先する。
   # システムの Mesa 23.2 は 4.2 止まりで、Unity が CopyTexture と compute shader を無効にする。
   # YOLUPAINTER_MESA=system でシステムの Mesa に戻せる。
-  if [[ "${YOLUPAINTER_MESA:-bundled}" != system && -f /opt/mesa-d3d12/lib/libGLX_mesa.so.0 ]]; then
+  # 比較ビルドは /tmp などに置き、同梱の /opt を変更せず選ぶ。
+  mesa_prefix="${YOLUPAINTER_MESA_PREFIX:-/opt/mesa-d3d12}"
+  if [[ "${YOLUPAINTER_MESA:-bundled}" != system && -f "$mesa_prefix/lib/libGLX_mesa.so.0" ]]; then
     # Mesa 24.2 の libGLX_mesa は libgallium を直接リンクするので、DRI ドライバの置き場は要らない。
-    export LD_LIBRARY_PATH="/opt/mesa-d3d12/lib:$LD_LIBRARY_PATH"
+    export LD_LIBRARY_PATH="$mesa_prefix/lib:$LD_LIBRARY_PATH"
     export __GLX_VENDOR_LIBRARY_NAME=mesa
   fi
+  # 同梱パッチが解釈する、3 系統それぞれの未使用バッファーキャッシュ上限（MiB）。
+  # 既定は上流と同じ 512。実測して選ぶ（64 は GLX で比較、Unity は未確認）。
+  export D3D12_BUFFER_CACHE_MB="${D3D12_BUFFER_CACHE_MB:-${YOLUPAINTER_GPU_CACHE_MB:-512}}"
+  # 同梱の診断パッチ。DRED をデバイス作成前に設定し、デバイス消失と HRESULT をログに残す。
+  export D3D12_DEVICE_DIAGNOSTICS="${D3D12_DEVICE_DIAGNOSTICS:-1}"
+  # 台をまたいで GPU の重い仕事（メッシュマップのベイクの Dispatch）を 1 つずつにする（2026-10-03: 4 つの Unity が同時に GPU のベイクを
+  # すると、GPU のドライバの層でまとめて落ちた。Editor/Gpu/GpuHeavyWorkGate.cs が読む。空にすれば止める）
+  export YOLUPAINTER_GPU_HEAVY_LOCK="${YOLUPAINTER_GPU_HEAVY_LOCK-$HOME/.cache/yolupainter-tests/gpu-heavy.lock}"
+  [[ -z "$YOLUPAINTER_GPU_HEAVY_LOCK" ]] || mkdir -p "$(dirname "$YOLUPAINTER_GPU_HEAVY_LOCK")"
+  # GPU のベイク（compute のレイ）を止めて CPU で焼く（2026-10-03: WSL の更新の後、1 台だけでも GPU のベイクの中で GPU のデバイスが消えて
+  # Unity が落ちるようになった。原因が分かるまで。GPU のベイクの試験は「使えない」で飛ぶ。YOLUPAINTER_GPU_BAKE_OFF= で戻す）
+  export YOLUPAINTER_GPU_BAKE_OFF="${YOLUPAINTER_GPU_BAKE_OFF-1}"
   # 複数の GPU があるときは MESA_D3D12_DEFAULT_ADAPTER_NAME（部分一致）で選べる。
 fi
 

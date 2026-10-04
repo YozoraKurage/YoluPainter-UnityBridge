@@ -17,7 +17,7 @@ namespace Yozolab.YoluPainter.Core
     public sealed class TriangleFill
     {
         readonly PaintDocument document; readonly BrushStroke stroke; readonly SelectionMask selection;
-        readonly Func<Rgba32, double, Rgba32> rule;
+        readonly Func<Rgba32, double, Rgba32>[] rules;
         readonly int width, height, tileSize;
         /// <summary>The samples covered so far, per tile (tile-local, row-major). A tile whose every pixel is fully covered shares
         /// <see cref="FullTile"/> (and keeps no memory of its own).</summary>
@@ -34,9 +34,12 @@ namespace Yozolab.YoluPainter.Core
 
         internal TriangleFill(PaintDocument document, BrushStroke stroke, Func<Rgba32, double, Rgba32> rule)
         {
-            this.document = document; this.stroke = stroke; this.rule = rule;
+            this.document = document; this.stroke = stroke; rules = new[] { rule };
             selection = document.Selection; width = document.Width; height = document.Height; tileSize = document.TileSize;
         }
+
+        internal TriangleFill(PaintDocument document, BrushStroke stroke, Func<Rgba32, double, Rgba32>[] rules)
+            : this(document, stroke, rules[0]) { this.rules = rules; }
 
         /// <summary>Adds triangles to the filled union. Returns true when a pixel changed. Coordinates must be finite (a triangle with
         /// almost no area, or off the canvas, covers nothing).</summary>
@@ -93,10 +96,11 @@ namespace Yozolab.YoluPainter.Core
             var same = new bool[batch]; var uniform = new bool[batch];
             for (int k = 0; k < batch; k++) { bytes[k] = new byte[n * 4]; selected[k] = new byte[n]; }
             bool any = false;
+            for (int target = 0; target < rules.Length; target++)
             for (int start = 0; start < coords.Count; start += batch)
             {
                 int count = Math.Min(batch, coords.Count - start), first = start;
-                for (int k = 0; k < count; k++) originals[k] = stroke.OriginalTile(coords[first + k]); // 写しと巻き戻しの予算
+                for (int k = 0; k < count; k++) originals[k] = stroke.OriginalTile(coords[first + k], target); // 写しと巻き戻しの予算
                 // ワーカーでは割り当てない。描く前の画素に、和集合の被覆率（と選択範囲の小さい方。SelectionCombine.Intersect と同じ）で式を当てる
                 CoreParallelism.For(count, degree, k =>
                 {
@@ -112,16 +116,16 @@ namespace Yozolab.YoluPainter.Core
                         if (selection != null) amount = hasSelection ? Math.Min(amount, sel[i]) : 0;
                         if (amount == 0) continue;
                         int o = i * 4; var before = new Rgba32(tile[o], tile[o + 1], tile[o + 2], tile[o + 3]);
-                        var next = rule(before, amount / 255.0);
+                        var next = rules[target](before, amount / 255.0);
                         tile[o] = next.R; tile[o + 1] = next.G; tile[o + 2] = next.B; tile[o + 3] = next.A;
                     }
-                    same[k] = TileStorage.SameAs(stroke.PeekSurfaceTile(coord), tile); // 読むだけ（置き換えは並列の後）
+                    same[k] = TileStorage.SameAs(stroke.PeekSurfaceTile(coord, target), tile); // 読むだけ（置き換えは並列の後）
                     uniform[k] = !same[k] && TileStorage.Uniformity(tile);
                 });
                 for (int k = 0; k < count; k++)
                 {
                     if (same[k]) continue;
-                    stroke.ReplaceTile(coords[first + k], TileStorage.FromBytes(bytes[k], uniform[k]));
+                    stroke.ReplaceTile(coords[first + k], TileStorage.FromBytes(bytes[k], uniform[k]), target);
                     any = true;
                 }
             }
@@ -140,14 +144,27 @@ namespace Yozolab.YoluPainter.Core
             MathUtil.RequireFinite(opacity, nameof(opacity)); if (opacity < 0 || opacity > 1) throw new ArgumentOutOfRangeException(nameof(opacity));
             EnsureNoStroke(); RefuseInBatch("A fill"); PaintLayer.ValidateChannel(channel);
             var layer = GetLayer(layerId);
-            if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException("Only paint layers have pixels to fill. Use the layer's mask for fill, adjustment and group layers.");
-            if (!layer.IsChannelEnabled(channel)) throw new InvalidOperationException("Enable the target channel before filling.");
+            if (layer.Kind != LayerKind.Raster) throw new InvalidOperationException("Only paint layers have pixels to fill.");
+            if (!layer.IsChannelEnabled(channel)) throw new InvalidOperationException("The target channel is not enabled.");
             RefuseLockedPixels(layer, erase);
             RefusePathLayer(layer);
             bool keepAlpha = KeepsAlpha(layer);
             var stroke = new BrushStroke(this, layer.GetChannel(channel), new BrushSettings { Color = color, Opacity = opacity, Erase = erase });
             activeStroke = stroke;
             return new TriangleFill(this, stroke, FillRule(color, opacity, erase, keepAlpha));
+        }
+
+        /// <summary>マテリアルの組を同じ三角形の和集合で塗る。式は単チャンネルと共通、有効化・取消・履歴・予算は組全体。</summary>
+        public TriangleFill BeginMaterialTriangleFill(Guid layerId, IReadOnlyList<ChannelPaint> channels, double opacity = 1, bool erase = false)
+        {
+            MathUtil.RequireFinite(opacity, nameof(opacity));
+            if (opacity < 0 || opacity > 1) throw new ArgumentOutOfRangeException(nameof(opacity));
+            if (channels == null) throw new ArgumentNullException(nameof(channels));
+            var material = new List<ChannelPaint>(channels);
+            var stroke = BeginMaterialStroke(layerId, material, new BrushSettings { Opacity = opacity, Erase = erase });
+            var rules = new Func<Rgba32, double, Rgba32>[material.Count];
+            for (int k = 0; k < material.Count; k++) rules[k] = FillRule(material[k].Value, opacity, erase, KeepsAlpha(GetLayer(layerId)));
+            return new TriangleFill(this, stroke, rules);
         }
 
         /// <summary>Starts a <see cref="TriangleFill"/> of a layer's mask: hides by amount × the union's coverage, or reveals with reveal,

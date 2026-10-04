@@ -28,7 +28,7 @@ namespace Yozolab.YoluPainter.Tests
                 Assert.That(window.IsStroking, Is.True, window.StatusMessage);
                 window.Preview.SetBlendShapeWeight(window.Preview.BlendShapes[0], 100);
                 window.ApplyPoseNow();
-                Assert.That(window.StatusMessage, Does.Contain("Finish the stroke"));
+                Assert.That(window.StatusMessage, Does.Contain("A stroke is in progress"));
                 Assert.That(window.Preview.SnapshotRevision, Is.EqualTo(revision), "the surface generation does not change mid-stroke");
                 Mouse(window, EventType.MouseUp, center);
                 window.ApplyPoseNow();

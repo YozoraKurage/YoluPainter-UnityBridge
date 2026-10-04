@@ -55,16 +55,17 @@ namespace Yozolab.YoluPainter.Editor
             if (resourcesHooked) return;
             resourcesHooked = true;
             resources.Changed += OnResourcesChanged;
+            resources.AddUsageProbe(ShelfBrushUsage);
             resources.AddUsageProbe(FillImageUsage); // 塗りつぶしの画像が使っているリソースは消さない（TexturePaintWindow.FillImages.cs）
             resources.BudgetBytes = PainterSettings.ResourceBudgetBytes;
         }
-        void UnhookResources() { if (resourcesHooked) { resources.Changed -= OnResourcesChanged; resources.RemoveUsageProbe(FillImageUsage); } resourcesHooked = false; }
+        void UnhookResources() { if (resourcesHooked) { resources.Changed -= OnResourcesChanged; resources.RemoveUsageProbe(FillImageUsage); resources.RemoveUsageProbe(ShelfBrushUsage); } resourcesHooked = false; }
 
         void OnResourcesChanged(ResourceChange change)
         {
             switch (change.Kind)
             {
-                case ResourceChangeKind.Reset: resourceChecks.Clear(); keptResourceCopies.Clear(); resourceChecksStale = true; break;
+                case ResourceChangeKind.Reset: shelfTipCache.Clear(); CancelSmartSave(); resourceChecks.Clear(); keptResourceCopies.Clear(); resourceChecksStale = true; break;
                 case ResourceChangeKind.Removed: resourceChecks.Remove(change.Id); keptResourceCopies.Remove(change.Id); setsRevision++; break;
                 default: setsRevision++; break;
             }
@@ -79,6 +80,7 @@ namespace Yozolab.YoluPainter.Editor
             HookResources();
             long budget = PainterSettings.ResourceBudgetBytes;
             resources.BudgetBytes = budget;
+            RefreshArchiveRoom();
             return resources.UsedBytes > budget
                 ? "This project's resources hold " + (resources.UsedBytes >> 20) + " MiB of pixels, above the " + (budget >> 20) + " MiB resource budget in Project Settings > YoluPainter; nothing more can be imported until the budget is raised."
                 : null;
@@ -94,10 +96,30 @@ namespace Yozolab.YoluPainter.Editor
 
         // ───────── 取り込み ─────────
 
-        void RequireNoStrokeForResources() { if (stroke != null) throw new InvalidOperationException(L.Tr("Finish the stroke first.")); }
+        void RequireNoStrokeForResources() { if (stroke != null || toolDragging) throw new InvalidOperationException(L.Tr("A stroke is in progress.")); }
 
         /// <summary>取り込む前に、画素の量で予算を確かめる（大きな画像を読んでから断らない）。同じ中身が既にあれば通るはずだが、読む前には
         /// 分からないので、予算に収まらなければ断る。</summary>
+        internal void RefreshArchiveRoom()
+        {
+            // 描いている間は測らない（文書の大きさを測る DocumentBinary.Measure はストロークの最中を断る。設定の変更はストロークの最中にも
+            // 届く）。リソースの取り込みはどれもストロークの最中を断り、その前にここを通るので、古い値のまま取り込むことは無い
+            if (stroke != null || textureSets.Any(s => s.Document.HasActiveStroke)) return;
+            // 合成の PNG は圧縮の効かない場合も数え、余分なチャンク・小さな状態のエントリ用に余裕を取る。
+            long reserved = 2L * 1024 * 1024;
+            foreach (var set in textureSets)
+            {
+                var d = set.Document;
+                reserved = checked(reserved + DocumentBinary.Measure(d));
+                long rgba = (long)d.Width * d.Height * 4;
+                reserved = checked(reserved + (rgba + rgba / 50 + d.Height + 4096) * YlpContent.UsedChannels(d).Count);
+                if (d.Selection != null) reserved = checked(reserved + (long)d.Width * d.Height + 65536);
+                reserved = checked(reserved + (set.ImportedOriginal?.LongLength ?? 0));
+                foreach (var map in set.MeshMaps.Maps) reserved = checked(reserved + map.PayloadBytes + 4096);
+            }
+            ImageResources.ArchiveBudgetBytes = Math.Max(0, YlpArchive.MaxTotalBytes - reserved);
+        }
+
         void CheckResourceRoom(long bytes, string what)
         {
             HookResources();
@@ -108,6 +130,7 @@ namespace Yozolab.YoluPainter.Editor
 
         ImageResource AddResource(string name, ImageContent content, ResourceOrigin origin, ResourceColorSpace colorSpace, IEnumerable<string> notes, string source)
         {
+            RefreshArchiveRoom();
             var image = ImageResources.Add(name, content, origin, colorSpace, out bool added);
             resourceChecks[image.Id] = new ResourceSourceCheck { State = origin.Kind == ResourceOriginKind.None ? ResourceSourceState.NotLinked : ResourceSourceState.Unchanged, Stamp = origin.SourceStamp, CurrentPath = origin.Path };
             var extra = notes?.Where(n => !string.IsNullOrEmpty(n)).ToList() ?? new List<string>();
@@ -128,7 +151,7 @@ namespace Yozolab.YoluPainter.Editor
             CheckResourceRoom((long)texture.width * texture.height * 4, "\"" + texture.name + "\"");
             string path = AssetDatabase.GetAssetPath(texture), guid = AssetDatabase.AssetPathToGUID(path);
             var read = UnityTextureReader.Read(texture);
-            var origin = ResourceOrigin.UnityAsset(guid, path, UnityTextureReader.Stamp(path), read.ThroughGpu);
+            var origin = ResourceOrigin.UnityAsset(guid, path, UnityTextureReader.Stamp(path), read.ThroughGpu, UnityResourceObject.LocalId(texture));
             return AddResource(texture.name, read.Content, origin, read.ColorSpace, read.Notes, path);
         }
 
@@ -147,7 +170,7 @@ namespace Yozolab.YoluPainter.Editor
         internal ImageResource ImportLibraryImage(string fileName)
         {
             RequireNoStrokeForResources();
-            string path = Path.Combine(PainterSettings.LibraryFolder, fileName);
+            string path = ResourceLibraryFolder.Resolve(PainterSettings.LibraryFolder, fileName);
             var read = ImageFiles.Read(path);
             CheckRoomFor(read.Content, fileName);
             return AddResource(Path.GetFileNameWithoutExtension(fileName), read.Content, ResourceOrigin.Library(fileName, read.Sha256, read.Length), ResourceColorSpace.Unspecified, new[] { read.Note }, L.Tr("My Library"));
@@ -197,6 +220,13 @@ namespace Yozolab.YoluPainter.Editor
         internal bool RemoveResource(Guid id)
         {
             RequireNoStrokeForResources();
+            if (ImageResources.TryGetBrush(id, out var heldBrush))
+            {
+                var usage = ImageResources.UsageOf(id);
+                if (usage != null) throw new ResourceRefusedException(ResourceRefusal.InUse, L.Tr("{0} is used by {1}; it was not removed.", heldBrush.Name, usage));
+                if (!Dialogs.Confirm(L.Tr("Remove resource?"), L.Tr("Remove {0} from this project?", heldBrush.Name), L.Tr("Remove"), L.Tr("Cancel"))) return false;
+                ImageResources.Remove(id); shelfTipCache.Remove(heldBrush.Hash); selectedAsset = null; return true;
+            }
             var image = ImageResources.Get(id);
             var use = ImageResources.UsageOf(id);
             if (use != null) throw new ResourceRefusedException(ResourceRefusal.InUse, L.Tr("{0} is used by {1}; it was not removed.", image.Name, use));
@@ -216,7 +246,7 @@ namespace Yozolab.YoluPainter.Editor
         /// </summary>
         internal Guid PlaceResourceAsLayer(Guid id)
         {
-            if (stroke != null) throw new InvalidOperationException(L.Tr("Finish the stroke first."));
+            if (stroke != null) throw new InvalidOperationException(L.Tr("A stroke is in progress."));
             var image = ImageResources.Get(id);
             long bytes = (long)document.Width * document.Height * 4;
             if (bytes > PainterSettings.StrokeBudgetBytes)
@@ -280,18 +310,18 @@ namespace Yozolab.YoluPainter.Editor
                     case ResourceOriginKind.UnityAsset:
                     {
                         string path = AssetDatabase.GUIDToAssetPath(o.AssetGuid);
-                        var texture = string.IsNullOrEmpty(path) ? null : AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+                        var texture = string.IsNullOrEmpty(path) ? null : UnityResourceObject.Load<Texture2D>(o.AssetGuid, o.LocalFileId);
                         if (texture == null) return new ResourceSourceCheck { State = ResourceSourceState.Missing, Reason = L.Tr("The Unity asset is gone ({0}); the copy in this project is used.", o.Path) };
                         string stamp = UnityTextureReader.Stamp(path);
                         if (stamp == o.SourceStamp) return new ResourceSourceCheck { State = ResourceSourceState.Unchanged, Stamp = stamp, CurrentPath = path };
                         if (previous != null && previous.Stamp == stamp && previous.State != ResourceSourceState.Missing) { previous.CurrentPath = path; return previous; }
                         var read = UnityTextureReader.Read(texture);
-                        return Compared(image, read.Content, ResourceOrigin.UnityAsset(o.AssetGuid, path, stamp, read.ThroughGpu), stamp, path);
+                        return Compared(image, read.Content, ResourceOrigin.UnityAsset(o.AssetGuid, path, stamp, read.ThroughGpu, o.LocalFileId), stamp, path);
                     }
                     case ResourceOriginKind.File:
                     case ResourceOriginKind.Library:
                     {
-                        string path = o.Kind == ResourceOriginKind.File ? o.Path : Path.Combine(PainterSettings.LibraryFolder, o.Path);
+                        string path = o.Kind == ResourceOriginKind.File ? o.Path : ResourceLibraryFolder.Resolve(PainterSettings.LibraryFolder, o.Path);
                         if (!File.Exists(path)) return new ResourceSourceCheck { State = ResourceSourceState.Missing, Reason = L.Tr("The file is gone ({0}); the copy in this project is used.", path) };
                         var info = new FileInfo(path);
                         string quick = info.Length + ":" + info.LastWriteTimeUtc.Ticks;
@@ -334,6 +364,7 @@ namespace Yozolab.YoluPainter.Editor
             var check = CheckResourceSource(image, resourceChecks.TryGetValue(id, out var previous) ? previous : null);
             resourceChecks[id] = check;
             if (check.State != ResourceSourceState.Changed) { message = L.Tr("{0} matches its source; nothing to update.", image.Name); return false; }
+            RefreshArchiveRoom();
             ImageResources.ReplaceContent(id, check.Current, check.CurrentOrigin);
             resourceChecks[id] = new ResourceSourceCheck { State = ResourceSourceState.Unchanged, Stamp = check.Stamp, CurrentPath = check.CurrentPath };
             keptResourceCopies.Remove(id);
@@ -364,7 +395,7 @@ namespace Yozolab.YoluPainter.Editor
                 return L.Tr("Updated {0} resource(s) from their sources.", updated) + (note != null ? " " + note : "");
             }
             foreach (var r in changed) KeepResourceCopy(r.Id);
-            return L.Tr("{0} resource(s) changed in their source; the copies in this project are kept (Assets panel ▸ Update to take the new pixels).", changed.Count) + (note != null ? " " + note : "");
+            return L.Tr("{0} resource(s) changed in their source; the copies in this project are kept.", changed.Count) + (note != null ? " " + note : "");
         }
 
         /// <summary>リソースの出どころを人に見せる短い文。</summary>

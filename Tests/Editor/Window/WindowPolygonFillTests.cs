@@ -215,7 +215,7 @@ namespace Yozolab.YoluPainter.Tests
         {
             window.Tool = TexturePaintWindow.PaintTool.PolygonFill; var before = Snapshot(); int steps = window.Document.UndoCount;
             Click(At(window, 300, 300));
-            Assert.That(window.StatusMessage, Does.Contain("Load a model")); Assert.That(window.IsStroking, Is.False);
+            Assert.That(window.StatusMessage, Does.Contain("No model")); Assert.That(window.IsStroking, Is.False);
             Assert.That(Snapshot(), Is.EqualTo(before)); Assert.That(window.Document.UndoCount, Is.EqualTo(steps));
         }
     }
