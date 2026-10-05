@@ -26,6 +26,11 @@
 # 標準出力にはサマリと失敗内容だけを出す。Unity の生ログ（数万行）は台のプロジェクトの Logs/ に残る。
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+# 親が子の要約をためていても、待機状況は直ちに表示する。
+if [[ -z "${YOLUPAINTER_PROGRESS_OPEN:-}" || ! -e /proc/$$/fd/3 ]]; then
+  exec 3>&2
+  export YOLUPAINTER_PROGRESS_OPEN=1
+fi
 readonly DAEMON_DIR="$UNITY_PROJECT/TestDaemon"
 source "$SCRIPT_DIR/daemon-lock.sh"
 
@@ -232,6 +237,7 @@ if ! daemon_client_lock_held && [[ -z "${YOLUPAINTER_DAEMON_SWITCHING:-}" ]]; th
     : # batch-gl の台が無い: 今までどおり台 0（デーモンかコールド）へ落ちる
   else
     waited=0
+    wait_started=$SECONDS
     while :; do
       for n in "${eligible[@]}"; do
         dir="$(runner_project "$n")/TestDaemon"; mkdir -p "$dir"
@@ -250,7 +256,18 @@ if ! daemon_client_lock_held && [[ -z "${YOLUPAINTER_DAEMON_SWITCHING:-}" ]]; th
         exec 8>&-
       done
       [[ $waited == 0 ]] && info "空いているテストの台（${eligible[*]}）を待っている…"
-      waited=1; sleep 1
+      if (( SECONDS - wait_started >= waited )); then
+        echo "台の空き待ち $(( SECONDS - wait_started )) 秒（前の依頼）" >&3
+        live_count=0
+        for n in "${eligible[@]}"; do
+          [[ "$(runner_live_mode "$n")" == down ]] && continue
+          live_count=$((live_count + 1))
+          python3 "$SCRIPT_DIR/daemon-request.py" status "$(runner_project "$n")/TestDaemon" >&3 2>&3
+        done
+        (( live_count > 0 )) || { warn "候補の台がすべて停止した"; exit 5; }
+        waited=$(( SECONDS - wait_started + 30 ))
+      fi
+      sleep 1
     done
   fi
 fi
@@ -276,6 +293,10 @@ daemon_alive() {
 # unity-do.sh）を 1 本ずつ通す（daemon-lock.sh）。switch-daemon.sh がモードを切り替えている間は、
 # コールドへ落ちずに切り替えが終わるのを待つ。
 acquire_daemon_client_lock
+# 前の呼び出し側が中断していても、実行中のソースを同期で書き換えない。
+if daemon_alive; then
+  python3 "$SCRIPT_DIR/daemon-request.py" wait "$DAEMON_DIR" >&3 2>&3 || exit $?
+fi
 if [[ "$UNITY_RUNNER" != 0 ]]; then
   daemon_alive || die "台 $UNITY_RUNNER の常駐 Unity が動いていない（runners.sh start $UNITY_RUNNER）"
   pkg="$(runner_package "$UNITY_RUNNER")"
@@ -330,64 +351,51 @@ if [[ -z "$FILTER" && -z "$CATEGORY" && $FULL == 0 && $GUI_ONLY == 0 && -z "${YO
 fi
 if daemon_alive; then
   info "デーモンへ依頼 (台 $UNITY_RUNNER、PID $(cat "$DAEMON_DIR/daemon.pid"))"
-  rm -f "$DAEMON_DIR/done" "$DAEMON_DIR/result.xml"
-  printf '{"filter":"%s","category":"%s"}' "$FILTER" "$CATEGORY" \
-    > "$DAEMON_DIR/request.json"
-  # 鼓動が長く止まっていたら、忙しいのではなく固まっている。死活は PID で見る(上の
-  # コメントのとおり、忙しい常駐を殺さないため)が、PID は主スレッドが止まった Unity にも
-  # 「生きている」と答える — ネイティブのダイアログが出るとそうなり、デーモン自身の
-  # 見張りも同じ主スレッドなので code 5 すら返せない(2026-09-18 実測、22 分無音)。
-  # 鼓動は 2 秒ごとなので、この閾値は「長いテストフレーム」より十分に長く取る。
-  # GUI の台では窓のテストが CPU で表示を合成するので、続けて実行されるテストの塊で鼓動が 3 分を超えて止まることがある（台 2 の全件で
-  # 2026-10-03 に 3 回。デーモンは 14 分で最後まで回し切っていたのに、依頼側が先に打ち切っていた）。GUI の台では 15 分待つ。
-  # 全体の待ちの上限も、GUI の台の全件（14 分ほど）が収まるよう 40 分に（batch-gl は 15 分のまま）
-  if [[ "$(runner_live_mode "$UNITY_RUNNER")" == gui ]]; then BEAT_STALE=900; WAIT_LIMIT=2400; else BEAT_STALE=180; WAIT_LIMIT=900; fi
-  readonly BEAT_STALE WAIT_LIMIT
-  beat_age() {
-    local f="$DAEMON_DIR/alive"
-    [[ -f "$f" ]] || { echo 99999; return; }
-    echo $(( $(date +%s) - $(stat -c %Y "$f") ))
+  # 古い受け口へ送って共有結果を自分の結果と誤認しない。
+  [[ "$(cat "$DAEMON_DIR/protocol" 2>/dev/null)" == "request-id-v1:$(cat "$DAEMON_DIR/daemon.pid")" ]] || {
+    warn "旧デーモン（依頼ID未対応）: test-daemon.sh restart（台 1 以上は runners.sh restart N）を。結果無し"; exit 3;
   }
-  stalled=0
-  for _ in $(seq 1 "$WAIT_LIMIT"); do
-    sleep 1
-    [[ -f "$DAEMON_DIR/done" ]] && break
-    daemon_alive || break
-    if [[ $(beat_age) -gt $BEAT_STALE ]]; then stalled=1; break; fi
-  done
-  if [[ $stalled == 1 ]]; then
-    warn "デーモンの鼓動が $(beat_age) 秒止まっている（主スレッドごと固まっている）。test-daemon.sh restart を"
-    exit 5
-  fi
-  if [[ ! -f "$DAEMON_DIR/done" ]] && daemon_alive; then
-    # 生きているのに 15 分応答が無い。止まった実行はデーモン自身が 1〜2 分で code 5 を返すので、
-    # ここに来るのはそれすら回らない状態。全件は正当に長い — GUI 常駐ではテストが起こす
-    # ドメインリロードで実行がやり直され、実測 8 分超になった(2026-09-16)。短くしない。
-    # 勝手に殺してコールドへ落ちると常駐とロック衝突するので、ここでは状況を言って止まるだけ。
-    warn "デーモンは生きているが $(( WAIT_LIMIT / 60 )) 分応答が無い。test-daemon.sh restart を検討 (ログ: $UNITY_LOG_DIR/daemon.log)"
-    exit 1
-  fi
-  if [[ -f "$DAEMON_DIR/done" ]]; then
-    code=$(head -1 "$DAEMON_DIR/done")
+  request_id="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+  done_path="$DAEMON_DIR/done-$request_id"
+  result_path="$DAEMON_DIR/result-$request_id.xml"
+  durations_path="$DAEMON_DIR/durations-$request_id.tsv"
+  python3 "$SCRIPT_DIR/daemon-request.py" cleanup "$DAEMON_DIR"
+  python3 - "$DAEMON_DIR" "$request_id" "$FILTER" "$CATEGORY" <<'PYREQUEST'
+import json, os, sys
+from pathlib import Path
+d, request_id, pattern, category = sys.argv[1:]
+p = Path(d) / ('request-' + request_id + '.tmp')
+p.write_text(json.dumps(dict(id=request_id, filter=pattern, category=category)))
+os.replace(p, Path(d) / 'request.json')
+PYREQUEST
+  info "依頼ID: $request_id / 結果: $result_path"
+  long_wait=$IS_FULL_RUN
+  [[ $FULL == 0 ]] || long_wait=1
+  short_limit=900
+  [[ "$(runner_live_mode "$UNITY_RUNNER")" != gui ]] || short_limit=2400
+  YOLUPAINTER_REQUEST_TIMEOUT="${YOLUPAINTER_REQUEST_TIMEOUT:-$short_limit}" \
+    python3 "$SCRIPT_DIR/daemon-request.py" wait "$DAEMON_DIR" "$request_id" "$long_wait" >&3 2>&3 || exit $?
+  if [[ -f "$done_path" ]]; then
+    code=$(head -1 "$done_path")
     if [[ "$code" == 3 ]]; then
-      warn "デーモン側でコンパイルエラー: $(sed -n 2p "$DAEMON_DIR/done")"
+      warn "デーモン側でコンパイルエラー: $(sed -n 2p "$done_path")"
       grep -o '[^ ]*\.cs([0-9]*,[0-9]*): error CS[0-9]*: .*' \
         "$UNITY_LOG_DIR/daemon.log" 2>/dev/null | sort -u | head -50 || true
       exit 3
     fi
     if [[ "$code" == 5 ]]; then
-      warn "デーモンが止まっていた: $(sed -n 2p "$DAEMON_DIR/done") — $DAEMON_DIR/trace.log を見てから test-daemon.sh restart を"
+      warn "デーモンが止まっていた: $(sed -n 2p "$done_path") — $DAEMON_DIR/trace.log を見てから test-daemon.sh restart を"
       exit 5
     fi
     echo ""
     summary_code=0
-    node "$SCRIPT_DIR/summarize-results.js" "$DAEMON_DIR/result.xml" || summary_code=$?
+    node "$SCRIPT_DIR/summarize-results.js" "$result_path" || summary_code=$?
     code="$(combined_test_exit_code "$code" "$summary_code")"
     # テストごとの時間を台ごとの履歴に残す（遅いテストを探す: test-durations.sh。新しい 200 回分だけ残す）
-    if [[ -s "$DAEMON_DIR/durations.tsv" ]]; then
+    if [[ -s "$durations_path" ]]; then
       hist="$HOME/.cache/yolupainter-tests/durations"; mkdir -p "$hist"
-      stamp="$(date +%Y%m%d-%H%M%S)-runner$UNITY_RUNNER-$(runner_live_mode "$UNITY_RUNNER")"
-      { printf '# filter=%s source=%s group=%s\n' "$FILTER" "${SOURCE_DIR:-${SHA:-/workspace}}" "${YOLUPAINTER_TEST_GROUP:-}"; cat "$DAEMON_DIR/durations.tsv"; } > "$hist/$stamp.tsv"
+      stamp="$(date +%Y%m%d-%H%M%S)-$request_id-runner$UNITY_RUNNER-$(runner_live_mode "$UNITY_RUNNER")"
+      { printf '# filter=%s source=%s group=%s\n' "$FILTER" "${SOURCE_DIR:-${SHA:-/workspace}}" "${YOLUPAINTER_TEST_GROUP:-}"; cat "$durations_path"; } > "$hist/$stamp.tsv"
       ls -1t "$hist"/*.tsv 2>/dev/null | tail -n +201 | xargs -r rm -f
     fi
     # 台の Unity はドメインの再読み込み（担当が worktree を替えて頼むたびの組み直し）ごとにメモリを溜め込む（2026-10-03: 再読み込み
@@ -417,13 +425,12 @@ if daemon_alive; then
         info "台 $UNITY_RUNNER を裏で再起動する（$reason。1〜2 分。ログ $RUNNERS_HOME/$UNITY_RUNNER/restart.log）"
         # setsid -f で頼んだ側のセッションとプロセスグループから切り離す（頼んだ側のコマンドが終わって、まとめて止められると、
         # 起動し直した Unity も止まり、台が落ちたままになった。2026-10-03）。ロックの fd 8 は引き継ぐので、終わるまで台は使われない
-        YOLUPAINTER_LOCK_HELD=1 setsid -f "$SCRIPT_DIR/runners.sh" restart "$UNITY_RUNNER" > "$RUNNERS_HOME/$UNITY_RUNNER/restart.log" 2>&1 < /dev/null
+        YOLUPAINTER_LOCK_HELD=1 setsid -f "$SCRIPT_DIR/runners.sh" restart "$UNITY_RUNNER" > "$RUNNERS_HOME/$UNITY_RUNNER/restart.log" 2>&1 < /dev/null 3>&-
       fi
     fi
     exit "$code"
   fi
-  warn "デーモンのプロセスが死んでいた。後始末してコールドで続行する"
-  rm -f "$DAEMON_DIR/daemon.pid" "$DAEMON_DIR/running.json" "$DAEMON_DIR/request.json"
+  warn "依頼の結果が無い"; exit 3
 fi
 
 mkdir -p "$UNITY_LOG_DIR"

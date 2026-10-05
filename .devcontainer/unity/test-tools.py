@@ -26,9 +26,10 @@ from pathlib import Path
 project = Path(sys.argv[sys.argv.index('-projectPath') + 1])
 d = project / 'TestDaemon'
 d.mkdir(parents=True, exist_ok=True)
-(d / 'launched').write_text(str(os.getpid()))
+(d / 'protocol').write_text('request-id-v1:' + str(os.getpid()))
 locks = [os.readlink('/proc/self/fd/' + f) for f in os.listdir('/proc/self/fd') if f.isdigit() and os.path.exists('/proc/self/fd/' + f)]
 (d / 'child-locks').write_text('\n'.join(p for p in locks if p.endswith('/client.lock')))
+(d / 'launched').write_text(str(os.getpid()))
 if '-quit' in sys.argv:
     sys.exit(0)
 while (d / 'hold-start').exists():
@@ -39,10 +40,13 @@ while not (d / 'quit').exists():
     if request.exists():
         try:
             value = json.loads(request.read_text())
-            request.unlink()
+            request.rename(d / 'running.json')
         except (OSError, ValueError):
             continue
         (d / 'seen.json').write_text(json.dumps(value))
+        suffix = '-' + value['id'] if value.get('id') else ''
+        if suffix:
+            (d / ('status' + suffix)).write_text('Fixture.LongTest')
         while (d / 'hold-request').exists():
             time.sleep(0.01)
         if 'op' in value or 'exec' in value:
@@ -55,8 +59,12 @@ while not (d / 'quit').exists():
             code = {'pass': 0, 'fail': 1, 'missing': 0, 'compile': 3, 'dead': 5}[state]
             if state in ('pass', 'fail'):
                 failed = int(state == 'fail')
-                (d / 'result.xml').write_text('<test-run total="1" passed="%d" failed="%d" skipped="0" duration="0.1"></test-run>' % (1 - failed, failed))
-        (d / 'done').write_text(str(code) + '\n仮の受け口\n')
+                (d / ('result' + suffix + '.xml')).write_text('<test-run total="1" passed="%d" failed="%d" skipped="0" duration="0.1"></test-run>' % (1 - failed, failed))
+        (d / 'running.json').unlink()
+        (d / ('done' + suffix)).write_text(str(code) + '\n仮の受け口\n')
+        if (d / 'overwrite-shared').exists():
+            (d / 'done').write_text('1\n別の依頼\n')
+            (d / 'result.xml').write_text('<test-run total="22" passed="0" failed="22"></test-run>')
     time.sleep(0.01)
 '''
 
@@ -68,7 +76,7 @@ class Fixture:
         self.scripts = self.root / 'scripts'
         self.scripts.mkdir()
         for name in ('run-tests.sh', 'runners.sh', 'test-daemon.sh', 'daemon-lock.sh',
-                     'unity-do.sh', 'exec-method.sh', 'sync-package.py', 'summarize-results.js', 'guard-gpu-bake.py'):
+                     'daemon-request.py', 'unity-do.sh', 'exec-method.sh', 'sync-package.py', 'summarize-results.js', 'guard-gpu-bake.py'):
             shutil.copy2(SCRIPTS / name, self.scripts / name)
         self.source = self.root / 'source'
         self.source.mkdir()
@@ -86,6 +94,8 @@ class Fixture:
         self.write('unity-editor', '#!/bin/bash\nexec python3 "$(dirname "$0")/server.py" -batchmode "$@"\n', True)
         self.write('xvfb-run', '#!/bin/bash\nshift 3\nshift\nexec python3 "$(dirname "$0")/server.py" "$@"\n', True)
         self.write('sleep', '#!/usr/bin/env python3\nimport sys,time\ntime.sleep(min(float(sys.argv[1]), 0.03))\n', True)
+        self.env['YOLUPAINTER_PROGRESS_INTERVAL'] = '0.1'
+        self.env.pop('YOLUPAINTER_PROGRESS_OPEN', None)
         self.env['PATH'] = str(self.scripts) + ':' + self.env['PATH']
         self.write('common.sh', '''set -euo pipefail
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -172,7 +182,8 @@ die() { echo "エラー: $*" >&2; exit 1; }
             for name in ('daemon.pid', 'launched'):
                 try:
                     pid = int((d / name).read_text())
-                    os.kill(pid, signal.SIGTERM)
+                    if pid != os.getpid():
+                        os.kill(pid, signal.SIGTERM)
                 except (OSError, ValueError):
                     pass
         for p in self.processes:
@@ -191,6 +202,228 @@ class ToolTests(unittest.TestCase):
         f = Fixture(**kwargs)
         self.addCleanup(f.close)
         return f
+
+    def test_full_waits_past_short_limit_and_stale_heartbeat(self):
+        for args in (['--release'], ['--full', '--filter', 'Fixture'], [],
+                     ['--filter', 'Shard']):
+            with self.subTest(args=args):
+                f = self.fixture()
+                f.server(1)
+                d = f.daemon(1)
+                (d / 'hold-request').touch()
+                env = {'YOLUPAINTER_REQUEST_TIMEOUT': '0.2'}
+                if args == ['--filter', 'Shard']:
+                    env['YOLUPAINTER_FULL_RUN'] = '1'
+                p = f.start([str(f.scripts / 'run-tests.sh'), '--runner', '1', *args], env)
+                f.wait(d / 'seen.json')
+                os.utime(d / 'alive', (time.time() - 600, time.time() - 600))  # 鼓動が 10 分古い（停止の判定 30 分の手前）
+                time.sleep(0.5)
+                self.assertIsNone(p.poll(), '全件を短い依頼の上限で打ち切った')
+                (d / 'hold-request').unlink()
+                out, _ = p.communicate(timeout=10)
+                self.assertEqual(0, p.returncode, out)
+                self.assertIn('Fixture.LongTest', out)
+
+    def test_full_wait_stops_on_absolute_limit_and_stalled_heartbeat(self):
+        for label, env, stale in (('絶対上限', {'YOLUPAINTER_FULL_TIMEOUT': '0.3'}, 0),
+                                  ('鼓動の停止', {'YOLUPAINTER_STALL_TIMEOUT': '60'}, 3600)):
+            with self.subTest(label):
+                f = self.fixture()
+                f.server(1)
+                d = f.daemon(1)
+                (d / 'hold-request').touch()
+                p = f.start([str(f.scripts / 'run-tests.sh'), '--runner', '1', '--release'], env)
+                f.wait(d / 'seen.json')
+                if stale:
+                    os.utime(d / 'alive', (time.time() - stale, time.time() - stale))
+                out, _ = p.communicate(timeout=10)
+                self.assertEqual(5, p.returncode, out)
+                self.assertTrue((d / 'running.json').exists(), '依頼は台に残す')
+
+    def test_previous_request_wait_is_bounded(self):
+        for label, env, stale in (('絶対上限', {'YOLUPAINTER_FULL_TIMEOUT': '0.3'}, 0),
+                                  ('鼓動の停止', {'YOLUPAINTER_STALL_TIMEOUT': '60'}, 3600)):
+            with self.subTest(label):
+                f = self.fixture()
+                f.server(1)
+                d = f.daemon(1)
+                (d / 'hold-request').touch()
+                (d / 'request.json').write_text(json.dumps({'op': 'snippet'}))
+                f.wait(d / 'seen.json')
+                if stale:
+                    os.utime(d / 'alive', (time.time() - stale, time.time() - stale))
+                p = f.start([str(f.scripts / 'run-tests.sh'), '--runner', '1', '--release'], env)
+                out, _ = p.communicate(timeout=10)
+                self.assertEqual(5, p.returncode, out)
+                self.assertIn('前の依頼が残っている', out)
+                self.assertFalse((d / 'request.json').exists(), '前の依頼の上に書かない')
+
+    def test_unity_do_and_exec_method_wait_for_orphan_request(self):
+        for name, args, env in (('unity-do.sh', ['--runner', '2', 'run', '-e', 'return 1;'], {}),
+                                ('exec-method.sh', ['Fixture.Run'], {'YOLUPAINTER_RUNNER': '2'})):
+            with self.subTest(name):
+                f = self.fixture()
+                f.server(2)
+                d = f.daemon(2)
+                (d / 'hold-request').touch()
+                (d / 'request.json').write_text(json.dumps({'op': 'snippet'}))  # ロックを持たない残りの依頼
+                f.wait(d / 'seen.json')
+                p = f.start([str(f.scripts / name), *args], env)
+                time.sleep(0.4)
+                self.assertFalse((d / 'request.json').exists(), '残った依頼の終了前に書いた')
+                (d / 'hold-request').unlink()
+                out, _ = p.communicate(timeout=10)
+                self.assertEqual(0, p.returncode, out)
+                # 上限つき: 固まった残りには 5 で止まる
+                f2 = self.fixture()
+                f2.server(2)
+                d2 = f2.daemon(2)
+                (d2 / 'hold-request').touch()
+                (d2 / 'request.json').write_text(json.dumps({'op': 'snippet'}))
+                f2.wait(d2 / 'seen.json')
+                p = f2.start([str(f2.scripts / name), *args], dict(env, YOLUPAINTER_FULL_TIMEOUT='0.3'))
+                out, _ = p.communicate(timeout=10)
+                self.assertEqual(5, p.returncode, out)
+                self.assertFalse((d2 / 'request.json').exists())
+
+    def test_cleanup_removes_old_orphans_but_not_current_ids(self):
+        f = self.fixture()
+        d = f.daemon(1)
+        keep, gone = 'a' * 32, 'b' * 32
+        (d / 'running.json').write_text(json.dumps({'id': keep}))
+        old = time.time() - 8 * 86400
+        names = ['result-%s.xml' % keep, 'status-%s' % keep, 'result-%s.xml' % gone, 'status-%s' % gone, 'request-%s.tmp' % gone]
+        for n in names:
+            (d / n).write_text('x')
+            os.utime(d / n, (old, old))
+        subprocess.run(['python3', str(f.scripts / 'daemon-request.py'), 'cleanup', str(d)], check=True)
+        self.assertEqual([True, True, False, False, False], [(d / n).exists() for n in names])
+
+    def test_orphan_previous_request_waits_before_source_sync(self):
+        f = self.fixture()
+        f.server(1)
+        d = f.daemon(1)
+        (d / 'hold-request').touch()
+        (d / 'request.json').write_text(json.dumps({'op': 'snippet'}))
+        f.wait(d / 'seen.json')
+        f.write('sync-package.py', 'from pathlib import Path; Path(__file__).with_name("synced").touch()\n')
+        p = f.start([str(f.scripts / 'run-tests.sh'), '--runner', '1', '--release'])
+        time.sleep(0.5)
+        self.assertFalse((f.scripts / 'synced').exists())
+        self.assertFalse((d / 'request.json').exists())
+        (d / 'hold-request').unlink()
+        out, _ = p.communicate(timeout=10)
+        self.assertEqual(0, p.returncode, out)
+        self.assertIn('snippet', out)
+        self.assertTrue((f.scripts / 'synced').exists())
+
+    def test_results_survive_later_request_and_shared_overwrite(self):
+        f = self.fixture(plan={'batch-gl:Later': 'fail'})
+        f.server(1)
+        d = f.daemon(1)
+        (d / 'overwrite-shared').touch()
+        rc, out = f.run('run-tests.sh', '--runner', '1', '--release')
+        self.assertEqual(0, rc, out)
+        self.assertIn('1 件 / 成功 1 / 失敗 0', out)
+        first_id = json.loads((d / 'seen.json').read_text())['id']
+        result = d / ('result-' + first_id + '.xml')
+        before = result.read_bytes()
+        rc, out = f.run('run-tests.sh', '--runner', '1', '--filter', 'Later')
+        self.assertEqual(1, rc, out)
+        self.assertEqual(before, result.read_bytes())
+        self.assertEqual('0', (d / ('done-' + first_id)).read_text().splitlines()[0])
+        self.assertEqual(2, len(list(d.glob('result-*.xml'))))
+
+    def test_dead_daemon_returns_without_cold_run(self):
+        f = self.fixture()
+        f.server(1)
+        d = f.daemon(1)
+        (d / 'hold-request').touch()
+        p = f.start([str(f.scripts / 'run-tests.sh'), '--runner', '1', '--release'])
+        f.wait(d / 'seen.json')
+        server = f.processes[0]
+        server.terminate()
+        server.wait(timeout=3)
+        out, _ = p.communicate(timeout=10)
+        self.assertEqual(5, p.returncode, out)
+        self.assertTrue((d / 'running.json').exists())
+
+    def test_old_protocol_is_rejected_before_sending(self):
+        f = self.fixture()
+        f.server(1)
+        d = f.daemon(1)
+        (d / 'protocol').unlink()
+        rc, out = f.run('run-tests.sh', '--runner', '1', '--release')
+        self.assertEqual(3, rc, out)
+        self.assertFalse((d / 'seen.json').exists())
+
+    def test_short_request_timeout_leaves_request_and_late_result(self):
+        f = self.fixture()
+        f.server(1)
+        d = f.daemon(1)
+        (d / 'hold-request').touch()
+        rc, out = f.run('run-tests.sh', '--runner', '1', '--filter', 'Fixture',
+                        env={'YOLUPAINTER_REQUEST_TIMEOUT': '0.2'})
+        self.assertEqual(5, rc, out)
+        request_id = json.loads((d / 'running.json').read_text())['id']
+        (d / 'hold-request').unlink()
+        f.wait(d / ('done-' + request_id))
+        self.assertTrue((d / ('result-' + request_id + '.xml')).exists())
+
+    def test_full_waits_while_own_request_is_queued(self):
+        f = self.fixture()
+        d = f.daemon(1)
+        identity = 'a' * 32
+        (d / 'daemon.pid').write_text(str(os.getpid()))
+        (d / 'running.json').write_text(json.dumps({'op': 'snippet'}))
+        (d / 'request.json').write_text(json.dumps({'id': identity}))
+        p = f.start(['python3', str(f.scripts / 'daemon-request.py'), 'wait', str(d), identity, '1'],
+                    {'YOLUPAINTER_REQUEST_TIMEOUT': '0.1'})
+        time.sleep(0.4)
+        self.assertIsNone(p.poll())
+        (d / ('done-' + identity)).write_text('0')
+        out, _ = p.communicate(timeout=10)
+        (d / 'daemon.pid').unlink()  # 後始末で試験自身を止めない
+        self.assertEqual(0, p.returncode, out)
+        self.assertIn('snippet', out)
+
+    def test_both_reports_progress_before_children_finish(self):
+        f = self.fixture()
+        for n in (1, 2):
+            f.server(n)
+            (f.daemon(n) / 'hold-request').touch()
+        p = f.start([str(f.scripts / 'run-tests.sh'), '--both', '--release', '--shards', '1'])
+        for n in (1, 2):
+            f.wait(f.daemon(n) / 'seen.json')
+        # 両方が保留中でも、親の要約出力を待たず進捗が届く。
+        import select
+        self.assertTrue(select.select([p.stdout], [], [], 2)[0])
+        line = p.stdout.readline()
+        self.assertIn('待機', line)
+        for n in (1, 2):
+            (f.daemon(n) / 'hold-request').unlink()
+        out, _ = p.communicate(timeout=10)
+        self.assertEqual(0, p.returncode, out)
+
+    def test_completed_results_retention(self):
+        f = self.fixture()
+        d = f.daemon(1)
+        for i in range(203):
+            identity = '%032x' % i
+            for name in ('done-' + identity, 'result-' + identity + '.xml'):
+                p = d / name
+                p.touch()
+                os.utime(p, (100 + i, 100 + i))
+        active = '%032x' % 0
+        (d / 'running.json').write_text(json.dumps({'id': active}))
+        recent = d / ('done-' + '%032x' % 203)
+        recent.touch()
+        rc, out = f.run('daemon-request.py', 'cleanup', str(d))
+        self.assertEqual(0, rc, out)
+        self.assertTrue((d / ('done-' + active)).exists())
+        self.assertFalse((d / ('result-' + '%032x' % 1 + '.xml')).exists())
+        self.assertTrue(recent.exists())
+        self.assertEqual(201, len(list(d.glob('done-*'))))
 
     def test_plain_full_run_is_refused_for_agents(self):
         # 担当の絞り込みの無い全件は終了コード 6 で断り、--priority・--release・--full と絞り込みは断らない（2026-10-03 の決まり）

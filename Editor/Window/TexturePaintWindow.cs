@@ -99,6 +99,7 @@ namespace Yozolab.YoluPainter.Editor
             EditorApplication.playModeStateChanged+=PlayModeChanged;
             CheckRecoveryStorage();
             NotifyBrushAlphaMigration();
+            StandalonePrompt.OnPaintWindowOpened(); // スタンドアロン版のおすすめ（エディタの起動ごとに 1 回）
         }
         /// <summary>設定のメモリ予算をドキュメントに入れる。今の画素がすでに予算を超えているときは画素を捨てず、予算を今の量まで
         /// 広げてそう知らせる。</summary>
