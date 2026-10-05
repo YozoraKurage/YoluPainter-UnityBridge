@@ -32,7 +32,9 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             "_MainTex", "_MainColorAdjustMask", "_AlphaMask", "_BumpMap", "_ShadowStrengthMask", "_ShadowBorderMask", "_ShadowBlurMask",
             "_ShadowColorTex", "_Shadow2ndColorTex", "_Shadow3rdColorTex", "_EmissionMap", "_EmissionBlendMask", "_Emission2ndMap",
             "_Emission2ndBlendMask", "_MatCapTex", "_MatCapBlendMask", "_MatCap2ndTex", "_MatCap2ndBlendMask", "_RimColorTex", "_OutlineTex",
-            "_OutlineWidthMask",
+            "_OutlineWidthMask", "_Main2ndTex", "_Main2ndBlendMask", "_Main3rdTex", "_Main3rdBlendMask", "_Bump2ndMap", "_Bump2ndScaleMask",
+            "_RimShadeMask", "_BacklightColorTex", "_SmoothnessTex", "_MetallicGlossMap", "_ReflectionColorTex", "_GlitterColorTex",
+            "_AnisotropyTangentMap", "_AnisotropyScaleMask", "_AnisotropyShiftNoiseMask", "_MatCapBumpMap", "_MatCap2ndBumpMap",
         };
 
         /// <summary>値を送るマテリアルか（確かめた lilToon で、Live Link の流し込みの決まりが lilToon と決めたもの）。似た名前のシェーダーは入らない。</summary>
