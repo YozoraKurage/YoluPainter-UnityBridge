@@ -405,7 +405,7 @@ int 不透明度の分岐点数（2〜32）、各点の double 位置・double �
 
 実物のアバターの PSD を取り込んだ文書は、正本だけで 1 GB を超えることがある。スタンドアロン版は、上の外側の上限（1 エントリ 512 MiB・合計 768 MiB・
 1000 エントリ・zip64 なし）に収まらないものだけを次の 2 つで書く。収まるプロジェクトは今までと同じバイト列で書く（外側も正本も変えない）。各欄の並びと選んだ
-理由の全文は YoluPainter-rs の `crates/yolu-io/README.md`（「大きな文書（正本の版 26）と大きな .ylp（`YLP-4`）」）。
+理由の全文はスタンドアロン版（[YoluPainter](https://github.com/YozoraKurage/YoluPainter)）の `crates/yolu-io/README.md`（「大きな文書（正本の版 26）と大きな .ylp（`YLP-4`）」）。
 
 - **正本の版 26（分けた正本）**: 中身の正本（中の版 21〜25 の並び）が 512 MiB を超える文書だけ。`sets/<ID>/document.utpaint` は、`DOTPAINT`・int 26・int 中の版・
   int 部分の数・中の版の並び（ID から最後まで）から `Bytes` の値（色・画素。先頭の識別子のほか全部）を抜いたもの。`Bytes` の値は並びの順に同じセットの
