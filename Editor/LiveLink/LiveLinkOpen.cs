@@ -75,7 +75,8 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         /// <summary>場所が決まらないときに選んでもらう（空・null は取消）。</summary>
         public Func<string> ChooseExe = LiveLinkOpen.ChooseExeWithPanel;
         public Action<string> RememberExe = path => LiveLinkSettings.StandalonePath = path;
-        public Func<string, ILaunchedStandalone> Launch = LiveLinkOpen.StartProcess;
+        /// <summary>スタンドアロンを起動する（実行ファイル・つなぎ先の名前）。名前は、今のつなぎ先の名前（<see cref="LinkName"/>）をそのまま渡す。</summary>
+        public Func<string, string, ILaunchedStandalone> Launch = LiveLinkOpen.StartProcess;
         /// <summary>進み具合（文・0〜1）を出して、取り消されたら true を返す。終わるときは文が null。null なら出さない。</summary>
         public Func<string, float, bool> Progress;
     }
@@ -288,7 +289,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             }
             try
             {
-                process = o.Launch(exe);
+                process = o.Launch(exe, o.LinkName);
             }
             catch (Exception e) when (e is Win32Exception || e is IOException || e is InvalidOperationException || e is UnauthorizedAccessException)
             {
@@ -342,10 +343,18 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
 
         // ───────── 外との境目の既定 ─────────
 
-        /// <summary>スタンドアロンの起動の仕方: 場所のフォルダを作業場所にして、<c>--livelink</c>（設定に関わらず待ち受ける）を付ける。</summary>
-        internal static ProcessStartInfo StartInfo(string exe)
+        /// <summary>スタンドアロンがつなぎ先の名前を受け取る環境変数（スタンドアロンは起動時にこれを読む。名前に使える形でなければ既定の名前）。</summary>
+        internal const string LinkNameVariable = "YOLUPAINTER_LINK_NAME";
+
+        /// <summary>
+        /// スタンドアロンの起動の仕方: 場所のフォルダを作業場所にして、<c>--livelink</c>（設定に関わらず待ち受ける）を付け、つなぎ先の名前を
+        /// 環境変数 <see cref="LinkNameVariable"/> で渡す。Preferences で Link name を変えていても、起動したスタンドアロンが同じ名前で待ち受ける
+        /// （渡さないと既定の名前で待ち受け、Unity は変えた名前を探し続けて時間切れになる）。Unity の環境に同じ変数があっても、今の名前で上書きする。
+        /// </summary>
+        internal static ProcessStartInfo StartInfo(string exe, string linkName)
         {
             var info = new ProcessStartInfo(exe, "--livelink") { UseShellExecute = false };
+            info.EnvironmentVariables[LinkNameVariable] = linkName;
             string dir = Path.GetDirectoryName(exe);
             if (!string.IsNullOrEmpty(dir)) info.WorkingDirectory = dir;
             // Linux: Unity が自分のライブラリの場所を足している LD_LIBRARY_PATH を、そのまま子に渡さない（別の版のライブラリを読ませない）
@@ -373,9 +382,9 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
 
         internal static IOpenLink ConnectSession(string linkName) => new SessionLink(LiveLinkSession.Start(linkName));
 
-        internal static ILaunchedStandalone StartProcess(string exe)
+        internal static ILaunchedStandalone StartProcess(string exe, string linkName)
         {
-            var process = Process.Start(StartInfo(exe));
+            var process = Process.Start(StartInfo(exe, linkName));
             return process == null ? null : new LaunchedProcess(process);
         }
 

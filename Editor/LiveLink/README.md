@@ -9,7 +9,8 @@ Live Link shows the textures painted in the standalone YoluPainter on a model in
 - Available when the selected object is in the scene (not a Prefab asset) and has an active `MeshRenderer` or `SkinnedMeshRenderer`
   with a mesh. Otherwise the menu item is greyed out, and the window's button says why in its tooltip.
 - If Live Link is connected it sends the model. If not, it connects; if nobody answers on the link name, it starts the standalone
-  with `--livelink`, tries again until the standalone answers, then connects and sends the model. The wait is shown in a progress bar
+  with `--livelink` and the current link name in the environment variable `YOLUPAINTER_LINK_NAME` (so a changed link name is the one the
+  standalone listens on), tries again until the standalone answers, then connects and sends the model. The wait is shown in a progress bar
   that can be cancelled, and it gives up 60 seconds after the connection was started (counted again from the start of the
   standalone), also when a peer accepts the connection but never answers.
 - Whether a standalone is there is decided by trying to connect, not by looking for its key file. A standalone that answers on the
