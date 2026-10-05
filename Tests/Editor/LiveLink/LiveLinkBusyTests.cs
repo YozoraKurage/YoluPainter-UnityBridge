@@ -294,9 +294,10 @@ namespace Yozolab.YoluPainter.Tests
         {
             RequireGraphics();
             var root = ModelOf();
-            Connect(LiveLinkBridge.FeatureMaterialValues);
+            Connect(LiveLinkBridge.FeatureMaterialValues | LiveLinkBridge.FeatureOriginalTextures);
             SendFirstModel(root);
-            StallAndFill();
+            // 重しは元の絵（値は置き換えない）。スロットの絵だと、ブリッジは重しを外して収まるので、「入らない」前提が成り立たない
+            StallAndFill(asOriginals: true);
             var snapshot = new LiveLinkMaterialValues.Snapshot { Shader = "Hidden/lilToon", Source = "test" };
             snapshot.Slots.Add(new LiveLinkMaterialValues.Slot { Name = "_MatCapTex", Texture = Solid(new Color32(10, 20, 30, 255), 64), Srgb = true, Identity = 7 });
             var sentSlots = new Dictionary<string, ulong>();
@@ -309,11 +310,11 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(refused.Retry, Is.False);
             // 空いたら、値と絵が届く
             Resume();
-            uint values = LiveLinkTestServer.Stats(server).values;
+            var before = LiveLinkTestServer.Stats(server);
             var sent = LiveLinkMaterialValues.Send(session.Handle, 0, snapshot, sentSlots, ref budget);
             Assert.That((sent.Result, sent.Textures, sent.Retry), Is.EqualTo((1, 1, false)));
             Assert.That(sentSlots["_MatCapTex"], Is.EqualTo(7UL));
-            Pump(() => LiveLinkTestServer.Stats(server).values == values + 1 && LiveLinkTestServer.Stats(server).textures >= 3, "the values and the picture");
+            Pump(() => LiveLinkTestServer.Stats(server).values == before.values + 1 && LiveLinkTestServer.Stats(server).textures == before.textures + 1, "the values and the picture");
             Assert.That(LiveLinkTestServer.Texture(server, 0, "_MatCapTex", out var texture), Is.True);
             Assert.That((texture.width, texture.height), Is.EqualTo((64u, 64u)));
         }
