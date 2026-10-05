@@ -70,6 +70,31 @@ values", and the standalone drops what it had. Nothing is written to the materia
 The values are sent only when the standalone has the *material values* feature mark (`ylb_common_features`); an older standalone
 gets nothing new. The library functions are `ylb_values_*` and `ylb_texture_send` (library version 4).
 
+## Original textures
+
+When the standalone has the *original textures* feature mark, Live Link also sends what is already in the slot the standalone paints (the Color
+property of each material, such as `_MainTex`), so that a new texture set starts from it instead of an empty layer. The standalone puts the
+picture at the bottom of the set as a layer named "Original", and the painting goes over it. The model in the scene does not change when
+the link is made: the standalone shows a set in Unity only after the original is in it, so nothing turns black, white or checkered.
+
+- Sent after the model for each material whose Color property holds a texture, a few textures per editor update. The standalone adds it only
+  to a texture set it has just created (or to the untouched first set of a new unsaved project), never to a set that has painting, was edited
+  while waiting, or comes from a project the user opened. Nothing is added to the undo history.
+- Read without changing anything (the texture, its import settings and the material are not written and the texture is not made readable).
+  From the source file for PNG, TGA and JPG when the import settings keep its pixels: the real values, with the RGB of transparent pixels.
+  Otherwise (PSD, or an import that changes the picture: normal map, sprite, alpha source, "Alpha Is Transparency", a PNG with a gamma
+  chunk that Unity applies, …) from the imported texture: its CPU values,
+  or, when it is not readable, drawn into a temporary `RenderTexture` and read back (a compressed texture gives the values the GPU decodes,
+  not the file's). A picture that is not an asset is drawn and read back. The standalone shows a mark on a layer that was read through the GPU
+  or from a compressed texture, and says if it scaled the picture to the size of the set.
+- A texture used by several materials is read once; each material still gets its own copy of the pixels, and each copy counts against the
+  1 GiB below (the standalone keeps a separate set per material). The originals are sent again whenever the model is sent again (a changed
+  hierarchy, or the link made again after a script reload).
+- At most 8192 pixels on a side (a larger texture is reported as too large, not shrunk) and 1 GiB of pixels in one send. A texture that cannot
+  be read or sent is reported with its reason, and the set starts empty. The standalone gives up waiting after 30 seconds without progress.
+- Sent only when the standalone has the feature mark (`ylb_common_features`); an older standalone is not sent anything and shows its sets
+  at once as before. The library functions are `ylb_original_send` and `ylb_pending_bytes` (library version 5).
+
 ## Transport
 
 The native library in `Plugins/LiveLink` (`libyolu_bridge.so` for the Linux editor, `yolu_bridge.dll` for the Windows editor,
@@ -102,7 +127,7 @@ versions that do not overlap are refused.
   than the version this side asks for (or does not tell its version, because it predates this check), or one side has features the other
   lacks. The mark's tooltip names both versions, which side to update (and to which version) and the features that cannot be used. The
   state itself stays a short name. The mark is shown only while the link is up; it goes when the standalone is closed.
-- A feature mark is a bit in the greeting (material values, assets, project transfer, animation). The marks both sides set are the
+- A feature mark is a bit in the greeting (material values, assets, project transfer, animation, original textures). The marks both sides set are the
   features usable on this link; a command that needs a mark is sent only when the other side has it (`ylb_common_features`).
 - When the protocol versions do not overlap the standalone refuses, and the window's warning says which side to update and to which
   version ("The Unity package must be 0.6.0 or newer.").

@@ -30,13 +30,25 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         public int MaterialUpdatesSent { get; private set; }
         /// <summary>lilToon の値を送ったマテリアルの数の合計（試験・表示用）。</summary>
         public int ValuesSent { get; private set; }
+        /// <summary>送った元の絵（画素の付いたもの）の数の合計（試験・表示用）。</summary>
+        public int OriginalsSent { get; private set; }
+        /// <summary>元の絵の様子だけを送った（読めない・大きすぎる・予算を超える）数の合計（試験・表示用）。</summary>
+        public int OriginalsDeclined { get; private set; }
+        /// <summary>送り終えていない元の絵があるか（試験が待つ）。</summary>
+        public bool OriginalsPending => originals != null;
         /// <summary>つながりが終わった知らせ（断られた・つなげなかった・相手が閉じた）の種類。終わっていなければ null。</summary>
         public LiveLinkEventKind? EndedBy { get; private set; }
         /// <summary>終わった知らせの数値（断られたときは YoluPainter の RejectCode: 1 版が合わない・2 ほかの Unity とつながっている・3 鍵）。</summary>
         public int EndedCode { get; private set; }
         public event Action Changed;
 
+        /// <summary>元の絵を 1 回の更新で読んで送る時間の目安（ミリ秒。試験が 0 にすると 1 回の更新で 1 枚ずつになる）。</summary>
+        internal double OriginalsPumpMs = LiveLinkOriginals.PumpMs;
+        /// <summary>積んだ命令がこのバイト数以上たまっている間は、次の元の絵を読まない（試験が 0 にすると送りが止まったまま残る）。</summary>
+        internal long OriginalsPendingLimit = LiveLinkOriginals.PendingLimit;
+
         ulong lastSerial; bool pending; double nextCheck; bool disposed;
+        LiveLinkOriginals.Sender originals;
 
         LiveLinkSession(string linkName, ulong handle) { LinkName = linkName; Handle = handle; }
 
@@ -106,6 +118,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             if (EditorUtility.IsPersistent(root)) return L.Tr("A Prefab asset cannot be chosen.");
             if (Status != LiveLinkStatus.Connected) return L.Tr("Not connected to the standalone yet.");
             Display.Clear();
+            originals = null; // 前のモデルの元の絵の送りは、モデルを替える時点で取り消す（送り直しが失敗しても残さない）
             Model?.Dispose();
             Model = LiveLinkModel.Capture(root);
             if (Model.Meshes.Count == 0) { var none = L.Tr("{0} has no active mesh renderers to send.", root.name); Model.Dispose(); Model = null; return none; }
@@ -114,6 +127,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             ModelsSent++;
             AddLog(L.Tr("Sent {0}: {1} renderers, {2} materials, {3} vertices.", root.name, Model.Meshes.Count, Model.Materials.Count, Model.VertexTotal));
             SendValues(true);
+            StartOriginals();
             nextCheck = EditorApplication.timeSinceStartup + CheckInterval;
             Changed?.Invoke();
             return null;
@@ -122,6 +136,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         /// <summary>送ったモデルを閉じる（PropertyBlock を外し、スタンドアロンに知らせる）。</summary>
         public void CloseModel()
         {
+            originals = null;
             Display.Clear();
             if (Model != null && Handle != 0) LiveLinkBridge.ModelClose(Handle);
             Model?.Dispose();
@@ -141,6 +156,33 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                 ? L.Tr("Sent the lilToon values of {0} materials and {1} textures.", r.Materials, r.Textures)
                 : L.Tr("Sent the lilToon values of {0} materials.", r.Materials));
             Changed?.Invoke();
+        }
+
+        /// <summary>元の絵（Color の流し込み先の元のテクスチャ）を送る列を作る。スタンドアロンが機能の印（元のテクスチャ）を持たなければ作らない（読みもしない）。
+        /// 送るのはエディタの更新ごとに少しずつ（<see cref="PumpOriginals"/>）。スタンドアロンは、揃うまでそのセットを出さないので、つないだ瞬間に表示は変わらない。</summary>
+        void StartOriginals()
+        {
+            originals = null;
+            if (Model == null || (CommonFeatures & LiveLinkBridge.FeatureOriginalTextures) == 0) return;
+            var plan = LiveLinkOriginals.Plan(Model);
+            if (plan.Count > 0) originals = new LiveLinkOriginals.Sender(Model, plan);
+        }
+
+        void PumpOriginals()
+        {
+            var sender = originals;
+            if (sender == null) return;
+            if (Model == null || Model.Generation != sender.Generation || Status != LiveLinkStatus.Connected) { originals = null; return; }
+            var r = sender.Pump(Handle, OriginalsPumpMs, OriginalsPendingLimit);
+            if (r.Problem != null) AddLog(r.Problem);
+            OriginalsSent += r.Images; OriginalsDeclined += r.Declined;
+            if (r.Images + r.Declined > 0) Changed?.Invoke();
+            if (!sender.Done) return;
+            originals = null;
+            if (sender.Images + sender.Declined > 0)
+                AddLog(sender.Declined > 0
+                    ? L.Tr("Sent the original textures of {0} materials ({1} not sent).", sender.Images + sender.Declined, sender.Declined)
+                    : L.Tr("Sent the original textures of {0} materials.", sender.Images));
         }
 
         void AddLog(string text)
@@ -165,6 +207,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                     default: if (!string.IsNullOrEmpty(e.Text)) AddLog(e.Text); break;
                 }
             }
+            PumpOriginals();
             ulong serial = LiveLinkBridge.Serial(Handle);
             if (Display.RebuildLost(Handle)) pending = true;
             if (serial != lastSerial || pending)
@@ -230,6 +273,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             if (disposed) return;
             disposed = true;
             EditorApplication.update -= Tick;
+            originals = null;
             Display.Dispose();
             Model?.Dispose(); Model = null;
             LiveLinkBridge.Disconnect(Handle);

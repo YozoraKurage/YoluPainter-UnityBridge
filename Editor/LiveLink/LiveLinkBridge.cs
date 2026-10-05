@@ -25,7 +25,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
     internal static unsafe class LiveLinkBridge
     {
         /// <summary>この C# が知っているブリッジの版。</summary>
-        public const uint ExpectedAbi = 4;
+        public const uint ExpectedAbi = 5;
         const string LoadedKey = "Yozolab.YoluPainter.LiveLink.BridgeLoaded";
         static bool s_checked; static string s_problem; static uint s_abi, s_protocols;
 
@@ -234,7 +234,30 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             fixed (byte* p = b) fixed (byte* px = pixels)
                 return LiveLinkNative.ylb_texture_send(handle, material, p, b.Length, (uint)width, (uint)height, srgb ? 1 : 0, px, pixels?.Length ?? 0);
         }
+
+        // ───────── 元の絵（機能の印 OriginalTextures がスタンドアロンにもあるときだけ送る） ─────────
+
+        /// <summary>機能の印: 元のテクスチャ（Color の流し込み先の元の絵を送り、スタンドアロンが新しいセットの一番下に入れる）。</summary>
+        public const ulong FeatureOriginalTextures = 1UL << 4;
+
+        /// <summary>元の絵を送る（<see cref="LiveLinkOriginalState"/>・<see cref="LiveLinkOriginalRead"/>。絵が付かない様子は画素なし。画素は RGBA8、行は下から）。
+        /// 1 = 積んだ、0 = スタンドアロンに印が無いので送らない、負は失敗。</summary>
+        public static int OriginalSend(ulong handle, int material, string slot, LiveLinkOriginalState state, LiveLinkOriginalRead read, bool compressed, int width, int height, bool srgb, byte[] pixels)
+        {
+            var b = Utf8(slot);
+            fixed (byte* p = b) fixed (byte* px = pixels)
+                return LiveLinkNative.ylb_original_send(handle, material, p, b.Length, (int)state, (int)read, compressed ? 1 : 0, (uint)Math.Max(0, width), (uint)Math.Max(0, height), srgb ? 1 : 0, px, pixels?.Length ?? 0);
+        }
+
+        /// <summary>まだ送り終えていない（順番待ちに積んだ）命令のバイトの合計（大きな絵を続けて送るときの目安）。</summary>
+        public static long PendingBytes(ulong handle) => handle == 0 || !Available ? 0 : (long)Math.Min(long.MaxValue, LiveLinkNative.ylb_pending_bytes(handle));
     }
+
+    /// <summary>元の絵の様子（ylb_original_send の state）。</summary>
+    internal enum LiveLinkOriginalState { Image = 0, Unreadable = 1, TooLarge = 2, OverBudget = 3 }
+
+    /// <summary>元の絵をどう読んだか（ylb_original_send の read）。</summary>
+    internal enum LiveLinkOriginalRead { File = 0, Imported = 1, Gpu = 2 }
 
     /// <summary>描いていないスロットの絵の様子（ylb_values_slot）。</summary>
     internal enum LiveLinkSlotState { Empty = 0, Follows = 1, Unchanged = 2, OverBudget = 3, Unreadable = 4 }
@@ -307,6 +330,17 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         {
             var b = Encoding.UTF8.GetBytes(name);
             fixed (byte* p = b) return LiveLinkNative.ylb_test_server_slot(server, (uint)material, p, b.Length, 1) == 1;
+        }
+
+        /// <summary>最後に受けた、スロットの元の絵の様子（無ければ false）。</summary>
+        public static bool Original(ulong server, int material, string slot, out YlbTestServerOriginal original)
+        {
+            var b = Encoding.UTF8.GetBytes(slot);
+            YlbTestServerOriginal o;
+            int r;
+            fixed (byte* p = b) r = LiveLinkNative.ylb_test_server_original(server, (uint)material, p, b.Length, &o);
+            original = o;
+            return r == 0;
         }
 
         /// <summary>最後に受けた、スロットの絵の様子（無ければ false）。</summary>

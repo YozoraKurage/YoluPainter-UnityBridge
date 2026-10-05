@@ -246,6 +246,9 @@ msgstr "プロジェクトの転送"
 msgid "Animation"
 msgstr "アニメーション"
 
+msgid "Original textures"
+msgstr "元のテクスチャ"
+
 msgid "Newer features"
 msgstr "新しい機能"
 
@@ -282,3 +285,29 @@ msgstr "lilToon の値を送りました（マテリアル {0}・テクスチャ
 
 msgid "Sent the lilToon values of {0} materials."
 msgstr "lilToon の値を送りました（マテリアル {0}）。"
+
+# ── 元の絵（Color の流し込み先の元のテクスチャ） ──
+
+msgid "The Live Link library refused the original texture ({0})."
+msgstr "Live Link のライブラリが元のテクスチャを断りました（{0}）。"
+
+msgid "Sent the original textures of {0} materials ({1} not sent)."
+msgstr "元のテクスチャを送りました（マテリアル {0}・送れなかったもの {1}）。"
+
+msgid "Sent the original textures of {0} materials."
+msgstr "元のテクスチャを送りました（マテリアル {0}）。"
+
+msgid "The texture is gone."
+msgstr "テクスチャが無くなりました。"
+
+msgid "The texture is not a 2D texture."
+msgstr "2D のテクスチャではありません。"
+
+msgid "The texture is {0} × {1}; the most sent is {2} on a side."
+msgstr "テクスチャは {0} × {1} です（送れるのは 1 辺 {2} まで）。"
+
+msgid "The texture could not be read ({0})."
+msgstr "テクスチャを読めませんでした（{0}）。"
+
+msgid "The texture could not be drawn and read back here."
+msgstr "ここではテクスチャを描いて読み戻せませんでした。"

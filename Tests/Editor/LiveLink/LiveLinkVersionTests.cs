@@ -142,6 +142,7 @@ namespace Yozolab.YoluPainter.Tests
                 (LiveLinkFeatures.Assets, "Assets", "アセット"),
                 (LiveLinkFeatures.ProjectTransfer, "Project transfer", "プロジェクトの転送"),
                 (LiveLinkFeatures.Animation, "Animation", "アニメーション"),
+                (LiveLinkFeatures.OriginalTextures, "Original textures", "元のテクスチャ"),
             };
             var names = new System.Collections.Generic.List<string>();
             foreach (var (bit, en, ja) in table) if ((mask & bit) != 0) names.Add(japanese ? ja : en);
