@@ -106,15 +106,22 @@ namespace Yozolab.YoluPainter.Tests
         }
 
         /// <summary>スタンドアロンの読みを止め（読みの時間切れの分だけ待って、途中まで読んでいた枠を読み終えさせる）、送りの列を、小さな命令も入らない満杯にする。
-        /// 積んだ量を返す。</summary>
-        long StallAndFill()
+        /// 積んだ量を返す。重しは、マテリアル 0 のスロットの絵 2 枚。ブリッジは、同じマテリアルの新しい値を、送っていない古い値と続く絵に置き換えて積むので、
+        /// マテリアル 0 の値を送る試験は <paramref name="asOriginals"/> を真にする（同じ 2 枚を元の絵として積む。値は元の絵を置き換えない。
+        /// <see cref="LiveLinkBridge.FeatureOriginalTextures"/> の印が要る）。</summary>
+        long StallAndFill(bool asOriginals = false)
         {
             Assert.That(LiveLinkTestServer.PauseReading(server, true), Is.True);
             Thread.Sleep(400);
             LiveLinkTestServer.SetOutboxLimit(session.Handle, 10UL << 20);
             var pixels = new byte[1024 * 1024 * 4];
-            Assert.That(LiveLinkBridge.TextureSend(session.Handle, 0, "_fill0", 1024, 1024, false, pixels), Is.EqualTo(1));
-            Assert.That(LiveLinkBridge.TextureSend(session.Handle, 0, "_fill1", 1024, 1024, false, pixels), Is.EqualTo(1));
+            foreach (var slot in new[] { "_fill0", "_fill1" })
+            {
+                int sent = asOriginals
+                    ? LiveLinkBridge.OriginalSend(session.Handle, 0, slot, LiveLinkOriginalState.Image, LiveLinkOriginalRead.File, false, 1024, 1024, false, pixels)
+                    : LiveLinkBridge.TextureSend(session.Handle, 0, slot, 1024, 1024, false, pixels);
+                Assert.That(sent, Is.EqualTo(1));
+            }
             long held = LiveLinkBridge.PendingBytes(session.Handle);
             Assert.That(held, Is.GreaterThan(8L << 20));
             // 積んだ量のすぐ上を上限にする（これ以上は、小さな命令も入らない）
@@ -194,11 +201,11 @@ namespace Yozolab.YoluPainter.Tests
         public void ValuesThatCannotBeQueuedKeepTheirTurnAndAreSentWhenThereIsRoom()
         {
             var root = ModelOf();
-            Connect(LiveLinkBridge.FeatureMaterialValues);
+            Connect(LiveLinkBridge.FeatureMaterialValues | LiveLinkBridge.FeatureOriginalTextures);
             SendFirstModel(root);
             uint before = LiveLinkTestServer.Stats(server).values;
-            StallAndFill();
-            // モデルを送った直後の全部送りが、満杯で断られる。送る番は残る
+            StallAndFill(asOriginals: true);
+            // モデルを送った直後の全部送りが、満杯で断られる（置き換えて空ける絵は列に無い）。送る番は残る
             var report = session.Model.SendValues(session.Handle, true);
             Assert.That(report.Busy, Is.True);
             Assert.That(session.Model.Busy, Is.True);
@@ -220,13 +227,33 @@ namespace Yozolab.YoluPainter.Tests
         }
 
         [Test]
+        public void ValuesTakeTheRoomOfTheWaitingPicturesOfTheirMaterialWhenTheQueueIsFull()
+        {
+            var root = ModelOf();
+            Connect(LiveLinkBridge.FeatureMaterialValues);
+            SendFirstModel(root);
+            uint before = LiveLinkTestServer.Stats(server).values;
+            long held = StallAndFill();
+            // 満杯の列に残っているのは、マテリアル 0 の送っていない絵。新しい値は、受け手が値のあとに受ける絵だけを持つので、古い絵をまとめて外して積まれる
+            var report = session.Model.SendValues(session.Handle, true);
+            Assert.That(report.Busy, Is.False, "置き換えて空いた分で収まる");
+            Assert.That(report.Problem, Is.Null);
+            Assert.That(session.Model.Busy, Is.False);
+            Assert.That(session.Model.Materials[0].ValuesDue, Is.False);
+            Assert.That(LiveLinkBridge.PendingBytes(session.Handle), Is.LessThan(held), "外した絵の分だけ、積んだ量が減る");
+            Resume();
+            Pump(() => LiveLinkTestServer.Stats(server).values == before + 1, "the values");
+            Assert.That(LiveLinkTestServer.Texture(server, 0, "_fill1", out _), Is.False, "外した絵は届かない");
+        }
+
+        [Test]
         public void AValuesRequestThatCannotBeAnsweredIsKeptAndAnsweredWhenThereIsRoom()
         {
             var root = ModelOf();
-            Connect(LiveLinkBridge.FeatureMaterialValues | LiveLinkBridge.FeatureMaterialRequest);
+            Connect(LiveLinkBridge.FeatureMaterialValues | LiveLinkBridge.FeatureMaterialRequest | LiveLinkBridge.FeatureOriginalTextures);
             SendFirstModel(root);
             uint before = LiveLinkTestServer.Stats(server).values;
-            StallAndFill();
+            StallAndFill(asOriginals: true);
             Assert.That(LiveLinkTestServer.Request(server, 0, 0, LiveLinkRequest.WantValues, "", 0), Is.True);
             Pump(() => session.RequestsReceived == 1, "the request");
             for (int i = 0; i < 20; i++) { session.Tick(); Thread.Sleep(5); }
