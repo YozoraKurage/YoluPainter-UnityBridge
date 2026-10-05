@@ -5,7 +5,7 @@ using UnityEngine;
 namespace Yozolab.YoluPainter.Editor
 {
     /// <summary>
-    /// スタンドアロン版 YoluPainter（YoluPainter-rs）への移行のおすすめ。Unity 版は機能を増やさずブリッジ（Live Link）に専念するので、描く窓
+    /// スタンドアロン版 YoluPainterへの移行のおすすめ。Unity 版は機能を増やさずブリッジ（Live Link）に専念するので、描く窓
     /// （<see cref="TexturePaintWindow"/>）を開いたとき、エディターの起動ごとに 1 回だけ、小さな窓でスタンドアロン版を知らせる。
     /// 選べるのは「ダウンロードのページを開く」「あとで」「今後表示しない」。Preferences ▸ YoluPainter で切れる（既定は入）。
     /// 描く窓の機能は変えない（窓を出すだけで、文書にもプロジェクトにも何も書かない）。
@@ -13,7 +13,7 @@ namespace Yozolab.YoluPainter.Editor
     internal static class StandalonePrompt
     {
         /// <summary>スタンドアロン版の配布ページ。</summary>
-        public const string DownloadUrl = "https://github.com/YozoraKurage/YoluPainter-rs/releases/latest";
+        public const string DownloadUrl = "https://github.com/YozoraKurage/YoluPainter/releases/latest";
         const string KeyPrefix = "Yozolab.YoluPainter.SuggestStandalone";
         public const string EnabledKey = KeyPrefix + ".Enabled";
         public const string ShownKey = KeyPrefix + ".Shown";

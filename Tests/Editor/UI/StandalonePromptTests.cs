@@ -105,7 +105,7 @@ namespace Yozolab.YoluPainter.Tests
         {
             StandalonePrompt.NotifyPaintWindowOpened();
             StandalonePrompt.Choose(StandalonePrompt.Choice.Download);
-            Assert.That(opened, Is.EqualTo(new[] { "https://github.com/YozoraKurage/YoluPainter-rs/releases/latest" }));
+            Assert.That(opened, Is.EqualTo(new[] { "https://github.com/YozoraKurage/YoluPainter/releases/latest" }));
             Assert.That(StandalonePrompt.DownloadUrl, Is.EqualTo(opened[0]));
             Assert.That(StandalonePrompt.Enabled, Is.True);
         }

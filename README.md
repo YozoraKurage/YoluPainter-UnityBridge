@@ -1,6 +1,6 @@
-# YoluPainter
+# YoluPainter Unity Bridge
 
-Unity Editor 内の専用ウィンドウで、同じレイヤーへ 2D と 3D から描くテクスチャ制作拡張です。現在は実装のプロトタイプで、完成版ではありません。
+スタンドアロン版 [YoluPainter](https://github.com/YozoraKurage/YoluPainter) と Unity エディターをつなぐブリッジ（Live Link）です。Unity のシーンのモデルをスタンドアロン版で開き、描いた色を実際のマテリアルでその場で見られます。Unity Editor 内の専用ウィンドウで 2D と 3D から描く機能も入っていますが、新しい機能はスタンドアロン版に入ります。現在は実装のプロトタイプで、完成版ではありません。
 
 - Unity 2022.3 以降 / パッケージ名 `net.yozolab.yolupainter` / エディタ専用
 - 依存パッケージ: com.unity.burst（1.8.7 以上）と com.unity.mathematics（1.2.6）。Unity のレジストリから自動で入る（どちらも Unity Companion License）。Unity 2022.3.22f1 ではエディタの決まりで Burst は 1.8.12 になる。無くても動く（.unitypackage で Assets に入れたときなど。CPU の合成の内側のループが Burst ではなく管理側のコードで動き、少し遅くなるだけ）。lilToon への出力は今後の範囲で、今は lilToon に依存していません
@@ -90,7 +90,7 @@ RGB は sRGB の格納値で補間し、不透明度は独立して補間しま�
    - **VCC（VRChat Creator Companion）**: Settings ▸ Packages ▸ Add Repository で `https://vpm.yozolab.net/index.json` を足し、プロジェクトの
      Manage Project で YoluPainter を追加する
    - **Release の .zip / .unitypackage**: GitHub の Releases から取り、.zip は Packages の下に展開、.unitypackage は取り込む
-   - **Package Manager**: `+` → Add package from git URL で `https://github.com/YozoraKurage/YoluPainter.git`（または Add package from
+   - **Package Manager**: `+` → Add package from git URL で `https://github.com/YozoraKurage/YoluPainter-UnityBridge.git`（または Add package from
      disk でこのリポジトリの `package.json`）
 2. メニュー `YozoLab → YoluPainter (Prototype)` を開く
 3. ファイル ▸ 新規プロジェクト… でモデル（プレハブかモデルアセット）とテクスチャセットにするマテリアルを選ぶ。モデル無しでも 2D だけで描ける。3D ▸ デモのキューブ で検証用の 6 つの UV 島を持つキューブも読める
