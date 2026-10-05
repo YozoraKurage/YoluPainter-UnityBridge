@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -43,6 +44,12 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         public int ValuesResent { get; private set; }
         /// <summary>送り終えていない元の絵があるか（試験が待つ）。</summary>
         public bool OriginalsPending => originals != null;
+        /// <summary>送りの列が混んでいて、モデルを積めずに送り直しを待っているか（モデルは写してあり、混みが引いたら <see cref="Tick"/> が送る。試験・表示用）。</summary>
+        public bool ModelPending => modelPending;
+        /// <summary>ブリッジに「混んでいる」と断られた回数の合計（元の絵は、ブリッジが断った分だけ数え、読む前に入る空きが無いと見て待った分は数えない。試験・表示用）。</summary>
+        public int BusyRefusals { get; private set; }
+        /// <summary>送りの列が混んでいて断られたばかりで、次に送り直すまでの間にいるか。</summary>
+        public bool Congested => EditorApplication.timeSinceStartup < busyUntil;
         /// <summary>つながりが終わった知らせ（断られた・つなげなかった・相手が閉じた）の種類。終わっていなければ null。</summary>
         public LiveLinkEventKind? EndedBy { get; private set; }
         /// <summary>終わった知らせの数値（断られたときは YoluPainter の RejectCode: 1 版が合わない・2 ほかの Unity とつながっている・3 鍵）。</summary>
@@ -54,8 +61,16 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         /// <summary>積んだ命令がこのバイト数以上たまっている間は、次の元の絵を読まない（試験が 0 にすると送りが止まったまま残る）。</summary>
         internal long OriginalsPendingLimit = LiveLinkOriginals.PendingLimit;
 
+        /// <summary>送りの列が混んでいて断られたあと、次に送り直すまでの間（秒。試験が 0 にすると、次の更新ですぐ送り直す）。</summary>
+        internal double BusyRetrySeconds = 0.5;
+
         ulong lastSerial; bool pending; double nextCheck; bool disposed;
         LiveLinkOriginals.Sender originals;
+        double busyUntil; bool busyLogged;
+        /// <summary>モデルを写して組み立てたが、送りの列が混んでいて積めていない（<see cref="RetryModel"/> が送り直す）。</summary>
+        bool modelPending;
+        /// <summary>スタンドアロンに頼まれた値のうち、送りの列が混んでいて答えられていないマテリアルの番号。</summary>
+        HashSet<int> valuesPending;
 
         LiveLinkSession(string linkName, ulong handle) { LinkName = linkName; Handle = handle; }
 
@@ -126,24 +141,57 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             if (Status != LiveLinkStatus.Connected) return L.Tr("Not connected to the standalone yet.");
             Display.Clear();
             originals = null; // 前のモデルの元の絵の送りは、モデルを替える時点で取り消す（送り直しが失敗しても残さない）
+            modelPending = false; valuesPending = null;
             Model?.Dispose();
             Model = LiveLinkModel.Capture(root);
             if (Model.Meshes.Count == 0) { var none = L.Tr("{0} has no active mesh renderers to send.", root.name); Model.Dispose(); Model = null; return none; }
             string problem = Model.Send(Handle);
             if (problem != null) return problem;
+            // 送りの列が混んでいて積めなかった: 写したモデルを持ったまま、混みが引いてから送る（Tick が少し後に送り直す。ここでは待たない）
+            if (Model.Busy) { modelPending = true; NoteBusy(); Changed?.Invoke(); return null; }
+            FinishModelSend();
+            return null;
+        }
+
+        /// <summary>モデルを積めた後の続き（ログ・値・元の絵・見回りの再開）。</summary>
+        void FinishModelSend()
+        {
             ModelsSent++;
-            AddLog(L.Tr("Sent {0}: {1} renderers, {2} materials, {3} vertices.", root.name, Model.Meshes.Count, Model.Materials.Count, Model.VertexTotal));
+            AddLog(L.Tr("Sent {0}: {1} renderers, {2} materials, {3} vertices.", Model.Root != null ? Model.Root.name : "", Model.Meshes.Count, Model.Materials.Count, Model.VertexTotal));
             SendValues(true);
             StartOriginals();
             nextCheck = EditorApplication.timeSinceStartup + CheckInterval;
             Changed?.Invoke();
-            return null;
+        }
+
+        /// <summary>混んでいて積めなかったモデルを、混みが引いたころに送り直す（写し直さない。ブリッジに組み立てが残っている）。</summary>
+        void RetryModel()
+        {
+            if (!modelPending) return;
+            if (Model == null || Status != LiveLinkStatus.Connected) { modelPending = false; return; }
+            if (Congested) return;
+            string problem = Model.Commit(Handle);
+            if (problem != null) { modelPending = false; AddLog(problem); Changed?.Invoke(); return; }
+            if (Model.Busy) { NoteBusy(); return; }
+            modelPending = false;
+            FinishModelSend();
+        }
+
+        /// <summary>送りの列が混んでいて、送れなかった。知らせは混みが続く間に 1 回だけ出す。<paramref name="refused"/> が真（既定）は、ブリッジが断った場合で、
+        /// 断った回数に数え、少し後（<see cref="BusyRetrySeconds"/>）まで重い送りを控える。偽は、元の絵を読む前に、入る空きが無いと見て待っただけの場合で、
+        /// 数えず、間も置かない（元の絵の送りは、更新ごとに空きを見て続けるので）。</summary>
+        void NoteBusy(bool refused = true)
+        {
+            if (refused) { BusyRefusals++; busyUntil = EditorApplication.timeSinceStartup + BusyRetrySeconds; }
+            if (busyLogged) return;
+            busyLogged = true;
+            AddLog(L.Tr("The standalone is slow to read, so sending waits."));
         }
 
         /// <summary>送ったモデルを閉じる（PropertyBlock を外し、スタンドアロンに知らせる）。</summary>
         public void CloseModel()
         {
-            originals = null;
+            originals = null; modelPending = false; valuesPending = null;
             Display.Clear();
             if (Model != null && Handle != 0) LiveLinkBridge.ModelClose(Handle);
             Model?.Dispose();
@@ -157,6 +205,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             if (Model == null) return;
             var r = Model.SendValues(Handle, all);
             if (r.Problem != null) AddLog(r.Problem);
+            if (r.Busy) NoteBusy();
             if (r.Materials == 0) return;
             ValuesSent += r.Materials;
             AddLog(r.Textures > 0
@@ -185,6 +234,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             if (Model == null || Model.Generation != sender.Generation || Status != LiveLinkStatus.Connected) { originals = null; return; }
             var r = sender.Pump(Handle, OriginalsPumpMs, OriginalsPendingLimit);
             if (r.Problem != null) AddLog(r.Problem);
+            if (r.Busy) NoteBusy(r.Refused);
             OriginalsSent += r.Images; OriginalsDeclined += r.Declined; OriginalsCached += r.Cached;
             if (r.Images + r.Declined + r.Cached > 0) Changed?.Invoke();
             if (!sender.Done) return;
@@ -222,14 +272,29 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                     else originals = new LiveLinkOriginals.Sender(Model, jobs);
                 }
             }
-            if (wantedValues != null)
+            if (wantedValues != null || valuesPending != null) AnswerValueRequests(wantedValues);
+        }
+
+        /// <summary>頼まれた値を答える（<paramref name="wanted"/> が今回の頼み。前に混んでいて答えられなかった頼みも、まとめて答える）。送りの列が混んでいれば、
+        /// 答えていない番号を覚えて、混みが引いてから続ける（頼みは取り出し済みなので、覚えておかないと答えが消える）。</summary>
+        void AnswerValueRequests(HashSet<int> wanted)
+        {
+            var all = new HashSet<int>(wanted ?? new HashSet<int>());
+            if (valuesPending != null) all.UnionWith(valuesPending);
+            valuesPending = null;
+            if (all.Count == 0 || Model == null || Model.Generation <= 0) return;
+            if (Congested) { valuesPending = all; return; }
+            var r = Model.SendValues(Handle, false, all);
+            if (r.Problem != null) AddLog(r.Problem);
+            if (r.Busy)
             {
-                var r = Model.SendValues(Handle, false, wantedValues);
-                if (r.Problem != null) AddLog(r.Problem);
-                ValuesResent += wantedValues.Count;
-                AddLog(L.Tr("The standalone asked for the values of {0} materials; sent them again.", wantedValues.Count));
-                Changed?.Invoke();
+                valuesPending = new HashSet<int>(r.Unsent ?? all.ToList());
+                NoteBusy();
+                return;
             }
+            ValuesResent += all.Count;
+            AddLog(L.Tr("The standalone asked for the values of {0} materials; sent them again.", all.Count));
+            Changed?.Invoke();
         }
 
         void AddLog(string text)
@@ -254,6 +319,8 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                     default: if (!string.IsNullOrEmpty(e.Text)) AddLog(e.Text); break;
                 }
             }
+            if (busyLogged && Handle != 0 && LiveLinkBridge.PendingBytes(Handle) == 0) busyLogged = false; // 混みが引いたら、次に混んだときにまた知らせる
+            RetryModel();
             HandleRequests();
             PumpOriginals();
             ulong serial = LiveLinkBridge.Serial(Handle);
@@ -270,7 +337,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                     changed = true; SceneView.RepaintAll(); EditorApplication.QueuePlayerLoopUpdate();
                 }
             }
-            if (Model != null && Status == LiveLinkStatus.Connected && EditorApplication.timeSinceStartup >= nextCheck)
+            if (Model != null && !modelPending && Status == LiveLinkStatus.Connected && EditorApplication.timeSinceStartup >= nextCheck)
             {
                 nextCheck = EditorApplication.timeSinceStartup + CheckInterval;
                 CheckModel();
@@ -283,18 +350,22 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         /// 受けるときだけ）、形が変わった → ポーズを送る。</summary>
         public void CheckModel()
         {
-            if (Model == null) return;
+            if (Model == null || modelPending) return; // 積めていないモデルは、積めてから見回る（混みが引いたら RetryModel が送る）
             if (Model.Root == null) { AddLog(L.Tr("The model was removed from the scene.")); CloseModel(); return; }
-            if (Model.ComputeStructureHash() != Model.StructureHash)
+            // 送りの列が混んでいて断られたばかりのあいだは、重い送り（モデルの写し直し・マテリアル・値）を控える。ポーズは別の溜め場に最新だけを置くので、続ける
+            bool congested = Congested;
+            if (!congested && Model.ComputeStructureHash() != Model.StructureHash)
             {
                 AddLog(L.Tr("The renderers, meshes or materials changed; sending the model again."));
                 string problem = SendModel(Model.Root);
                 if (problem != null) AddLog(problem);
                 return;
             }
-            if (Model.ComputeMaterialHash() != Model.MaterialHash)
+            if (!congested && Model.ComputeMaterialHash() != Model.MaterialHash)
             {
                 string problem = Model.SendMaterials(Handle);
+                // 混んでいて断られた: 送ったものとして覚えない（次の見回りで、同じ変化をもう一度送る）
+                if (Model.Busy) { NoteBusy(); return; }
                 if (problem != null) { AddLog(problem); Model.AcceptMaterialHash(); return; }
                 MaterialUpdatesSent++;
                 Display.Rebind(Model);
@@ -302,7 +373,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                 Changed?.Invoke();
             }
             // lilToon の値（インスペクターで変えた値・差し替えたテクスチャ）。変わったマテリアルだけ
-            SendValues(false);
+            if (!congested) SendValues(false);
             if (Model == null) return;
             int sent = Model.SendPoseIfChanged(Handle);
             if (sent > 0) PosesSent++;
@@ -321,7 +392,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             if (disposed) return;
             disposed = true;
             EditorApplication.update -= Tick;
-            originals = null;
+            originals = null; modelPending = false; valuesPending = null;
             Display.Dispose();
             Model?.Dispose(); Model = null;
             LiveLinkBridge.Disconnect(Handle);

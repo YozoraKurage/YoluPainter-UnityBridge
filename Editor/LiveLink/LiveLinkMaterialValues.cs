@@ -200,12 +200,33 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             }
         }
 
+        /// <summary>値と絵を積むとき、値と枠の頭のために残しておく余裕（バイト）。</summary>
+        const long SendSlack = 1L << 20;
+
         /// <summary>送った結果。</summary>
         internal struct Sent
         {
-            /// <summary>1 = 送った、0 = スタンドアロンに印が無いので送らない、負は失敗。</summary>
+            /// <summary>1 = 送った、0 = スタンドアロンに印が無いので送らない、<see cref="LiveLinkBridge.Busy"/> = 送りの列が混んでいて何も積んでいない、ほかの負は失敗。</summary>
             public int Result;
             public int Textures; public long Bytes;
+            /// <summary>値は積んだが、続く絵の送りが混んでいて断られた（スタンドアロンは絵を待つので、呼び手はこのマテリアルを送り直す）。</summary>
+            public bool Retry;
+        }
+
+        /// <summary>これから送る絵（前と同じでなく、予算に収まるもの）の画素のバイトの合計の見積もり（読まずに、大きさだけから。読めない絵は送らないので、実際より多めになりうる）。</summary>
+        static long FollowBytes(Snapshot s, Dictionary<string, ulong> sentSlots, long budget)
+        {
+            long total = 0;
+            foreach (var slot in s.Slots)
+            {
+                var t = slot.Texture;
+                if (t == null || (sentSlots.TryGetValue(slot.Name, out ulong id) && id == slot.Identity)) continue;
+                var size = SendSize(t);
+                long bytes = (long)size.x * size.y * 4;
+                if (bytes > budget) continue;
+                budget -= bytes; total += bytes;
+            }
+            return total;
         }
 
         /// <summary>写しを送る: 値（プロパティ・キーワード・スロットの様子）を送ってから、来ると言った絵を送る。<paramref name="sentSlots"/> は
@@ -214,6 +235,8 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         public static Sent Send(ulong handle, int material, Snapshot s, Dictionary<string, ulong> sentSlots, ref long budget)
         {
             var result = new Sent();
+            // 送りの列に入らないなら、絵を読む（GPU から読み戻す）前に断る。読んでから断られて、混んでいる間に読み直すことにならない
+            if (FollowBytes(s, sentSlots, budget) + SendSlack > LiveLinkBridge.SendRoom(handle)) { result.Result = LiveLinkBridge.Busy; return result; }
             if (LiveLinkBridge.ValuesBegin(handle, material, true, s.Shader, s.Source) < 0) { result.Result = -1; return result; }
             foreach (var p in s.Properties)
             {
@@ -255,19 +278,24 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             if (result.Result != 1) return result;
             foreach (var (slot, pixels, size) in follow)
             {
-                if (LiveLinkBridge.TextureSend(handle, material, slot.Name, size.x, size.y, slot.Srgb, pixels) == 1)
+                int sent = LiveLinkBridge.TextureSend(handle, material, slot.Name, size.x, size.y, slot.Srgb, pixels);
+                if (sent == 1)
                 {
                     sentSlots[slot.Name] = slot.Identity;
                     result.Textures++; result.Bytes += pixels.Length;
                 }
-                else sentSlots.Remove(slot.Name);
+                else
+                {
+                    sentSlots.Remove(slot.Name);
+                    if (sent == LiveLinkBridge.Busy) result.Retry = true;
+                }
             }
             foreach (var kv in states)
                 if (kv.Value != LiveLinkSlotState.Follows && kv.Value != LiveLinkSlotState.Unchanged) sentSlots.Remove(kv.Key);
             return result;
         }
 
-        /// <summary>「値なし」を送る（lilToon でなくなったマテリアル。スタンドアロンは前の値を捨てる）。</summary>
+        /// <summary>「値なし」を送る（lilToon でなくなったマテリアル。スタンドアロンは前の値を捨てる）。送りの列が混んでいれば <see cref="LiveLinkBridge.Busy"/>。</summary>
         public static int SendNone(ulong handle, int material)
         {
             if (LiveLinkBridge.ValuesBegin(handle, material, false, "", "") < 0) return -1;

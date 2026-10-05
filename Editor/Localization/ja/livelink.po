@@ -332,3 +332,6 @@ msgstr "元のテクスチャを送りました（マテリアル {0}・送れ�
 
 msgid "The standalone asked for the values of {0} materials; sent them again."
 msgstr "スタンドアロンが頼んだ {0} マテリアルの値を、送り直しました。"
+
+msgid "The standalone is slow to read, so sending waits."
+msgstr "スタンドアロンの読みが追いつかないので、送りを待っています。"

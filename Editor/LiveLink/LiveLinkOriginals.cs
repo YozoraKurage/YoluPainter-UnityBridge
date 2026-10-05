@@ -298,8 +298,9 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             result.Compressed = !(texture is RenderTexture) && GraphicsFormatUtility.IsCompressedFormat(texture.graphicsFormat);
         }
 
-        /// <summary>送った結果（ログ用）。</summary>
-        internal struct Report { public int Images, Declined, Cached; public long Bytes; public string Problem; }
+        /// <summary>送った結果（ログ用）。<see cref="Busy"/> は、送りの列が混んでいて、次の絵を送れずに待っていること（絵は列に残り、次の <see cref="Sender.Pump"/> で続ける）。
+        /// <see cref="Refused"/> は、その待ちのうち、ブリッジが「混んでいる」と断った分（絵を読む前に、入る空きが無いと見て待っただけのときは偽）。</summary>
+        internal struct Report { public int Images, Declined, Cached; public long Bytes; public string Problem; public bool Busy, Refused; }
 
         /// <summary>
         /// 送る絵の列（モデルを送るたびに作り直す）。<see cref="Pump"/> を更新ごとに呼ぶと、時間の許す限り 1 枚ずつ読んで送る。
@@ -348,7 +349,8 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             }
 
             /// <summary>時間の許す限り（<paramref name="budgetMs"/> まで。最初の 1 枚は必ず）読んで送る。ブリッジが失敗したら理由を返す
-            /// （<paramref name="pendingLimit"/> は積んだ命令の上限。既定は <see cref="PendingLimit"/>）。</summary>
+            /// （<paramref name="pendingLimit"/> は積んだ命令の上限。既定は <see cref="PendingLimit"/>）。送りの列が混んでいる間は読まずに待ち（<see cref="Report.Busy"/>。ブリッジが断った分は
+            /// <see cref="Report.Refused"/> も真）、枠は残る。ブリッジの列の空きは <see cref="LiveLinkBridge.SendRoom"/> で、絵の大きさが入るかを読む前に見る。</summary>
             public Report Pump(ulong handle, double budgetMs = PumpMs, long pendingLimit = PendingLimit)
             {
                 var report = new Report();
@@ -365,6 +367,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                     if (job.Have != 0 && stamp != 0 && stamp == job.Have)
                     {
                         int hit = LiveLinkBridge.OriginalSend(handle, job.Material, job.Property, LiveLinkOriginalState.Cached, LiveLinkOriginalRead.File, false, texture.width, texture.height, true, null, stamp);
+                        if (hit == LiveLinkBridge.Busy) { report.Busy = report.Refused = true; return report; }
                         if (hit < 0) { report.Problem = L.Tr("The Live Link library refused the original texture ({0}).", entry != null ? entry.Name : job.Property); Finish(); return report; }
                         if (hit == 0) { Finish(); return report; }
                         jobs.Dequeue(); report.Cached++; Cached++;
@@ -375,10 +378,14 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                     if (texture != null && estimate > remaining) loaded = new Loaded { State = LiveLinkOriginalState.OverBudget, Width = texture.width, Height = texture.height };
                     else
                     {
+                        // 送りの列に入らない大きさの絵は、読まずに待つ（読んでから断られて、混んでいる間に読み直すことにならない。列は読まれるにつれて空く）
+                        if (texture != null && estimate > LiveLinkBridge.SendRoom(handle)) { report.Busy = true; return report; }
                         loaded = LoadShared(texture);
                         if (loaded.State == LiveLinkOriginalState.Image && loaded.Pixels.LongLength > remaining) { loaded = new Loaded { State = LiveLinkOriginalState.OverBudget, Width = loaded.Width, Height = loaded.Height }; }
                     }
                     int sent = LiveLinkBridge.OriginalSend(handle, job.Material, job.Property, loaded.State, loaded.Read, loaded.Compressed, loaded.Width, loaded.Height, loaded.Srgb, loaded.State == LiveLinkOriginalState.Image ? loaded.Pixels : null, loaded.State == LiveLinkOriginalState.Image ? loaded.Stamp : 0);
+                    // 混んでいて断られた: 枠は列に残し、読んだ画素も残す（同じテクスチャなら LoadShared が使い回すので、読み直さない）
+                    if (sent == LiveLinkBridge.Busy) { report.Busy = report.Refused = true; return report; }
                     if (sent < 0) { report.Problem = L.Tr("The Live Link library refused the original texture ({0}).", entry != null ? entry.Name : job.Property); Finish(); return report; }
                     if (sent == 0) { Finish(); return report; } // スタンドアロンの印が無くなった（つながり直し）
                     jobs.Dequeue();

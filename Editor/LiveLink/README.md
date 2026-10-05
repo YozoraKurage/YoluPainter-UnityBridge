@@ -136,7 +136,16 @@ copied. The library's functions never wait on the standalone, so the editor's ma
   one Unity at a time, so they would make the new library's connection be refused as busy); the copy's path is kept in `SessionState`, and when
   a copy of other contents is loaded, `ylb_disconnect_all` of the previous copy is called first, and so is that of the package's own file
   for an editor that loaded it before copies were used. Only a library that is already loaded is asked; none is loaded for this.
-- `ylb_abi_version` is asked first; a library of another version is not used. The library's version is 6.
+- `ylb_abi_version` is asked first; a library of another version is not used. The library's version is 7.
+- The commands waiting to be written (and the one being written) are limited to 256 MiB, so a standalone that stops reading cannot make the editor
+  hold more than that. What only the latest of matters replaces the older one still waiting: a picture of the same slot, a material update of the same
+  model, a picture of an original texture of the same slot, and the values of a material (together with its waiting pictures, unless the new values
+  say a picture is "unchanged" and it is still waiting). The model is never replaced, and closing the model is never refused. A command that does not
+  fit is refused as busy (`YLB_E_BUSY`) without changing anything, and Live Link sends it again shortly (every 0.5 s while it stays busy) without
+  waiting on the main thread: the model, the material update and the values stay built in the library (a model is judged by its size before it is
+  serialized, so a retry costs no memory), the textures are not read from the GPU
+  while they would not fit (`ylb_send_room`), and one line in the log says that the standalone is slow to read for as long as it lasts. An empty queue
+  takes any one command, so a model or an original texture larger than the limit still goes.
 - A model whose message would pass the limit of one message (512 MiB) is refused before anything is written (`ylb_model_send` returns
   `YLB_E_TOO_LARGE`, and Live Link says so); the link stays up and nothing is sent. Poses that would pass the limit are skipped with a note.
 - Each texture channel is a `RenderTexture` kept on the GPU (RGBA, with a mip chain; Color and Emission are sRGB when the

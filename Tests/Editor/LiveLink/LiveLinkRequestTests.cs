@@ -427,7 +427,7 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(LiveLinkFeatures.Names(LiveLinkFeatures.MaterialRequest), Is.EqualTo("マテリアルの頼み"));
             Assert.That(LiveLinkFeatures.MaterialRequest, Is.EqualTo(LiveLinkBridge.FeatureMaterialRequest));
             Assert.That(LiveLinkFeatures.Known & LiveLinkFeatures.MaterialRequest, Is.Not.EqualTo(0UL));
-            Assert.That(LiveLinkBridge.ExpectedAbi, Is.EqualTo(6u));
+            Assert.That(LiveLinkBridge.ExpectedAbi, Is.EqualTo(7u));
         }
     }
 }

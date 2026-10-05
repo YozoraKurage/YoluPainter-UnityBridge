@@ -133,7 +133,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         static IntPtr p_ylb_model_submesh;
 
         /// <summary>
-        ///  組み立てたモデルを送る（積むだけ）。返すのはモデルの世代（1 から）。
+        ///  組み立てたモデルを送る（積むだけ）。返すのはモデルの世代（1 から）。送りの列が混んでいれば YLB_E_BUSY（組み立てを残すので、少し後にもう一度呼べる。断るときはモデルを枠にしないので、呼び直しは安い）。
         /// </summary>
         internal static int ylb_model_send(ulong handle) => ((delegate* unmanaged[Cdecl]<ulong, int>)Pointer(p_ylb_model_send))(handle);
         static IntPtr p_ylb_model_send;
@@ -170,6 +170,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
 
         /// <summary>
         ///  組み立てたマテリアルの更新を送る（積むだけ）。マテリアルの数は送ったモデルと同じでなければならない（違えば YLB_E_ARGUMENT）。返すのはマテリアルの数。
+        ///  送りの列が混んでいれば YLB_E_BUSY（組み立てを残すので、少し後にもう一度呼べる）。同じ世代の送っていない古い更新は置き換わる。
         /// </summary>
         internal static int ylb_materials_send(ulong handle) => ((delegate* unmanaged[Cdecl]<ulong, int>)Pointer(p_ylb_materials_send))(handle);
         static IntPtr p_ylb_materials_send;
@@ -238,6 +239,8 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
 
         /// <summary>
         ///  組み立てた値を送る（積むだけ）。返すのは 1 = 積んだ、0 = スタンドアロンに印（MATERIAL_VALUES）が無いので送らない（組み立ては捨てる）。
+        ///  送りの列が混んでいれば YLB_E_BUSY（組み立てを残すので、少し後にもう一度呼べる）。同じマテリアルの送っていない古い値と絵は置き換わる
+        ///  （新しい値が「前と同じ」と言う絵が列の中にあるときを除く）。
         /// </summary>
         internal static int ylb_values_send(ulong handle) => ((delegate* unmanaged[Cdecl]<ulong, int>)Pointer(p_ylb_values_send))(handle);
         static IntPtr p_ylb_values_send;
@@ -246,6 +249,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         ///  描いていないスロットの絵を送る（積むだけ。直前の値で状態 1 と言ったスロット）。`pixels` は RGBA8（straight）で行は下から、
         ///  `pixel_len` は幅 × 高さ × 4。辺は MAX_SLOT_TEXTURE_SIZE まで（送る側が縮める）。`srgb` が 0 でなければ Unity はこの絵を sRGB として
         ///  読む。返すのは 1 = 積んだ、0 = スタンドアロンに印が無いので送らない。
+        ///  送りの列が混んでいれば YLB_E_BUSY（呼び手が画素を持っていて、少し後に送り直す。同じ世代・マテリアル・スロットの送っていない古い絵は置き換わる）。
         /// </summary>
         internal static int ylb_texture_send(ulong handle, int material, byte* slot, int slot_len, uint width, uint height, int srgb, byte* pixels, int pixel_len) => ((delegate* unmanaged[Cdecl]<ulong, int, byte*, int, uint, uint, int, byte*, int, int>)Pointer(p_ylb_texture_send))(handle, material, slot, slot_len, width, height, srgb, pixels, pixel_len);
         static IntPtr p_ylb_texture_send;
@@ -258,7 +262,8 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         ///  `srgb` が 0 でなければ Unity はこの絵を sRGB として読む（ガンマの色空間のプロジェクトは真で送る）。
         ///  `stamp` はこの絵の印（Unity が決める 64 ビット。0 は印なし）。`state` が 4（スタンドアロンが頼みで持つと言った絵と印が同じ。画素なし）のときは
         ///  0 以外が要る（`width`・`height` は Unity のテクスチャの大きさ）。
-        ///  返すのは 1 = 積んだ、0 = スタンドアロンに印が無いので送らない。
+        ///  返すのは 1 = 積んだ、0 = スタンドアロンに印が無いので送らない。送りの列が混んでいれば YLB_E_BUSY（呼び手が画素を持っていて、少し後に送り直す。
+        ///  画素の付いた元の絵は、同じ世代・マテリアル・スロットの送っていない古い元の絵を置き換える）。大きな絵は、読む前に `ylb_send_room` で入るかを確かめる。
         /// </summary>
         internal static int ylb_original_send(ulong handle, int material, byte* slot, int slot_len, int state, int read, int flags, uint width, uint height, int srgb, ulong stamp, byte* pixels, int pixel_len) => ((delegate* unmanaged[Cdecl]<ulong, int, byte*, int, int, int, int, uint, uint, int, ulong, byte*, int, int>)Pointer(p_ylb_original_send))(handle, material, slot, slot_len, state, read, flags, width, height, srgb, stamp, pixels, pixel_len);
         static IntPtr p_ylb_original_send;
@@ -269,6 +274,12 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         /// </summary>
         internal static int ylb_test_set_payload_limit(ulong handle, ulong bytes) => ((delegate* unmanaged[Cdecl]<ulong, ulong, int>)Pointer(p_ylb_test_set_payload_limit))(handle, bytes);
         static IntPtr p_ylb_test_set_payload_limit;
+
+        /// <summary>
+        ///  試験用: 送りの列の上限（バイト）を決める（既定は 256 MiB）。小さい量で「混んでいる」（YLB_E_BUSY）を確かめる。
+        /// </summary>
+        internal static int ylb_test_set_outbox_limit(ulong handle, ulong bytes) => ((delegate* unmanaged[Cdecl]<ulong, ulong, int>)Pointer(p_ylb_test_set_outbox_limit))(handle, bytes);
+        static IntPtr p_ylb_test_set_outbox_limit;
 
         /// <summary>
         ///  スタンドアロンからの頼みを 1 つ取り出す（待たない）。1 = 取り出した（`request` と、スロットの名前を `slot` へ UTF-8 で。入りきらなければ
@@ -282,10 +293,19 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         static IntPtr p_ylb_next_request;
 
         /// <summary>
-        ///  まだ送り終えていない（順番待ちに積んだ）命令のバイトの合計。大きな絵を続けて送るとき、これが小さくなるまで次を積まないための目安。
+        ///  まだ送り終えていない命令のバイトの合計（順番待ちに積んだものと、いま書いている途中のもの）。大きな絵を続けて送るとき、これが小さくなるまで
+        ///  次を積まないための目安。
         /// </summary>
         internal static ulong ylb_pending_bytes(ulong handle) => ((delegate* unmanaged[Cdecl]<ulong, ulong>)Pointer(p_ylb_pending_bytes))(handle);
         static IntPtr p_ylb_pending_bytes;
+
+        /// <summary>
+        ///  いま積める大きさの目安（バイト）。送りの列の上限（256 MiB）から、積んである量を引いたもの。何も積んでいなければ、1 つの命令が上限より大きくても
+        ///  入るので `u64::MAX`。数が合わないハンドルは 0。C# は、大きな絵を読む前にこれで足りるかを見て、足りなければ読まずに待つ（Unity の主のスレッドは
+        ///  待たない）。置き換えで空く分は数えないので、足りなくても `ylb_*_send` が積めることはある。
+        /// </summary>
+        internal static ulong ylb_send_room(ulong handle) => ((delegate* unmanaged[Cdecl]<ulong, ulong>)Pointer(p_ylb_send_room))(handle);
+        static IntPtr p_ylb_send_room;
 
         /// <summary>
         ///  テクスチャセットの数。
@@ -338,6 +358,13 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         /// </summary>
         internal static ulong ylb_test_server_start(byte* name, int name_len, int size, int tile_size) => ((delegate* unmanaged[Cdecl]<byte*, int, int, int, ulong>)Pointer(p_ylb_test_server_start))(name, name_len, size, tile_size);
         static IntPtr p_ylb_test_server_start;
+
+        /// <summary>
+        ///  自己診断のスタンドアロンが、つながりから読むのを止める（`paused` が 0 以外）か、再び読む（0）。止めている間、相手の書く枠は溜まり、ブリッジの
+        ///  送りの列は読まれない相手の様子になる（上限と「混んでいる」の確かめ用）。
+        /// </summary>
+        internal static int ylb_test_server_pause_reading(ulong server, int paused) => ((delegate* unmanaged[Cdecl]<ulong, int, int>)Pointer(p_ylb_test_server_pause_reading))(server, paused);
+        static IntPtr p_ylb_test_server_pause_reading;
 
         /// <summary>
         ///  自己診断のスタンドアロンを止める（つないでいる側を先に切る。Windows では相手が切るまで読むスレッドが残る）。
@@ -462,8 +489,10 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             p_ylb_texture_send = Resolve(symbol, "ylb_texture_send");
             p_ylb_original_send = Resolve(symbol, "ylb_original_send");
             p_ylb_test_set_payload_limit = Resolve(symbol, "ylb_test_set_payload_limit");
+            p_ylb_test_set_outbox_limit = Resolve(symbol, "ylb_test_set_outbox_limit");
             p_ylb_next_request = Resolve(symbol, "ylb_next_request");
             p_ylb_pending_bytes = Resolve(symbol, "ylb_pending_bytes");
+            p_ylb_send_room = Resolve(symbol, "ylb_send_room");
             p_ylb_set_count = Resolve(symbol, "ylb_set_count");
             p_ylb_set_info = Resolve(symbol, "ylb_set_info");
             p_ylb_set_name = Resolve(symbol, "ylb_set_name");
@@ -472,6 +501,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             p_ylb_copy_dirty = Resolve(symbol, "ylb_copy_dirty");
             p_ylb_now_us = Resolve(symbol, "ylb_now_us");
             p_ylb_test_server_start = Resolve(symbol, "ylb_test_server_start");
+            p_ylb_test_server_pause_reading = Resolve(symbol, "ylb_test_server_pause_reading");
             p_ylb_test_server_stop = Resolve(symbol, "ylb_test_server_stop");
             p_ylb_test_server_pattern = Resolve(symbol, "ylb_test_server_pattern");
             p_ylb_test_server_paint = Resolve(symbol, "ylb_test_server_paint");

@@ -26,7 +26,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
     internal static unsafe class LiveLinkBridge
     {
         /// <summary>この C# が知っているブリッジの版。</summary>
-        public const uint ExpectedAbi = 6;
+        public const uint ExpectedAbi = 7;
         const string LoadedKey = "Yozolab.YoluPainter.LiveLink.BridgeLoaded";
         static bool s_checked; static string s_problem; static uint s_abi, s_protocols;
 
@@ -191,6 +191,9 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
 
         /// <summary>ylb_model_send の返す、命令が枠の上限を超える（モデルが大きすぎる）ことを表す値（YLB_E_TOO_LARGE）。</summary>
         public const int TooLarge = -7;
+        /// <summary>送る関数（モデル・マテリアルの更新・値・絵・元の絵）の返す、送りの列が混んでいて積まなかったことを表す値（YLB_E_BUSY）。何も変えていないので、少し後に
+        /// 送り直せる（モデル・マテリアルの更新・値は組み立てが残るので、同じ関数をもう一度呼ぶだけ。絵・元の絵は呼び手の画素で送り直す）。</summary>
+        public const int Busy = -8;
         /// <summary>1 つの命令（モデル）で送れる大きさ（MiB。スタンドアロンの枠の上限）。</summary>
         public const int MaxSendMiB = 512;
 
@@ -275,8 +278,12 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             return true;
         }
 
-        /// <summary>まだ送り終えていない（順番待ちに積んだ）命令のバイトの合計（大きな絵を続けて送るときの目安）。</summary>
+        /// <summary>まだ送り終えていない命令のバイトの合計（順番待ちに積んだものと、いま書いている途中のもの。大きな絵を続けて送るときの目安）。</summary>
         public static long PendingBytes(ulong handle) => handle == 0 || !Available ? 0 : (long)Math.Min(long.MaxValue, LiveLinkNative.ylb_pending_bytes(handle));
+
+        /// <summary>いま積める大きさ（バイト。送りの列の上限から、積んである量を引いたもの）。何も積んでいなければ <see cref="long.MaxValue"/>（1 つの命令が上限より大きくても入る）。
+        /// 大きな絵を読む前に、入るかを確かめる（入らないなら読まずに、少し後にもう一度見る）。置き換えで空く分は数えないので、足りなくても送れることはある。</summary>
+        public static long SendRoom(ulong handle) => handle == 0 || !Available ? 0 : (long)Math.Min(long.MaxValue, LiveLinkNative.ylb_send_room(handle));
     }
 
     /// <summary>元の絵の様子（ylb_original_send の state）。</summary>
@@ -347,6 +354,12 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
 
         /// <summary>試験用: 1 つの命令の中身の上限（バイト）を狭める（巨大なモデルを作らずに、上限を超えるモデルの断りを確かめる）。</summary>
         public static void SetPayloadLimit(ulong handle, ulong bytes) => LiveLinkNative.ylb_test_set_payload_limit(handle, bytes);
+
+        /// <summary>試験用: 送りの列の上限（バイト。既定は 256 MiB）を決める（小さい量で「混んでいる」を確かめる）。</summary>
+        public static void SetOutboxLimit(ulong handle, ulong bytes) => LiveLinkNative.ylb_test_set_outbox_limit(handle, bytes);
+
+        /// <summary>試験用: 自己診断のスタンドアロンが、つながりから読むのを止める（true）か再開する（false）。止めている間、ブリッジの送りの列は読まれない相手の様子になる。</summary>
+        public static bool PauseReading(ulong server, bool paused) => LiveLinkNative.ylb_test_server_pause_reading(server, paused ? 1 : 0) == 0;
 
         /// <summary>読めるプロトコルの版の範囲を決める（次につなぐものから効く。つなぐ側の範囲と重ならなければ、版の範囲の断りを返す）。</summary>
         public static bool SetProtocol(ulong server, int min, int max) => LiveLinkNative.ylb_test_server_set_protocol(server, (uint)Math.Max(0, min), (uint)Math.Max(0, max)) == 0;

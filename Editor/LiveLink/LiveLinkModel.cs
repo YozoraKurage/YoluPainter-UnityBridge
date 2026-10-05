@@ -35,12 +35,15 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             public ulong ValuesKey, ValuesHash;
             /// <summary>lilToon の値を送ってある（lilToon でなくなったら「値なし」を送る）。</summary>
             public bool ValuesSent;
+            /// <summary>値を送る番が残っている（モデルを送った直後・頼まれたときに立て、送り終えるまで残す。送りの列が混んでいて断られたら、次の見回りで続きから送る）。</summary>
+            public bool ValuesDue;
             /// <summary>このマテリアルに送った、描いていないスロットの絵の同一性（同じなら送り直さない）。</summary>
             public readonly Dictionary<string, ulong> SentSlots = new Dictionary<string, ulong>();
         }
 
-        /// <summary>マテリアルの値を送った結果（ログ用）。</summary>
-        internal struct ValuesReport { public int Materials, Textures; public long Bytes; public string Problem; }
+        /// <summary>マテリアルの値を送った結果（ログ用）。<see cref="Busy"/> は、送りの列が混んでいて途中で止めたこと（残りは <see cref="LiveLinkModel.SendValues"/> を
+        /// もう一度呼べば続く）。<see cref="Unsent"/> は、頼まれた番号（<c>only</c>）のうち、止めたために送っていないもの。</summary>
+        internal struct ValuesReport { public int Materials, Textures; public long Bytes; public string Problem; public bool Busy; public List<int> Unsent; }
 
         internal sealed class MeshEntry
         {
@@ -58,6 +61,8 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         public readonly List<string> Notes = new List<string>();
         /// <summary>送ったモデルの世代（ylb_model_send の返した値。送る前は 0）。</summary>
         public int Generation { get; private set; }
+        /// <summary>直前の <see cref="Send"/>・<see cref="Commit"/>・<see cref="SendMaterials"/>・<see cref="SendValues"/> が、送りの列が混んでいて断られた（何も積んでいない。少し後に送り直せる）か。</summary>
+        public bool Busy { get; private set; }
         public ulong StructureHash { get; private set; }
         /// <summary>送ったマテリアルの情報（シェーダー・キーワード・テクスチャのプロパティ）の値（ComputeMaterialHash。変われば、マテリアルの更新だけを送る）。</summary>
         public ulong MaterialHash { get; private set; }
@@ -283,9 +288,11 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             return clean.Length > 256 ? clean.Substring(0, 256) : clean;
         }
 
-        /// <summary>モデルを送る（積むだけ）。失敗すれば理由、送れれば null。</summary>
+        /// <summary>モデルを送る（積むだけ）。失敗すれば理由、送れれば null。送りの列が混んでいて断られたときも null で、<see cref="Busy"/> が真（<see cref="Generation"/> は 0 のまま。
+        /// 組み立てたモデルはブリッジに残るので、少し後に <see cref="Commit"/> だけをもう一度呼べる）。</summary>
         public string Send(ulong handle)
         {
+            Busy = false;
             if (Root == null) return L.Tr("The model is gone.");
             if (LiveLinkBridge.ModelBegin(handle, KeyName(Root.name)) < 0) return L.Tr("The Live Link library refused the model ({0}).", "begin");
             for (int i = 0; i < Materials.Count; i++)
@@ -302,7 +309,16 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                     if (LiveLinkBridge.ModelSubmesh(handle, mesh, e.SubmeshMaterials[s], subs[s]) < 0) return L.Tr("The Live Link library refused the model ({0}).", "submesh " + e.Name + " " + s);
                 e.PoseHash = PoseHashOf(e);
             }
+            return Commit(handle);
+        }
+
+        /// <summary>組み立てたモデルを積む（<see cref="Send"/> の最後の段）。送りの列が混んでいて断られたら <see cref="Busy"/> が真で、何も積まない（組み立てはブリッジに残る）。
+        /// 失敗すれば理由、積めれば null（<see cref="Generation"/> が決まる）。</summary>
+        public string Commit(ulong handle)
+        {
+            Busy = false;
             int generation = LiveLinkBridge.ModelSend(handle);
+            if (generation == LiveLinkBridge.Busy) { Busy = true; return null; }
             if (generation == LiveLinkBridge.TooLarge) return L.Tr("The model is larger than the {0} MiB that can be sent at once, so it was not sent.", LiveLinkBridge.MaxSendMiB);
             if (generation <= 0) return L.Tr("The model could not be sent (not connected).");
             Generation = generation;
@@ -338,9 +354,10 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         public void AcceptMaterialHash() => MaterialHash = ComputeMaterialHash();
 
         /// <summary>マテリアルの情報（シェーダー・キーワード・テクスチャのプロパティ・見せるチャンネル）を決め直し、モデルは送り直さずに更新だけを送る。
-        /// 失敗すれば理由、送れれば null。</summary>
+        /// 失敗すれば理由、送れれば null。送りの列が混んでいて断られたときも null で、<see cref="Busy"/> が真（送ったものとして覚えないので、次の見回りで同じ変化をまた送る）。</summary>
         public string SendMaterials(ulong handle)
         {
+            Busy = false;
             if (Root == null) return L.Tr("The model is gone.");
             if (Generation <= 0) return L.Tr("The model was not sent yet.");
             texturePropertyCache.Clear();
@@ -348,7 +365,9 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             if (LiveLinkBridge.MaterialsBegin(handle) < 0) return L.Tr("The Live Link library refused the material update ({0}).", "begin");
             for (int i = 0; i < Materials.Count; i++)
                 if (!WriteMaterial(handle, i, true)) return L.Tr("The Live Link library refused the material update ({0}).", "material " + Materials[i].Name);
-            if (LiveLinkBridge.MaterialsSend(handle) < 0) return L.Tr("The material update could not be sent (not connected).");
+            int sent = LiveLinkBridge.MaterialsSend(handle);
+            if (sent == LiveLinkBridge.Busy) { Busy = true; return null; }
+            if (sent < 0) return L.Tr("The material update could not be sent (not connected).");
             MaterialHash = ComputeMaterialHash();
             return null;
         }
@@ -360,19 +379,29 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         /// （スタンドアロンは持っていないと言っている）。マテリアルの無い組には「値なし」を送り、頼んだ側の待ちを閉じる。</summary>
         public ValuesReport SendValues(ulong handle, bool all, ISet<int> only = null)
         {
+            Busy = false;
             var report = new ValuesReport();
             if (Generation <= 0 || Root == null) return report;
             if ((LiveLinkBridge.CommonFeatures(handle) & LiveLinkBridge.FeatureMaterialValues) == 0) return report;
             long budget = LiveLinkMaterialValues.Budget;
-            if (only != null) all = true;
+            // 送る番を立てる（モデルを送った直後は全部）。送り終えるまで残すので、送りの列が混んでいて断られても、次の見回りで続きから送る。
+            // 頼まれたとき（only）は、送れなかった番号を結果（Unsent）で呼び手に返す（頼みは取り出し済みなので、呼び手が覚える）
+            if (all && only == null) foreach (var m in Materials) m.ValuesDue = true;
             for (int i = 0; i < Materials.Count; i++)
             {
                 if (only != null && !only.Contains(i)) continue;
                 var e = Materials[i];
+                bool due = only != null || e.ValuesDue;
+                e.ValuesDue = false;
                 if (e.Material == null)
                 {
                     // マテリアルの無い組: 値は無い。頼まれたときだけ「値なし」と答える（頼んだ側の待ちを閉じる）
-                    if (only != null && LiveLinkMaterialValues.SendNone(handle, i) < 0) { report.Problem = L.Tr("The Live Link library refused the material values ({0}).", e.Name); return report; }
+                    if (only != null)
+                    {
+                        int answered = LiveLinkMaterialValues.SendNone(handle, i);
+                        if (answered == LiveLinkBridge.Busy) return StopBusy(report, e, i, only, e.ValuesKey);
+                        if (answered < 0) { report.Problem = L.Tr("The Live Link library refused the material values ({0}).", e.Name); return report; }
+                    }
                     continue;
                 }
                 if (only != null) e.SentSlots.Clear();
@@ -381,24 +410,40 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                 // 元のテクスチャのまま見せるので、その絵も送る
                 var routed = e.Shown.Where(c => c.Channel == PaintChannel.Color).Select(c => c.Property).ToList();
                 ulong key = lil ? LiveLinkMaterialValues.QuickKey(e.Material, routed) : 1;
-                if (!all && key == e.ValuesKey) continue;
+                if (!due && key == e.ValuesKey) continue;
+                ulong keyBefore = e.ValuesKey;
                 e.ValuesKey = key;
                 if (!lil)
                 {
-                    if (!all && !e.ValuesSent) continue;
+                    if (!due && !e.ValuesSent) continue;
                     int none = LiveLinkMaterialValues.SendNone(handle, i);
+                    if (none == LiveLinkBridge.Busy) return StopBusy(report, e, i, only, keyBefore);
                     if (none < 0) { report.Problem = L.Tr("The Live Link library refused the material values ({0}).", e.Name); return report; }
                     e.ValuesSent = false; e.ValuesHash = 0; e.SentSlots.Clear();
                     continue;
                 }
                 var snapshot = LiveLinkMaterialValues.Read(e.Material, e.Binding, routed);
-                if (!all && e.ValuesSent && snapshot.Hash == e.ValuesHash) continue;
+                if (!due && e.ValuesSent && snapshot.Hash == e.ValuesHash) continue;
                 var sent = LiveLinkMaterialValues.Send(handle, i, snapshot, e.SentSlots, ref budget);
+                if (sent.Result == LiveLinkBridge.Busy) return StopBusy(report, e, i, only, keyBefore);
                 if (sent.Result < 0) { report.Problem = L.Tr("The Live Link library refused the material values ({0}).", e.Name); return report; }
                 if (sent.Result == 0) return report; // スタンドアロンの印が無くなった（つながり直し）
                 e.ValuesSent = true; e.ValuesHash = snapshot.Hash;
                 report.Materials++; report.Textures += sent.Textures; report.Bytes += sent.Bytes;
+                // 値は積んだが、続く絵が混んでいて断られた: スタンドアロンは絵を待っているので、このマテリアルを次に全部送り直す
+                if (sent.Retry) return StopBusy(report, e, i, only, e.ValuesKey);
             }
+            return report;
+        }
+
+        /// <summary>送りの列が混んでいて値を積めなかった: ここで止める（残りは混みが引いてから）。このマテリアルは、次に最初から送る番にする
+        /// （<paramref name="keyBefore"/> に戻して、変わっていないものとして飛ばさない）。頼まれた番号は、止めた所から後ろを結果で返す。</summary>
+        ValuesReport StopBusy(ValuesReport report, MaterialEntry e, int index, ISet<int> only, ulong keyBefore)
+        {
+            Busy = true; report.Busy = true;
+            e.ValuesKey = keyBefore;
+            if (only == null) e.ValuesDue = true;
+            else report.Unsent = only.Where(m => m >= index).OrderBy(m => m).ToList();
             return report;
         }
 
