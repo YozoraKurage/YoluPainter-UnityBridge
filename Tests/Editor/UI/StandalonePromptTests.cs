@@ -20,19 +20,21 @@ namespace Yozolab.YoluPainter.Tests
     [SetUpFixture]
     public sealed class StandalonePromptPin
     {
-        StandalonePrompt.IStore store; Action presenter; Action<string> openUrl; Action<Action> schedule;
+        StandalonePrompt.IStore store; Action presenter; Action<string> openUrl; Action<Action> schedule; Func<bool> platform;
 
         [OneTimeSetUp]
         public void Pin()
         {
-            store = StandalonePrompt.Store; presenter = StandalonePrompt.Presenter; openUrl = StandalonePrompt.OpenUrl; schedule = StandalonePrompt.Schedule;
+            store = StandalonePrompt.Store; presenter = StandalonePrompt.Presenter; openUrl = StandalonePrompt.OpenUrl; schedule = StandalonePrompt.Schedule; platform = StandalonePrompt.PlatformHasStandalone;
             StandalonePrompt.Store = new MemoryPromptStore(); StandalonePrompt.Presenter = () => { }; StandalonePrompt.OpenUrl = _ => { };
+            // この試験の間は、どの OS でも「配布がある」ことにする（OS で出し分ける決まりの試験は StandalonePromptTests が個別に）
+            StandalonePrompt.PlatformHasStandalone = () => true;
         }
 
         [OneTimeTearDown]
         public void Unpin()
         {
-            StandalonePrompt.Store = store; StandalonePrompt.Presenter = presenter; StandalonePrompt.OpenUrl = openUrl; StandalonePrompt.Schedule = schedule;
+            StandalonePrompt.Store = store; StandalonePrompt.Presenter = presenter; StandalonePrompt.OpenUrl = openUrl; StandalonePrompt.Schedule = schedule; StandalonePrompt.PlatformHasStandalone = platform;
         }
     }
 
@@ -62,6 +64,7 @@ namespace Yozolab.YoluPainter.Tests
         [TearDown]
         public void Restore()
         {
+            StandalonePrompt.PlatformHasStandalone = () => true;
             StandalonePrompt.Presenter = () => { }; StandalonePrompt.OpenUrl = _ => { };
             StandalonePrompt.Schedule = savedSchedule;
             StandalonePrompt.Store = new MemoryPromptStore();
@@ -86,6 +89,29 @@ namespace Yozolab.YoluPainter.Tests
             Assert.That(shown, Is.EqualTo(2));
             StandalonePrompt.OnPaintWindowOpened();
             Assert.That(shown, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void ItIsNeitherShownNorRememberedWhereThereIsNoStandaloneToDownload()
+        {
+            // スタンドアロン版の配布は Windows だけ: Mac・Linux のエディタには、窓も Preferences の入切も出さない（出したとも覚えない）
+            Assert.That(StandalonePrompt.HasStandaloneFor(RuntimePlatform.WindowsEditor), Is.True);
+            foreach (var platform in new[] { RuntimePlatform.LinuxEditor, RuntimePlatform.OSXEditor, RuntimePlatform.WindowsPlayer, RuntimePlatform.LinuxPlayer })
+                Assert.That(StandalonePrompt.HasStandaloneFor(platform), Is.False, platform.ToString());
+            StandalonePrompt.PlatformHasStandalone = () => false;
+            for (int i = 0; i < 3; i++)
+            {
+                RestartEditor();
+                Assert.That(StandalonePrompt.NotifyPaintWindowOpened(), Is.False);
+                StandalonePrompt.OnPaintWindowOpened();
+            }
+            Assert.That(shown, Is.Zero);
+            Assert.That(store.ShownThisSession, Is.False, "nothing was recorded");
+            Assert.That(StandalonePrompt.Enabled, Is.True, "the setting itself is untouched");
+            Assert.That(StandalonePrompt.DrawPreference(), Is.False, "no switch is drawn");
+            // 配布のある OS に戻れば、設定のとおり出る
+            StandalonePrompt.PlatformHasStandalone = () => true;
+            Assert.That(StandalonePrompt.NotifyPaintWindowOpened(), Is.True);
         }
 
         [Test]

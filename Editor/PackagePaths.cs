@@ -23,16 +23,30 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>パッケージの根からの相対パスを、ディスク上の絶対パスにする。</summary>
         public static string Physical(string relative) => Path.GetFullPath(FileUtil.GetPhysicalPath(Asset(relative)));
 
-        static string Find()
+        /// <summary>パッケージの根の、ディスク上の絶対パス（末尾の区切りなし）。<c>BrushSets~</c> のように、Unity がインポートしないフォルダの場所を求めるときの根。</summary>
+        public static string PhysicalRoot => Path.GetFullPath(FileUtil.GetPhysicalPath(Root)).TrimEnd('/', '\\');
+
+        /// <summary>パッケージの情報から取れるパッケージの根のアセットのパス（取れなければ null。Assets への複製のとき）。試験は、取れない配置の道をここを差し替えて通す。</summary>
+        internal static System.Func<string> InfoAssetPath = () =>
         {
             var info = PackageInfo.FindForAssembly(typeof(PackagePaths).Assembly);
-            if (info != null && !string.IsNullOrEmpty(info.assetPath)) return info.assetPath;
+            return info != null && !string.IsNullOrEmpty(info.assetPath) ? info.assetPath : null;
+        };
+
+        /// <summary>覚えた根を忘れて、次に求めるときにもう一度探す（試験用）。</summary>
+        internal static void Reset() => s_root = null;
+
+        static string Find() => InfoAssetPath() ?? FromAssemblyDefinition() ?? Fallback;
+
+        /// <summary>Editor のアセンブリ定義の場所から辿ったパッケージの根のアセットのパス（見つからなければ null）。パッケージの情報が取れない配置の道。</summary>
+        internal static string FromAssemblyDefinition()
+        {
             foreach (var guid in AssetDatabase.FindAssets("Yozolab.YoluPainter.Editor t:AssemblyDefinitionAsset"))
             {
                 string path = AssetDatabase.GUIDToAssetPath(guid);
                 if (Path.GetFileName(path) == "Yozolab.YoluPainter.Editor.asmdef") return Path.GetDirectoryName(Path.GetDirectoryName(path)).Replace('\\', '/');
             }
-            return Fallback;
+            return null;
         }
     }
 }

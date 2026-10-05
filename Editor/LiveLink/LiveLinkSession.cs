@@ -34,6 +34,13 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         public int OriginalsSent { get; private set; }
         /// <summary>元の絵の様子だけを送った（読めない・大きすぎる・予算を超える）数の合計（試験・表示用）。</summary>
         public int OriginalsDeclined { get; private set; }
+        /// <summary>画素を送らず「印が同じ」と答えた元の絵の数の合計（スタンドアロンが手元に持つ絵と今の印が同じ。試験・表示用）。</summary>
+        public int OriginalsCached { get; private set; }
+        /// <summary>スタンドアロンから受けた頼みの数と、世代が合わずに答えなかった数（試験・表示用）。</summary>
+        public int RequestsReceived { get; private set; }
+        public int RequestsIgnored { get; private set; }
+        /// <summary>頼まれて送り直したマテリアルの値の数の合計（試験・表示用）。</summary>
+        public int ValuesResent { get; private set; }
         /// <summary>送り終えていない元の絵があるか（試験が待つ）。</summary>
         public bool OriginalsPending => originals != null;
         /// <summary>つながりが終わった知らせ（断られた・つなげなかった・相手が閉じた）の種類。終わっていなければ null。</summary>
@@ -159,11 +166,14 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         }
 
         /// <summary>元の絵（Color の流し込み先の元のテクスチャ）を送る列を作る。スタンドアロンが機能の印（元のテクスチャ）を持たなければ作らない（読みもしない）。
+        /// 頼みを出せる（機能の印 マテリアルの頼み が双方にある）スタンドアロンには、押し出さない: 元の絵を入れるセットのマテリアルだけを、スタンドアロンが頼む
+        /// （<see cref="HandleRequests"/>）。頼みを知らない古いスタンドアロンには、今までどおり全部を押し出す。
         /// 送るのはエディタの更新ごとに少しずつ（<see cref="PumpOriginals"/>）。スタンドアロンは、揃うまでそのセットを出さないので、つないだ瞬間に表示は変わらない。</summary>
         void StartOriginals()
         {
             originals = null;
             if (Model == null || (CommonFeatures & LiveLinkBridge.FeatureOriginalTextures) == 0) return;
+            if ((CommonFeatures & LiveLinkBridge.FeatureMaterialRequest) != 0) return;
             var plan = LiveLinkOriginals.Plan(Model);
             if (plan.Count > 0) originals = new LiveLinkOriginals.Sender(Model, plan);
         }
@@ -175,14 +185,51 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             if (Model == null || Model.Generation != sender.Generation || Status != LiveLinkStatus.Connected) { originals = null; return; }
             var r = sender.Pump(Handle, OriginalsPumpMs, OriginalsPendingLimit);
             if (r.Problem != null) AddLog(r.Problem);
-            OriginalsSent += r.Images; OriginalsDeclined += r.Declined;
-            if (r.Images + r.Declined > 0) Changed?.Invoke();
+            OriginalsSent += r.Images; OriginalsDeclined += r.Declined; OriginalsCached += r.Cached;
+            if (r.Images + r.Declined + r.Cached > 0) Changed?.Invoke();
             if (!sender.Done) return;
             originals = null;
-            if (sender.Images + sender.Declined > 0)
-                AddLog(sender.Declined > 0
-                    ? L.Tr("Sent the original textures of {0} materials ({1} not sent).", sender.Images + sender.Declined, sender.Declined)
-                    : L.Tr("Sent the original textures of {0} materials.", sender.Images));
+            int total = sender.Images + sender.Declined + sender.Cached;
+            if (total > 0)
+                AddLog(sender.Cached > 0
+                    ? L.Tr("Sent the original textures of {0} materials ({1} not sent; {2} the standalone already has).", total, sender.Declined, sender.Cached)
+                    : sender.Declined > 0
+                        ? L.Tr("Sent the original textures of {0} materials ({1} not sent).", sender.Images + sender.Declined, sender.Declined)
+                        : L.Tr("Sent the original textures of {0} materials.", sender.Images));
+        }
+
+        /// <summary>スタンドアロンの頼みに答える。頼みは今のモデルの世代のものだけ（古い世代の頼みは答えない）。元の絵は、頼まれたマテリアルの絵だけを読んで送る
+        /// （頼みの have が今の印と同じなら、読まずに「印が同じ」と答える）。値は、頼まれたマテリアルの値を、前に送った絵も含めて全部送り直す。</summary>
+        void HandleRequests()
+        {
+            List<(int Material, string Slot, ulong Have)> wantedOriginals = null;
+            HashSet<int> wantedValues = null;
+            while (LiveLinkBridge.NextRequest(Handle, out var request))
+            {
+                RequestsReceived++;
+                if (Model == null || Model.Generation <= 0 || request.Generation != (uint)Model.Generation || request.Material > int.MaxValue) { RequestsIgnored++; continue; }
+                if (request.WantsOriginal && (CommonFeatures & LiveLinkBridge.FeatureOriginalTextures) != 0)
+                    (wantedOriginals ?? (wantedOriginals = new List<(int, string, ulong)>())).Add(((int)request.Material, request.Slot ?? "", request.Have));
+                if (request.WantsValues && (CommonFeatures & LiveLinkBridge.FeatureMaterialValues) != 0)
+                    (wantedValues ?? (wantedValues = new HashSet<int>())).Add((int)request.Material);
+            }
+            if (wantedOriginals != null)
+            {
+                var jobs = LiveLinkOriginals.PlanRequested(Model, wantedOriginals);
+                if (jobs.Count > 0)
+                {
+                    if (originals != null && originals.Generation == Model.Generation) originals.Enqueue(jobs);
+                    else originals = new LiveLinkOriginals.Sender(Model, jobs);
+                }
+            }
+            if (wantedValues != null)
+            {
+                var r = Model.SendValues(Handle, false, wantedValues);
+                if (r.Problem != null) AddLog(r.Problem);
+                ValuesResent += wantedValues.Count;
+                AddLog(L.Tr("The standalone asked for the values of {0} materials; sent them again.", wantedValues.Count));
+                Changed?.Invoke();
+            }
         }
 
         void AddLog(string text)
@@ -207,6 +254,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                     default: if (!string.IsNullOrEmpty(e.Text)) AddLog(e.Text); break;
                 }
             }
+            HandleRequests();
             PumpOriginals();
             ulong serial = LiveLinkBridge.Serial(Handle);
             if (Display.RebuildLost(Handle)) pending = true;

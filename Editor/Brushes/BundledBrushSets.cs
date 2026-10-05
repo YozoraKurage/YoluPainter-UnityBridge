@@ -17,15 +17,12 @@ namespace Yozolab.YoluPainter.Editor
         static Dictionary<string, BrushTips.TipRef> tips;
         static readonly List<string> loadWarnings = new List<string>();
 
-        /// <summary>パッケージのルート（テストはここを差し替えられる）。</summary>
+        /// <summary>パッケージのルート（ディスク上の絶対パス。テストはここを差し替えられる）。パッケージがどこに入っても（Packages の下・ローカルのフォルダ・
+        /// VPM・Assets への複製）同じに求まる <see cref="PackagePaths"/> から取る。パッケージの情報が取れない配置（Assets への複製）で、プロジェクトのフォルダを
+        /// 根にして同梱のブラシを探し損ねない。</summary>
         public static string PackageRoot
         {
-            get
-            {
-                if (packageRoot != null) return packageRoot;
-                var info = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(BundledBrushSets).Assembly);
-                return packageRoot = info != null ? info.resolvedPath : Path.GetFullPath(".");
-            }
+            get => packageRoot ?? (packageRoot = PackagePaths.PhysicalRoot);
             set { packageRoot = value; presets = null; tips = null; }
         }
         static string packageRoot;

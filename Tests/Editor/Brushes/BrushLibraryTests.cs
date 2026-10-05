@@ -51,6 +51,45 @@ namespace Yozolab.YoluPainter.Tests
         static int Painted(PaintDocument d)
         { var rgba = d.Composite(PaintChannel.Color); int n = 0; for (int i = 3; i < rgba.Length; i += 4) if (rgba[i] > 0) n++; return n; }
 
+        [Test] public void ThePackageRootThatFindsTheBundledBrushesComesFromThePackageLocationNotTheProjectFolder()
+        {
+            var saved = BundledBrushSets.PackageRoot;
+            try
+            {
+                BundledBrushSets.PackageRoot = null; // 求め直す
+                string root = BundledBrushSets.PackageRoot;
+                Assert.That(root, Is.EqualTo(PackagePaths.PhysicalRoot));
+                Assert.That(Directory.Exists(Path.Combine(root, "BrushSets~", "Krita4Default", "brushes")), Is.True, "the bundled brushes are found under " + root);
+                Assert.That(root, Is.Not.EqualTo(Path.GetFullPath(".")), "the project folder is not the package root");
+                Assert.That(root, Does.Not.EndWith("/").And.Not.EndWith("\\"));
+                // パッケージの情報が取れる配置では、その場所と同じ
+                var info = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(BundledBrushSets).Assembly);
+                if (info != null) Assert.That(Path.GetFullPath(info.resolvedPath).TrimEnd('/', '\\'), Is.EqualTo(root));
+            }
+            finally { BundledBrushSets.PackageRoot = saved; }
+        }
+
+        [Test] public void TheBundledBrushesAreFoundFromTheAssemblyDefinitionWhenNoPackageInformationIsAvailable()
+        {
+            var savedInfo = PackagePaths.InfoAssetPath; var savedRoot = BundledBrushSets.PackageRoot;
+            try
+            {
+                // Assets への複製のように、パッケージの情報（PackageInfo）が取れない配置。前の実装はこのとき、プロジェクトのフォルダを根にして探し損ねた
+                PackagePaths.InfoAssetPath = () => null; PackagePaths.Reset(); BundledBrushSets.PackageRoot = null;
+                string fromAssembly = PackagePaths.FromAssemblyDefinition();
+                Assert.That(fromAssembly, Is.Not.Null, "the Editor assembly definition is found by its name");
+                var info = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(BundledBrushSets).Assembly);
+                if (info != null) Assert.That(fromAssembly, Is.EqualTo(info.assetPath), "it leads to the same root as the package information");
+                string root = BundledBrushSets.PackageRoot;
+                Assert.That(root, Is.EqualTo(Path.GetFullPath(UnityEditor.FileUtil.GetPhysicalPath(fromAssembly)).TrimEnd('/', '\\')));
+                Assert.That(root, Is.Not.EqualTo(Path.GetFullPath(".")), "the project folder is not the root");
+                Assert.That(Directory.Exists(Path.Combine(root, "BrushSets~", "Krita4Default", "brushes")), Is.True, "the bundled brushes are found under " + root);
+                Assert.That(BundledBrushSets.Presets.Count, Is.GreaterThan(0));
+                Assert.That(BundledBrushSets.LoadWarnings, Is.Empty);
+            }
+            finally { PackagePaths.InfoAssetPath = savedInfo; PackagePaths.Reset(); BundledBrushSets.PackageRoot = savedRoot; }
+        }
+
         [Test] public void TheBundledKritaSetLoadsCompletelyAndMatchesItsChecksums()
         {
             string set = Path.Combine(BundledBrushSets.PackageRoot, "BrushSets~", "Krita4Default");

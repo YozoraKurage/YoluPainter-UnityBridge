@@ -303,6 +303,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                 e.PoseHash = PoseHashOf(e);
             }
             int generation = LiveLinkBridge.ModelSend(handle);
+            if (generation == LiveLinkBridge.TooLarge) return L.Tr("The model is larger than the {0} MiB that can be sent at once, so it was not sent.", LiveLinkBridge.MaxSendMiB);
             if (generation <= 0) return L.Tr("The model could not be sent (not connected).");
             Generation = generation;
             return null;
@@ -354,17 +355,27 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
 
         /// <summary>確かめた lilToon のマテリアルの値（と描いていないスロットの絵）を送る。スタンドアロンが機能の印（マテリアルの値）を
         /// 持たなければ何もしない（読みもしない）。<paramref name="all"/> ならモデルを送った直後として全部のマテリアルを送り（lilToon でない
-        /// マテリアルは「値なし」）、偽なら変わったマテリアルだけ（0.2 秒ごとの見回り）。マテリアルには書かない。</summary>
-        public ValuesReport SendValues(ulong handle, bool all)
+        /// マテリアルは「値なし」）、偽なら変わったマテリアルだけ（0.2 秒ごとの見回り）。マテリアルには書かない。
+        /// <paramref name="only"/> を渡すと、そのマテリアルの番号だけを、変わっていなくても送り直す（スタンドアロンの頼み）。前に送った絵も全部送り直す
+        /// （スタンドアロンは持っていないと言っている）。マテリアルの無い組には「値なし」を送り、頼んだ側の待ちを閉じる。</summary>
+        public ValuesReport SendValues(ulong handle, bool all, ISet<int> only = null)
         {
             var report = new ValuesReport();
             if (Generation <= 0 || Root == null) return report;
             if ((LiveLinkBridge.CommonFeatures(handle) & LiveLinkBridge.FeatureMaterialValues) == 0) return report;
             long budget = LiveLinkMaterialValues.Budget;
+            if (only != null) all = true;
             for (int i = 0; i < Materials.Count; i++)
             {
+                if (only != null && !only.Contains(i)) continue;
                 var e = Materials[i];
-                if (e.Material == null) continue;
+                if (e.Material == null)
+                {
+                    // マテリアルの無い組: 値は無い。頼まれたときだけ「値なし」と答える（頼んだ側の待ちを閉じる）
+                    if (only != null && LiveLinkMaterialValues.SendNone(handle, i) < 0) { report.Problem = L.Tr("The Live Link library refused the material values ({0}).", e.Name); return report; }
+                    continue;
+                }
+                if (only != null) e.SentSlots.Clear();
                 bool lil = LiveLinkMaterialValues.IsVerifiedLilToon(e.Binding);
                 // スタンドアロンが描いた絵で見せるのは Color の流し込み先だけ（スタンドアロンが出すチャンネル）。ほかの流し込み先は
                 // 元のテクスチャのまま見せるので、その絵も送る

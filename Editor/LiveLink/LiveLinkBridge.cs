@@ -18,14 +18,15 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
     internal enum LiveLinkStatus { Unknown = -1, Connecting = 0, Connected = 1, Closed = 2, Failed = 3 }
 
     /// <summary>
-    /// ブリッジの DLL（yolu_bridge。Plugins/LiveLink の Linux の .so と Windows の .dll、エディタだけ）の口。初めて使うときに DLL を読み、
-    /// 最初に版（ylb_abi_version）を確かめる。合わなければほかの関数を呼ばない。Unity は一度読んだ DLL を手放さないので、ドメインの
-    /// 読み直しの後は前のドメインのつながりを ylb_disconnect_all で切る（DLL を使ったドメインがあったときだけ。使わない人には DLL を読ませない）。
+    /// ブリッジの DLL（yolu_bridge。Plugins/LiveLink の Linux の .so と Windows の .dll、エディタだけ）の口。初めて使うときに DLL を（パッケージの中の
+    /// ファイルのコピーから。<see cref="LiveLinkNativeLoader"/>）読み、最初に版（ylb_abi_version）を確かめる。合わなければほかの関数を呼ばない。
+    /// 読んだ DLL は手放さないので、ドメインの読み直しの後は前のドメインのつながりを ylb_disconnect_all で切る（DLL を使ったドメインがあったときだけ。使わない人には DLL を読ませない）。
+    /// パッケージの更新で中身の違うコピーを読むときは、前のコピーのつながりも、そのコピーの ylb_disconnect_all で切る（<see cref="LiveLinkNativeLoader.DisconnectStale"/>）。
     /// </summary>
     internal static unsafe class LiveLinkBridge
     {
         /// <summary>この C# が知っているブリッジの版。</summary>
-        public const uint ExpectedAbi = 5;
+        public const uint ExpectedAbi = 6;
         const string LoadedKey = "Yozolab.YoluPainter.LiveLink.BridgeLoaded";
         static bool s_checked; static string s_problem; static uint s_abi, s_protocols;
 
@@ -42,14 +43,15 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             s_checked = true;
             try
             {
+                // ライブラリは、パッケージの中のファイルでなく、そのコピーから読む（LiveLinkNativeLoader）。更新で、読み込み中のファイルを差し替えられなくならない
+                s_problem = LiveLinkNativeLoader.Load();
+                if (s_problem != null) return;
                 s_abi = LiveLinkNative.ylb_abi_version();
                 SessionState.SetBool(LoadedKey, true);
-                if (s_abi != ExpectedAbi) { s_problem = L.Tr("The Live Link library is version {0}, not {1}. Unity needs a restart.", s_abi, ExpectedAbi); return; }
+                if (s_abi != ExpectedAbi) { s_problem = L.Tr("The Live Link library is version {0}, not {1}.", s_abi, ExpectedAbi); return; }
                 s_protocols = LiveLinkNative.ylb_protocol_versions();
             }
-            catch (DllNotFoundException e) { s_problem = L.Tr("The Live Link library (yolu_bridge) could not be loaded: {0}", e.Message); }
-            catch (EntryPointNotFoundException e) { s_problem = L.Tr("The Live Link library is missing a function ({0}). Unity needs a restart.", e.Message); }
-            catch (BadImageFormatException e) { s_problem = L.Tr("The Live Link library (yolu_bridge) could not be loaded: {0}", e.Message); }
+            catch (EntryPointNotFoundException e) { s_problem = L.Tr("The Live Link library is missing a function ({0}).", e.Message); }
         }
 
         [InitializeOnLoadMethod]
@@ -187,6 +189,11 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
 
         public static int MaterialsSend(ulong handle) => LiveLinkNative.ylb_materials_send(handle);
 
+        /// <summary>ylb_model_send の返す、命令が枠の上限を超える（モデルが大きすぎる）ことを表す値（YLB_E_TOO_LARGE）。</summary>
+        public const int TooLarge = -7;
+        /// <summary>1 つの命令（モデル）で送れる大きさ（MiB。スタンドアロンの枠の上限）。</summary>
+        public const int MaxSendMiB = 512;
+
         public static int ModelSend(ulong handle) => LiveLinkNative.ylb_model_send(handle);
         public static int ModelClose(ulong handle) => LiveLinkNative.ylb_model_close(handle);
         public static int PoseBegin(ulong handle) => LiveLinkNative.ylb_pose_begin(handle);
@@ -241,12 +248,31 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         public const ulong FeatureOriginalTextures = 1UL << 4;
 
         /// <summary>元の絵を送る（<see cref="LiveLinkOriginalState"/>・<see cref="LiveLinkOriginalRead"/>。絵が付かない様子は画素なし。画素は RGBA8、行は下から）。
-        /// 1 = 積んだ、0 = スタンドアロンに印が無いので送らない、負は失敗。</summary>
-        public static int OriginalSend(ulong handle, int material, string slot, LiveLinkOriginalState state, LiveLinkOriginalRead read, bool compressed, int width, int height, bool srgb, byte[] pixels)
+        /// <paramref name="stamp"/> は絵の印（<see cref="LiveLinkOriginals.StampOf"/>。0 は印なし）で、<see cref="LiveLinkOriginalState.Cached"/>（スタンドアロンが
+        /// 頼みで持つと言った絵と印が同じ。画素なし）には 0 でない印が要る。1 = 積んだ、0 = スタンドアロンに印が無いので送らない、負は失敗。</summary>
+        public static int OriginalSend(ulong handle, int material, string slot, LiveLinkOriginalState state, LiveLinkOriginalRead read, bool compressed, int width, int height, bool srgb, byte[] pixels, ulong stamp = 0)
         {
             var b = Utf8(slot);
             fixed (byte* p = b) fixed (byte* px = pixels)
-                return LiveLinkNative.ylb_original_send(handle, material, p, b.Length, (int)state, (int)read, compressed ? 1 : 0, (uint)Math.Max(0, width), (uint)Math.Max(0, height), srgb ? 1 : 0, px, pixels?.Length ?? 0);
+                return LiveLinkNative.ylb_original_send(handle, material, p, b.Length, (int)state, (int)read, compressed ? 1 : 0, (uint)Math.Max(0, width), (uint)Math.Max(0, height), srgb ? 1 : 0, stamp, px, pixels?.Length ?? 0);
+        }
+
+        // ───────── スタンドアロンからの頼み（機能の印 MaterialRequest が双方にあるときだけ来る） ─────────
+
+        /// <summary>機能の印: マテリアルの頼み（スタンドアロンが値・元の絵を頼み、元の絵は頼まれたものだけを送る）。</summary>
+        public const ulong FeatureMaterialRequest = 1UL << 5;
+
+        /// <summary>スタンドアロンからの頼みを 1 つ取り出す（待たない）。無ければ false。</summary>
+        public static bool NextRequest(ulong handle, out LiveLinkRequest request)
+        {
+            request = default;
+            if (handle == 0 || !Available) return false;
+            var buf = new byte[1024]; YlbRequest raw; int r;
+            fixed (byte* p = buf) r = LiveLinkNative.ylb_next_request(handle, &raw, p, buf.Length);
+            if (r != 1) return false;
+            string slot = Encoding.UTF8.GetString(buf, 0, Math.Max(0, Math.Min(raw.slot_len, buf.Length)));
+            request = new LiveLinkRequest(raw.generation, raw.material, raw.wants, slot, raw.have);
+            return true;
         }
 
         /// <summary>まだ送り終えていない（順番待ちに積んだ）命令のバイトの合計（大きな絵を続けて送るときの目安）。</summary>
@@ -254,7 +280,24 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
     }
 
     /// <summary>元の絵の様子（ylb_original_send の state）。</summary>
-    internal enum LiveLinkOriginalState { Image = 0, Unreadable = 1, TooLarge = 2, OverBudget = 3 }
+    internal enum LiveLinkOriginalState { Image = 0, Unreadable = 1, TooLarge = 2, OverBudget = 3, Cached = 4 }
+
+    /// <summary>スタンドアロンからの頼み 1 つ（ylb_next_request）。</summary>
+    internal readonly struct LiveLinkRequest
+    {
+        public const uint WantValues = 1, WantOriginal = 2;
+        /// <summary>頼みの世代（送ったモデルの世代と違えば、古いモデルの頼み）。</summary>
+        public readonly uint Generation;
+        public readonly uint Material;
+        public readonly uint Wants;
+        /// <summary>元の絵のスロット（元の絵を頼むときだけ）。</summary>
+        public readonly string Slot;
+        /// <summary>スタンドアロンが手元に持つ元の絵の印（0 は持たない）。</summary>
+        public readonly ulong Have;
+        public LiveLinkRequest(uint generation, uint material, uint wants, string slot, ulong have) { Generation = generation; Material = material; Wants = wants; Slot = slot; Have = have; }
+        public bool WantsValues => (Wants & WantValues) != 0;
+        public bool WantsOriginal => (Wants & WantOriginal) != 0;
+    }
 
     /// <summary>元の絵をどう読んだか（ylb_original_send の read）。</summary>
     internal enum LiveLinkOriginalRead { File = 0, Imported = 1, Gpu = 2 }
@@ -293,6 +336,17 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         /// <paramref name="minPeer"/> は求める Unity のパッケージの版（null は要求なし）、<paramref name="features"/> は出す機能の印。</summary>
         public static bool Configure(ulong server, Version appVersion, Version minPeer, ulong features)
             => LiveLinkNative.ylb_test_server_configure(server, LiveLinkVersions.Pack(appVersion), LiveLinkVersions.Pack(minPeer ?? new Version(0, 0, 0)), features) == 0;
+
+        /// <summary>自己診断のスタンドアロンから、ブリッジへ頼みを 1 つ送る（スタンドアロンが頼む役。<paramref name="generation"/> が 0 なら今のモデルの世代。
+        /// 相手に印（マテリアルの頼み）が無い・つながっていなければ false）。</summary>
+        public static bool Request(ulong server, uint generation, uint material, uint wants, string slot, ulong have)
+        {
+            var b = Encoding.UTF8.GetBytes(slot ?? "");
+            fixed (byte* p = b) return LiveLinkNative.ylb_test_server_request(server, generation, material, (int)wants, p, b.Length, have) == 0;
+        }
+
+        /// <summary>試験用: 1 つの命令の中身の上限（バイト）を狭める（巨大なモデルを作らずに、上限を超えるモデルの断りを確かめる）。</summary>
+        public static void SetPayloadLimit(ulong handle, ulong bytes) => LiveLinkNative.ylb_test_set_payload_limit(handle, bytes);
 
         /// <summary>読めるプロトコルの版の範囲を決める（次につなぐものから効く。つなぐ側の範囲と重ならなければ、版の範囲の断りを返す）。</summary>
         public static bool SetProtocol(ulong server, int min, int max) => LiveLinkNative.ylb_test_server_set_protocol(server, (uint)Math.Max(0, min), (uint)Math.Max(0, max)) == 0;

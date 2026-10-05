@@ -7,17 +7,26 @@ msgstr ""
 
 # ── ブリッジ（ネイティブのライブラリ） ──
 
-msgid "The Live Link library is version {0}, not {1}. Unity needs a restart."
-msgstr "Live Link のライブラリの版は {0} です（必要なのは {1}）。Unity の再起動が要ります。"
+msgid "The Live Link library is version {0}, not {1}."
+msgstr "Live Link のライブラリの版は {0} です（必要なのは {1}）。"
 
 msgid "The Live Link library (yolu_bridge) could not be loaded: {0}"
 msgstr "Live Link のライブラリ（yolu_bridge）を読めません: {0}"
 
-msgid "The Live Link library is missing a function ({0}). Unity needs a restart."
-msgstr "Live Link のライブラリに関数（{0}）がありません。Unity の再起動が要ります。"
+msgid "The Live Link library is missing a function ({0})."
+msgstr "Live Link のライブラリに関数（{0}）がありません。"
 
 msgid "The channel packing shader ({0}) cannot be used here, so only Color, Emission and Normal are shown."
 msgstr "チャンネルを詰め直すシェーダー（{0}）がここでは使えないので、カラー・エミッション・ノーマルだけを見せます。"
+
+msgid "The Live Link library is available in the Windows and Linux editors only."
+msgstr "Live Link のライブラリを使えるのは、Windows と Linux のエディタだけです。"
+
+msgid "The Live Link library file is missing: {0}"
+msgstr "Live Link のライブラリのファイルがありません: {0}"
+
+msgid "The Live Link library could not be copied for loading: {0}"
+msgstr "Live Link のライブラリを、読み込み用にコピーできませんでした: {0}"
 
 # ── モデルを送る ──
 
@@ -249,6 +258,9 @@ msgstr "アニメーション"
 msgid "Original textures"
 msgstr "元のテクスチャ"
 
+msgid "Material requests"
+msgstr "マテリアルの頼み"
+
 msgid "Newer features"
 msgstr "新しい機能"
 
@@ -311,3 +323,12 @@ msgstr "テクスチャを読めませんでした（{0}）。"
 
 msgid "The texture could not be drawn and read back here."
 msgstr "ここではテクスチャを描いて読み戻せませんでした。"
+
+msgid "The model is larger than the {0} MiB that can be sent at once, so it was not sent."
+msgstr "モデルが 1 度に送れる大きさ（{0} MiB）を超えるので、送りませんでした。"
+
+msgid "Sent the original textures of {0} materials ({1} not sent; {2} the standalone already has)."
+msgstr "元のテクスチャを送りました（マテリアル {0}・送れなかったもの {1}・スタンドアロンが持っているもの {2}）。"
+
+msgid "The standalone asked for the values of {0} materials; sent them again."
+msgstr "スタンドアロンが頼んだ {0} マテリアルの値を、送り直しました。"
