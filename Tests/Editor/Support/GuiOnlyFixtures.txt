@@ -7,3 +7,4 @@ ShortcutGuardTests
 WindowResizeTests
 YlpImporterTests
 LiveLinkWindowTests
+StandalonePromptTests

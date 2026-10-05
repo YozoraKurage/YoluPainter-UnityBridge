@@ -417,8 +417,8 @@ namespace Yozolab.YoluPainter.Tests
         [Test]
         public void ATextureThatCannotBeSentGivesItsStateAndNoPixels()
         {
+            // 大きさは作る前の値で判断する（Create はしない。描き先の上限を超える大きさだと、機材によって Unity がエラーを記録する）
             var tooWide = Own(new RenderTexture(LiveLinkOriginals.MaxEdge + 1, 1, 0));
-            tooWide.Create();
             var large = LiveLinkOriginals.Load(tooWide);
             Assert.That(large.State, Is.EqualTo(LiveLinkOriginalState.TooLarge));
             Assert.That(large.Pixels, Is.Null);
