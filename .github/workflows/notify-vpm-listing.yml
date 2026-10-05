@@ -22,6 +22,9 @@ on:
   release:
     types: [published, edited, released]
 
+# この処理が使うのは LISTING_DISPATCH_TOKEN だけ。GITHUB_TOKEN には何も許さない。
+permissions: {}
+
 env:
   # 再ビルド対象の VPM リスティングリポジトリ（全パッケージ共通）
   LISTING_REPO: "YozoraKurage/vpmrepo-list"
