@@ -31,7 +31,16 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             public readonly List<PreviewChannelBinding> Shown = new List<PreviewChannelBinding>();
             public readonly List<string> Notes = new List<string>();
             public string Name => Material != null ? Material.name : PreviewMaterialGroup.UnassignedName;
+            /// <summary>マテリアルの値を最後に見たときのすばやい鍵（<see cref="LiveLinkMaterialValues.QuickKey"/>）と、送った値のハッシュ。</summary>
+            public ulong ValuesKey, ValuesHash;
+            /// <summary>lilToon の値を送ってある（lilToon でなくなったら「値なし」を送る）。</summary>
+            public bool ValuesSent;
+            /// <summary>このマテリアルに送った、描いていないスロットの絵の同一性（同じなら送り直さない）。</summary>
+            public readonly Dictionary<string, ulong> SentSlots = new Dictionary<string, ulong>();
         }
+
+        /// <summary>マテリアルの値を送った結果（ログ用）。</summary>
+        internal struct ValuesReport { public int Materials, Textures; public long Bytes; public string Problem; }
 
         internal sealed class MeshEntry
         {
@@ -341,6 +350,45 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             if (LiveLinkBridge.MaterialsSend(handle) < 0) return L.Tr("The material update could not be sent (not connected).");
             MaterialHash = ComputeMaterialHash();
             return null;
+        }
+
+        /// <summary>確かめた lilToon のマテリアルの値（と描いていないスロットの絵）を送る。スタンドアロンが機能の印（マテリアルの値）を
+        /// 持たなければ何もしない（読みもしない）。<paramref name="all"/> ならモデルを送った直後として全部のマテリアルを送り（lilToon でない
+        /// マテリアルは「値なし」）、偽なら変わったマテリアルだけ（0.2 秒ごとの見回り）。マテリアルには書かない。</summary>
+        public ValuesReport SendValues(ulong handle, bool all)
+        {
+            var report = new ValuesReport();
+            if (Generation <= 0 || Root == null) return report;
+            if ((LiveLinkBridge.CommonFeatures(handle) & LiveLinkBridge.FeatureMaterialValues) == 0) return report;
+            long budget = LiveLinkMaterialValues.Budget;
+            for (int i = 0; i < Materials.Count; i++)
+            {
+                var e = Materials[i];
+                if (e.Material == null) continue;
+                bool lil = LiveLinkMaterialValues.IsVerifiedLilToon(e.Binding);
+                // スタンドアロンが描いた絵で見せるのは Color の流し込み先だけ（スタンドアロンが出すチャンネル）。ほかの流し込み先は
+                // 元のテクスチャのまま見せるので、その絵も送る
+                var routed = e.Shown.Where(c => c.Channel == PaintChannel.Color).Select(c => c.Property).ToList();
+                ulong key = lil ? LiveLinkMaterialValues.QuickKey(e.Material, routed) : 1;
+                if (!all && key == e.ValuesKey) continue;
+                e.ValuesKey = key;
+                if (!lil)
+                {
+                    if (!all && !e.ValuesSent) continue;
+                    int none = LiveLinkMaterialValues.SendNone(handle, i);
+                    if (none < 0) { report.Problem = L.Tr("The Live Link library refused the material values ({0}).", e.Name); return report; }
+                    e.ValuesSent = false; e.ValuesHash = 0; e.SentSlots.Clear();
+                    continue;
+                }
+                var snapshot = LiveLinkMaterialValues.Read(e.Material, e.Binding, routed);
+                if (!all && e.ValuesSent && snapshot.Hash == e.ValuesHash) continue;
+                var sent = LiveLinkMaterialValues.Send(handle, i, snapshot, e.SentSlots, ref budget);
+                if (sent.Result < 0) { report.Problem = L.Tr("The Live Link library refused the material values ({0}).", e.Name); return report; }
+                if (sent.Result == 0) return report; // スタンドアロンの印が無くなった（つながり直し）
+                e.ValuesSent = true; e.ValuesHash = snapshot.Hash;
+                report.Materials++; report.Textures += sent.Textures; report.Bytes += sent.Bytes;
+            }
+            return report;
         }
 
         /// <summary>形の変わったメッシュ（スキンメッシュのポーズ・BlendShape、動かしたレンダラー）を送る。送ったメッシュの数を返す（失敗は負）。</summary>

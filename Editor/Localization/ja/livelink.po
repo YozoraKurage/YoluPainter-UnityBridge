@@ -271,3 +271,14 @@ msgstr "スタンドアロン版をすすめる"
 
 msgid "Shows a small window once per editor session when the YoluPainter window is opened."
 msgstr "YoluPainter の窓を開いたとき、エディタを起動するごとに 1 回、小さな窓を出します。"
+
+# ── マテリアルの値（lilToon） ──
+
+msgid "The Live Link library refused the material values ({0})."
+msgstr "Live Link のライブラリがマテリアルの値を断りました（{0}）。"
+
+msgid "Sent the lilToon values of {0} materials and {1} textures."
+msgstr "lilToon の値を送りました（マテリアル {0}・テクスチャ {1}）。"
+
+msgid "Sent the lilToon values of {0} materials."
+msgstr "lilToon の値を送りました（マテリアル {0}）。"

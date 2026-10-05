@@ -25,7 +25,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
     internal static unsafe class LiveLinkBridge
     {
         /// <summary>この C# が知っているブリッジの版。</summary>
-        public const uint ExpectedAbi = 3;
+        public const uint ExpectedAbi = 4;
         const string LoadedKey = "Yozolab.YoluPainter.LiveLink.BridgeLoaded";
         static bool s_checked; static string s_problem; static uint s_abi, s_protocols;
 
@@ -198,7 +198,46 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         }
 
         public static int PoseSend(ulong handle) => LiveLinkNative.ylb_pose_send(handle);
+
+        // ───────── マテリアルの値（機能の印 MaterialValues がスタンドアロンにもあるときだけ送る） ─────────
+
+        /// <summary>機能の印: マテリアルの値（lilToon のプロパティの値と描いていないスロットの絵）。</summary>
+        public const ulong FeatureMaterialValues = 1UL << 0;
+
+        /// <summary>値の組み立てを始める。<paramref name="lilToon"/> が偽なら「値なし」（前に送った値を捨てさせる）。</summary>
+        public static int ValuesBegin(ulong handle, int material, bool lilToon, string shader, string source)
+        {
+            byte[] s = Utf8(shader), o = Utf8(source);
+            fixed (byte* ps = s) fixed (byte* po = o) return LiveLinkNative.ylb_values_begin(handle, material, lilToon ? 1 : 0, ps, s.Length, po, o.Length);
+        }
+
+        public static int ValuesFloat(ulong handle, string name, float value) { var b = Utf8(name); fixed (byte* p = b) return LiveLinkNative.ylb_values_float(handle, p, b.Length, value); }
+        public static int ValuesInt(ulong handle, string name, int value) { var b = Utf8(name); fixed (byte* p = b) return LiveLinkNative.ylb_values_int(handle, p, b.Length, value); }
+        public static int ValuesColor(ulong handle, string name, UnityEngine.Color c) { var b = Utf8(name); fixed (byte* p = b) return LiveLinkNative.ylb_values_color(handle, p, b.Length, c.r, c.g, c.b, c.a); }
+        public static int ValuesVector(ulong handle, string name, UnityEngine.Vector4 v) { var b = Utf8(name); fixed (byte* p = b) return LiveLinkNative.ylb_values_vector(handle, p, b.Length, v.x, v.y, v.z, v.w); }
+        public static int ValuesKeyword(ulong handle, string name) { var b = Utf8(name); fixed (byte* p = b) return LiveLinkNative.ylb_values_keyword(handle, p, b.Length); }
+
+        /// <summary>描いていないスロットの様子（<see cref="LiveLinkSlotState"/>）と元のテクスチャの大きさ。</summary>
+        public static int ValuesSlot(ulong handle, string name, LiveLinkSlotState state, int width, int height)
+        {
+            var b = Utf8(name);
+            fixed (byte* p = b) return LiveLinkNative.ylb_values_slot(handle, p, b.Length, (int)state, (uint)Math.Max(0, width), (uint)Math.Max(0, height));
+        }
+
+        /// <summary>組み立てた値を送る。1 = 送った、0 = スタンドアロンに印が無いので送らない、負は失敗。</summary>
+        public static int ValuesSend(ulong handle) => LiveLinkNative.ylb_values_send(handle);
+
+        /// <summary>描いていないスロットの絵を送る（RGBA8、行は下から）。1 = 送った、0 = 印が無いので送らない、負は失敗。</summary>
+        public static int TextureSend(ulong handle, int material, string slot, int width, int height, bool srgb, byte[] pixels)
+        {
+            var b = Utf8(slot);
+            fixed (byte* p = b) fixed (byte* px = pixels)
+                return LiveLinkNative.ylb_texture_send(handle, material, p, b.Length, (uint)width, (uint)height, srgb ? 1 : 0, px, pixels?.Length ?? 0);
+        }
     }
+
+    /// <summary>描いていないスロットの絵の様子（ylb_values_slot）。</summary>
+    internal enum LiveLinkSlotState { Empty = 0, Follows = 1, Unchanged = 2, OverBudget = 3, Unreadable = 4 }
 
     /// <summary>
     /// ブリッジの中の自己診断のスタンドアロン（同じプロセスで本物のソケットと共有メモリを通し、マテリアルごとの色の市松を返す）。
@@ -243,6 +282,42 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             YlbTestServerStats stats;
             LiveLinkNative.ylb_test_server_stats(server, &stats);
             return stats;
+        }
+
+        /// <summary>最後に受けた、マテリアルの番号 <paramref name="material"/> の値のプロパティ。型（0 Float・1 Int・2 Color・3 Vector）を返し、無ければ負。</summary>
+        public static int Value(ulong server, int material, string name, out UnityEngine.Vector4 value)
+        {
+            var b = Encoding.UTF8.GetBytes(name);
+            float* v = stackalloc float[4];
+            int r;
+            fixed (byte* p = b) r = LiveLinkNative.ylb_test_server_value(server, (uint)material, p, b.Length, v);
+            value = new UnityEngine.Vector4(v[0], v[1], v[2], v[3]);
+            return r;
+        }
+
+        /// <summary>最後に受けた値の、スロットの様子（無ければ負）。</summary>
+        public static int Slot(ulong server, int material, string name)
+        {
+            var b = Encoding.UTF8.GetBytes(name);
+            fixed (byte* p = b) return LiveLinkNative.ylb_test_server_slot(server, (uint)material, p, b.Length, 0);
+        }
+
+        /// <summary>最後に受けた値に、キーワードがあるか。</summary>
+        public static bool HasKeyword(ulong server, int material, string name)
+        {
+            var b = Encoding.UTF8.GetBytes(name);
+            fixed (byte* p = b) return LiveLinkNative.ylb_test_server_slot(server, (uint)material, p, b.Length, 1) == 1;
+        }
+
+        /// <summary>最後に受けた、スロットの絵の様子（無ければ false）。</summary>
+        public static bool Texture(ulong server, int material, string slot, out YlbTestServerTexture texture)
+        {
+            var b = Encoding.UTF8.GetBytes(slot);
+            YlbTestServerTexture t;
+            int r;
+            fixed (byte* p = b) r = LiveLinkNative.ylb_test_server_texture(server, (uint)material, p, b.Length, &t);
+            texture = t;
+            return r == 0;
         }
     }
 }

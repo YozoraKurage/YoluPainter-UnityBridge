@@ -28,6 +28,8 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         public int ModelsSent { get; private set; }
         /// <summary>送ったマテリアルの更新の数（モデルを送り直さずに済んだ回数。試験・表示用）。</summary>
         public int MaterialUpdatesSent { get; private set; }
+        /// <summary>lilToon の値を送ったマテリアルの数の合計（試験・表示用）。</summary>
+        public int ValuesSent { get; private set; }
         /// <summary>つながりが終わった知らせ（断られた・つなげなかった・相手が閉じた）の種類。終わっていなければ null。</summary>
         public LiveLinkEventKind? EndedBy { get; private set; }
         /// <summary>終わった知らせの数値（断られたときは YoluPainter の RejectCode: 1 版が合わない・2 ほかの Unity とつながっている・3 鍵）。</summary>
@@ -111,6 +113,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             if (problem != null) return problem;
             ModelsSent++;
             AddLog(L.Tr("Sent {0}: {1} renderers, {2} materials, {3} vertices.", root.name, Model.Meshes.Count, Model.Materials.Count, Model.VertexTotal));
+            SendValues(true);
             nextCheck = EditorApplication.timeSinceStartup + CheckInterval;
             Changed?.Invoke();
             return null;
@@ -123,6 +126,20 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             if (Model != null && Handle != 0) LiveLinkBridge.ModelClose(Handle);
             Model?.Dispose();
             Model = null;
+            Changed?.Invoke();
+        }
+
+        /// <summary>lilToon のマテリアルの値を送る（スタンドアロンが受けるときだけ。<see cref="LiveLinkModel.SendValues"/>）。</summary>
+        void SendValues(bool all)
+        {
+            if (Model == null) return;
+            var r = Model.SendValues(Handle, all);
+            if (r.Problem != null) AddLog(r.Problem);
+            if (r.Materials == 0) return;
+            ValuesSent += r.Materials;
+            AddLog(r.Textures > 0
+                ? L.Tr("Sent the lilToon values of {0} materials and {1} textures.", r.Materials, r.Textures)
+                : L.Tr("Sent the lilToon values of {0} materials.", r.Materials));
             Changed?.Invoke();
         }
 
@@ -171,7 +188,8 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         }
 
         /// <summary>モデルの変化を見る: 根が消えた → 閉じる、レンダラー・メッシュ・マテリアルの組み合わせが変わった → モデルを送り直す、
-        /// シェーダー・キーワード・テクスチャが変わった → マテリアルの更新だけを送る、形が変わった → ポーズを送る。</summary>
+        /// シェーダー・キーワード・テクスチャが変わった → マテリアルの更新だけを送る、lilToon の値が変わった → 値を送る（スタンドアロンが
+        /// 受けるときだけ）、形が変わった → ポーズを送る。</summary>
         public void CheckModel()
         {
             if (Model == null) return;
@@ -192,6 +210,9 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                 AddLog(L.Tr("The shaders, keywords or textures of the materials changed; sent the material information again."));
                 Changed?.Invoke();
             }
+            // lilToon の値（インスペクターで変えた値・差し替えたテクスチャ）。変わったマテリアルだけ
+            SendValues(false);
+            if (Model == null) return;
             int sent = Model.SendPoseIfChanged(Handle);
             if (sent > 0) PosesSent++;
         }

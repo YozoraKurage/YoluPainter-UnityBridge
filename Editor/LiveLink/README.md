@@ -50,6 +50,26 @@ Live Link shows the textures painted in the standalone YoluPainter on a model in
   change, the model is sent again; when only a material's shader, keywords or textures change, only a material update is
   sent (the texture sets stay).
 
+## Material values (lilToon)
+
+When a material of the model is a verified lilToon material (the shader comes from the installed lilToon package, and its version,
+variant and properties are the verified ones, the same check as the binding above; a shader that only looks like lilToon is not used),
+Live Link also sends what the standalone needs to draw it with the lilToon look in its 3D View:
+
+- the shader name, every property value as the material holds it (colors, numbers, vectors, toggles, and the tiling and offset of
+  each texture as `<name>_ST`) and the enabled keywords;
+- for each lilToon texture slot that the standalone draws and that does not show a painted channel (shadow color textures, MatCaps,
+  masks, …), the texture itself. It is drawn into a temporary `RenderTexture` and read from there (the texture is not made readable and
+  its import settings are not changed), halved until no side exceeds 2048, and at most 64 MiB of pixels are sent at a time; a slot over
+  that is reported as not sent. A texture already sent is not sent again until the model is sent again.
+
+Values are sent after the model, and again (only for the materials that changed) when a material is edited, checked every 0.2 s through
+the material's change count and the textures in the slots. A material that is no longer a verified lilToon material is sent as "no
+values", and the standalone drops what it had. Nothing is written to the material.
+
+The values are sent only when the standalone has the *material values* feature mark (`ylb_common_features`); an older standalone
+gets nothing new. The library functions are `ylb_values_*` and `ylb_texture_send` (library version 4).
+
 ## Transport
 
 The native library in `Plugins/LiveLink` (`libyolu_bridge.so` for the Linux editor, `yolu_bridge.dll` for the Windows editor,
@@ -86,7 +106,7 @@ versions that do not overlap are refused.
   features usable on this link; a command that needs a mark is sent only when the other side has it (`ylb_common_features`).
 - When the protocol versions do not overlap the standalone refuses, and the window's warning says which side to update and to which
   version ("The Unity package must be 0.6.0 or newer.").
-- The bridge library answers these through `ylb_link_report`, `ylb_peer_app_version` and `ylb_common_features` (library version 3). The
+- The bridge library answers these through `ylb_link_report`, `ylb_peer_app_version` and `ylb_common_features` (library version 3 and later). The
   answers are about the link that is up: once it has ended they are empty (no peer version, no common features).
 
 ## Moving to the standalone
