@@ -50,7 +50,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
     }
 
     /// <summary>
-    /// The project's resources in a .ylp (format 4, Documentation~/YLP_FORMAT.md): <c>resources.json</c> at the root lists them
+    /// The project's resources in a .ylp (format 4; the standalone repository's docs/YLP_FORMAT.md): <c>resources.json</c> at the root lists them
     /// (ID, kind, name, content hash, size, colour space, origin) and each distinct content is one PNG <c>resources/&lt;hash&gt;.png</c>
     /// (<see cref="RgbaPng"/>; the hash is of the decoded pixels, so the name says what the pixels must be). Both are source entries:
     /// a listed content that is missing, does not decode, has another size or other pixels refuses the whole file (the copy is the

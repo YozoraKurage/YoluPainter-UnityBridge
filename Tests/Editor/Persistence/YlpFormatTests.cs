@@ -13,7 +13,7 @@ using Object = UnityEngine.Object;
 namespace Yozolab.YoluPainter.Tests
 {
     /// <summary>
-    /// .ylp の中身の形式（YlpFormat、Documentation~/YLP_FORMAT.md）: ylp.json の読み書きと拒否、古い形式を開くと今の並びになること、
+    /// .ylp の中身の形式（YlpFormat。仕様はスタンドアロン版のリポジトリの docs/YLP_FORMAT.md）: ylp.json の読み書きと拒否、古い形式を開くと今の並びになること、
     /// 新しすぎる形式はどのエントリにも触れずに断ること、知らないエントリを知らせること。形式 1 のファイルは、形式を足す前の
     /// YoluPainter で作って固めたフィクスチャ（Fixtures~/format1.ylp。層 5 枚・マスク・グループ・塗りつぶし層・調整層・Normal の
     /// 設定・選択範囲・全チャンネルの合成）、形式 2 は同じ中身に ylp.json と取り込んだ PSD の原本を足したもの（Fixtures~/format2.ylp）で

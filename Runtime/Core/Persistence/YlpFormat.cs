@@ -163,7 +163,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
     }
 
     /// <summary>
-    /// .ylp の中身の形式（Documentation~/YLP_FORMAT.md）。外側（zip・mimetype・manifest の SHA-256）は <see cref="YlpArchive"/>
+    /// .ylp の中身の形式（仕様はスタンドアロン版のリポジトリの docs/YLP_FORMAT.md）。外側（zip・mimetype・manifest の SHA-256）は <see cref="YlpArchive"/>
     /// の層で、ここはその中のエントリの並びと、それを書いたアプリの記録（ylp.json）とテクスチャセットの並び（project.json）を受け持つ。
     /// <list type="bullet">
     /// <item>形式 1: ylp.json の無いもの（2026-10-03 より前の YoluPainter）。</item>
