@@ -29,6 +29,12 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
     /// 積んだ命令が <see cref="PendingLimit"/> バイト以上たまっている間は、次を読まない（送る速さに合わせる）。
     /// 同じテクスチャを使うマテリアルが何枚あっても、読むのは 1 回（画素は使い回す）。送りと予算は枠（マテリアル）ごと: 枠ごとにスタンドアロンが別のセット
     /// として画素を持つので、送った量をそのまま数える。
+    /// <para>頼み（機能の印 <see cref="LiveLinkBridge.FeatureMaterialRequest"/> が双方にあるとき）: スタンドアロンが元の絵を入れるセットのマテリアルだけを頼む。
+    /// Unity は元の絵を自分から押し出さず、頼まれた絵を読んで送る（<see cref="Plan"/>ではなく <see cref="PlanRequested"/>）。頼みには、スタンドアロンが手元に持つ絵の
+    /// 印（<see cref="StampOf"/>）が付くことがあり、今の印と同じなら、絵を読まずに画素なしの <see cref="LiveLinkOriginalState.Cached"/> で答える。
+    /// 印はテクスチャのアセット（GUID・ローカルのファイル ID）・取り込みの結果の印（<see cref="AssetDatabase.GetAssetDependencyHash(string)"/>。元のファイルの中身・
+    /// インポート設定・インポーターの版が変われば変わる）・取り込んだ絵の中身のハッシュ・原本のファイルの長さと更新時刻・大きさ・プロジェクトの色空間・ビルドターゲットを
+    /// 混ぜて決める。どれか 1 つでも取れない・アセットでない絵は 0（印なし。必ず画素を送る）。印は読む前に取る: 読む間にファイルが変わっても、古い絵に新しい印を付けない。</para>
     /// </summary>
     internal static class LiveLinkOriginals
     {
@@ -52,6 +58,8 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             public int Width, Height;
             /// <summary>Plan のときのテクスチャの同一性（同じテクスチャのマテリアルを隣に並べて、画素を使い回すため）。</summary>
             public int TextureId;
+            /// <summary>スタンドアロンが手元に持つ絵の印（頼みの have。0 は持たない・押し出し）。今の印と同じなら、絵を読まずに Cached で答える。</summary>
+            public ulong Have;
         }
 
         /// <summary>読んだ結果（<see cref="Load"/>）。</summary>
@@ -64,6 +72,8 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             public byte[] Pixels;
             /// <summary>読めなかった理由（ログ用）。</summary>
             public string Reason;
+            /// <summary>この絵の印（読む前に取ったもの。0 は印なし）。</summary>
+            public ulong Stamp;
         }
 
         /// <summary>モデルのマテリアルのうち、Color の流し込み先のプロパティに絵が入っているものの、送る絵の一覧（スタンドアロンが来るはずの元の絵と同じ決め方）。</summary>
@@ -83,6 +93,71 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             return jobs;
         }
 
+        /// <summary>頼まれた元の絵（マテリアルの番号・スロット・スタンドアロンが持つ絵の印）の、送る絵の一覧。<see cref="Plan"/> と同じ決め方で、頼みに合う枠だけ。
+        /// 頼まれた枠に今は絵が入っていない（絵が外された・スロットが違う・マテリアルが無い）ものは、絵の無い様子（読めない）で答える枠にする（頼んだ側を待たせ続けない）。
+        /// 範囲外のマテリアルの番号は答えない。同じ枠を重ねて頼まれても 1 つ。</summary>
+        public static List<Job> PlanRequested(LiveLinkModel model, IEnumerable<(int Material, string Slot, ulong Have)> requested)
+        {
+            var planned = Plan(model);
+            var jobs = new List<Job>();
+            var seen = new HashSet<(int, string)>();
+            foreach (var (material, slot, have) in requested)
+            {
+                if (material < 0 || material >= model.Materials.Count || !seen.Add((material, slot))) continue;
+                var job = planned.FirstOrDefault(j => j.Material == material && j.Property == slot);
+                if (job == null) job = new Job { Material = material, Property = slot, TextureId = int.MinValue + material };
+                job.Have = have;
+                jobs.Add(job);
+            }
+            return jobs;
+        }
+
+        /// <summary>この版の読み方の番号。読み方（原本のファイルから・取り込んだ絵から・GPU を通して、の決め方や変換）を変えたら上げる（手元の絵の印が替わり、古い読み方の絵を使わない）。</summary>
+        internal const int ReaderVersion = 1;
+
+        /// <summary>
+        /// 元のテクスチャの印（スタンドアロンが手元の絵と今の絵が同じかを決める。0 は印なし）。プロジェクトのアセットのテクスチャだけが印を持つ。
+        /// 絵を読む前に取る（読む間に変わっても、古い絵に新しい印を付けない）。取れない物が 1 つでもあれば 0（間違って古い絵を使わない側に倒す）。
+        /// </summary>
+        public static ulong StampOf(Texture texture)
+        {
+            try
+            {
+                if (!(texture is Texture2D t2d) || !AssetDatabase.IsMainAsset(t2d)) return 0;
+                string path = AssetDatabase.GetAssetPath(t2d);
+                if (!IsProjectAsset(path)) return 0;
+                if (!AssetDatabase.TryGetGUIDAndLocalFileIdentifier(t2d, out string guid, out long fileId) || string.IsNullOrEmpty(guid)) return 0;
+                var dependency = AssetDatabase.GetAssetDependencyHash(path);
+                if (!dependency.isValid) return 0;
+                var info = new FileInfo(Path.GetFullPath(path));
+                if (!info.Exists) return 0;
+                var contents = t2d.imageContentsHash;
+                var h = new Stamper();
+                h.Add(ReaderVersion); h.Add(guid); h.Add(fileId); h.Add(dependency.ToString());
+                h.Add(info.Length); h.Add(info.LastWriteTimeUtc.Ticks);
+                h.Add(contents.isValid ? contents.ToString() : "-");
+                h.Add(t2d.width); h.Add(t2d.height);
+                h.Add((int)PlayerSettings.colorSpace); h.Add((int)EditorUserBuildSettings.activeBuildTarget);
+                ulong value = h.Value;
+                return value == 0 ? 1 : value;
+            }
+            catch (Exception) { return 0; }
+        }
+
+        /// <summary>64 ビットの FNV-1a（印を決めるだけ。保存しない。文字列は UTF-8、数は 8 バイトのリトルエンディアンで混ぜる）。</summary>
+        struct Stamper
+        {
+            ulong value; bool started;
+            public ulong Value => started ? value : 14695981039346656037UL;
+            void Byte(byte b)
+            {
+                if (!started) { value = 14695981039346656037UL; started = true; }
+                value ^= b; value *= 1099511628211UL;
+            }
+            public void Add(long x) { for (int i = 0; i < 8; i++) Byte((byte)(x >> (i * 8))); }
+            public void Add(string s) { var bytes = System.Text.Encoding.UTF8.GetBytes(s ?? ""); Add(bytes.Length); foreach (var b in bytes) Byte(b); }
+        }
+
         /// <summary>
         /// 元のテクスチャ 1 つを読む。投げない（読めなければ <see cref="LiveLinkOriginalState.Unreadable"/>・大きすぎれば <see cref="LiveLinkOriginalState.TooLarge"/>）。
         /// ガンマの色空間のプロジェクトは、スタンドアロンの Color も画素をそのまま使うので、sRGB は真にする。
@@ -94,6 +169,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             {
                 if (texture == null) { result.State = LiveLinkOriginalState.Unreadable; result.Reason = L.Tr("The texture is gone."); return result; }
                 result.Width = texture.width; result.Height = texture.height;
+                result.Stamp = StampOf(texture); // 読む前に取る
                 if (texture.dimension != UnityEngine.Rendering.TextureDimension.Tex2D) { result.State = LiveLinkOriginalState.Unreadable; result.Reason = L.Tr("The texture is not a 2D texture."); return result; }
                 if (texture.width > MaxEdge || texture.height > MaxEdge) { result.State = LiveLinkOriginalState.TooLarge; result.Reason = L.Tr("The texture is {0} × {1}; the most sent is {2} on a side.", texture.width, texture.height, MaxEdge); return result; }
                 if (texture is Texture2D t2d && AssetDatabase.IsMainAsset(t2d) && IsProjectAsset(AssetDatabase.GetAssetPath(t2d)))
@@ -222,8 +298,9 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             result.Compressed = !(texture is RenderTexture) && GraphicsFormatUtility.IsCompressedFormat(texture.graphicsFormat);
         }
 
-        /// <summary>送った結果（ログ用）。</summary>
-        internal struct Report { public int Images, Declined; public long Bytes; public string Problem; }
+        /// <summary>送った結果（ログ用）。<see cref="Busy"/> は、送りの列が混んでいて、次の絵を送れずに待っていること（絵は列に残り、次の <see cref="Sender.Pump"/> で続ける）。
+        /// <see cref="Refused"/> は、その待ちのうち、ブリッジが「混んでいる」と断った分（絵を読む前に、入る空きが無いと見て待っただけのときは偽）。</summary>
+        internal struct Report { public int Images, Declined, Cached; public long Bytes; public string Problem; public bool Busy, Refused; }
 
         /// <summary>
         /// 送る絵の列（モデルを送るたびに作り直す）。<see cref="Pump"/> を更新ごとに呼ぶと、時間の許す限り 1 枚ずつ読んで送る。
@@ -239,6 +316,8 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             public bool Done => jobs.Count == 0;
             public int Images { get; private set; }
             public int Declined { get; private set; }
+            /// <summary>画素を送らず「印が同じ」と答えた数（頼みの have が今の印と同じ）。</summary>
+            public int Cached { get; private set; }
             public long Bytes { get; private set; }
             /// <summary>テクスチャを読んだ回数（同じテクスチャの枠は 1 回にまとまる。試験・診断用）。</summary>
             public int Reads { get; private set; }
@@ -250,6 +329,17 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                 jobs = new Queue<Job>(GroupByTexture(plan));
             }
 
+            /// <summary>頼まれた枠を足す（同じ枠がもう列にあれば、頼みの印を新しい方にする。送りが済んだ枠は、また足す）。</summary>
+            public void Enqueue(IEnumerable<Job> more)
+            {
+                foreach (var job in more)
+                {
+                    var queued = jobs.FirstOrDefault(j => j.Material == job.Material && j.Property == job.Property);
+                    if (queued != null) { queued.Have = job.Have; continue; }
+                    jobs.Enqueue(job);
+                }
+            }
+
             /// <summary>同じテクスチャの枠を、最初に出てきた位置にまとめる（順番は安定。共有が無ければそのまま）。</summary>
             static List<Job> GroupByTexture(List<Job> plan)
             {
@@ -259,7 +349,8 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             }
 
             /// <summary>時間の許す限り（<paramref name="budgetMs"/> まで。最初の 1 枚は必ず）読んで送る。ブリッジが失敗したら理由を返す
-            /// （<paramref name="pendingLimit"/> は積んだ命令の上限。既定は <see cref="PendingLimit"/>）。</summary>
+            /// （<paramref name="pendingLimit"/> は積んだ命令の上限。既定は <see cref="PendingLimit"/>）。送りの列が混んでいる間は読まずに待ち（<see cref="Report.Busy"/>。ブリッジが断った分は
+            /// <see cref="Report.Refused"/> も真）、枠は残る。ブリッジの列の空きは <see cref="LiveLinkBridge.SendRoom"/> で、絵の大きさが入るかを読む前に見る。</summary>
             public Report Pump(ulong handle, double budgetMs = PumpMs, long pendingLimit = PendingLimit)
             {
                 var report = new Report();
@@ -271,15 +362,30 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
                     var job = jobs.Peek();
                     var entry = job.Material < model.Materials.Count ? model.Materials[job.Material] : null;
                     Texture texture = entry != null && entry.Material != null && entry.Material.HasProperty(job.Property) ? entry.Material.GetTexture(job.Property) : null;
+                    // 印は読む前に取り、頼みの have と同じなら、絵を読まずに「印が同じ」と答える（予算も使わない）
+                    ulong stamp = job.Have != 0 && texture != null ? StampOf(texture) : 0;
+                    if (job.Have != 0 && stamp != 0 && stamp == job.Have)
+                    {
+                        int hit = LiveLinkBridge.OriginalSend(handle, job.Material, job.Property, LiveLinkOriginalState.Cached, LiveLinkOriginalRead.File, false, texture.width, texture.height, true, null, stamp);
+                        if (hit == LiveLinkBridge.Busy) { report.Busy = report.Refused = true; return report; }
+                        if (hit < 0) { report.Problem = L.Tr("The Live Link library refused the original texture ({0}).", entry != null ? entry.Name : job.Property); Finish(); return report; }
+                        if (hit == 0) { Finish(); return report; }
+                        jobs.Dequeue(); report.Cached++; Cached++;
+                        continue;
+                    }
                     Loaded loaded;
                     long estimate = (long)Math.Max(1, job.Width) * Math.Max(1, job.Height) * 4;
                     if (texture != null && estimate > remaining) loaded = new Loaded { State = LiveLinkOriginalState.OverBudget, Width = texture.width, Height = texture.height };
                     else
                     {
+                        // 送りの列に入らない大きさの絵は、読まずに待つ（読んでから断られて、混んでいる間に読み直すことにならない。列は読まれるにつれて空く）
+                        if (texture != null && estimate > LiveLinkBridge.SendRoom(handle)) { report.Busy = true; return report; }
                         loaded = LoadShared(texture);
                         if (loaded.State == LiveLinkOriginalState.Image && loaded.Pixels.LongLength > remaining) { loaded = new Loaded { State = LiveLinkOriginalState.OverBudget, Width = loaded.Width, Height = loaded.Height }; }
                     }
-                    int sent = LiveLinkBridge.OriginalSend(handle, job.Material, job.Property, loaded.State, loaded.Read, loaded.Compressed, loaded.Width, loaded.Height, loaded.Srgb, loaded.State == LiveLinkOriginalState.Image ? loaded.Pixels : null);
+                    int sent = LiveLinkBridge.OriginalSend(handle, job.Material, job.Property, loaded.State, loaded.Read, loaded.Compressed, loaded.Width, loaded.Height, loaded.Srgb, loaded.State == LiveLinkOriginalState.Image ? loaded.Pixels : null, loaded.State == LiveLinkOriginalState.Image ? loaded.Stamp : 0);
+                    // 混んでいて断られた: 枠は列に残し、読んだ画素も残す（同じテクスチャなら LoadShared が使い回すので、読み直さない）
+                    if (sent == LiveLinkBridge.Busy) { report.Busy = report.Refused = true; return report; }
                     if (sent < 0) { report.Problem = L.Tr("The Live Link library refused the original texture ({0}).", entry != null ? entry.Name : job.Property); Finish(); return report; }
                     if (sent == 0) { Finish(); return report; } // スタンドアロンの印が無くなった（つながり直し）
                     jobs.Dequeue();

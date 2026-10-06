@@ -13,7 +13,8 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
         public const ulong ProjectTransfer = 1UL << 2;
         public const ulong Animation = 1UL << 3;
         public const ulong OriginalTextures = 1UL << 4;
-        public const ulong Known = MaterialValues | Assets | ProjectTransfer | Animation | OriginalTextures;
+        public const ulong MaterialRequest = 1UL << 5;
+        public const ulong Known = MaterialValues | Assets | ProjectTransfer | Animation | OriginalTextures | MaterialRequest;
 
         /// <summary>印の名前をビットの小さい順に並べる（名前を知らない印は「Newer features」にまとめる）。</summary>
         public static string Names(ulong mask)
@@ -24,6 +25,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             if ((mask & ProjectTransfer) != 0) names.Add(L.Tr("Project transfer"));
             if ((mask & Animation) != 0) names.Add(L.Tr("Animation"));
             if ((mask & OriginalTextures) != 0) names.Add(L.Tr("Original textures"));
+            if ((mask & MaterialRequest) != 0) names.Add(L.Tr("Material requests"));
             if ((mask & ~Known) != 0) names.Add(L.Tr("Newer features"));
             return string.Join(L.IsJapanese ? "・" : ", ", names);
         }

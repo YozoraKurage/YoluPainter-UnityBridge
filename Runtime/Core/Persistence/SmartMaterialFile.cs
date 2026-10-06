@@ -26,7 +26,7 @@ namespace Yozolab.YoluPainter.Core.Persistence
     }
 
     /// <summary>
-    /// A smart material or smart mask as one file (.ylsmart; Documentation~/YLP_FORMAT.md). The outer layer is the .ylp's zip layer
+    /// A smart material or smart mask as one file (.ylsmart; the standalone repository's docs/YLP_FORMAT.md). The outer layer is the .ylp's zip layer
     /// (<see cref="YlpArchive"/>: the uncompressed <c>mimetype</c> first, then <c>manifest.sha256</c> with every entry's SHA-256 and length,
     /// names, sizes and expansion limits checked before anything is read) with its own MIME type and manifest version
     /// (<c>YOLUPAINTER-SMART-1</c>), so neither kind of file opens as the other. Inside:

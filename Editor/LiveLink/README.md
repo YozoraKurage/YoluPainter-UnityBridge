@@ -78,7 +78,8 @@ property of each material, such as `_MainTex`), so that a new texture set starts
 picture at the bottom of the set as a layer named "Original", and the painting goes over it. The model in the scene does not change when
 the link is made: the standalone shows a set in Unity only after the original is in it, so nothing turns black, white or checkered.
 
-- Sent after the model for each material whose Color property holds a texture, a few textures per editor update. The standalone adds it only
+- Sent after the model for each material whose Color property holds a texture, a few textures per editor update (a standalone without the
+  *material requests* mark; for one with the mark see *Requests from the standalone* below). The standalone adds it only
   to a texture set it has just created (or to the untouched first set of a new unsaved project), never to a set that has painting, was edited
   while waiting, or comes from a project the user opened. Nothing is added to the undo history.
 - Read without changing anything (the texture, its import settings and the material are not written and the texture is not made readable).
@@ -94,7 +95,30 @@ the link is made: the standalone shows a set in Unity only after the original is
 - At most 8192 pixels on a side (a larger texture is reported as too large, not shrunk) and 1 GiB of pixels in one send. A texture that cannot
   be read or sent is reported with its reason, and the set starts empty. The standalone gives up waiting after 30 seconds without progress.
 - Sent only when the standalone has the feature mark (`ylb_common_features`); an older standalone is not sent anything and shows its sets
-  at once as before. The library functions are `ylb_original_send` and `ylb_pending_bytes` (library version 5).
+  at once as before. The library functions are `ylb_original_send` and `ylb_pending_bytes` (library version 5; `ylb_original_send` takes the
+  picture's stamp since library version 6).
+
+## Requests from the standalone
+
+When both sides have the *material requests* mark, the standalone asks for what it needs and Live Link answers only that (`ylb_next_request`,
+read every editor update; library version 6):
+
+- **Original textures**: Live Link no longer pushes them. The standalone asks for the materials of the sets it is about to fill, so a model
+  sent again (a changed hierarchy, a reconnection) reads and sends only the textures of sets that are really new, not every texture of the model.
+  A request names the model generation (a request for another generation is not answered), the material and the slot. A material whose slot
+  holds no texture any more is answered as unreadable, so the standalone does not wait for it.
+- **Stamps**: a request can carry the stamp of the picture the standalone already holds. When the stamp equals the texture's stamp now, Live Link
+  answers without pixels (`Cached`) and does not read the texture. A stamp mixes the asset (GUID and local file ID), what the import produced from it
+  (`AssetDatabase.GetAssetDependencyHash`: the source file, the import settings and the importer version), the hash of the imported picture, the
+  length and modification time of the source file, the size, the project's colour space and the build target, and the version of Live Link's way of
+  reading. It is taken before the texture is read, so a texture that changes while it is read is never sent with the newer stamp. A texture that is
+  not a project asset (a runtime texture, a `RenderTexture`), or whose stamp cannot be taken, has no stamp (0) and is always sent as pixels. When the
+  stamps differ, the pixels are sent, so an older picture is never used for a changed texture.
+- **Values**: a request for values sends the material's lilToon values again with every texture of its slots (the standalone says it holds none);
+  a material without a `Material` is answered as "no values" so the standalone's wait ends. The standalone asks when no values arrived for a
+  material that has a texture set, or when a texture it was told would follow did not arrive.
+
+A standalone without the mark keeps the old way: originals are pushed after the model and values after the model and when they change.
 
 ## Transport
 
@@ -103,8 +127,27 @@ x86_64) connects to the standalone through a local socket (a Unix socket on Linu
 arrive through shared memory, one mapped file per texture set and channel, in 128-pixel tiles; only the tiles that changed are
 copied. The library's functions never wait on the standalone, so the editor's main thread is not blocked.
 
-- `ylb_abi_version` is asked first; a library of another version is not used (Unity keeps a loaded native library until it
-  quits, so restart Unity after updating the package).
+- The library is not read from `Plugins/LiveLink` itself but from a copy under the project's `Library/YoluPainter/LiveLink/<hash of the
+  contents>/` (the functions are called through function pointers, `Native/LiveLinkNativeLoader.cs`). Unity never lets go of a native library
+  it has loaded, and Windows does not allow a file that is loaded to be replaced or deleted, so loading the package's own file would make a
+  package update fail (and make an update need an editor restart). The package's file is not held by the editor; after an update the new
+  library is copied into a folder of its own and used from then on, and the copies of other contents are deleted where they can be (one that
+  is still loaded stays until the editor quits and is not used). The library that was loaded before may still hold links (the standalone takes
+  one Unity at a time, so they would make the new library's connection be refused as busy); the copy's path is kept in `SessionState`, and when
+  a copy of other contents is loaded, `ylb_disconnect_all` of the previous copy is called first, and so is that of the package's own file
+  for an editor that loaded it before copies were used. Only a library that is already loaded is asked; none is loaded for this.
+- `ylb_abi_version` is asked first; a library of another version is not used. The library's version is 7.
+- The commands waiting to be written (and the one being written) are limited to 256 MiB, so a standalone that stops reading cannot make the editor
+  hold more than that. What only the latest of matters replaces the older one still waiting: a picture of the same slot, a material update of the same
+  model, a picture of an original texture of the same slot, and the values of a material (together with its waiting pictures, unless the new values
+  say a picture is "unchanged" and it is still waiting). The model is never replaced, and closing the model is never refused. A command that does not
+  fit is refused as busy (`YLB_E_BUSY`) without changing anything, and Live Link sends it again shortly (every 0.5 s while it stays busy) without
+  waiting on the main thread: the model, the material update and the values stay built in the library (a model is judged by its size before it is
+  serialized, so a retry costs no memory), the textures are not read from the GPU
+  while they would not fit (`ylb_send_room`), and one line in the log says that the standalone is slow to read for as long as it lasts. An empty queue
+  takes any one command, so a model or an original texture larger than the limit still goes.
+- A model whose message would pass the limit of one message (512 MiB) is refused before anything is written (`ylb_model_send` returns
+  `YLB_E_TOO_LARGE`, and Live Link says so); the link stays up and nothing is sent. Poses that would pass the limit are skipped with a note.
 - Each texture channel is a `RenderTexture` kept on the GPU (RGBA, with a mip chain; Color and Emission are sRGB when the
   project's colour space is linear, the others linear). Changed tiles are copied from shared memory into a small strip texture,
   the strip is uploaded and `Graphics.CopyTexture` places each tile; the mip chain of the channels that changed is rebuilt on the
@@ -114,7 +157,8 @@ copied. The library's functions never wait on the standalone, so the editor's ma
   are packed again once, when the whole change has arrived, and that pass is outside the 8 ms. Where `CopyTexture` is not
   available, the whole `Texture2D` is uploaded with `Apply`.
 - A texture that the graphics device lost is created again and filled again from the standalone.
-- `Native/LiveLinkNative.g.cs` is generated from the library's C functions (csbindgen); do not edit it by hand.
+- `Native/LiveLinkNative.g.cs` is generated from the library's C functions (csbindgen, then rewritten to function pointers by the
+  standalone repository's `tools/gen-livelink-native.py`); do not edit it by hand.
 - Diagnostics ▸ *Connect to the test pattern* starts a test server inside the library (a checker per material) to check
   the link, the shared memory and the property blocks without the standalone.
 
@@ -128,7 +172,7 @@ versions that do not overlap are refused.
   than the version this side asks for (or does not tell its version, because it predates this check), or one side has features the other
   lacks. The mark's tooltip names both versions, which side to update (and to which version) and the features that cannot be used. The
   state itself stays a short name. The mark is shown only while the link is up; it goes when the standalone is closed.
-- A feature mark is a bit in the greeting (material values, assets, project transfer, animation, original textures). The marks both sides set are the
+- A feature mark is a bit in the greeting (material values, assets, project transfer, animation, original textures, material requests). The marks both sides set are the
   features usable on this link; a command that needs a mark is sent only when the other side has it (`ylb_common_features`).
 - When the protocol versions do not overlap the standalone refuses, and the window's warning says which side to update and to which
   version ("The Unity package must be 0.6.0 or newer.").
@@ -140,7 +184,8 @@ versions that do not overlap are refused.
 The Unity package no longer grows: Live Link is its main job. When the YoluPainter painting window is opened, a small window recommends
 the standalone once per editor session (a one-line list of what only the standalone has, and three buttons: open the download page,
 Later, Don't show again). **Edit ▸ Preferences ▸ YoluPainter ▸ Suggest the standalone YoluPainter** turns it off (on by default;
-*Don't show again* is the same switch). The painting window itself is not changed.
+*Don't show again* is the same switch). The painting window itself is not changed. The standalone is distributed for Windows only, so the
+window and the switch are shown in the Windows editor only (on Linux and macOS neither is shown, and nothing is remembered).
 
 ## Who can connect
 

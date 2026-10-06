@@ -66,7 +66,7 @@
 - 速さ: Core の CPU の処理はタイルと行の束で並列（出力はスレッド数に依らずバイト一致）。表示の合成は 自動 / GPU / CPU から選べる。3D のダブの遮蔽のレイも並列で、ストロークの間は見え方を覚える
 
 **保存と連携**
-- 原画素を保持する独自形式 `.ylp`（形式の版と保存したアプリの版を記録し、古い形式は開くときに移す。`Documentation~/YLP_FORMAT.md`）、チェックサム付きの世代保存、保存途中の障害・外部改変の拒否、復旧の checkpoint
+- 原画素を保持する独自形式 `.ylp`（形式の版と保存したアプリの版を記録し、古い形式は開くときに移す。形式の仕様は [スタンドアロン版の docs/YLP_FORMAT.md](https://github.com/YozoraKurage/YoluPainter/blob/main/docs/YLP_FORMAT.md)）、チェックサム付きの世代保存、保存途中の障害・外部改変の拒否、復旧の checkpoint
 - 制限を明確にした RGB8 ラスター PSD の読み書き（未対応の情報があれば編集を禁止して原本を守る）、チャンネルごとの PNG の書き出し、lilToon のマテリアルへの割り当て（確かめた版・バリアントだけ）。書き出しのテンプレート（Unity Standard / URP Lit・HDRP Lit・lilToon 向けに、Metallic と Smoothness・MaskMap・焼いた AO などを詰めた PNG）。書き出しでは UV の外へ色を塗り広げる（パディング。既定は届くかぎり全部、プロジェクト設定で 0〜64 テクセルか全部。Unity のミップマップで UV の境目に背景がにじまない）
 - Live Link: スタンドアロン版 YoluPainter で描いたテクスチャを、Unity のシーンのモデルに本物のマテリアル（lilToon・Standard など）で一時表示する。ヒエラルキーで GameObject を右クリック → Open in YoluPainter（または `YozoLab → YoluPainter → Live Link` の窓の大きなボタン）だけで、スタンドアロンの起動・接続・モデルの送信まで進む。Windows ではインストーラーが書いた場所を自動で見つけ、見つからないとき・Linux では Edit ▸ Preferences ▸ YoluPainter の実行ファイルのパスを使う。スクリプトの再コンパイルや Play の出入りのあとは、つないでいたなら自動でつなぎ直す。元のシーン・マテリアル・テクスチャ・Prefab には書かず、MaterialPropertyBlock の一時表示だけ。仕組みは `Editor/LiveLink/README.md`
 - プラグインの受け口（試作 API 0.1）: `Yozolab.YoluPainter.Api` を参照するアセンブリでメニューのコマンドとツールのアイコンを足し、開いているプロジェクトを読んだり層を足したりできる。書き方は `Documentation~/PLUGIN_API.md`
@@ -116,13 +116,9 @@ Read/Write が無効のメッシュも、エディタの読み取り用APIで読
 
 ## 保存（.ylp）
 
-YoluPainter のファイルは `.ylp` です（CLIP STUDIO の .clip、Photoshop の .psd に当たる 1 ファイル）。中身は zip で、拡張子を .zip に変えれば普通のツールでも中を確認できます。形式の詳しい決まりは `Documentation~/YLP_FORMAT.md` にあります。
+YoluPainter のファイルは `.ylp` です（CLIP STUDIO の .clip、Photoshop の .psd に当たる 1 ファイル）。中身は zip で、拡張子を .zip に変えれば普通のツールでも中を確認できます。形式の仕様（エントリ・JSON の形・正本の欄・版）は、スタンドアロン版のリポジトリの [docs/YLP_FORMAT.md](https://github.com/YozoraKurage/YoluPainter/blob/main/docs/YLP_FORMAT.md) が正本です。
 
-- `ylp.json`: 中身の形式の版と、保存した・作った YoluPainter と Unity の版。自分より新しい形式は、書いた版を示して開くのを断ります
-- `project.json` と `sets/<ID>/`: テクスチャセットの並びと、セットごとの正本 `document.utpaint`（マスク・Fill・調整・クリッピング・パスを含めてロスなし）・選択範囲・合成済みの画像・焼いたメッシュマップ
-- `resources.json` と `resources/<中身の SHA-256>.png`: プロジェクトのリソース（アセットのパネルで取り込んだ画像）の並びと、写しの画素。出どころ（Unity の GUID・ファイル・自分の置き場・内蔵）も記録する
-- `view.json`・`brush.json`・`thumbnail.png`
-- 先頭の `mimetype`（無圧縮）と、全エントリーの SHA-256 を並べた `manifest.sha256`。読むときに全部確かめ、合わなければ開きません
+このパッケージ（Unity 版）が開けるのは、外側 `YOLUPAINTER-YLP-1`〜`3`・中身の形式 1〜7・正本の版 1〜21 のファイルです。スタンドアロン版が新しい機能（ユーザーチャンネル・色調補正・名前を付けて残した選択範囲・とても大きな文書など）を使って保存したファイルは、ファイルに触れずに理由を示して断ります。
 
 保存は、作って読み直して確かめた一時ファイル（名前が `~` で終わるので Unity は取り込まない）から最後に 1 回だけ置き換えます。途中で失敗しても元のファイルはそのままです。
 
@@ -147,7 +143,7 @@ YoluPainter のファイルは `.ylp` です（CLIP STUDIO の .clip、Photoshop
 
 ## 文書
 
-- `Documentation~/YLP_FORMAT.md` — .ylp ファイルの中身の形式と、版・移行の決まり
+- [docs/YLP_FORMAT.md](https://github.com/YozoraKurage/YoluPainter/blob/main/docs/YLP_FORMAT.md)（スタンドアロン版のリポジトリ） — .ylp ファイルの形式と、版・移行の決まり
 - `Documentation~/PSD_COMPATIBILITY.md` — PSD の読み書きの対応の範囲
 - `Documentation~/PLUGIN_API.md` — プラグインの受け口（試作 API）
 - `Documentation~/THIRD_PARTY.md`・`Editor/UI/Icons/THIRD-PARTY-NOTICES.md` — 同梱しているもののライセンス

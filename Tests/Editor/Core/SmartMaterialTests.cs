@@ -454,7 +454,7 @@ namespace Yozolab.YoluPainter.Tests
         }
 
         /// <summary>内蔵のスマートマテリアルの断片のバイト列の SHA-256（変えたら版を上げてここを直す）。正本の版の数（8〜11 バイト目）は 0 にして
-        /// から数える: 正本の版が上がっても、使わない機能の並びは変わらない（YLP_FORMAT の決まり）ので、中身が同じなら同じ値。</summary>
+        /// から数える: 正本の版が上がっても、使わない機能の並びは変わらない（.ylp の形式の決まり。スタンドアロン版のリポジトリの docs/YLP_FORMAT.md）ので、中身が同じなら同じ値。</summary>
         [Test] public void BuiltInFragmentsHaveTheirPinnedHashes()
         {
             var hashes = BuiltInSmartMaterials.All.ToDictionary(e => e.Key, e =>

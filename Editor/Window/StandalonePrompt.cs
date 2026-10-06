@@ -9,6 +9,7 @@ namespace Yozolab.YoluPainter.Editor
     /// （<see cref="TexturePaintWindow"/>）を開いたとき、エディターの起動ごとに 1 回だけ、小さな窓でスタンドアロン版を知らせる。
     /// 選べるのは「ダウンロードのページを開く」「あとで」「今後表示しない」。Preferences ▸ YoluPainter で切れる（既定は入）。
     /// 描く窓の機能は変えない（窓を出すだけで、文書にもプロジェクトにも何も書かない）。
+    /// スタンドアロン版の配布は Windows だけなので、窓も Preferences の入切も Windows のエディタだけに出す（Mac・Linux の利用者に、入れられない物を勧めない）。
     /// </summary>
     internal static class StandalonePrompt
     {
@@ -45,6 +46,12 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>ページを開く（試験は差し替える）。</summary>
         internal static Action<string> OpenUrl = url => Application.OpenURL(url);
 
+        /// <summary>このエディタの OS に、スタンドアロン版の配布があるか（Windows だけ。試験は差し替える）。</summary>
+        internal static Func<bool> PlatformHasStandalone = () => HasStandaloneFor(Application.platform);
+
+        /// <summary>その OS のエディタに、スタンドアロン版の配布があるか（Windows だけ。Linux 版・Mac 版の配布は今は出していない）。</summary>
+        internal static bool HasStandaloneFor(RuntimePlatform platform) => platform == RuntimePlatform.WindowsEditor;
+
         /// <summary>あとで実行する（窓を開いている最中ではなく、開き終わってから出すため。試験は差し替える）。</summary>
         internal static Action<Action> Schedule = action => EditorApplication.delayCall += () => action();
 
@@ -54,10 +61,11 @@ namespace Yozolab.YoluPainter.Editor
         /// <summary>描く窓が開いた（OnEnable）。窓が開き終わってから <see cref="NotifyPaintWindowOpened"/> を呼ぶ。</summary>
         public static void OnPaintWindowOpened() => Schedule(() => NotifyPaintWindowOpened());
 
-        /// <summary>描く窓を開いたとき。設定が入で、このセッションでまだ出していなければ、出したと覚えてから窓を出す。出したら true。</summary>
+        /// <summary>描く窓を開いたとき。設定が入で、このセッションでまだ出していなければ、出したと覚えてから窓を出す。出したら true。
+        /// スタンドアロン版の配布が無い OS（Windows 以外）では、出さず、出したとも覚えない。</summary>
         public static bool NotifyPaintWindowOpened()
         {
-            if (!Store.Enabled || Store.ShownThisSession) return false;
+            if (!PlatformHasStandalone() || !Store.Enabled || Store.ShownThisSession) return false;
             Store.ShownThisSession = true;
             Presenter();
             return true;
@@ -73,9 +81,10 @@ namespace Yozolab.YoluPainter.Editor
             }
         }
 
-        /// <summary>Preferences の入切（変えたら true）。</summary>
+        /// <summary>Preferences の入切（変えたら true）。スタンドアロン版の配布が無い OS では、欄を出さない（変えられない）。</summary>
         public static bool DrawPreference()
         {
+            if (!PlatformHasStandalone()) return false;
             bool now = Enabled;
             bool next = EditorGUILayout.Toggle(L.Content("Suggest the standalone YoluPainter", "Shows a small window once per editor session when the YoluPainter window is opened."), now);
             if (next == now) return false;
