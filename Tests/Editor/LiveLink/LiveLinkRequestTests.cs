@@ -1,433 +1,486 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
 using System.Linq;
-using System.Threading;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.Rendering;
-using Yozolab.YoluPainter.Core.Shelf;
-using Yozolab.YoluPainter.Editor;
 using Yozolab.YoluPainter.Editor.LiveLink;
-using Object = UnityEngine.Object;
 
 namespace Yozolab.YoluPainter.Tests
 {
     /// <summary>
-    /// Live Link の頼み: スタンドアロンが「このマテリアルの値・元の絵がほしい」と頼み、Unity は頼まれたものだけを読んで送る。元の絵は、頼みを出せる
-    /// スタンドアロン（機能の印 マテリアルの頼み が双方にある）には自分から押し出さない。頼みの have（スタンドアロンが手元に持つ絵の印）が今の印と同じなら
-    /// 絵を読まずに画素なしの Cached で答え、印が違う・取れない（アセットでない絵）ときは必ず画素を送る。世代が違う頼みは答えない。
-    /// 試験のアセットは試験が作ったフォルダの中だけで、終わりに消す。
+    /// 頼みの JSON を作る: FBX から来たメッシュ・来ていないメッシュ（<c>refused</c>）、FBX の中の道（対応が取れる・展開して名前で探す・名前が重なる・
+    /// 根の子が 1 つだけで畳まれた FBX）、FBX の根の値を送るか（相手の下のときだけ）、親を付け替えたボーンの <c>local</c>、BlendShape、マテリアルの値と
+    /// テクスチャの道（sRGB・ノーマルマップ・拡大とずらし・ファイルの無い絵は道 null）、シェーダーのパッケージ、取り込みの設定。試験の FBX は ASCII で書いてテストプロジェクトの一時のフォルダに取り込む。
     /// </summary>
     public sealed class LiveLinkRequestTests
     {
-        static int s_counter;
-        readonly List<Object> owned = new List<Object>();
-        readonly List<string> folders = new List<string>();
-        ulong server;
-        LiveLinkSession session;
+        LiveLinkTestScope scope;
 
-        const ulong AllMarks = LiveLinkBridge.FeatureMaterialValues | LiveLinkBridge.FeatureOriginalTextures | LiveLinkBridge.FeatureMaterialRequest;
+        [SetUp] public void SetUp() => scope = new LiveLinkTestScope();
+        [TearDown] public void TearDown() => scope.Dispose();
 
-        [SetUp]
-        public void Require()
+        static Dictionary<string, object> Json(LiveLinkRequest r) => (Dictionary<string, object>)JsonReader.Parse(r.ToJson());
+
+        static List<Dictionary<string, object>> Items(Dictionary<string, object> o, string name) => JsonReader.Arr(o, name).Cast<Dictionary<string, object>>().ToList();
+
+        static float[] Floats(object list) => ((List<object>)list).Select(x => (float)(double)x).ToArray();
+
+        static void AreClose(float[] actual, float[] expected, string what)
         {
-            Assert.That(LiveLinkBridge.Problem, Is.Null, "the bridge library must load on the Linux and Windows editors");
-            L.OverrideLanguage(PainterLanguage.English);
+            Assert.That(actual.Length, Is.EqualTo(expected.Length), what);
+            for (int i = 0; i < actual.Length; i++) Assert.That(actual[i], Is.EqualTo(expected[i]).Within(1e-5f), what + "[" + i + "]");
         }
 
-        [TearDown]
-        public void CleanUp()
+        static Dictionary<string, object> Bone(Dictionary<string, object> json, string node) =>
+            Items(json, "bones").SingleOrDefault(b => JsonReader.Str(b, "node") == node);
+
+        static void LocalIs(Dictionary<string, object> json, string node, Vector3 t, Quaternion r, Vector3 s)
         {
-            session?.Dispose(); session = null;
-            LiveLinkTestServer.Stop(server); server = 0;
-            foreach (var o in owned) if (o != null) Object.DestroyImmediate(o);
-            owned.Clear();
-            foreach (var f in folders) AssetDatabase.DeleteAsset(f);
-            folders.Clear();
-            L.OverrideLanguage(null);
+            var b = Bone(json, node);
+            Assert.That(b, Is.Not.Null, "bone " + node);
+            var local = JsonReader.Obj(b, "local");
+            AreClose(Floats(local["t"]), new[] { t.x, t.y, t.z }, node + ".t");
+            var q = Floats(local["r"]);
+            // q と -q は同じ回転
+            float sign = Mathf.Sign(q[0] * r.x + q[1] * r.y + q[2] * r.z + q[3] * r.w);
+            AreClose(q.Select(x => x * sign).ToArray(), new[] { r.x, r.y, r.z, r.w }, node + ".r");
+            AreClose(Floats(local["s"]), new[] { s.x, s.y, s.z }, node + ".s");
         }
 
-        T Own<T>(T o) where T : Object { owned.Add(o); return o; }
-
-        static string UniqueName() => "ylp-unity-request-" + Process.GetCurrentProcess().Id + "-" + (++s_counter);
-
-        static void RequireGraphics()
+        [Test]
+        public void AnFbxInstanceIsSentWithItsFileImportSettingsNodesAndPose()
         {
-            if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null) Assert.Ignore("needs a graphics device (the textures are read through a RenderTexture)");
-            if (EditorShaderCompiler.IsBroken) Assert.Ignore("Built-in shaders fail to compile in this Editor (devcontainer GUI mode). Use test-daemon.sh start --batch-gl.");
+            string fbx = scope.WriteFbx("Arm", FbxAscii.ArmScene());
+            var target = scope.Instantiate(fbx);
+            target.transform.position = new Vector3(3, 0, 0);
+            var upper = target.transform.Find("Armature/Upper");
+            upper.localRotation = Quaternion.Euler(0, 0, 30);
+            var r = LiveLinkRequest.Build(target);
+            var json = Json(r);
+
+            Assert.That(JsonReader.Num(json, "format"), Is.EqualTo(1));
+            Assert.That(JsonReader.Str(json, "kind"), Is.EqualTo("open"));
+            Assert.That(Guid.TryParse(JsonReader.Str(json, "id"), out _), Is.True);
+            Assert.That(JsonReader.Str(JsonReader.Obj(json, "bridge"), "unity"), Is.EqualTo(Application.unityVersion));
+            Assert.That(JsonReader.Str(JsonReader.Obj(json, "project"), "root"), Is.EqualTo(LiveLinkSettings.ProjectRoot));
+            var t = JsonReader.Obj(json, "target");
+            Assert.That(JsonReader.Str(t, "key"), Is.EqualTo(LiveLinkRequest.TargetKeyOf(target)));
+            Assert.That(JsonReader.Str(t, "name"), Is.EqualTo("Arm"));
+            Assert.That(JsonReader.Str(t, "export_dir"), Is.EqualTo(LiveLinkSettings.ProjectRoot + "/Assets/YoluPainter/Arm"));
+            AreClose(Floats(JsonReader.Obj(json, "root")["world"]), Enumerable.Range(0, 16).Select(i => target.transform.worldToLocalMatrix[i % 4, i / 4]).ToArray(), "root.world (column-major)");
+
+            var models = Items(json, "models");
+            Assert.That(models.Count, Is.EqualTo(1));
+            Assert.That(JsonReader.Str(models[0], "fbx"), Is.EqualTo(LiveLinkTestScope.Absolute(fbx)));
+            Assert.That(JsonReader.Str(models[0], "guid"), Is.EqualTo(AssetDatabase.AssetPathToGUID(fbx)));
+            var import = JsonReader.Obj(models[0], "import");
+            Assert.That(JsonReader.Num(import, "global_scale"), Is.EqualTo(1));
+            Assert.That(JsonReader.Bool(import, "use_file_scale"), Is.True);
+            Assert.That(JsonReader.Bool(import, "bake_axis_conversion"), Is.False);
+            Assert.That(JsonReader.Bool(import, "import_blend_shapes"), Is.True);
+            Assert.That(JsonReader.Bool(import, "preserve_hierarchy"), Is.False);
+
+            var renderers = Items(json, "renderers").ToDictionary(x => JsonReader.Str(x, "path"));
+            Assert.That(renderers.Keys, Is.EquivalentTo(new[] { "ArmMesh", "Armature/Upper/Lower/Hat" }));
+            var arm = renderers["ArmMesh"];
+            Assert.That(JsonReader.Str(arm, "node"), Is.EqualTo("ArmMesh"));
+            Assert.That(JsonReader.Num(arm, "model"), Is.EqualTo(0));
+            Assert.That(JsonReader.Bool(arm, "skinned"), Is.True);
+            Assert.That(JsonReader.Bool(arm, "enabled"), Is.True);
+            Assert.That(JsonReader.Arr(arm, "materials").Select(x => (double)x), Is.EqualTo(new[] { 0.0, 1.0 }), "Skin and Cloth, in submesh order");
+            var hat = renderers["Armature/Upper/Lower/Hat"];
+            Assert.That(JsonReader.Str(hat, "node"), Is.EqualTo("Armature/Upper/Lower/Hat"));
+            Assert.That(JsonReader.Bool(hat, "skinned"), Is.False);
+            Assert.That(JsonReader.Arr(hat, "materials").Select(x => (double)x), Is.EqualTo(new[] { 0.0 }), "the same material is one entry");
+
+            // ボーン: FBX のノード全部。相手が FBX の根そのものなので、根（""）は送らない（スタンドアロンは FBX のままの値）。
+            // Unity の取り込みは X を裏返す（Lower は -1）
+            Assert.That(Items(json, "bones").Select(b => JsonReader.Str(b, "node")),
+                Is.EquivalentTo(new[] { "Armature", "Armature/Upper", "Armature/Upper/Lower", "Armature/Upper/Lower/Hat", "ArmMesh" }));
+            LocalIs(json, "Armature/Upper", new Vector3(0, 1, 0), Quaternion.Euler(0, 0, 30), Vector3.one);
+            LocalIs(json, "Armature/Upper/Lower", new Vector3(-1, 0, 0), Quaternion.identity, Vector3.one);
+            LocalIs(json, "Armature/Upper/Lower/Hat", new Vector3(-0.5f, 0.2f, 0), Quaternion.identity, Vector3.one);
+            Assert.That(Items(json, "refused"), Is.Empty);
+
+            var materials = Items(json, "materials");
+            Assert.That(materials.Select(m => JsonReader.Str(m, "name")), Is.EqualTo(new[] { "Skin", "Cloth" }));
+            var skin = AssetDatabase.LoadAllAssetsAtPath(fbx).OfType<Material>().Single(m => m.name == "Skin");
+            Assert.That(JsonReader.Str(materials[0], "key"), Is.EqualTo(LiveLinkRequest.MaterialKey(skin)));
+            Assert.That(JsonReader.Str(materials[0], "key"), Does.StartWith("guid:" + AssetDatabase.AssetPathToGUID(fbx) + "/fileid:"));
+            Assert.That(LiveLinkImport.FindMaterial(JsonReader.Str(materials[0], "key")), Is.EqualTo(skin), "the key finds the material again");
         }
 
-        void Connect(ulong features)
+        [Test]
+        public void AMeshThatIsNotFromAnFbxIsRefusedAndTheRestIsSent()
         {
-            string name = UniqueName();
-            server = LiveLinkTestServer.Start(name, 128, 64);
-            Assert.That(server, Is.Not.EqualTo(0UL));
-            Assert.That(LiveLinkTestServer.Configure(server, new Version(0, 4, 0), null, features), Is.True);
-            session = LiveLinkSession.Start(name);
-            Pump(() => session.Status == LiveLinkStatus.Connected, "the connection");
+            string fbx = scope.WriteFbx("Arm", FbxAscii.ArmScene());
+            var root = scope.Own(new GameObject("Avatar"));
+            var arm = scope.Instantiate(fbx);
+            arm.transform.SetParent(root.transform, false);
+            arm.transform.localPosition = new Vector3(0, 2, 0);
+            var cube = scope.NotFromFbx("Accessory");
+            cube.transform.SetParent(root.transform, false);
+            var saved = UnityEngine.Object.Instantiate(cube.GetComponent<MeshFilter>().sharedMesh);
+            AssetDatabase.CreateAsset(saved, scope.AssetFolder + "/Saved.asset");
+            var other = scope.Own(new GameObject("Saved", typeof(MeshFilter), typeof(MeshRenderer)));
+            other.GetComponent<MeshFilter>().sharedMesh = saved;
+            other.transform.SetParent(root.transform, false);
+            other.GetComponent<MeshRenderer>().enabled = false;
+
+            var r = LiveLinkRequest.Build(root);
+            var json = Json(r);
+            Assert.That(Items(json, "refused").Select(x => JsonReader.Str(x, "path") + ":" + JsonReader.Str(x, "reason")),
+                Is.EquivalentTo(new[] { "Accessory:" + LiveLinkReason.MeshNotFromFbx, "Saved:" + LiveLinkReason.MeshNotFromFbx }));
+            Assert.That(Items(json, "renderers").Select(x => JsonReader.Str(x, "path")), Is.EquivalentTo(new[] { "Arm/ArmMesh", "Arm/Armature/Upper/Lower/Hat" }),
+                "the path is from the target's root; the node is inside the FBX");
+            Assert.That(Items(json, "renderers").Select(x => JsonReader.Str(x, "node")), Is.EquivalentTo(new[] { "ArmMesh", "Armature/Upper/Lower/Hat" }));
+            // FBX の根は、相手の根に対する値
+            LocalIs(json, "", new Vector3(0, 2, 0), Quaternion.identity, Vector3.one);
         }
 
-        void Pump(Func<bool> done, string what, double seconds = 15)
+        [Test]
+        public void TheSameFbxPlacedTwiceOrInsideItselfIsOneModelEach()
         {
-            var clock = Stopwatch.StartNew();
-            while (!done())
+            string fbx = scope.WriteFbx("Arm", FbxAscii.ArmScene());
+            var root = scope.Own(new GameObject("Avatar"));
+            var a = scope.Instantiate(fbx); a.transform.SetParent(root.transform, false);
+            var b = scope.Instantiate(fbx); b.name = "Arm2"; b.transform.SetParent(root.transform, false); b.transform.localPosition = new Vector3(1, 0, 0);
+            var nested = scope.Instantiate(fbx); nested.name = "Inner"; nested.transform.SetParent(a.transform.Find("Armature/Upper"), false);
+            var json = Json(LiveLinkRequest.Build(root));
+            Assert.That(Items(json, "refused"), Is.Empty);
+            Assert.That(Items(json, "models").Count, Is.EqualTo(3));
+            var byPath = Items(json, "renderers").ToDictionary(x => JsonReader.Str(x, "path"), x => (int)JsonReader.Num(x, "model").Value);
+            Assert.That(byPath.Keys, Is.EquivalentTo(new[] { "Arm/ArmMesh", "Arm/Armature/Upper/Lower/Hat", "Arm2/ArmMesh", "Arm2/Armature/Upper/Lower/Hat",
+                "Arm/Armature/Upper/Inner/ArmMesh", "Arm/Armature/Upper/Inner/Armature/Upper/Lower/Hat" }));
+            Assert.That(new[] { byPath["Arm/ArmMesh"], byPath["Arm2/ArmMesh"], byPath["Arm/Armature/Upper/Inner/ArmMesh"] }.Distinct().Count(), Is.EqualTo(3));
+            Assert.That(byPath["Arm/Armature/Upper/Inner/ArmMesh"], Is.EqualTo(byPath["Arm/Armature/Upper/Inner/Armature/Upper/Lower/Hat"]));
+            var inner = Items(json, "bones").Where(x => (int)JsonReader.Num(x, "model").Value == byPath["Arm/Armature/Upper/Inner/ArmMesh"]).ToList();
+            Assert.That(inner.Count, Is.EqualTo(6), "the inner copy has all its nodes");
+            var innerRoot = inner.Single(x => JsonReader.Str(x, "node") == "");
+            AreClose(Floats(JsonReader.Obj(innerRoot, "local")["t"]), new[] { 0f, 1f, 0f }, "the inner root relative to the target");
+        }
+
+        [Test]
+        public void TheTargetIsKnownByItsGlobalObjectIdOrInThisSessionByItsInstance()
+        {
+            var inScene = new GameObject("Plain"); // 描く物の無い、開いているシーンの物
+            try
             {
-                if (clock.Elapsed.TotalSeconds > seconds) Assert.Fail("timed out waiting for " + what + " (" + session?.StatusText + ")");
-                session?.Tick();
-                Thread.Sleep(5);
+                Assert.That(LiveLinkRequest.TargetKeyOf(inScene), Is.EqualTo(GlobalObjectId.GetGlobalObjectIdSlow(inScene).ToString()));
+                Assert.That(LiveLinkRequest.TargetKeyOf(inScene), Does.StartWith("GlobalObjectId_V1-2-"));
             }
+            finally { UnityEngine.Object.DestroyImmediate(inScene); }
+            // プレビューのシーンの物は GlobalObjectId が空なので、対象ごとに違う鍵にする
+            var a = scope.Own(new GameObject("A"));
+            var b = scope.Own(new GameObject("B"));
+            Assert.That(GlobalObjectId.GetGlobalObjectIdSlow(a).identifierType, Is.EqualTo(0));
+            Assert.That(LiveLinkRequest.TargetKeyOf(a), Is.EqualTo("instance:" + a.GetInstanceID()));
+            Assert.That(LiveLinkRequest.TargetKeyOf(a), Is.Not.EqualTo(LiveLinkRequest.TargetKeyOf(b)));
         }
 
-        string NewFolder()
+        [Test]
+        public void MaterialsWithoutAnIdentityAreSentWithKeysOfTheirOwn()
         {
-            string folder = "Assets/YoluPainterRequests-" + Guid.NewGuid().ToString("N");
-            Assert.That(AssetDatabase.CreateFolder("Assets", Path.GetFileName(folder)), Is.Not.Empty);
-            folders.Add(folder);
-            return folder;
+            string fbx = scope.WriteFbx("Arm", FbxAscii.ArmScene());
+            var target = scope.Instantiate(fbx);
+            // プレビューのシーン・保存していないシーンの中のマテリアルは GlobalObjectId が空で、どれも同じ空の id になる
+            var a = scope.CreateSceneMaterial("A");
+            var b = scope.CreateSceneMaterial("B");
+            Assert.That(GlobalObjectId.GetGlobalObjectIdSlow(a).identifierType, Is.EqualTo(0));
+            target.GetComponentInChildren<SkinnedMeshRenderer>().sharedMaterials = new[] { a, b };
+            var all = Items(Json(LiveLinkRequest.Build(target)), "materials").Select(m => JsonReader.Str(m, "key")).ToArray();
+            Assert.That(all.Distinct().Count(), Is.EqualTo(all.Length), "no two materials share a key");
+            var keys = all.Where(k => k.StartsWith("instance:")).ToArray(); // 帽子のレンダラーは FBX のマテリアルのまま
+            Assert.That(keys, Is.EqualTo(new[] { "instance:" + a.GetInstanceID(), "instance:" + b.GetInstanceID() }));
+            Assert.That(LiveLinkImport.FindMaterial(keys[0]), Is.EqualTo(a));
+            Assert.That(LiveLinkImport.FindMaterial(keys[1]), Is.EqualTo(b));
+            Assert.That(LiveLinkImport.FindMaterial(keys[0], false), Is.Null, "an InstanceID of another editor session is not looked up");
+            Assert.That(LiveLinkImport.FindMaterial("instance:x"), Is.Null);
         }
 
-        /// <summary>画素 (x, y)（y は下から）が [x * 50 + seed, y * 80, (x + y) * 20, 255] の、4 × 3 の絵。</summary>
-        static byte[] Picture(byte seed = 0)
+        [Test]
+        public void ADisabledRendererIsSentAsHidden()
         {
-            var rgba = new byte[4 * 3 * 4];
-            for (int y = 0; y < 3; y++)
-                for (int x = 0; x < 4; x++)
-                {
-                    int o = (y * 4 + x) * 4;
-                    rgba[o] = (byte)(x * 50 + seed); rgba[o + 1] = (byte)(y * 80); rgba[o + 2] = (byte)((x + y) * 20); rgba[o + 3] = 255;
-                }
-            return rgba;
+            string fbx = scope.WriteFbx("Arm", FbxAscii.ArmScene());
+            var target = scope.Instantiate(fbx);
+            target.transform.Find("Armature/Upper/Lower/Hat").gameObject.SetActive(false);
+            var renderers = Items(Json(LiveLinkRequest.Build(target)), "renderers").ToDictionary(x => JsonReader.Str(x, "path"));
+            Assert.That(JsonReader.Bool(renderers["Armature/Upper/Lower/Hat"], "enabled"), Is.False);
+            Assert.That(JsonReader.Bool(renderers["ArmMesh"], "enabled"), Is.True);
         }
 
-        /// <summary>ファイルを書いて取り込み、インポート設定を決める（絵を変えない設定）。</summary>
-        Texture2D Import(string folder, string file, byte[] png, out string path)
+        [Test]
+        public void AnUnpackedInstanceIsFoundByNamesAndBySkinBones()
         {
-            path = folder + "/" + file;
-            File.WriteAllBytes(path, png);
-            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
-            var importer = (TextureImporter)AssetImporter.GetAtPath(path);
-            importer.mipmapEnabled = false; importer.alphaIsTransparency = false; importer.textureCompression = TextureImporterCompression.Uncompressed;
-            importer.npotScale = TextureImporterNPOTScale.None; importer.isReadable = false; importer.sRGBTexture = true;
-            importer.SaveAndReimport();
-            var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
-            Assert.That(texture, Is.Not.Null, path);
-            return texture;
+            string fbx = scope.WriteFbx("Arm", FbxAscii.ArmScene());
+            var target = scope.Instantiate(fbx);
+            PrefabUtility.UnpackPrefabInstance(target, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            Assert.That(PrefabUtility.GetCorrespondingObjectFromOriginalSource(target.transform), Is.Null, "no correspondence after unpacking");
+            target.name = "Renamed";
+            var json = Json(LiveLinkRequest.Build(target));
+            Assert.That(Items(json, "refused"), Is.Empty);
+            Assert.That(Items(json, "renderers").Select(x => JsonReader.Str(x, "node")), Is.EquivalentTo(new[] { "ArmMesh", "Armature/Upper/Lower/Hat" }));
+            Assert.That(Items(json, "bones").Select(b => JsonReader.Str(b, "node")),
+                Is.EquivalentTo(new[] { "Armature", "Armature/Upper", "Armature/Upper/Lower", "Armature/Upper/Lower/Hat", "ArmMesh" }));
+            LocalIs(json, "Armature/Upper/Lower", new Vector3(-1, 0, 0), Quaternion.identity, Vector3.one);
         }
 
-        /// <summary>差し替えたファイルを取り込み直して、新しいテクスチャを返す。</summary>
-        static Texture2D Replace(string path, byte[] png)
+        [Test]
+        public void TheFbxRootIsSentOnlyWhenItIsBelowTheTarget()
         {
-            File.WriteAllBytes(path, png);
-            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport);
-            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
-        }
+            string fbx = scope.WriteFbx("Arm", FbxAscii.ArmScene());
+            // 相手が FBX の中の子: FBX の根は相手の先祖なので送らない。ほかのノードは FBX の親に対する値
+            var instance = scope.Instantiate(fbx);
+            instance.transform.position = new Vector3(0, 0, 4);
+            var armature = instance.transform.Find("Armature").gameObject;
+            var json = Json(LiveLinkRequest.Build(armature));
+            Assert.That(Items(json, "renderers").Select(x => JsonReader.Str(x, "path") + "=" + JsonReader.Str(x, "node")), Is.EqualTo(new[] { "Upper/Lower/Hat=Armature/Upper/Lower/Hat" }));
+            Assert.That(Bone(json, ""), Is.Null);
+            LocalIs(json, "Armature/Upper/Lower", new Vector3(-1, 0, 0), Quaternion.identity, Vector3.one);
 
-        /// <summary>テクスチャごとに 1 つのキューブ（それぞれ別のマテリアル。_MainTex に入れる）を持つモデル。</summary>
-        GameObject ModelOf(params Texture[] textures)
-        {
-            var root = Own(new GameObject("LiveLinkRequestModel"));
-            root.transform.position = new Vector3(900, 900, 900);
-            for (int i = 0; i < textures.Length; i++)
+            // 根の子が 1 つだけで畳まれた FBX: その子の回転は Unity ではプレハブの根に移る。相手がその根なら送らない（単位を送ると回転が消える）、
+            // 相手の下に置いたなら、その回転を含む相手に対する値
+            var scene = new FbxAscii.Scene
             {
-                var cube = Own(GameObject.CreatePrimitive(PrimitiveType.Cube));
-                cube.transform.SetParent(root.transform, false);
-                cube.transform.localPosition = new Vector3(i * 2, 0, 0);
-                var material = Own(new Material(Shader.Find("Standard")) { name = "RequestBody" + i });
-                material.SetTexture("_MainTex", textures[i]);
-                cube.GetComponent<MeshRenderer>().sharedMaterial = material;
-            }
-            return root;
+                Nodes = { new FbxAscii.Node("Armature", null, new double[] { 0, 0, 0 }, false) { Rotation = new double[] { -90, 0, 0 } }, new FbxAscii.Node("Body", 0, new double[] { 0, 0, 0 }, false) },
+                Materials = { "Skin" },
+            };
+            var tube = FbxAscii.BoxTube("Body", 1, 2, 1, 0.1, 3);
+            tube.Materials = new List<int> { 0 };
+            tube.PolygonMaterials = tube.PolygonMaterials.Select(_ => 0).ToList();
+            scene.Meshes.Add(tube);
+            string collapsed = scope.WriteFbx("Lying", scene);
+            var alone = scope.Instantiate(collapsed);
+            var rootRotation = alone.transform.localRotation;
+            Assert.That(Quaternion.Angle(rootRotation, Quaternion.identity), Is.GreaterThan(1), "Unity moves the single top node's rotation to the prefab root");
+            json = Json(LiveLinkRequest.Build(alone));
+            Assert.That(Items(json, "refused"), Is.Empty);
+            Assert.That(Bone(json, ""), Is.Null, "an identity here would lose the rotation in the standalone");
+
+            var holder = scope.Own(new GameObject("Avatar"));
+            var placed = scope.Instantiate(collapsed);
+            placed.transform.SetParent(holder.transform, false);
+            placed.transform.localPosition = new Vector3(0, 1, 0);
+            json = Json(LiveLinkRequest.Build(holder));
+            LocalIs(json, "", new Vector3(0, 1, 0), rootRotation, Vector3.one);
         }
 
-        Texture2D Solid(Color32 color, int size = 16)
+        [Test]
+        public void AReparentedBoneIsSentRelativeToItsParentInTheFbx()
         {
-            var t = Own(new Texture2D(size, size, TextureFormat.RGBA32, false, false) { name = "solid" });
-            t.SetPixels32(Enumerable.Repeat(color, size * size).ToArray());
-            t.Apply(false, true);
-            return t;
+            string fbx = scope.WriteFbx("Arm", FbxAscii.ArmScene());
+            var target = scope.Instantiate(fbx);
+            PrefabUtility.UnpackPrefabInstance(target, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            var lower = target.transform.Find("Armature/Upper/Lower");
+            var holder = new GameObject("Holder").transform;
+            holder.SetParent(target.transform, false);
+            holder.localPosition = new Vector3(5, 5, 5);
+            holder.localRotation = Quaternion.Euler(0, 90, 0);
+            lower.SetParent(holder, true); // ワールドの位置はそのまま
+            lower.Rotate(0, 0, 45, Space.Self);
+            var json = Json(LiveLinkRequest.Build(target));
+            Assert.That(Items(json, "refused"), Is.Empty, "the skin's bones are found through the bones list");
+            LocalIs(json, "Armature/Upper/Lower", new Vector3(-1, 0, 0), Quaternion.Euler(0, 0, 45), Vector3.one);
+            // Lower の下の Hat は、Lower に当たる Transform の子から名前で見つかる
+            LocalIs(json, "Armature/Upper/Lower/Hat", new Vector3(-0.5f, 0.2f, 0), Quaternion.identity, Vector3.one);
+            Assert.That(Items(json, "renderers").Single(x => JsonReader.Str(x, "node") == "Armature/Upper/Lower/Hat")["path"], Is.EqualTo("Holder/Lower/Hat"));
         }
 
-        static void WaitFor(Func<bool> done, string what, double seconds = 15)
+        [Test]
+        public void SiblingsWithTheSameNameAreAmbiguousOnlyWhereNamesDecide()
         {
-            var clock = Stopwatch.StartNew();
-            while (!done())
+            string fbx = scope.WriteFbx("Arm", FbxAscii.ArmScene());
+            // プレハブのインスタンス: 足した同じ名前の物は、対応が取れているので関係ない
+            var instance = scope.Instantiate(fbx);
+            var extra = new GameObject("Hat").transform;
+            extra.SetParent(instance.transform.Find("Armature/Upper/Lower"), false);
+            var json = Json(LiveLinkRequest.Build(instance));
+            Assert.That(Items(json, "refused"), Is.Empty);
+
+            // 展開した階層: メッシュのノードと同じ名前の兄弟があると、どちらとも決めない
+            var unpacked = scope.Instantiate(fbx);
+            PrefabUtility.UnpackPrefabInstance(unpacked, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            var hat = unpacked.transform.Find("Armature/Upper/Lower/Hat");
+            var copy = UnityEngine.Object.Instantiate(hat.gameObject, hat.parent);
+            copy.name = "Hat";
+            json = Json(LiveLinkRequest.Build(unpacked));
+            Assert.That(Items(json, "refused").Select(x => JsonReader.Str(x, "reason")).Distinct(), Is.EqualTo(new[] { LiveLinkReason.AmbiguousBone }));
+            Assert.That(Items(json, "refused").Count, Is.EqualTo(2), "both renderers named Hat");
+            Assert.That(Items(json, "renderers").Select(x => JsonReader.Str(x, "node")), Is.EqualTo(new[] { "ArmMesh" }));
+            Assert.That(Bone(json, "Armature/Upper/Lower/Hat"), Is.Null, "an ambiguous node has no value");
+
+            // 展開して、ボーンでないノードの名前を変えた: 見つからない
+            var renamed = scope.Instantiate(fbx);
+            PrefabUtility.UnpackPrefabInstance(renamed, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            renamed.transform.Find("Armature/Upper/Lower/Hat").name = "Cap";
+            json = Json(LiveLinkRequest.Build(renamed));
+            Assert.That(Items(json, "refused").Select(x => JsonReader.Str(x, "path") + ":" + JsonReader.Str(x, "reason")),
+                Is.EqualTo(new[] { "Armature/Upper/Lower/Cap:" + LiveLinkReason.BoneNotFound }));
+        }
+
+        [Test]
+        public void AMissingBoneRefusesItsRenderer()
+        {
+            string fbx = scope.WriteFbx("Arm", FbxAscii.ArmScene());
+            var target = scope.Instantiate(fbx);
+            PrefabUtility.UnpackPrefabInstance(target, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+            var skin = target.GetComponentInChildren<SkinnedMeshRenderer>();
+            var bones = skin.bones;
+            bones[1] = null;
+            skin.bones = bones;
+            var json = Json(LiveLinkRequest.Build(target));
+            Assert.That(Items(json, "refused").Select(x => JsonReader.Str(x, "path") + ":" + JsonReader.Str(x, "reason")), Is.EqualTo(new[] { "ArmMesh:" + LiveLinkReason.BoneNotFound }));
+        }
+
+        [Test]
+        public void AFbxWithOneTopNodeIsAddressedBelowTheCollapsedRoot()
+        {
+            var scene = new FbxAscii.Scene
             {
-                if (clock.Elapsed.TotalSeconds > seconds) Assert.Fail("timed out waiting for " + what);
-                Thread.Sleep(5);
-            }
+                Nodes = { new FbxAscii.Node("Armature", null, new double[] { 0, 0, 0 }, false), new FbxAscii.Node("Upper", 0, new double[] { 0, 1, 0 }, true), new FbxAscii.Node("Body", 0, new double[] { 0, 0, 0 }, false) },
+                Materials = { "Skin" },
+            };
+            var tube = FbxAscii.BoxTube("Body", 2, 2, 1, 0.1, 3);
+            tube.Materials = new List<int> { 0 };
+            tube.PolygonMaterials = tube.PolygonMaterials.Select(_ => 0).ToList();
+            scene.Meshes.Add(tube);
+            string collapsed = scope.WriteFbx("Single", scene);
+            var json = Json(LiveLinkRequest.Build(scope.Instantiate(collapsed)));
+            Assert.That(Items(json, "renderers").Select(x => JsonReader.Str(x, "node")), Is.EqualTo(new[] { "Body" }), "Unity drops the single top node from the paths");
+            Assert.That(JsonReader.Bool(JsonReader.Obj(Items(json, "models")[0], "import"), "preserve_hierarchy"), Is.False);
+
+            string kept = scope.WriteFbx("Kept", scene, mi => mi.preserveHierarchy = true);
+            json = Json(LiveLinkRequest.Build(scope.Instantiate(kept)));
+            Assert.That(Items(json, "renderers").Select(x => JsonReader.Str(x, "node")), Is.EqualTo(new[] { "Armature/Body" }));
+            Assert.That(JsonReader.Bool(JsonReader.Obj(Items(json, "models")[0], "import"), "preserve_hierarchy"), Is.True);
         }
 
-        static uint Pack(byte r, byte g, byte b, byte a) => (uint)r | (uint)g << 8 | (uint)b << 16 | (uint)a << 24;
-
-        // ───────── 押し出さない・頼まれた分だけ送る ─────────
+        [Test]
+        public void BlendShapeWeightsAreSentByName()
+        {
+            string fbx = scope.WriteFbx("Arm", FbxAscii.ArmScene());
+            var target = scope.Instantiate(fbx);
+            var skin = target.GetComponentInChildren<SkinnedMeshRenderer>();
+            skin.SetBlendShapeWeight(skin.sharedMesh.GetBlendShapeIndex("Bend"), 35);
+            var arm = Items(Json(LiveLinkRequest.Build(target)), "renderers").Single(x => JsonReader.Str(x, "path") == "ArmMesh");
+            var shapes = JsonReader.Obj(arm, "blend_shapes");
+            Assert.That(shapes.Keys, Is.EquivalentTo(new[] { "Thick", "Bend" }), "the channel names, as Unity imports them");
+            Assert.That(JsonReader.Num(shapes, "Bend"), Is.EqualTo(35).Within(1e-4));
+            Assert.That(JsonReader.Num(shapes, "Thick"), Is.EqualTo(skin.GetBlendShapeWeight(skin.sharedMesh.GetBlendShapeIndex("Thick"))).Within(1e-4));
+        }
 
         [Test]
-        public void ARequestingStandaloneIsNotPushedTheOriginalsAndAsksForTheSetsItHolds()
+        public void TheImportSettingsAreSent()
         {
-            RequireGraphics();
-            var root = ModelOf(Solid(new Color32(200, 30, 10, 255)), Solid(new Color32(10, 200, 30, 255)));
-            Connect(AllMarks);
-            Assert.That(session.CommonFeatures & LiveLinkBridge.FeatureMaterialRequest, Is.Not.EqualTo(0UL));
-            Assert.That(session.SendModel(root), Is.Null);
-            Assert.That(session.OriginalsPending, Is.False, "頼みを出せるスタンドアロンには、元の絵を押し出さない（読みもしない）");
-            // スタンドアロン役は、元の絵を待たせたセットを自分から頼む。頼みに答えて読み・送る
-            Pump(() => session.Display.AppliedCount > 0, "the sets with the originals");
-            var stats = LiveLinkTestServer.Stats(server);
-            Assert.That((stats.requests, stats.last_request_items), Is.EqualTo((1u, 2u)), "1 つの頼みに 2 つのマテリアル");
-            Assert.That(session.RequestsReceived, Is.EqualTo(2));
-            Assert.That(session.RequestsIgnored, Is.EqualTo(0));
-            Assert.That((stats.originals, stats.held_sets), Is.EqualTo((2u, 0u)));
-            Assert.That(session.OriginalsSent, Is.EqualTo(2));
-            for (int m = 0; m < 2; m++)
+            string fbx = scope.WriteFbx("Arm", FbxAscii.ArmScene(), mi =>
             {
-                Assert.That(LiveLinkTestServer.Original(server, m, "_MainTex", out var o), Is.True);
-                Assert.That(o.state, Is.EqualTo((uint)LiveLinkOriginalState.Image));
-                Assert.That(o.stamp, Is.EqualTo(0UL), "アセットでない絵には印が無い（必ず画素を送る）");
+                mi.globalScale = 2;
+                mi.useFileScale = false;
+                mi.bakeAxisConversion = true;
+                mi.importBlendShapes = false;
+            });
+            var json = Json(LiveLinkRequest.Build(scope.Instantiate(fbx)));
+            var import = JsonReader.Obj(Items(json, "models")[0], "import");
+            Assert.That(JsonReader.Num(import, "global_scale"), Is.EqualTo(2));
+            Assert.That(JsonReader.Bool(import, "use_file_scale"), Is.False);
+            Assert.That(JsonReader.Bool(import, "bake_axis_conversion"), Is.True, "sent as it is; the standalone refuses it");
+            Assert.That(JsonReader.Bool(import, "import_blend_shapes"), Is.False);
+            var arm = Items(json, "renderers").Single(x => JsonReader.Str(x, "node") == "ArmMesh");
+            Assert.That(JsonReader.Obj(arm, "blend_shapes"), Is.Empty);
+        }
+
+        [Test]
+        public void MaterialValuesAndTextureFilesAreSentWithoutPixels()
+        {
+            string fbx = scope.WriteFbx("Arm", FbxAscii.ArmScene());
+            var target = scope.Instantiate(fbx);
+            var material = scope.CreateMaterial("Body");
+            material.SetColor("_Color", new Color(0.25f, 0.5f, 0.75f, 1));
+            material.SetFloat("_Glossiness", 0.3f);
+            var main = scope.WritePng("body", Color.white);
+            var normal = scope.WritePng("body_normal", new Color(0.5f, 0.5f, 1), ti => ti.textureType = TextureImporterType.NormalMap);
+            var mask = scope.WritePng("body_mask", Color.gray, ti => ti.sRGBTexture = false);
+            material.SetTexture("_MainTex", main);
+            material.SetTextureScale("_MainTex", new Vector2(2, 3));
+            material.SetTextureOffset("_MainTex", new Vector2(0.5f, 0.25f));
+            material.SetTexture("_BumpMap", normal);
+            material.SetTexture("_MetallicGlossMap", mask);
+            var rt = new RenderTexture(4, 4, 0);
+            try
+            {
+                material.SetTexture("_EmissionMap", rt);
+                material.EnableKeyword("_NORMALMAP");
+                var skin = target.GetComponentInChildren<SkinnedMeshRenderer>();
+                skin.sharedMaterials = new[] { material, null };
+
+                var json = Json(LiveLinkRequest.Build(target));
+                var arm = Items(json, "renderers").Single(x => JsonReader.Str(x, "node") == "ArmMesh");
+                var materials = Items(json, "materials");
+                var indexes = JsonReader.Arr(arm, "materials").Select(x => (int)(double)x).ToArray();
+                var body = materials[indexes[0]];
+                Assert.That(JsonReader.Str(materials[indexes[1]], "key"), Is.EqualTo(LiveLinkRequest.NoMaterialKey), "a submesh without a material");
+                Assert.That(JsonReader.Str(body, "key"), Is.EqualTo(LiveLinkRequest.MaterialKey(material)));
+                Assert.That(JsonReader.Str(body, "name"), Is.EqualTo("Body"));
+                var shader = JsonReader.Obj(body, "shader");
+                Assert.That(JsonReader.Str(shader, "name"), Is.EqualTo("Standard"));
+                Assert.That(JsonReader.Str(shader, "package"), Is.Empty, "a built-in shader is in no package");
+                Assert.That(JsonReader.Str(shader, "version"), Is.Empty);
+                Assert.That(JsonReader.Arr(shader, "keywords"), Does.Contain("_NORMALMAP"));
+                Assert.That(JsonReader.Num(shader, "render_queue"), Is.EqualTo(material.renderQueue));
+                var values = JsonReader.Obj(body, "values");
+                AreClose(Floats(JsonReader.Obj(values, "colors")["_Color"]), new[] { 0.25f, 0.5f, 0.75f, 1f }, "_Color");
+                Assert.That(JsonReader.Num(JsonReader.Obj(values, "floats"), "_Glossiness"), Is.EqualTo(0.3).Within(1e-6));
+                var textures = Items(body, "textures").ToDictionary(x => JsonReader.Str(x, "property"));
+                Assert.That(textures.Keys, Is.EquivalentTo(new[] { "_MainTex", "_BumpMap", "_MetallicGlossMap", "_EmissionMap" }));
+                var emission = textures["_EmissionMap"];
+                Assert.That(emission.ContainsKey("path") && emission["path"] == null, Is.True, "the RenderTexture has no file: its path is null");
+                Assert.That(emission.ContainsKey("guid"), Is.False);
+                Assert.That(JsonReader.Bool(emission, "srgb"), Is.EqualTo(rt.sRGB));
+                Assert.That(JsonReader.Bool(emission, "normal_map"), Is.False);
+                var mainTex = textures["_MainTex"];
+                Assert.That(JsonReader.Str(mainTex, "path"), Is.EqualTo(LiveLinkTestScope.Absolute(AssetDatabase.GetAssetPath(main))));
+                Assert.That(JsonReader.Str(mainTex, "guid"), Is.EqualTo(AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(main))));
+                Assert.That(JsonReader.Bool(mainTex, "srgb"), Is.True);
+                Assert.That(JsonReader.Bool(mainTex, "normal_map"), Is.False);
+                AreClose(Floats(mainTex["scale"]), new[] { 2f, 3f }, "scale");
+                AreClose(Floats(mainTex["offset"]), new[] { 0.5f, 0.25f }, "offset");
+                Assert.That(JsonReader.Bool(textures["_BumpMap"], "normal_map"), Is.True);
+                Assert.That(JsonReader.Bool(textures["_BumpMap"], "srgb"), Is.False, "a normal map is read as linear");
+                Assert.That(JsonReader.Bool(textures["_MetallicGlossMap"], "srgb"), Is.False);
             }
+            finally { UnityEngine.Object.DestroyImmediate(rt); }
         }
 
         [Test]
-        public void OnlyTheRequestedMaterialIsReadAndSentAndTheOthersAreLeftAlone()
+        public void APackageFileIsSentByItsRealPath()
         {
-            RequireGraphics();
-            var root = ModelOf(Solid(new Color32(200, 30, 10, 255)), Solid(new Color32(10, 200, 30, 255)), Solid(new Color32(30, 10, 200, 255)));
-            Connect(AllMarks);
-            Assert.That(session.SendModel(root), Is.Null);
-            Pump(() => session.Display.AppliedCount > 0 && LiveLinkTestServer.Stats(server).originals >= 3, "the first originals");
-            uint before = LiveLinkTestServer.Stats(server).originals;
-            int sentBefore = session.OriginalsSent;
-            // 手でマテリアル 1 だけを頼む（世代 0 は今のモデルの世代）
-            Assert.That(LiveLinkTestServer.Request(server, 0, 1, LiveLinkRequest.WantOriginal, "_MainTex", 0), Is.True);
-            Pump(() => session.OriginalsSent == sentBefore + 1, "the requested original");
-            WaitFor(() => LiveLinkTestServer.Stats(server).originals == before + 1, "the answer");
-            Thread.Sleep(100);
-            Assert.That(LiveLinkTestServer.Stats(server).originals, Is.EqualTo(before + 1), "頼まれたマテリアルだけ");
-            Assert.That(LiveLinkTestServer.Stats(server).last_original_material, Is.EqualTo(1u));
-            Assert.That(session.OriginalsSent, Is.EqualTo(sentBefore + 1));
+            var info = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(LiveLinkRequest).Assembly);
+            Assert.That(LiveLinkFbxMap.PhysicalPath("Packages/" + info.name + "/package.json"), Is.EqualTo(LiveLinkSettings.Slash(System.IO.Path.GetFullPath(System.IO.Path.Combine(info.resolvedPath, "package.json")))));
+            var package = LiveLinkMaterialValues.PackageOf("Packages/" + info.name + "/package.json");
+            Assert.That(package?.name, Is.EqualTo(info.name));
+            Assert.That(package?.version, Is.EqualTo(info.version));
+            Assert.That(LiveLinkMaterialValues.PackageOf("Assets/x.shader"), Is.Null);
         }
 
         [Test]
-        public void ARequestOfAnotherGenerationIsIgnoredAndNothingIsRead()
+        public void TheJsonWriterAndReaderAgree()
         {
-            RequireGraphics();
-            var root = ModelOf(Solid(new Color32(200, 30, 10, 255)));
-            Connect(AllMarks);
-            Assert.That(session.SendModel(root), Is.Null);
-            Pump(() => session.Display.AppliedCount > 0, "the set");
-            uint before = LiveLinkTestServer.Stats(server).originals;
-            int ignored = session.RequestsIgnored;
-            Assert.That(LiveLinkTestServer.Request(server, 4242, 0, LiveLinkRequest.WantOriginal | LiveLinkRequest.WantValues, "_MainTex", 0), Is.True);
-            Pump(() => session.RequestsIgnored == ignored + 1, "the stale request to be taken out");
-            for (int i = 0; i < 20; i++) { session.Tick(); Thread.Sleep(5); }
-            Assert.That(LiveLinkTestServer.Stats(server).originals, Is.EqualTo(before), "古いモデルの頼みには答えない");
-            Assert.That(session.OriginalsPending, Is.False);
-            Assert.That(session.ValuesResent, Is.EqualTo(0));
-        }
-
-        [Test]
-        public void ARequestForASlotWithoutATextureIsAnsweredAsUnreadableAndAnOutOfRangeMaterialIsNot()
-        {
-            RequireGraphics();
-            var root = ModelOf(Solid(new Color32(200, 30, 10, 255)));
-            Connect(AllMarks);
-            Assert.That(session.SendModel(root), Is.Null);
-            Pump(() => session.Display.AppliedCount > 0, "the set");
-            // スロットが違う（絵が外された・名前が違う）: 読めない様子で答える（頼んだ側を待たせ続けない）
-            Assert.That(LiveLinkTestServer.Request(server, 0, 0, LiveLinkRequest.WantOriginal, "_OtherTex", 0), Is.True);
-            Pump(() => LiveLinkTestServer.Original(server, 0, "_OtherTex", out _), "the unreadable answer");
-            Assert.That(LiveLinkTestServer.Original(server, 0, "_OtherTex", out var gone), Is.True);
-            Assert.That((gone.state, gone.width, gone.height), Is.EqualTo(((uint)LiveLinkOriginalState.Unreadable, 0u, 0u)));
-            // 範囲外のマテリアルの番号には答えない（受けて捨てる）
-            uint before = LiveLinkTestServer.Stats(server).originals;
-            Assert.That(LiveLinkTestServer.Request(server, 0, 99, LiveLinkRequest.WantOriginal, "_MainTex", 0), Is.True);
-            Pump(() => session.RequestsReceived >= 2, "the second request");
-            for (int i = 0; i < 20; i++) { session.Tick(); Thread.Sleep(5); }
-            Assert.That(LiveLinkTestServer.Stats(server).originals, Is.EqualTo(before));
-            Assert.That(session.OriginalsPending, Is.False);
-        }
-
-        // ───────── 印 ─────────
-
-        [Test]
-        public void AnAssetTextureHasAStampThatFollowsItsContentsAndImportSettingsAndItsFileTimeAndNonAssetsHaveNone()
-        {
-            RequireGraphics();
-            string folder = NewFolder();
-            var texture = Import(folder, "Body.png", RgbaPng.Encode(Picture(), 4, 3), out string path);
-            ulong stamp = LiveLinkOriginals.StampOf(texture);
-            Assert.That(stamp, Is.Not.EqualTo(0UL), "アセットの絵には印がある");
-            Assert.That(LiveLinkOriginals.StampOf(texture), Is.EqualTo(stamp), "何も変えなければ同じ");
-            // 中身が変わる（別の絵に差し替えて取り込み直す）
-            var replaced = Replace(path, RgbaPng.Encode(Picture(9), 4, 3));
-            ulong changed = LiveLinkOriginals.StampOf(replaced);
-            Assert.That(changed, Is.Not.EqualTo(0UL));
-            Assert.That(changed, Is.Not.EqualTo(stamp), "中身が変わったら印も変わる");
-            // インポート設定が変わる（絵の読み方が変わる設定）
-            var importer = (TextureImporter)AssetImporter.GetAtPath(path);
-            importer.sRGBTexture = false; importer.SaveAndReimport();
-            ulong linear = LiveLinkOriginals.StampOf(AssetDatabase.LoadAssetAtPath<Texture2D>(path));
-            Assert.That(linear, Is.Not.EqualTo(changed), "インポート設定が変わったら印も変わる");
-            // 取り込み直さずにファイルだけが触られた（外のツールが書いた直後）: 古い絵と言い切れないので、印が変わる
-            ulong beforeTouch = LiveLinkOriginals.StampOf(AssetDatabase.LoadAssetAtPath<Texture2D>(path));
-            File.SetLastWriteTimeUtc(path, File.GetLastWriteTimeUtc(path).AddMinutes(3));
-            Assert.That(LiveLinkOriginals.StampOf(AssetDatabase.LoadAssetAtPath<Texture2D>(path)), Is.Not.EqualTo(beforeTouch), "ファイルが触られたら、取り込み直す前でも印が変わる");
-            // アセットでない絵・無い絵・2D でない絵は印なし（必ず画素を送る）
-            Assert.That(LiveLinkOriginals.StampOf(Solid(new Color32(1, 2, 3, 255))), Is.EqualTo(0UL));
-            Assert.That(LiveLinkOriginals.StampOf(Own(new RenderTexture(8, 8, 0))), Is.EqualTo(0UL));
-            Assert.That(LiveLinkOriginals.StampOf(null), Is.EqualTo(0UL));
-        }
-
-        [Test]
-        public void ASameStampIsAnsweredWithoutPixelsAndAChangedFileIsSentAgainAndANonAssetAlwaysSendsPixels()
-        {
-            RequireGraphics();
-            string folder = NewFolder();
-            var texture = Import(folder, "Body.png", RgbaPng.Encode(Picture(), 4, 3), out string path);
-            var runtime = Solid(new Color32(200, 30, 10, 255));
-            var root = ModelOf(texture, runtime);
-            Connect(AllMarks);
-            Assert.That(session.SendModel(root), Is.Null);
-            Pump(() => session.Display.AppliedCount > 0 && LiveLinkTestServer.Stats(server).originals >= 2, "the first originals");
-            // 最初は手元に何も無い: アセットの絵は印つきの画素で、アセットでない絵は印なしの画素で届く
-            Assert.That(LiveLinkTestServer.Original(server, 0, "_MainTex", out var first), Is.True);
-            Assert.That(first.state, Is.EqualTo((uint)LiveLinkOriginalState.Image));
-            Assert.That(first.stamp, Is.EqualTo(LiveLinkOriginals.StampOf(texture)), "送った印は、読む前に取った今の印");
-            Assert.That(LiveLinkTestServer.Original(server, 1, "_MainTex", out var second), Is.True);
-            Assert.That(second.stamp, Is.EqualTo(0UL));
-            uint kibAfterFirst = LiveLinkTestServer.Stats(server).original_kib;
-
-            // モデルを送り直す: スタンドアロン役は、手元の絵の印（アセットの絵だけ）を頼みに付ける。同じ印なら画素なしで答える。印なしの絵は画素をまた送る
-            Assert.That(session.SendModel(root), Is.Null);
-            Pump(() => LiveLinkTestServer.Stats(server).cached_used == 1 && LiveLinkTestServer.Stats(server).originals >= 4, "the answers of the second send");
-            var stats = LiveLinkTestServer.Stats(server);
-            Assert.That(session.OriginalsCached, Is.EqualTo(1), "印が同じ絵は、読まずに答えた");
-            Assert.That(stats.cached_missed, Is.EqualTo(0u));
-            Assert.That(LiveLinkTestServer.Original(server, 0, "_MainTex", out var used), Is.True);
-            Assert.That((used.state, used.stamp), Is.EqualTo(((uint)LiveLinkOriginalState.Image, first.stamp)), "手元の絵を使った（画素は最初のもの）");
-            Assert.That(used.corner, Is.EqualTo(Pack(0, 0, 0, 255)));
-            // 増えた画素は、アセットでない絵の分だけ（16 × 16 × 4 = 1 KiB）
-            Assert.That(stats.original_kib, Is.EqualTo(kibAfterFirst + 1), "アセットの絵の画素は送っていない");
-
-            // ファイルが差し替わった: 手元の絵の印と今の印が違うので、画素を送る（古い絵を新しい印で使わない）
-            Replace(path, RgbaPng.Encode(Picture(9), 4, 3));
-            Assert.That(session.SendModel(root), Is.Null);
-            Pump(() => LiveLinkTestServer.Stats(server).originals >= 6 && LiveLinkTestServer.Original(server, 0, "_MainTex", out var o) && o.corner == Pack(9, 0, 0, 255), "the new picture");
-            Assert.That(LiveLinkTestServer.Original(server, 0, "_MainTex", out var changed), Is.True);
-            Assert.That(changed.state, Is.EqualTo((uint)LiveLinkOriginalState.Image));
-            Assert.That(changed.stamp, Is.Not.EqualTo(first.stamp));
-            Assert.That(changed.stamp, Is.EqualTo(LiveLinkOriginals.StampOf(AssetDatabase.LoadAssetAtPath<Texture2D>(path))));
-            Assert.That(LiveLinkTestServer.Stats(server).cached_used, Is.EqualTo(1u), "2 回目の送りで 1 つだけ。3 回目は使っていない");
-            Assert.That(session.OriginalsCached, Is.EqualTo(1));
-        }
-
-        [Test]
-        public void AStampThatCannotBeTakenSendsThePixelsEvenWhenTheStandaloneSaysItHasOne()
-        {
-            RequireGraphics();
-            var root = ModelOf(Solid(new Color32(5, 6, 7, 255)));
-            Connect(AllMarks);
-            Assert.That(session.SendModel(root), Is.Null);
-            Pump(() => session.Display.AppliedCount > 0, "the set");
-            // スタンドアロンが（でたらめな）印を持つと言っても、印の取れない絵は読んで送る（印が合うことはない）
-            uint before = LiveLinkTestServer.Stats(server).originals;
-            int sent = session.OriginalsSent;
-            Assert.That(LiveLinkTestServer.Request(server, 0, 0, LiveLinkRequest.WantOriginal, "_MainTex", 0x1234_5678_9abc), Is.True);
-            Pump(() => session.OriginalsSent == sent + 1, "the pixels");
-            WaitFor(() => LiveLinkTestServer.Stats(server).originals == before + 1, "the answer");
-            Assert.That(session.OriginalsCached, Is.EqualTo(0));
-            Assert.That(LiveLinkTestServer.Original(server, 0, "_MainTex", out var o), Is.True);
-            Assert.That((o.state, o.corner), Is.EqualTo(((uint)LiveLinkOriginalState.Image, Pack(5, 6, 7, 255))));
-        }
-
-        // ───────── 値 ─────────
-
-        [Test]
-        public void AValuesRequestSendsTheValuesOfTheRequestedMaterialAgainAndAMaterialWithoutOneIsAnsweredAsNone()
-        {
-            RequireGraphics();
-            var root = ModelOf(Solid(new Color32(200, 30, 10, 255)), Solid(new Color32(10, 200, 30, 255)));
-            // マテリアルの無いサブメッシュの組（マテリアルは 3 つめ）
-            var bare = Own(GameObject.CreatePrimitive(PrimitiveType.Sphere));
-            bare.transform.SetParent(root.transform, false);
-            bare.GetComponent<MeshRenderer>().sharedMaterial = null;
-            Connect(AllMarks);
-            Assert.That(session.SendModel(root), Is.Null);
-            Pump(() => session.Display.AppliedCount > 0, "the sets");
-            int unassigned = session.Model.Materials.FindIndex(m => m.Material == null);
-            Assert.That(unassigned, Is.GreaterThanOrEqualTo(0));
-            // モデルの直後に送った値（マテリアルの無い組は送らない。2 つのマテリアルぶん）が届き終わってから、数え始める
-            Pump(() => LiveLinkTestServer.Stats(server).values >= 2, "the values sent with the model");
-            Thread.Sleep(50);
-            uint values = LiveLinkTestServer.Stats(server).values;
-            // 頼まれたマテリアルだけの値を送り直す（Standard なので「値なし」）
-            Assert.That(LiveLinkTestServer.Request(server, 0, 1, LiveLinkRequest.WantValues, "", 0), Is.True);
-            Pump(() => session.ValuesResent == 1, "the values request");
-            WaitFor(() => LiveLinkTestServer.Stats(server).values == values + 1, "the values answer");
-            Assert.That(LiveLinkTestServer.Stats(server).last_values_material, Is.EqualTo(1u));
-            Assert.That(LiveLinkTestServer.Stats(server).last_values_kind, Is.EqualTo(0u), "lilToon でないマテリアルは値なし");
-            // マテリアルの無い組にも、値なしと答える（頼んだ側の待ちを閉じる）
-            Assert.That(LiveLinkTestServer.Request(server, 0, (uint)unassigned, LiveLinkRequest.WantValues, "", 0), Is.True);
-            Pump(() => session.ValuesResent == 2, "the values request of the bare submeshes");
-            WaitFor(() => LiveLinkTestServer.Stats(server).values == values + 2, "the answer for the bare submeshes");
-            Assert.That(LiveLinkTestServer.Stats(server).last_values_material, Is.EqualTo((uint)unassigned));
-            Assert.That(LiveLinkTestServer.Stats(server).last_values_kind, Is.EqualTo(0u));
-            Assert.That(LiveLinkTestServer.Stats(server).refused, Is.EqualTo(0u));
-            Assert.That(session.Log.Any(l => l.Contains("asked for the values of 1 materials")), Is.True);
-        }
-
-        // ───────── 古い相手・大きすぎるモデル ─────────
-
-        [Test]
-        public void AStandaloneWithoutTheRequestMarkIsPushedTheOriginalsAsBefore()
-        {
-            RequireGraphics();
-            var root = ModelOf(Solid(new Color32(1, 2, 3, 255)));
-            Connect(LiveLinkBridge.FeatureMaterialValues | LiveLinkBridge.FeatureOriginalTextures);
-            Assert.That(session.CommonFeatures & LiveLinkBridge.FeatureMaterialRequest, Is.EqualTo(0UL));
-            Assert.That(session.SendModel(root), Is.Null);
-            Assert.That(session.OriginalsPending, Is.True, "頼みを知らない相手には、今までどおり全部を押し出す");
-            Pump(() => session.Display.AppliedCount > 0, "the set");
-            var stats = LiveLinkTestServer.Stats(server);
-            Assert.That((stats.requests, stats.originals, session.RequestsReceived), Is.EqualTo((0u, 1u, 0)));
-            // 頼みを知らない相手には、頼みの印が無いので届かない
-            Assert.That(LiveLinkTestServer.Request(server, 0, 0, LiveLinkRequest.WantOriginal, "_MainTex", 0), Is.False);
-        }
-
-        [Test]
-        public void AModelOverTheFrameLimitIsRefusedWithAReasonAndNothingIsSentAndTheLinkStaysUp()
-        {
-            RequireGraphics();
-            var root = ModelOf(Solid(new Color32(1, 2, 3, 255)));
-            Connect(AllMarks);
-            LiveLinkTestServer.SetPayloadLimit(session.Handle, 100);
-            string problem = session.SendModel(root);
-            Assert.That(problem, Is.Not.Null);
-            Assert.That(problem, Does.Contain("larger than the 512 MiB"));
-            Assert.That(session.ModelsSent, Is.EqualTo(0));
-            Assert.That(session.Status, Is.EqualTo(LiveLinkStatus.Connected), "つながりは保たれる");
-            for (int i = 0; i < 10; i++) { session.Tick(); Thread.Sleep(5); }
-            Assert.That(LiveLinkTestServer.Stats(server).models, Is.EqualTo(0u));
-            L.OverrideLanguage(PainterLanguage.Japanese);
-            Assert.That(session.SendModel(root), Does.Contain("512 MiB"));
-            L.OverrideLanguage(PainterLanguage.English);
-            // 上限を戻せば、同じモデルを送れる
-            LiveLinkTestServer.SetPayloadLimit(session.Handle, ulong.MaxValue);
-            Assert.That(session.SendModel(root), Is.Null);
-            Pump(() => LiveLinkTestServer.Stats(server).models == 1, "the model");
-        }
-
-        [Test]
-        public void TheRequestMarkHasItsNameInBothLanguages()
-        {
-            Assert.That(LiveLinkFeatures.Names(LiveLinkFeatures.MaterialRequest), Is.EqualTo("Material requests"));
-            L.OverrideLanguage(PainterLanguage.Japanese);
-            Assert.That(LiveLinkFeatures.Names(LiveLinkFeatures.MaterialRequest), Is.EqualTo("マテリアルの頼み"));
-            Assert.That(LiveLinkFeatures.MaterialRequest, Is.EqualTo(LiveLinkBridge.FeatureMaterialRequest));
-            Assert.That(LiveLinkFeatures.Known & LiveLinkFeatures.MaterialRequest, Is.Not.EqualTo(0UL));
-            Assert.That(LiveLinkBridge.ExpectedAbi, Is.EqualTo(7u));
+            var w = new JsonWriter();
+            w.BeginObject().Name("s").String("a\"b\\c\n\u0001é").Name("n").Number(0.1f).Name("z").Number(-0f).Name("i").Int(-3).Name("b").Bool(true).Name("x").Null()
+                .Name("a").BeginArray().Int(1).BeginObject().EndObject().BeginArray().EndArray().EndArray().EndObject();
+            var o = (Dictionary<string, object>)JsonReader.Parse(w.ToString());
+            Assert.That(JsonReader.Str(o, "s"), Is.EqualTo("a\"b\\c\n\u0001é"));
+            Assert.That((float)JsonReader.Num(o, "n").Value, Is.EqualTo(0.1f));
+            Assert.That(w.ToString(), Does.Contain("\"z\":0,"));
+            Assert.That(JsonReader.Num(o, "i"), Is.EqualTo(-3));
+            Assert.That(JsonReader.Bool(o, "b"), Is.True);
+            Assert.That(o["x"], Is.Null);
+            Assert.That(JsonReader.Arr(o, "a").Count, Is.EqualTo(3));
+            Assert.Throws<ArgumentException>(() => new JsonWriter().Number(float.NaN));
+            Assert.Throws<FormatException>(() => JsonReader.Parse("{\"a\":1,}"));
+            Assert.Throws<FormatException>(() => JsonReader.Parse("[1] 2"));
+            Assert.Throws<FormatException>(() => JsonReader.Parse(new string('[', 100) + new string(']', 100)));
         }
     }
 }

@@ -402,7 +402,6 @@ class RealRepositoryTests(unittest.TestCase):
         inc = set(self.included)
         self.assertIn("package.json", inc)
         self.assertIn("Documentation~/THIRD_PARTY.md", inc)
-        self.assertIn("Documentation~/licenses/live-link-native.txt", inc)
         brushes = [p for p in inc if p.startswith("BrushSets~/Krita4Default/brushes/")]
         self.assertGreater(len(brushes), 10)
         # BundledBrushSets.cs が読む場所
