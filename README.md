@@ -10,7 +10,8 @@
    - **VCC（VRChat Creator Companion）**: Settings ▸ Packages ▸ Add Repository で `https://vpm.yozolab.net/index.json` を追加し、プロジェクトの
      Manage Project で YoluPainter を追加する
    - **Release の .zip**: GitHub の Releases から `net.yozolab.yolupainter.<版>.zip` を取り、プロジェクトの `Packages/net.yozolab.yolupainter/` を作って
-     その中へ展開する（`package.json` が `Packages/net.yozolab.yolupainter/` の直下に来る形）
+     その中へ展開する（`package.json` が `Packages/net.yozolab.yolupainter/` の直下に来る形）。前の版が入っているときは、先にそのフォルダを消す
+     （上書きすると、消したはずのファイルが残る。0.4 以前からは下の「上げる方へ」も）
    - **Package Manager**: `+` → Add package from git URL で `https://github.com/YozoraKurage/YoluPainter-UnityBridge.git`
 2. スタンドアロン版の YoluPainter を入れる。Windows ではインストーラーが書いた場所を自動で使う。ほかの OS では
    Edit ▸ Preferences ▸ YoluPainter で実行ファイルの場所を指定する（空のまま開くと、初回にファイルを選ぶダイアログが出る）
@@ -39,12 +40,15 @@ Edit ▸ Preferences ▸ YoluPainter（この PC の自分だけの設定）:
 
 0.5.0 で、Unity の中で描く機能を外しました。描く・`.ylp` を開く・保存する・PSD の読み書き・メッシュマップのベイクは、スタンドアロン版で行います。
 
+- **.zip を手で展開している場合は、前の版の `Packages/net.yozolab.yolupainter/` を消してから展開してください。** 上書きすると、消した Runtime・旧い Editor・Tests の
+  ファイルが残ります。また、移したファイルの `.meta` は GUID を保ったまま新しい場所にも置かれるので、旧い場所に残った `.meta` と GUID が重なります
 - **上げる前に、Unity の YoluPainter のウィンドウで描きかけの作業を `.ylp` に保存してください。** `Library/YoluPainter` の復旧の checkpoint は、
   このパッケージでは開けなくなります（ファイルは消さずに残ります）
 - `YozoLab ▸ YoluPainter (Prototype)` のウィンドウ、Project Settings ▸ YoluPainter、ブラシ・アセットのパネルは無くなりました。
   ウィンドウの配置にその場所が残っていても、Unity が知らないウィンドウとして外すだけです
 - Assets に置いた `.ylp`・`.ylsmart` は、Unity では普通のファイルになります（サムネイル・情報・ダブルクリックで開く動きは無くなる）。
   ファイルはそのままなので、`.ylp` はスタンドアロン版で開けます。マテリアルに割り当てた PNG もそのままです（`.ylp` はテクスチャを出していなかったので、参照は切れません）
+  - `.ylsmart` の取り込みが出していた見本の絵（Texture2D のサブアセット）と情報のオブジェクトは無くなります。それを参照していた物（マテリアルのテクスチャなど）があれば、参照が切れます
 - 前の版の設定（`ProjectSettings/Packages/net.yozolab.yolupainter/`、`UserSettings/YoluPainter/` の取り込んだブラシ・自分の置き場）は、使わなくなりますが消しません。要らなければ手で消せます
 - 依存パッケージ（Burst・Mathematics）を外しました。ほかに使うパッケージが無ければ、Package Manager がプロジェクトから外します
 
