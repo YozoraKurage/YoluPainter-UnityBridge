@@ -68,15 +68,27 @@ namespace Yozolab.YoluPainter.Tests
         /// 「自動」は今の言語で出る。</summary>
         [Test] public void ThePreferencesLanguageFieldListsEveryLanguageOnceWithItsOwnName()
         {
-            Assert.That(LiveLinkPreferences.Languages, Is.EquivalentTo(Enum.GetValues(typeof(PainterLanguage))), "every language can be chosen");
-            Assert.That(LiveLinkPreferences.Languages.Distinct().Count(), Is.EqualTo(LiveLinkPreferences.Languages.Length));
-            Assert.That(LiveLinkPreferences.Languages[0], Is.EqualTo(PainterLanguage.Auto), "the default comes first");
+            var languages = LiveLinkPreferences.Languages;
+            Assert.That(languages, Is.EquivalentTo(Enum.GetValues(typeof(PainterLanguage))), "every language can be chosen");
+            Assert.That(languages.Distinct().Count(), Is.EqualTo(languages.Length));
+            // 画面で選んだ i 番目がそのまま保存される値になる（DrawLanguage は Languages[i] を L.Language に入れる）ので、並びを固定して名前と対で見る。
+            Assert.That(languages, Is.EqualTo(new[] { PainterLanguage.Auto, PainterLanguage.Japanese, PainterLanguage.English }), "the order of the field, the default first");
             var english = LiveLinkPreferences.LanguageNames().Select(c => c.text).ToArray();
             L.OverrideLanguage(PainterLanguage.Japanese);
             var japanese = LiveLinkPreferences.LanguageNames().Select(c => c.text).ToArray();
             L.OverrideLanguage(PainterLanguage.English);
-            Assert.That(english, Is.EqualTo(new[] { "Automatic", "日本語", "English" }));
-            Assert.That(japanese, Is.EqualTo(new[] { "自動", "日本語", "English" }));
+            Assert.That(english, Has.Length.EqualTo(languages.Length));
+            Assert.That(japanese, Has.Length.EqualTo(languages.Length));
+            var namesByLanguage = new Dictionary<PainterLanguage, (string inEnglish, string inJapanese)>
+            {
+                { PainterLanguage.Auto, ("Automatic", "自動") },
+                { PainterLanguage.Japanese, ("日本語", "日本語") },
+                { PainterLanguage.English, ("English", "English") },
+            };
+            for (int i = 0; i < languages.Length; i++)
+            {
+                Assert.That((english[i], japanese[i]), Is.EqualTo(namesByLanguage[languages[i]]), $"the name at {i} belongs to {languages[i]}");
+            }
         }
 
         /// <summary>選んだ言語は EditorPrefs に残り、その値に従う（試験だけの言語はその上に効く）。知らない値は自動として読む。試験の間だけ値を変え、
