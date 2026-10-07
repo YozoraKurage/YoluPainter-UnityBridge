@@ -30,12 +30,15 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
 
         internal LiveLinkImport.Prepared Current => current;
 
+        void OnEnable() => L.LanguageChanged += Retitle;
+        void OnDisable() => L.LanguageChanged -= Retitle;
+        void Retitle() { titleContent = new GUIContent(L.Tr("Apply to Materials")); Repaint(); }
+
         void Next()
         {
             current = waiting.Count > 0 ? waiting.Dequeue() : null;
             if (current == null) { Close(); return; }
-            titleContent = new GUIContent(L.Tr("Apply to Materials"));
-            Repaint();
+            Retitle();
         }
 
         /// <summary>選んだ答え（窓と試験から）。</summary>

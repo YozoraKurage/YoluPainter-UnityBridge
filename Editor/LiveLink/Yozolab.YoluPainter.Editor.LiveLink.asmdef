@@ -1,7 +1,7 @@
 {
   "name": "Yozolab.YoluPainter.Editor.LiveLink",
   "rootNamespace": "Yozolab.YoluPainter.Editor.LiveLink",
-  "references": ["Yozolab.YoluPainter.Editor"],
+  "references": [],
   "includePlatforms": ["Editor"],
   "allowUnsafeCode": false,
   "autoReferenced": true

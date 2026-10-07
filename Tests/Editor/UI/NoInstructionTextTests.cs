@@ -3,28 +3,24 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
-using Yozolab.YoluPainter.Editor;
+using Yozolab.YoluPainter.Editor.LiveLink;
 
 namespace Yozolab.YoluPainter.Tests
 {
     /// <summary>
     /// 画面に操作の説明文（「〜をクリックして点を追加」「ブラシはその上から塗ります」のような使い方の文、説明の段落、空の状態の案内）を置かない。
-    /// 画面の文字は名前・状態・短い理由だけで、説明はツールチップと ヘルプ ▸ キーボードショートカット に置く。ここでは、画面に常時出る文
-    /// （状態の帯・知らせ・段落・断った理由）のソースの文字列と、描いた文字（ToolPanelTests が全ツール・英日で集める）が、操作の指示の言い回しを
-    /// 含まないことを確かめる。
-    /// 見る範囲: Editor のソースで、状態の帯（message）・知らせ（Notice・NoteRow・Paragraph）・断った理由（why・reason・note）・
-    /// return する文・throw する例外の文・notes / remarks / refusals / warnings / problems への Add・ベイクの結果（MeshBakeEnded）を含む文の、
-    /// 文字列リテラルすべてと、その日本語訳。Runtime/Core の throw する例外の文（Editor の TryAction がそのまま状態の帯へ出す）。
-    /// 見ない範囲: ツールチップ、ダイアログの確かめの文（疑問文は除く）、ボタンやメニューの名前、Help ▸ Keyboard Shortcuts の本文、
-    /// 上の書き方に当たらない組み立て方の文（変数に入れてから別の場所で出す文など）、Core の例外のうち日本語に訳していない文の日本語。
+    /// 画面の文字は名前・状態・短い理由だけで、説明はツールチップに置く。ここでは、画面に常時出る文（状態・知らせ・段落・断った理由）の
+    /// ソースの文字列が、操作の指示の言い回しを含まないことを確かめる。
+    /// 見る範囲: Editor のソースで、状態（message）・知らせ（Notice・NoteRow・Paragraph）・断った理由（why・reason・note）・
+    /// return する文・throw する例外の文・notes / remarks / refusals / warnings / problems への Add を含む文の、文字列リテラルすべてと、その日本語訳。
+    /// 見ない範囲: ツールチップ、ダイアログの確かめの文（疑問文は除く）、ボタンやメニューの名前、上の書き方に当たらない組み立て方の文
+    /// （変数に入れてから別の場所で出す文など）。
     /// 文として判定するのは「。で終わる」か「。のあとに続きがある」文字列だけ（名前や状態の短い語は見ない）。
     /// </summary>
     public sealed class NoInstructionTextTests
     {
         /// <summary>操作の指示の言葉（英語は単語、日本語は語）。</summary>
         static readonly Regex Words = new Regex(@"\b(click|drag|press|tap|double-click|right-click)\b|\bhold\s+(?:down|[A-Z]\b|Alt|Ctrl|Shift|the\b)|\byou\b|\bplease\b|クリック|ドラッグ|押し|押す|ください|選ぶと", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        /// <summary>Core の例外の文では、API の取り決めの「hold」（must hold 9 floats）は指示ではない。</summary>
-        static readonly Regex CoreWords = new Regex(@"\b(click|drag|press|tap|double-click|right-click)\b|\byou\b|\bplease\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         const string Verbs = "Read|Place|Choose|Select|Wait|Make|Turn|Check|Unlock|Bake|Pick|Enter|Type|Switch|Load|Enable|Disable|Set|Add|Use|Move|Merge|Finish|Show|Hide|Rasterize|Redraw|Reset|Plan|Try|Reduce|Remove|Open|Close|Apply|Copy|Edit|Paint|Restore|Delete|Create|Reload|Export|Rename|Fix";
         /// <summary>命令形で始まる文（文の頭・「, or」・「;」のあとの動詞）と、「…を先に」「もう一度…」の案内。</summary>
         static readonly Regex Imperative = new Regex(@"(^|[.;:!?]\s+|,\s+or\s+|;\s+)(?:" + Verbs + @")\b", RegexOptions.CultureInvariant);
@@ -33,10 +29,10 @@ namespace Yozolab.YoluPainter.Tests
         static readonly Regex SentenceSplit = new Regex(@"(?<=[.;:!?])\s+", RegexOptions.CultureInvariant);
 
         /// <summary>画面に出る文として画面の文字に使ってよいか（操作の指示でないか）。<paramref name="sentence"/> なら、命令形・「先に」「もう一度」の案内も見る。</summary>
-        internal static bool LooksLikeInstruction(string text, bool sentence = false, bool core = false)
+        internal static bool LooksLikeInstruction(string text, bool sentence = false)
         {
             if (string.IsNullOrEmpty(text)) return false;
-            if ((core ? CoreWords : Words).IsMatch(text)) return true;
+            if (Words.IsMatch(text)) return true;
             if (!sentence) return false;
             text = text.Trim().TrimStart('.', ';', ':', ' ');
             if (!(text.EndsWith(".") || text.Contains(". "))) return false; // 名前や状態の短い語は文として見ない
@@ -58,9 +54,8 @@ namespace Yozolab.YoluPainter.Tests
             "Resized texture sets are resampled when you apply; their undo history is cleared.", // 適用すると何が変わるか（確かめの警告）
         };
 
-        /// <summary>Editor のソースで文を出す所: 状態の帯・知らせ・断った理由・return・throw・notes 系への Add・ベイクの結果。</summary>
-        static readonly Regex EditorSite = new Regex(@"\w*(?:notes|remarks|refusals|warnings|problems)\w*\??\.Add\(|\bmessage\s*\+?=(?!=)|\bNotice\(|\bNoteRow\(|\bParagraph\(|\bwhy\s*=|\breason\s*=|\bnote\s*=|\breturn\s+L\.Tr|throw new \w+\(|MeshBakeEnded\(");
-        static readonly Regex CoreSite = new Regex(@"throw new \w+");
+        /// <summary>Editor のソースで文を出す所: 状態・知らせ・断った理由・return・throw・notes 系への Add。</summary>
+        static readonly Regex EditorSite = new Regex(@"\w*(?:notes|remarks|refusals|warnings|problems)\w*\??\.Add\(|\bmessage\s*\+?=(?!=)|\bNotice\(|\bNoteRow\(|\bParagraph\(|\bwhy\s*=|\breason\s*=|\bnote\s*=|\breturn\s+L\.Tr|throw new \w+\(");
         static readonly Regex Literal = new Regex(@"""((?:[^""\\]|\\.)*)""");
 
         /// <summary>folder の下の .cs で、site に当たる行から文の終わり（;）までの文字列リテラルを返す（ファイル名:行: 原文）。</summary>
@@ -85,30 +80,27 @@ namespace Yozolab.YoluPainter.Tests
             }
         }
 
-        /// <summary>状態の帯・知らせ・段落・断った理由・例外の文に出す文の原文と日本語が、操作の指示の言い回しを含まない。Editor に加えて、Editor がそのまま
-        /// 状態の帯へ出す Core の例外の文も見る。</summary>
+        /// <summary>状態・知らせ・段落・断った理由・例外の文に出す文の原文と日本語が、操作の指示の言い回しを含まない。</summary>
         [Test] public void StatusNoticeParagraphAndRefusalTextsAreStatesAndReasonsNotInstructions()
         {
-            var found = new List<string>(); var counts = new Dictionary<string, int>();
-            foreach (var (folder, site, core) in new[] { ("Editor", EditorSite, false), ("Runtime", CoreSite, true) })
-                foreach (var (where, text) in SiteLiterals(folder, site))
-                {
-                    counts[folder] = counts.TryGetValue(folder, out var n) ? n + 1 : 1;
-                    L.OverrideLanguage(PainterLanguage.English);
-                    bool bad = LooksLikeInstruction(text, true, core);
-                    L.OverrideLanguage(PainterLanguage.Japanese);
-                    string ja = L.Tr(text);
-                    L.OverrideLanguage(PainterLanguage.English);
-                    if (bad || ja != text && LooksLikeInstruction(ja, false, core)) found.Add(folder + "/" + where + ": " + text + (ja != text ? "  /  " + ja : ""));
-                }
-            Assert.That(counts["Editor"], Is.GreaterThan(700), "the scan found the status, notice, return and throw sites of the Editor");
-            Assert.That(counts["Runtime"], Is.GreaterThan(800), "the scan found the exception texts of Core");
-            Assert.That(found, Is.Empty, "a status, notice, paragraph, refusal or exception text reads like operating instructions (put the how-to in a tooltip or Help ▸ Keyboard Shortcuts; show only a state or a short reason):\n" + string.Join("\n", found));
+            var found = new List<string>(); int count = 0;
+            foreach (var (where, text) in SiteLiterals("Editor", EditorSite))
+            {
+                count++;
+                L.OverrideLanguage(PainterLanguage.English);
+                bool bad = LooksLikeInstruction(text, true);
+                L.OverrideLanguage(PainterLanguage.Japanese);
+                string ja = L.Tr(text);
+                L.OverrideLanguage(PainterLanguage.English);
+                if (bad || ja != text && LooksLikeInstruction(ja)) found.Add("Editor/" + where + ": " + text + (ja != text ? "  /  " + ja : ""));
+            }
+            Assert.That(count, Is.GreaterThan(40), "the scan found the status, notice, return and throw sites of the Editor");
+            Assert.That(found, Is.Empty, "a status, notice, paragraph, refusal or exception text reads like operating instructions (put the how-to in a tooltip; show only a state or a short reason):\n" + string.Join("\n", found));
         }
 
         [TearDown] public void BackToEnglish() => L.OverrideLanguage(PainterLanguage.English);
 
-        /// <summary>規則が、止めたい文（利用者が挙げた例と、Core の断りの文に付いていた「〜してから」の案内）を捉え、状態と理由を通すこと。</summary>
+        /// <summary>規則が、止めたい文（操作の指示と「〜してから」「もう一度」の案内）を捉え、状態と理由を通すこと。</summary>
         [Test] public void TheRuleCatchesInstructionsAndPassesStatesAndReasons()
         {
             foreach (var bad in new[]
@@ -140,11 +132,11 @@ namespace Yozolab.YoluPainter.Tests
             {
                 "No model", "Layer mask", "A stroke is in progress.", "Path on the model: 1 point(s) on Color", "別のモデルで描かれたパス", "No clone source", "写し元なし", "Pen pressure", "ペンの筆圧",
                 "Drawn on another model", "モデル上のパス: 1 点（カラー）", "No map is checked", "The channel is not enabled on this layer.", "The bake was discarded because {0} changed; the previous maps are unchanged.",
-                "Tips must hold 1..256 non-null tips.", "The texture set would hold more than {0} layers. Nothing was placed.", "This tip is not in this Unity project; a round tip is used instead.",
+"The texture set would hold more than {0} layers. Nothing was placed.", "This tip is not in this Unity project; a round tip is used instead.",
                 "The model is posed: the paths were matched on its posed shape, not on the shape it was loaded with.", "The decal cannot be baked because it is not shown now. Baking would leave it out. Nothing was changed.",
                 "Add the texture sets? Each takes memory.", "テクスチャセットが選ばれていません。",
             })
-                Assert.That(LooksLikeInstruction(good, true, core: good.StartsWith("Tips must")), Is.False, good);
+                Assert.That(LooksLikeInstruction(good, true), Is.False, good);
         }
     }
 }

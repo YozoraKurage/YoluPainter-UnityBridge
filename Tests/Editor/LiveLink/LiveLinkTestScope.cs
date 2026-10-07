@@ -5,7 +5,6 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using Yozolab.YoluPainter.Editor;
 using Yozolab.YoluPainter.Editor.LiveLink;
 using Object = UnityEngine.Object;
 

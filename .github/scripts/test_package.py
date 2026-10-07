@@ -58,11 +58,9 @@ def make_repo(root, version="1.2.3", extra=()):
     write(root, "Tests.meta")
     write(root, "Tests/T.cs")
     write(root, "Tests/T.cs.meta")
-    write(root, "Tests/Fixtures~/f.bin", b"fixture")          # 入れない: ~ で終わる（INCLUDE_NESTED_TILDE の外）
-    write(root, "Tests/Editor/Persistence/Fixtures~/format1.ylp", b"ylp")  # 入れる: 試験が読む実物（.meta は要らない）
-    write(root, "Tests/Editor/Persistence/Fixtures~/inner~/x.ylp")         # 入れない: その下の入れ子の ~
-    write(root, "BrushSets~/Set/brush.gbr", b"\x00brush")      # 入れる: 同梱の筆先
-    write(root, "Documentation~/THIRD_PARTY.md", "notice")    # 入れる: 表記
+    write(root, "Tests/Fixtures~/f.bin", b"fixture")          # 入れない: トップより下の ~
+    write(root, "BrushSets~/Set/brush.gbr", b"\x00brush")      # 入れない: Documentation~ 以外のトップの ~
+    write(root, "Documentation~/THIRD_PARTY.md", "notice")    # 入れる: 表記（.meta は要らない）
     write(root, "Documentation~/inner~/note.txt")              # 入れない: 入れ子の ~
     write(root, ".github/workflows/x.yml")                     # 入れない: . で始まる
     write(root, ".devcontainer/Dockerfile")
@@ -78,15 +76,14 @@ class ClassifyTests(unittest.TestCase):
         cases = {
             "package.json": True,
             "Editor/Foo/Bar.cs": True,
-            "Plugins/LiveLink/libyolu_bridge.so": True,
-            "BrushSets~/Krita4Default/brushes/a.gbr": True,
-            "Documentation~/licenses/live-link-native.txt": True,
+            "Editor/LiveLink/Localization/ja/livelink.po": True,
+            "BrushSets~/Krita4Default/brushes/a.gbr": False,
+            "Documentation~/THIRD_PARTY.md": True,
             ".github/workflows/release.yml": False,
             ".gitignore": False,
             ".devcontainer/devcontainer.json": False,
             "Editor/.DS_Store": False,
-            "Tests/Editor/Persistence/Fixtures~/format1.ylp": True,
-            "Tests/Editor/Persistence/Fixtures~/inner~/x.ylp": False,
+            "Tests/Editor/Persistence/Fixtures~/format1.ylp": False,
             "Tests/Editor/Other~/x.ylp": False,
             "Tests/Fixtures~/f.bin": False,
             "Documentation~/sub~/x.md": False,
@@ -98,7 +95,8 @@ class ClassifyTests(unittest.TestCase):
             self.assertEqual(package.classify(path)[0], expected, path)
 
     def test_unknown_top_level_stops(self):
-        for path in ("scripts/build.sh", "NOTES.md", "Samples/a.cs"):
+        # Runtime・Plugins・Shaders は 0.5.0 で消したフォルダ。戻ってきたら、入れるかを決め直すまで止める
+        for path in ("scripts/build.sh", "NOTES.md", "Samples/a.cs", "Runtime/Core/A.cs", "Plugins/LiveLink/libyolu_bridge.so", "Shaders/X.shader"):
             with self.assertRaises(package.PackageError, msg=path):
                 package.classify(path)
 
@@ -125,14 +123,12 @@ class BuildTests(unittest.TestCase):
             self.assertEqual(names, sorted(names, key=lambda n: n.encode("utf-8")))
             self.assertIn("package.json", names)  # 根に置く
             self.assertEqual(json.loads(z.read("package.json"))["version"], "1.2.3")
-            self.assertEqual(z.read("BrushSets~/Set/brush.gbr"), b"\x00brush")
             self.assertEqual(z.read("Documentation~/THIRD_PARTY.md"), b"notice")
             for n in names:
                 self.assertFalse(n.endswith("/"), n)  # フォルダだけの項目は作らない
                 self.assertFalse(any(s.startswith(".") for s in n.split("/")), n)
             self.assertNotIn("Tests/Fixtures~/f.bin", names)
-            self.assertEqual(z.read("Tests/Editor/Persistence/Fixtures~/format1.ylp"), b"ylp")
-            self.assertNotIn("Tests/Editor/Persistence/Fixtures~/inner~/x.ylp", names)
+            self.assertFalse([n for n in names if n.startswith("BrushSets~/")])
             self.assertNotIn("Documentation~/inner~/note.txt", names)
             self.assertFalse([n for n in names if n.startswith(("temp~", ".github", ".devcontainer"))])
             for info in z.infolist():
@@ -177,7 +173,7 @@ class BuildTests(unittest.TestCase):
         code, out, _ = capture_main(["--root", self.root, "--list", "--out", self.out])
         self.assertEqual(code, 0)
         self.assertEqual(out.splitlines(), package.collect(self.root)[0])  # 入れる物の一覧そのもの
-        self.assertIn("BrushSets~/Set/brush.gbr", out.splitlines())
+        self.assertIn("Documentation~/THIRD_PARTY.md", out.splitlines())
         self.assertFalse(os.path.exists(self.out))  # --out を渡しても作らない
         self.assertEqual(self.tree(), before)       # 作業フォルダも変わらない
         self.assertEqual(os.getcwd(), here)
@@ -204,11 +200,11 @@ class BuildTests(unittest.TestCase):
         self.assertFalse(os.path.exists(self.out) and os.listdir(self.out))
 
     def test_folder_without_meta_stops(self):
-        # ファイルの .meta は揃っていて、欠けているのは Runtime フォルダの .meta（Runtime.meta）だけ
-        make_repo(self.root, extra=["Runtime/X.cs", "Runtime/X.cs.meta"])
+        # ファイルの .meta は揃っていて、欠けているのは Editor/Sub フォルダの .meta（Editor/Sub.meta）だけ
+        make_repo(self.root, extra=["Editor/Sub/X.cs", "Editor/Sub/X.cs.meta"])
         code, _, err = capture_main(["--root", self.root, "--out", self.out])
         self.assertEqual(code, 1)
-        self.assertIn(".meta が無いフォルダ: Runtime", err)
+        self.assertIn(".meta が無いフォルダ: Editor/Sub", err)
         self.assertNotIn(".meta が無いファイル", err)
         self.assertFalse(os.path.exists(self.out) and os.listdir(self.out))
 
@@ -222,9 +218,9 @@ class BuildTests(unittest.TestCase):
         # ~ で終わるフォルダの中は Unity が取り込まないので .meta は要らない（入れる物でも）
         make_repo(self.root)
         included, _ = package.collect(self.root)
-        self.assertIn("Tests/Editor/Persistence/Fixtures~/format1.ylp", included)
-        self.assertIn("BrushSets~/Set/brush.gbr", included)
-        self.assertNotIn("Tests/Editor/Persistence/Fixtures~/format1.ylp.meta", included)
+        self.assertIn("Documentation~/THIRD_PARTY.md", included)
+        self.assertNotIn("Documentation~/THIRD_PARTY.md.meta", included)
+        self.assertNotIn("Documentation~.meta", included)
 
     def test_bad_version_stops(self):
         for bad in ("1.2", "1.2.3-beta", "01.2.3", "../1.2.3", "latest"):
@@ -391,25 +387,35 @@ class WorkflowTests(unittest.TestCase):
 
 
 class RealRepositoryTests(unittest.TestCase):
-    """今のリポジトリの分類が全部決まっていて、同梱の筆先と表記が入ること（VCC の zip から欠けた不具合の回帰）。"""
+    """今のリポジトリの分類が全部決まっていて、Live Link・マテリアルへの適用・訳・表記が入り、0.5.0 で消した描く機能が入らないこと。"""
 
     @classmethod
     def setUpClass(cls):
         cls.root = package.default_root()
         cls.included, cls.excluded = package.collect(cls.root)
 
-    def test_bundled_brushes_and_notices_ship(self):
+    def test_live_link_and_notices_ship(self):
         inc = set(self.included)
-        self.assertIn("package.json", inc)
-        self.assertIn("Documentation~/THIRD_PARTY.md", inc)
-        brushes = [p for p in inc if p.startswith("BrushSets~/Krita4Default/brushes/")]
-        self.assertGreater(len(brushes), 10)
-        # BundledBrushSets.cs が読む場所
-        self.assertTrue(any(p.endswith(".gbr") or p.endswith(".png") for p in brushes))
+        for p in ("package.json", "README.md", "licence.md", "Documentation~/THIRD_PARTY.md",
+                  "Editor/LiveLink/Yozolab.YoluPainter.Editor.LiveLink.asmdef",
+                  "Editor/LiveLink/LiveLinkWindow.cs",        # Live Link のウィンドウ
+                  "Editor/LiveLink/LiveLinkApplyWindow.cs",   # マテリアルへの適用
+                  "Editor/LiveLink/LiveLinkPreferences.cs",
+                  "Editor/LiveLink/Localization/ja/livelink.po",  # PoCatalog が読む訳
+                  "Tests/Editor/Yozolab.YoluPainter.Tests.asmdef"):
+            self.assertIn(p, inc)
+
+    def test_removed_painting_features_do_not_ship(self):
+        gone = ("Runtime/", "Plugins/", "Shaders/", "BrushSets~/", "Editor/Window/", "Editor/Brushes/", "Editor/Ylp/",
+                "Documentation~/PLUGIN_API.md", "Documentation~/PSD_COMPATIBILITY.md", "Documentation~/tools/")
+        self.assertFalse([p for p in self.included if p.startswith(gone)])
+        asmdefs = sorted(p for p in self.included if p.endswith(".asmdef"))
+        self.assertEqual(asmdefs, ["Editor/LiveLink/Yozolab.YoluPainter.Editor.LiveLink.asmdef", "Tests/Editor/Yozolab.YoluPainter.Tests.asmdef"])
+        with open(os.path.join(self.root, "package.json"), encoding="utf-8") as f:
+            self.assertFalse(json.load(f).get("dependencies"), "Live Link uses no other package")
 
     def test_files_the_package_reads_from_itself_ship(self):
-        """コードが PackagePaths.Physical / Asset で読む物が zip に入っていること。
-        Tests を入れて Fixtures~ を外すと、使う人が testables で試験を回したときに落ちる（今まで出ていた zip の不具合の回帰）。"""
+        """コードが PackagePaths.Physical / Asset で読む物が zip に入っていること（使う人が testables で試験を回したときに、読む物が欠けて落ちないように）。"""
         import re
         inc = set(self.included)
         reads = {}
@@ -422,7 +428,7 @@ class RealRepositoryTests(unittest.TestCase):
                     with open(full, encoding="utf-8") as f:
                         for m in re.finditer(r'PackagePaths\.(?:Physical|Asset)\(\s*"([^"]+)"', f.read()):
                             reads.setdefault(m.group(1), os.path.relpath(full, self.root))
-        self.assertTrue(any("Fixtures~" in r for r in reads), "読む物の拾い方が壊れている")
+        self.assertIn("Editor", reads, "読む物の拾い方が壊れている")
         for rel, source in sorted(reads.items()):
             folder = rel if rel.endswith("/") else rel + "/"
             self.assertTrue(rel in inc or any(p.startswith(folder) for p in inc) or any(p.startswith(rel) for p in inc),

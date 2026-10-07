@@ -2,7 +2,7 @@
   "name": "net.yozolab.yolupainter",
   "version": "0.4.0",
   "displayName": "YoluPainter Unity Bridge",
-  "description": "Experimental editor-only sparse-tile texture authoring. No production compatibility claims.",
+  "description": "Opens a model of the scene in the standalone YoluPainter (Live Link) and applies the textures it exports to the model's materials. Editor only.",
   "unity": "2022.3",
   "author": {
     "name": "Yozolab"
@@ -10,11 +10,7 @@
   "keywords": [
     "texture",
     "painting",
-    "editor",
-    "prototype"
-  ],
-  "dependencies": {
-    "com.unity.burst": "1.8.7",
-    "com.unity.mathematics": "1.2.6"
-  }
+    "live link",
+    "editor"
+  ]
 }

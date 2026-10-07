@@ -15,30 +15,17 @@ namespace Yozolab.YoluPainter.Tests
     internal static class EditorShaderCompiler
     {
         static bool? broken;
-        static bool? brokenSync;
 
-        /// <summary>skip の判断に使う（GpuTests・LilToon 系ほか）。判定のしかたは変えない（非同期のコンパイルのまま）。</summary>
-        public static bool IsBroken
+        /// <summary>同期のコンパイルで判定する。非同期のままだと、作った直後はまだエラーが無く、壊れていても false になる。</summary>
+        static bool IsBroken
         {
             get
             {
                 if (broken.HasValue) return broken.Value;
                 if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null) return (broken = false).Value;
-                return (broken = Probe()).Value;
-            }
-        }
-
-        /// <summary>同期のコンパイルで判定する。非同期のままだと、作った直後はまだエラーが無く、壊れていても false になる。
-        /// <see cref="ShaderErrorsOnly"/> が使う（<see cref="IsBroken"/> の判定を変えると、ほかの試験の skip が変わりうるので別にした）。</summary>
-        static bool IsBrokenSync
-        {
-            get
-            {
-                if (brokenSync.HasValue) return brokenSync.Value;
-                if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null) return (brokenSync = false).Value;
                 bool async = ShaderUtil.allowAsyncCompilation;
                 ShaderUtil.allowAsyncCompilation = false;
-                try { return (brokenSync = Probe()).Value; }
+                try { return (broken = Probe()).Value; }
                 finally { ShaderUtil.allowAsyncCompilation = async; }
             }
         }
@@ -51,18 +38,6 @@ namespace Yozolab.YoluPainter.Tests
             finally { Object.DestroyImmediate(probe); }
         }
 
-        /// <summary>壊れたエディタでは、描画のたびに出るシェーダーのエラーログでテストを落とさない。</summary>
-        public static void TolerateErrorLogsIfBroken()
-        {
-            // 判定のためのコンパイル自体も、壊れていればエラーをログする。先に無視してから判定する。
-            LogAssert.ignoreFailingMessages = true;
-            if (!IsBroken) { LogAssert.ignoreFailingMessages = false; return; }
-            // 非同期コンパイルだとエラーはテストが終わった後のフレームでログされ、無視の設定が外れた別の
-            // テストを落とす。壊れたエディタでは同期コンパイルにして、エラーをそのテストの中で出させる。
-            ShaderUtil.allowAsyncCompilation = false;
-            WarmPackageShaders();
-        }
-
         /// <summary>シェーダーのコンパイルのエラー・警告のログか（壊れたエディターでインクルードが開けないときに出る物）。</summary>
         static readonly Regex ShaderLog = new Regex(@"^Shader (?:error|warning) in '|Couldn't open include file '[^']+\.(?:cginc|hlsl)'", RegexOptions.CultureInvariant);
 
@@ -70,7 +45,7 @@ namespace Yozolab.YoluPainter.Tests
 
         /// <summary>
         /// 壊れたエディターでだけ、シェーダーのコンパイルのエラーを許し、ほかのエラー・例外・Assert のログは集めて <see cref="IDisposable.Dispose"/> で
-        /// テストを落とす（<see cref="TolerateErrorLogsIfBroken"/> のように全部は許さない）。FBX の取り込みでできる Standard のマテリアルのように、
+        /// テストを落とす（全部は許さない）。FBX の取り込みでできる Standard のマテリアルのように、
         /// シェーダーで描かない試験でも、セッションで最初のコンパイルのエラーが出ることがある。コンパイルは同期にして、エラーをこの間に出させる。
         /// 壊れていないエディターでは何もしない（いつもの LogAssert のまま）。
         /// </summary>
@@ -88,7 +63,7 @@ namespace Yozolab.YoluPainter.Tests
             {
                 // 判定のためのコンパイル自体も、壊れていればエラーをログする。先に無視してから判定する
                 LogAssert.ignoreFailingMessages = true;
-                active = IsBrokenSync;
+                active = IsBroken;
                 if (!active) { LogAssert.ignoreFailingMessages = false; return; }
                 async = ShaderUtil.allowAsyncCompilation;
                 ShaderUtil.allowAsyncCompilation = false;
@@ -116,26 +91,6 @@ namespace Yozolab.YoluPainter.Tests
                 // ignoreFailingMessages は戻さない: テストの LogScope はテストの終わりに集めたログを確かめるので、ここで戻すと許したはずの
                 // シェーダーのエラーで落ちる（LogScope はテストごとなので、次のテストには残らない）
                 Assert.That(others, Is.Empty, "errors other than shader compile errors were logged");
-            }
-        }
-
-        static bool warmed;
-        /// <summary>壊れたエディタでは、シェーダーごとにセッションで最初のコンパイルの時だけエラーがログされる。テストの途中で
-        /// 無視の設定が戻ることがあり（窓や資産の作り直しの後。実測）、再起動した直後の台では最初に表示の合成を使った試験が
-        /// 落ちていた（2026-10-03、WindowResizeTests）。無視している今のうちに、パッケージのシェーダーを全部 1 回ずつ
-        /// コンパイルさせてエラーを出し切る。</summary>
-        static void WarmPackageShaders()
-        {
-            if (warmed) return;
-            warmed = true;
-            foreach (var guid in AssetDatabase.FindAssets("t:Shader", new[] { "Packages/net.yozolab.yolupainter" }))
-            {
-                var shader = AssetDatabase.LoadAssetAtPath<Shader>(AssetDatabase.GUIDToAssetPath(guid));
-                if (shader == null) continue;
-                var material = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
-                try { for (int pass = 0; pass < material.passCount; pass++) material.SetPass(pass); }
-                catch (System.Exception) { }
-                finally { Object.DestroyImmediate(material); }
             }
         }
     }

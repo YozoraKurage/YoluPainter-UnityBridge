@@ -38,6 +38,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             Selection.selectionChanged += OnSelection;
             LiveLinkState.Changed += OnStateChanged;
             EditorApplication.update += WatchPresence;
+            L.LanguageChanged += Repaint;
             presence = SafePresence();
             LiveLinkReplies.WindowOpened();
         }
@@ -47,6 +48,7 @@ namespace Yozolab.YoluPainter.Editor.LiveLink
             Selection.selectionChanged -= OnSelection;
             LiveLinkState.Changed -= OnStateChanged;
             EditorApplication.update -= WatchPresence;
+            L.LanguageChanged -= Repaint;
             LiveLinkReplies.WindowClosed();
         }
 

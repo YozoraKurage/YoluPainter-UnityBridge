@@ -13,12 +13,10 @@ zip の中身は「git が管理しているファイル」から次の決まり
 決まり、決まらない物があるとここで止まる（黙って落とさない）。
 
   入れる   トップの INCLUDE_TOP に挙げた物（package.json が zip の根）。
-           名前が ~ で終わる BrushSets~ と Documentation~ も、Unity が取り込まない代わりに
-           パッケージの中から読まれる・使う人が読む物なので、そのまま入れる。
-           Tests の Fixtures~（.ylp の古い形式の実物）も、同梱の試験が PackagePaths.Physical で読むので入れる
-           （Tests を入れるのは、使う人が testables で試験を回せるようにするため。試験が読む物は一緒に入れる）。
+           名前が ~ で終わる Documentation~ も、Unity が取り込まない代わりに使う人が読む物なので、そのまま入れる。
+           （Tests を入れるのは、使う人が testables で試験を回せるようにするため。）
   入れない 名前が . で始まる物（.git*・.github・.devcontainer など）、
-           ~ で終わるそのほかのフォルダ・ファイル（上の 3 つ以外）。
+           ~ で終わるそのほかのフォルダ・ファイル（Documentation~ 以外。トップより下にある物も）。
   止める   上のどちらにも当たらないトップの物。INCLUDE_TOP に足すか、除く理由を決めてから。
 
 中身が同じなら同じバイト列になる（並びは名前の順、時刻と権限は固定、圧縮は同じ設定）。
@@ -43,19 +41,9 @@ INCLUDE_TOP = (
     "README.md", "README.md.meta",
     "licence.md", "licence.md.meta",
     "Editor", "Editor.meta",
-    "Runtime", "Runtime.meta",
-    "Plugins", "Plugins.meta",
-    "Shaders", "Shaders.meta",
     "Tests", "Tests.meta",
     # 名前が ~ で終わるが入れる物（Unity は取り込まない）。
-    "BrushSets~",       # 同梱の筆先（Editor/Brushes/BundledBrushSets.cs が読む）
-    "Documentation~",   # 使う人向けの文書・第三者の表記（THIRD_PARTY.md・licenses/）
-)
-
-# トップより下の ~ で終わるフォルダのうち、入れる物（パスの先頭がこれと一致するもの）。
-# 同梱の試験が PackagePaths.Physical で読む（test_package.py の RealRepositoryTests が読む物の欠けを調べる）。
-INCLUDE_NESTED_TILDE = (
-    "Tests/Editor/Persistence/Fixtures~/",
+    "Documentation~",   # 使う人向けの文書・第三者の表記（THIRD_PARTY.md）
 )
 
 BUMP_KINDS = ("major", "minor", "patch")
@@ -73,14 +61,6 @@ class PackageError(Exception):
     """入れる物が決められない・足りない・不揃いのとき。"""
 
 
-def nested_tilde_allowed(path):
-    """トップより下に ~ で終わる名前を持つパスのうち、INCLUDE_NESTED_TILDE の下にある物（その下にさらに ~ が無い物）か。"""
-    for prefix in INCLUDE_NESTED_TILDE:
-        if path.startswith(prefix):
-            return not any(s.endswith("~") for s in path[len(prefix):].split("/"))
-    return False
-
-
 def classify(path):
     """git のパス（/ 区切り）を、(入れるか, 理由) にする。決まらなければ PackageError。"""
     segments = path.split("/")
@@ -88,7 +68,7 @@ def classify(path):
         return False, "名前が . で始まる"
     top = segments[0]
     if top in INCLUDE_TOP:
-        if any(s.endswith("~") for s in segments[1:]) and not nested_tilde_allowed(path):
+        if any(s.endswith("~") for s in segments[1:]):
             return False, "名前が ~ で終わる"
         return True, ""
     if top.endswith("~"):

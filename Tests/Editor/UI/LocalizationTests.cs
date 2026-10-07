@@ -2,21 +2,21 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
-using Yozolab.YoluPainter.Core;
-using Yozolab.YoluPainter.Editor;
+using UnityEditor;
+using UnityEngine;
+using Yozolab.YoluPainter.Editor.LiveLink;
 
 namespace Yozolab.YoluPainter.Tests
 {
-    /// <summary>テストの間は UI の言語を英語に、パネルの配置を既定に固定する（設定には書かない）。メッセージについての確かめが、日本語の
-    /// Unity で走らせても同じ意味になるように、また描き手のパネルの配置で窓の大きさが変わらないように。</summary>
+    /// <summary>テストの間は UI の言語を英語に固定する（設定には書かない）。メッセージについての確かめが、日本語の Unity で走らせても
+    /// 同じ意味になるように。</summary>
     [SetUpFixture]
     public sealed class LanguagePin
     {
-        [OneTimeSetUp] public void Pin() { L.OverrideLanguage(PainterLanguage.English); DockLayoutStore.UseDefaults = true; }
-        [OneTimeTearDown] public void Unpin() { L.OverrideLanguage(null); DockLayoutStore.UseDefaults = false; }
+        [OneTimeSetUp] public void Pin() => L.OverrideLanguage(PainterLanguage.English);
+        [OneTimeTearDown] public void Unpin() => L.OverrideLanguage(null);
     }
 
     /// <summary>UI の文字列表（.po）: 読み手の決まり、言語の切り替え、そして UI の文字列が日本語の表から漏れていないこと。</summary>
@@ -51,16 +51,80 @@ namespace Yozolab.YoluPainter.Tests
 
         [Test] public void JapaneseIsUsedWhenChosenAndAnythingMissingStaysEnglish()
         {
-            Assert.That(L.Tr("Layers"), Is.EqualTo("Layers"), "pinned to English for tests");
+            Assert.That(L.Tr("Open in YoluPainter"), Is.EqualTo("Open in YoluPainter"), "pinned to English for tests");
             L.OverrideLanguage(PainterLanguage.Japanese);
             Assert.That(L.IsJapanese, Is.True);
-            Assert.That(L.Tr("Layers"), Is.EqualTo("レイヤー"));
-            Assert.That(L.Tr("Normal"), Is.EqualTo("ノーマル"), "the channel");
-            Assert.That(L.TrIn("blend mode", "Normal"), Is.EqualTo("通常"), "the blend mode");
+            Assert.That(L.Tr("Open in YoluPainter"), Is.EqualTo("YoluPainter で開く"));
+            Assert.That(L.Tr("Language"), Is.EqualTo("言語"));
+            Assert.That(L.TrIn("LiveLink", "Choose…"), Is.EqualTo("選ぶ…"), "an entry with a context");
+            Assert.That(L.Tr("Choose…"), Is.EqualTo("Choose…"), "the same text without the context has no entry");
             Assert.That(L.Tr("A string nobody translated"), Is.EqualTo("A string nobody translated"));
             Assert.That(L.Tr(""), Is.Empty);
             L.OverrideLanguage(PainterLanguage.English);
-            Assert.That(L.TrIn("blend mode", "Normal"), Is.EqualTo("Normal"));
+            Assert.That(L.TrIn("LiveLink", "Choose…"), Is.EqualTo("Choose…"));
+        }
+
+        /// <summary>Preferences ▸ YoluPainter の言語の欄: 選びの並びが言語の値と 1 対 1 で、言語の名前はその言語のまま（どの言語の画面からも読める）、
+        /// 「自動」は今の言語で出る。</summary>
+        [Test] public void ThePreferencesLanguageFieldListsEveryLanguageOnceWithItsOwnName()
+        {
+            Assert.That(LiveLinkPreferences.Languages, Is.EquivalentTo(Enum.GetValues(typeof(PainterLanguage))), "every language can be chosen");
+            Assert.That(LiveLinkPreferences.Languages.Distinct().Count(), Is.EqualTo(LiveLinkPreferences.Languages.Length));
+            Assert.That(LiveLinkPreferences.Languages[0], Is.EqualTo(PainterLanguage.Auto), "the default comes first");
+            var english = LiveLinkPreferences.LanguageNames().Select(c => c.text).ToArray();
+            L.OverrideLanguage(PainterLanguage.Japanese);
+            var japanese = LiveLinkPreferences.LanguageNames().Select(c => c.text).ToArray();
+            L.OverrideLanguage(PainterLanguage.English);
+            Assert.That(english, Is.EqualTo(new[] { "Automatic", "日本語", "English" }));
+            Assert.That(japanese, Is.EqualTo(new[] { "自動", "日本語", "English" }));
+        }
+
+        /// <summary>選んだ言語は EditorPrefs に残り、その値に従う（試験だけの言語はその上に効く）。知らない値は自動として読む。試験の間だけ値を変え、
+        /// 元の値（無ければ無いこと）に戻す。</summary>
+        [Test] public void TheChosenLanguageIsKeptAndTheTestOverrideWinsOverIt()
+        {
+            const string key = "Yozolab.YoluPainter.Language";
+            bool had = EditorPrefs.HasKey(key); int saved = EditorPrefs.GetInt(key, 0);
+            try
+            {
+                L.OverrideLanguage(null);
+                L.Language = PainterLanguage.Japanese;
+                Assert.That(EditorPrefs.GetInt(key, -1), Is.EqualTo((int)PainterLanguage.Japanese));
+                Assert.That(L.IsJapanese, Is.True);
+                L.Language = PainterLanguage.English;
+                Assert.That(L.IsJapanese, Is.False);
+                L.Language = PainterLanguage.Auto;
+                Assert.That(L.IsJapanese, Is.EqualTo(Application.systemLanguage == SystemLanguage.Japanese), "automatic follows the operating system");
+                EditorPrefs.SetInt(key, 99);
+                Assert.That(L.Language, Is.EqualTo(PainterLanguage.Auto), "an unknown value reads as automatic");
+                L.Language = PainterLanguage.English;
+                L.OverrideLanguage(PainterLanguage.Japanese);
+                Assert.That(L.IsJapanese, Is.True, "the override for the tests wins over the stored choice");
+            }
+            finally
+            {
+                if (had) EditorPrefs.SetInt(key, saved); else EditorPrefs.DeleteKey(key);
+                L.OverrideLanguage(PainterLanguage.English);
+            }
+        }
+
+        /// <summary>パッケージの情報（PackageInfo）が取れない配置（Assets への複製など）でも、アセンブリ定義の場所からパッケージの根を求めて、表を読める。</summary>
+        [Test] public void TheCatalogIsFoundFromTheAssemblyDefinitionWhenNoPackageInformationIsAvailable()
+        {
+            var savedInfo = PackagePaths.InfoAssetPath;
+            try
+            {
+                PackagePaths.InfoAssetPath = () => null; PackagePaths.Reset();
+                string fromAssembly = PackagePaths.FromAssemblyDefinition();
+                Assert.That(fromAssembly, Is.Not.Null, "the assembly definition is found by its name");
+                var info = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(PackagePaths).Assembly);
+                if (info != null) Assert.That(fromAssembly, Is.EqualTo(info.assetPath), "it leads to the same root as the package information");
+                Assert.That(PackagePaths.Root, Is.EqualTo(fromAssembly));
+                Assert.That(PoCatalog.Folder(), Is.Not.Null);
+                Assert.That(Path.GetFullPath(PoCatalog.Folder()), Is.Not.EqualTo(Path.GetFullPath(PoCatalog.Location)), "not looked up under the project folder");
+                Assert.That(PoCatalog.Load("ja"), Is.Not.Empty);
+            }
+            finally { PackagePaths.InfoAssetPath = savedInfo; PackagePaths.Reset(); }
         }
 
         [Test] public void TheJapaneseCatalogHasNoDuplicateEntries()
@@ -91,7 +155,7 @@ namespace Yozolab.YoluPainter.Tests
         [Test] public void EveryUiStringHasAJapaneseTranslation()
         {
             var catalog = PoCatalog.Load("ja");
-            Assert.That(catalog, Is.Not.Empty, "ja.po did not load; the rest of this test would prove nothing");
+            Assert.That(catalog, Is.Not.Empty, "the Japanese catalog did not load; the rest of this test would prove nothing");
             var wanted = new Dictionary<string, string>(); // キー → どこで使っているか
             string editor = PackagePaths.Physical("Editor");
             foreach (var file in Directory.GetFiles(editor, "*.cs", SearchOption.AllDirectories))
@@ -104,22 +168,10 @@ namespace Yozolab.YoluPainter.Tests
                 }
                 foreach (Match m in InContext.Matches(text)) wanted[Unescape(m.Groups["ctx"].Value) + "\u0004" + Unescape(m.Groups["text"].Value)] = name;
             }
-            // 変数で渡しているもの: 表と列挙から集める
-            var window = typeof(TexturePaintWindow);
-            object Static(string field) => window.GetField(field, BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null) ?? throw new MissingMemberException(window.Name, field);
-            foreach (var title in (string[])Static("MenuTitles")) wanted[title] = "MenuTitles";
-            foreach (var slot in ((Array)Static("ToolSlots")).Cast<object>().Where(s => s != null)) wanted[(string)slot.GetType().GetField("Name").GetValue(slot)] = "ToolSlots";
-            foreach (var table in new[] { "AdjustmentMenu", "FilterMenu" })
-                foreach (var entry in ((Array)Static(table)).Cast<object>()) wanted[(string)entry.GetType().GetField("Item1").GetValue(entry)] = table;
-            foreach (var help in new[] { "ShortcutHelp", "LimitsHelp" }) wanted[(string)Static(help)] = help;
-            var blendName = window.GetMethod("BlendName", BindingFlags.NonPublic | BindingFlags.Static);
-            foreach (LayerBlendMode mode in Enum.GetValues(typeof(LayerBlendMode))) wanted["blend mode\u0004" + (string)blendName.Invoke(null, new object[] { mode })] = "BlendName";
-            foreach (var type in new[] { typeof(PaintChannel), typeof(GradientShape), typeof(Resampling) })
-                foreach (var n in Enum.GetNames(type)) wanted[n] = type.Name;
-
             var missing = wanted.Where(w => !catalog.TryGetValue(w.Key, out var ja) || string.IsNullOrEmpty(ja))
                 .Select(w => "  " + w.Value + ": " + w.Key.Replace("\u0004", " | ").Replace("\n", "\\n")).OrderBy(s => s).ToList();
-            Assert.That(missing, Is.Empty, missing.Count + " UI string(s) reach a Japanese user in English. Translate them in Editor/Localization/ja.po:\n" + string.Join("\n", missing));
+            Assert.That(wanted.Count, Is.GreaterThan(40), "the scan found the strings of the Editor");
+            Assert.That(missing, Is.Empty, missing.Count + " UI string(s) reach a Japanese user in English. Translate them in " + PoCatalog.Location + "/ja/:\n" + string.Join("\n", missing));
         }
     }
 }
