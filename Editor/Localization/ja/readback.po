@@ -1,5 +1,0 @@
-msgid "No ray scene was supplied."
-msgstr "レイのシーンが渡されていません。"
-
-msgid "GPU buffers could not be prepared ({0})."
-msgstr "GPU のバッファを準備できませんでした（{0}）。"

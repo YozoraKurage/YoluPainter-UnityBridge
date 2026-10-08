@@ -1,10 +1,4 @@
 # GUI モードの常駐 Unity でしか回らない（batch-gl では Application.isBatchMode で飛ばす）テストのクラス。
 # run-tests.sh --both は GUI の台でこのクラスだけを回す（ほかのテストは batch-gl の台で回っているので、2 回回さない）。
 # GuiOnlyFixturesTests が、batch-gl で飛ばすクラスがすべてここにあることを確かめる。新しく足したら 1 行ずつ書く。
-WindowTests
-PanelWindowTests
-ShortcutGuardTests
-WindowResizeTests
-YlpImporterTests
 LiveLinkWindowTests
-StandalonePromptTests
