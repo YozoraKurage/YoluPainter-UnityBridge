@@ -23,8 +23,8 @@ scaffold_project() {
   mkdir -p "$UNITY_PROJECT/Assets" "$UNITY_PROJECT/Packages" \
            "$UNITY_PROJECT/ProjectSettings" "$UNITY_LOG_DIR"
 
-  # manifest はテンプレートから毎回同期する。生成物なので手編集は想定しない。
-  cp "$SCRIPT_DIR/manifest.json" "$UNITY_PROJECT/Packages/manifest.json"
+  # manifest はテンプレートから毎回同期する。生成物なので手編集は想定しない。パッケージの道は PACKAGE_ROOT に合わせる。
+  sed "s#\"file:/workspace\"#\"file:$PACKAGE_ROOT\"#" "$SCRIPT_DIR/manifest.json" > "$UNITY_PROJECT/Packages/manifest.json"
 
   # これが無いと Unity が「別バージョンで作られたプロジェクト」とみなす。
   printf 'm_EditorVersion: %s\n' "$version" > "$UNITY_PROJECT/ProjectSettings/ProjectVersion.txt"

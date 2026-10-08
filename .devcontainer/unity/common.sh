@@ -36,8 +36,8 @@ readonly UNITY_LOG_DIR="$UNITY_PROJECT/Logs"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 
-# パッケージ本体（= このリポジトリ）
-readonly PACKAGE_ROOT="/workspace"
+# パッケージ本体（= このリポジトリ）。既定は /workspace。別の場所に clone したコンテナでは YOLUPAINTER_PACKAGE_ROOT で指す
+readonly PACKAGE_ROOT="${YOLUPAINTER_PACKAGE_ROOT:-/workspace}"
 
 # WSL2 の GPU（/dev/dxg）が見えていれば、Mesa の d3d12 ドライバで OpenGL を実 GPU に通す
 # （Unity → OpenGL → Mesa d3d12 → D3D12 → Windows の GPU ドライバ）。Linux 版 Unity は D3D11 を
