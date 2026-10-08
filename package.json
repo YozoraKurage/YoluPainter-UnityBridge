@@ -1,6 +1,6 @@
 {
   "name": "net.yozolab.yolupainter",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "displayName": "YoluPainter Unity Bridge",
   "description": "Opens a model of the scene in the standalone YoluPainter (Live Link) and applies the textures it exports to the model's materials. Editor only.",
   "unity": "2022.3",
