@@ -64,6 +64,7 @@ the standalone applies the pose, BlendShapes, material values and visibility to 
   the reply. A PNG outside `Assets` is not imported and is listed with the reason. Then a window lists what would change (material,
   property, previous texture → new texture): **Apply All**, **Apply Selected** or **Don't Apply**. Applying is one undo step and saves the
   assets. A material inside an FBX or a package cannot be changed and is listed with the reason.
+  A texture set that holds several materials arrives as one entry per material with the same image path, so each of its materials gets its own row in the window.
 
 ## What it touches
 
