@@ -1,0 +1,12 @@
+# ワークフローの Actions はコミットの SHA で固定している。その SHA を新しくする PR を月 1 回、1 つにまとめて出す。
+# 依存の既知の脆弱性は、リポジトリの設定の Dependabot の通知が見る。
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns:
+          - "*"
